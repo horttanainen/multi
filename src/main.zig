@@ -10,7 +10,7 @@ pub fn main() !void {
     }
     defer c.SDL_Quit();
 
-    const screen = c.SDL_CreateWindow("My Super Duper Game Window", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, 400, 140, c.SDL_WINDOW_OPENGL) orelse
+    const screen = c.SDL_CreateWindow("My Super Duper Game Window", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, 1280, 720, c.SDL_WINDOW_OPENGL) orelse
         {
         c.SDL_Log("Unable to create window: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
@@ -23,8 +23,8 @@ pub fn main() !void {
     };
     defer c.SDL_DestroyRenderer(renderer);
 
-    const zig_bmp = @embedFile("zig.bmp");
-    const rw = c.SDL_RWFromConstMem(zig_bmp, zig_bmp.len) orelse {
+    const level_bmp = @embedFile("level.bmp");
+    const rw = c.SDL_RWFromConstMem(level_bmp, level_bmp.len) orelse {
         c.SDL_Log("Unable to get RWFromConstMem: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
     };
