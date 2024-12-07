@@ -1,0 +1,3 @@
+[submodule "Box2D.zig"]
+	path = Box2D.zig
+	url = git@github.com:bluesillybeard/Box2D.zig.git

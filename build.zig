@@ -1,6 +1,7 @@
 const Build = @import("std").Build;
+const box2d = @import("Box2D.zig/build.zig");
 
-pub fn build(b: *Build) void {
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -15,6 +16,12 @@ pub fn build(b: *Build) void {
         .target = target,
     });
     exe.linkLibrary(sdl_dep.artifact("SDL2"));
+
+    const box2dModule = try box2d.addModule(b, "Box2D.zig", .{
+        .optimize = .ReleaseFast,
+        .target = target,
+    });
+    exe.root_module.addImport("box2d", box2dModule);
 
     b.installArtifact(exe);
 
