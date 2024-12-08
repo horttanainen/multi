@@ -51,28 +51,23 @@ pub fn main() !void {
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
-    groundDef.position = box2d.b2Vec2{ .x = 0.0, .y = 550.0 }; // Ground is at y = 12
+    groundDef.position = wCoordToBox2d(0.0, 550.0);
     const groundId = box2d.b2CreateBody(worldId, &groundDef);
-
-    const groundBox = box2d.b2MakeBox(800.0, 10.0);
+    const groundBox = box2d.b2MakeBox(wLengthToBox2d(800.0), wLengthToBox2d(50.0));
     const groundShapeDef = box2d.b2DefaultShapeDef();
     _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
 
     // Falling Box (Dynamic Body)
     var bodyDef = box2d.b2DefaultBodyDef();
     bodyDef.type = box2d.b2_dynamicBody;
-    bodyDef.position = box2d.b2Vec2{ .x = 400, .y = 0.0 };
+    bodyDef.position = wCoordToBox2d(400, 0.0);
     const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
-
-    const dynamicBox = box2d.b2MakeBox(1.0, 1.0);
-
+    const dynamicBox = box2d.b2MakeBox(wLengthToBox2d(50.0), wLengthToBox2d(50.0));
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.density = 1.0;
     shapeDef.friction = 0.3;
-
     _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
-    // Game Loop
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
     var running = true;
@@ -92,39 +87,51 @@ pub fn main() !void {
         // Step Box2D physics world
         box2d.b2World_Step(worldId, timeStep, subStepCount);
 
-        // Get box position
-        const boxPosition = box2d.b2Body_GetPosition(bodyId);
-        const boxX = @as(f32, boxPosition.x);
-        const boxY = @as(f32, boxPosition.y);
-
         // Render
         _ = sdl2.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black background
         _ = sdl2.SDL_RenderClear(renderer);
 
-        const groundPosition = box2d.b2Body_GetPosition(groundId);
-        const groundX = @as(f32, groundPosition.x);
-        const groundY = @as(f32, groundPosition.y);
+        const groundPositionBox2d = box2d.b2Body_GetPosition(groundId);
+        const groundPositionW = box2dCoordToW(groundPositionBox2d);
 
         // Draw ground
         _ = sdl2.SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // Green ground
         var groundRect = sdl2.SDL_Rect{
-            .x = @as(i32, @intFromFloat(groundX)),
-            .y = @as(i32, @intFromFloat(groundY)),
+            .x = groundPositionW.x,
+            .y = groundPositionW.y,
             .w = 800,
-            .h = 10,
+            .h = 50,
         };
         _ = sdl2.SDL_RenderFillRect(renderer, &groundRect);
 
-        // Draw falling box
+        const boxPositionBox2d = box2d.b2Body_GetPosition(bodyId);
+        const boxPositionW = box2dCoordToW(boxPositionBox2d);
+
         _ = sdl2.SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red box
         var boxRect = sdl2.SDL_Rect{
-            .x = @as(i32, @intFromFloat(boxX)),
-            .y = @as(i32, @intFromFloat(boxY)),
-            .w = 1,
-            .h = 1,
+            .x = boxPositionW.x,
+            .y = boxPositionW.y,
+            .w = 50.0,
+            .h = 50.0,
         };
         _ = sdl2.SDL_RenderFillRect(renderer, &boxRect);
 
         sdl2.SDL_RenderPresent(renderer);
     }
+}
+
+const pixelScale = 50.0;
+fn wCoordToBox2d(x: f32, y: f32) box2d.b2Vec2 {
+    return box2d.b2Vec2{ .x = wLengthToBox2d(x), .y = wLengthToBox2d(y) };
+}
+fn wLengthToBox2d(x: f32) f32 {
+    return x / pixelScale;
+}
+
+const Point = struct {
+    x: i32,
+    y: i32,
+};
+fn box2dCoordToW(coord: box2d.b2Vec2) Point {
+    return .{ .x = @as(i32, @intFromFloat(coord.x * pixelScale)), .y = @as(i32, @intFromFloat(coord.y * pixelScale)) };
 }
