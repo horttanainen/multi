@@ -11,14 +11,19 @@ pub fn build(b: *Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    exe.linkLibC();
+
     const sdl_dep = b.dependency("sdl", .{
-        .optimize = .ReleaseFast,
+        .optimize = optimize,
         .target = target,
     });
     exe.linkLibrary(sdl_dep.artifact("SDL2"));
 
+    const zsdl = b.dependency("zsdl", .{});
+    exe.root_module.addImport("zsdl2", zsdl.module("zsdl2"));
+
     const box2dModule = try box2d.addModule(b, "Box2D.zig", .{
-        .optimize = .ReleaseFast,
+        .optimize = optimize,
         .target = target,
     });
     exe.root_module.addImport("box2d", box2dModule);

@@ -7,6 +7,10 @@
             .url = "https://github.com/allyourcodebase/SDL/archive/fe896e655b24890f5e13ba8b740ebe0e20c4a23b.tar.gz",
             .hash = "1220503f94b77f9c057139384cc37f020c291208f7bdee60285c71b315961cf717bd",
         },
+        .zsdl = .{
+            .url = "https://github.com/zig-gamedev/zsdl/archive/43ffed63cab408d2f6210792452937abd22fd922.tar.gz",
+            .hash = "122054122c0d50255b5451ce6b4d2d868bd6fdd6d7c8d76897f139237f9d30054439",
+        },
     },
     .paths = .{
         "build.zig",

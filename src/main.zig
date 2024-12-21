@@ -1,47 +1,19 @@
-const sdl2 = @cImport({
-    @cInclude("SDL2/SDL.h");
-});
+const sdl = @import("zsdl2");
 const box2d = @import("box2d").native;
 const assert = @import("std").debug.assert;
+const print = @import("std").debug.print;
+
+const squareImgSrc = "";
 
 pub fn main() !void {
-    if (sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO) != 0) {
-        sdl2.SDL_Log("Unable to initialize SDL: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    }
-    defer sdl2.SDL_Quit();
+    try sdl.init(.{ .audio = true, .video = true });
+    defer sdl.quit();
 
-    const window = sdl2.SDL_CreateWindow("My Super Duper Game Window", sdl2.SDL_WINDOWPOS_UNDEFINED, sdl2.SDL_WINDOWPOS_UNDEFINED, 800, 600, sdl2.SDL_WINDOW_OPENGL | sdl2.SDL_WINDOW_SHOWN) orelse
-        {
-        sdl2.SDL_Log("Unable to create window: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    defer sdl2.SDL_DestroyWindow(window);
+    const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, 800, 600, .{ .opengl = true, .shown = true });
+    defer sdl.destroyWindow(window);
 
-    const renderer = sdl2.SDL_CreateRenderer(window, -1, sdl2.SDL_RENDERER_ACCELERATED | sdl2.SDL_RENDERER_PRESENTVSYNC) orelse {
-        sdl2.SDL_Log("Unable to create renderer: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    defer sdl2.SDL_DestroyRenderer(renderer);
-
-    const level_bmp = @embedFile("level.bmp");
-    const rw = sdl2.SDL_RWFromConstMem(level_bmp, level_bmp.len) orelse {
-        sdl2.SDL_Log("Unable to get RWFromConstMem: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    defer assert(sdl2.SDL_RWclose(rw) == 0);
-
-    const zig_surface = sdl2.SDL_LoadBMP_RW(rw, 0) orelse {
-        sdl2.SDL_Log("Unable to load bmp: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    defer sdl2.SDL_FreeSurface(zig_surface);
-
-    const zig_texture = sdl2.SDL_CreateTextureFromSurface(renderer, zig_surface) orelse {
-        sdl2.SDL_Log("Unable to create texture from surface: %s", sdl2.SDL_GetError());
-        return error.SDLInitializationFailed;
-    };
-    defer sdl2.SDL_DestroyTexture(zig_texture);
+    const renderer = try sdl.createRenderer(window, -1, .{ .accelerated = true, .present_vsync = true });
+    defer sdl.destroyRenderer(renderer);
 
     // Initialize Box2D World
     const gravity = box2d.b2Vec2{ .x = 0.0, .y = 9.8 };
@@ -74,10 +46,10 @@ pub fn main() !void {
 
     while (running) {
         // Event handling
-        var event: sdl2.SDL_Event = undefined;
-        while (sdl2.SDL_PollEvent(&event) != 0) {
+        var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
+        while (sdl.pollEvent(&event)) {
             switch (event.type) {
-                sdl2.SDL_QUIT => {
+                sdl.EventType.quit => {
                     running = false;
                 },
                 else => {},
@@ -88,35 +60,38 @@ pub fn main() !void {
         box2d.b2World_Step(worldId, timeStep, subStepCount);
 
         // Render
-        _ = sdl2.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black background
-        _ = sdl2.SDL_RenderClear(renderer);
+        try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 0, .b = 0, .a = 255 }); // Black background
+        try sdl.renderClear(renderer);
 
         const groundPositionBox2d = box2d.b2Body_GetPosition(groundId);
         const groundPositionW = box2dCoordToW(groundPositionBox2d);
 
         // Draw ground
-        _ = sdl2.SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // Green ground
-        var groundRect = sdl2.SDL_Rect{
+        try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 }); // Black background
+        const groundRect = sdl.Rect{
             .x = groundPositionW.x,
             .y = groundPositionW.y,
             .w = 800,
             .h = 50,
         };
-        _ = sdl2.SDL_RenderFillRect(renderer, &groundRect);
+        try sdl.renderFillRect(renderer, groundRect);
 
         const boxPositionBox2d = box2d.b2Body_GetPosition(bodyId);
+        const boxRotation = box2d.b2Body_GetRotation(bodyId);
         const boxPositionW = box2dCoordToW(boxPositionBox2d);
+        print("{} {} {}\n", .{ boxPositionBox2d.x, boxPositionBox2d.y, box2d.b2Rot_GetAngle(boxRotation) });
 
-        _ = sdl2.SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red box
-        var boxRect = sdl2.SDL_Rect{
+        try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
+
+        const boxRect = sdl.Rect{
             .x = boxPositionW.x,
             .y = boxPositionW.y,
             .w = 50.0,
             .h = 50.0,
         };
-        _ = sdl2.SDL_RenderFillRect(renderer, &boxRect);
+        try sdl.renderFillRect(renderer, boxRect);
 
-        sdl2.SDL_RenderPresent(renderer);
+        sdl.renderPresent(renderer);
     }
 }
 
