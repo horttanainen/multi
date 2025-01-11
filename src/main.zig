@@ -7,54 +7,62 @@ const PI = @import("std").math.pi;
 
 const boxImgSrc = "images/box.png";
 
+const Config = struct {
+    window: struct { width: i32, height: i32 },
+    met2pix: i32,
+};
+
+const c: Config = .{ .window = .{ .width = 800, .height = 800 }, .met2pix = 80 };
+
+const Sprite = struct { texture: *sdl.Texture, dim: struct {
+    w: f32,
+    h: f32,
+} };
+
 pub fn main() !void {
     try sdl.init(.{ .audio = true, .video = true });
     defer sdl.quit();
 
-    const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, 800, 600, .{ .opengl = true, .shown = true });
+    const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, c.window.width, c.window.height, .{ .opengl = true, .shown = true });
     defer sdl.destroyWindow(window);
 
     const renderer = try sdl.createRenderer(window, -1, .{ .accelerated = true, .present_vsync = true });
     defer sdl.destroyRenderer(renderer);
 
     // Initialize Box2D World
-    const gravity = box2d.b2Vec2{ .x = 0.0, .y = 9.8 };
+    const gravity = box2d.b2Vec2{ .x = 0.0, .y = 10 };
     var worldDef = box2d.b2DefaultWorldDef();
     worldDef.gravity = gravity;
     const worldId = box2d.b2CreateWorld(&worldDef);
 
-    // Ground (Static Body)
-    var groundDef = box2d.b2DefaultBodyDef();
-    groundDef.position = wCoordToBox2d(0.0, 550.0);
-    const groundId = box2d.b2CreateBody(worldId, &groundDef);
-    const groundBox = box2d.b2MakeBox(wLengthToBox2d(800.0), wLengthToBox2d(50.0));
-    const groundShapeDef = box2d.b2DefaultShapeDef();
-    _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
-
-    // Falling Box (Dynamic Body)
-
+    // load box texture
     const boxSurface = try image.load(boxImgSrc);
-
-    print("surface width: {} height: {}\n", .{ boxSurface.w, boxSurface.h });
-
     const boxTexture = try sdl.createTextureFromSurface(renderer, boxSurface);
     defer sdl.destroyTexture(boxTexture);
 
-    var width: i32 = 0;
-    var height: i32 = 0;
-    try sdl.queryTexture(boxTexture, null, null, &width, &height);
-    print("texture width: {} height: {}\n", .{ width, height });
+    // Ground (Static Body)
+    var groundDef = box2d.b2DefaultBodyDef();
+    groundDef.position = meters(5, 1);
+    const groundId = box2d.b2CreateBody(worldId, &groundDef);
+    const groundBox = box2d.b2MakeBox(5, 0.5);
+    const groundShapeDef = box2d.b2DefaultShapeDef();
+    _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
+
+    const groundSprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 10, .h = 1 } };
+
+    // Falling Box (Dynamic Body)
 
     var bodyDef = box2d.b2DefaultBodyDef();
     bodyDef.type = box2d.b2_dynamicBody;
-    bodyDef.position = wCoordToBox2d(400, 0.0);
+    bodyDef.position = meters(10, 10);
     const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
-    box2d.b2Body_SetAngularVelocity(bodyId, 1.0);
-    const dynamicBox = box2d.b2MakeBox(wLengthToBox2d(50.0), wLengthToBox2d(50.0));
+    box2d.b2Body_SetAngularVelocity(bodyId, 10.0);
+    const dynamicBox = box2d.b2MakeBox(0.5, 0.5);
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.density = 1.0;
     shapeDef.friction = 0.3;
     _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
+    const boxSprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 1, .h = 1 } };
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -75,61 +83,63 @@ pub fn main() !void {
         // Step Box2D physics world
         box2d.b2World_Step(worldId, timeStep, subStepCount);
 
+        try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(renderer);
 
-        const groundPositionBox2d = box2d.b2Body_GetPosition(groundId);
-        const groundPositionW = box2dCoordToW(groundPositionBox2d);
-
         // Draw ground
-        try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
-        const groundRect = sdl.Rect{
-            .x = groundPositionW.x,
-            .y = groundPositionW.y,
-            .w = 800,
-            .h = 50,
-        };
-        try sdl.renderFillRect(renderer, groundRect);
+        const gPosMeter = box2d.b2Body_GetPosition(groundId);
 
-        const boxPositionBox2d = box2d.b2Body_GetPosition(bodyId);
+        const groundPos = m2PixelPos(gPosMeter.x, gPosMeter.y, groundSprite.dim.w, groundSprite.dim.h);
+        const groundRect = sdl.Rect{
+            .x = groundPos.x,
+            .y = groundPos.y,
+            .w = m2P(groundSprite.dim.w),
+            .h = m2P(groundSprite.dim.h),
+        };
+        try sdl.renderCopyEx(renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
+
+        // Draw box
+
+        const boxPosMeter = box2d.b2Body_GetPosition(bodyId);
         const boxRotation = box2d.b2Body_GetRotation(bodyId);
         const rotationAngle = box2d.b2Rot_GetAngle(boxRotation);
-        const boxPositionW = box2dCoordToW(boxPositionBox2d);
-        print("box2d: \t{d} \t{d} \t{d}\n", .{ boxPositionBox2d.x, boxPositionBox2d.y, rotationAngle * 180.0 / PI });
-        // print("w: {d} {d} {d}\n", .{ boxPositionW.x, boxPositionW.y, rotationAngle * 180.0 / PI });
-        print("ground: \t{d} \t{d} \t{d}\n", .{ groundPositionBox2d.x, groundPositionBox2d.y, rotationAngle * 180.0 / PI });
 
-        try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
-
+        const boxPos = m2PixelPos(boxPosMeter.x, boxPosMeter.y, boxSprite.dim.w, boxSprite.dim.h);
         const boxRect = sdl.Rect{
-            .x = boxPositionW.x,
-            .y = boxPositionW.y,
-            .w = 50,
-            .h = 50,
+            .x = boxPos.x,
+            .y = boxPos.y,
+            .w = m2P(boxSprite.dim.w),
+            .h = m2P(boxSprite.dim.h),
         };
-        // platform.x = ((SCALED_WIDTH / 2.0f) + x_plat) * MET2PIX - platform.w / 2;
-        // platform.y = ((SCALED_HEIGHT / 2.0f) + y_plat) * MET2PIX - platform.h / 2;
+        try sdl.renderCopyEx(renderer, boxSprite.texture, null, &boxRect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 
-        try sdl.renderCopyEx(renderer, boxTexture, null, &boxRect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
-
+        // Debug
+        try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
+        try sdl.renderDrawLine(renderer, c.window.width / 2, 0, c.window.width / 2, c.window.height);
         sdl.renderPresent(renderer);
     }
 }
 
-const pixelScale = 50.0;
-fn wCoordToBox2d(x: f32, y: f32) box2d.b2Vec2 {
-    return box2d.b2Vec2{ .x = wLengthToBox2d(x), .y = wLengthToBox2d(y) };
+fn m2PixelPos(x: f32, y: f32, w: f32, h: f32) Point {
+    return Point{
+        .x = @as(i32, @intFromFloat(((w / 2.0) + x) * c.met2pix - c.met2pix * w)),
+        .y = @as(i32, @intFromFloat(((h / 2.0) + y) * c.met2pix - c.met2pix * h / 2.0)),
+    };
 }
-fn wLengthToBox2d(x: f32) f32 {
-    return x / pixelScale;
+
+fn meters(x: f32, y: f32) box2d.b2Vec2 {
+    return box2d.b2Vec2{ .x = x, .y = (c.window.height / c.met2pix) - y };
 }
 
 const Point = struct {
     x: i32,
     y: i32,
 };
-fn box2dCoordToW(coord: box2d.b2Vec2) Point {
-    return .{ .x = @as(i32, @intFromFloat(coord.x * pixelScale)), .y = @as(i32, @intFromFloat(coord.y * pixelScale)) };
+fn m2Pixel(
+    coord: box2d.b2Vec2,
+) Point {
+    return .{ .x = @as(i32, @intFromFloat(coord.x * c.met2pix)), .y = @as(i32, @intFromFloat(coord.y * c.met2pix)) };
 }
-fn box2dLengthToW(x: i32) i32 {
-    return x * @as(i32, pixelScale);
+fn m2P(x: f32) i32 {
+    return @as(i32, @intFromFloat(x * c.met2pix));
 }
