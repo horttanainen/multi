@@ -3,7 +3,10 @@ const image = @import("zsdl2_image");
 const box2d = @import("box2d").native;
 const assert = @import("std").debug.assert;
 const print = @import("std").debug.print;
-const PI = @import("std").math.pi;
+const std = @import("std");
+
+const PI = std.math.pi;
+const ArrayList = std.ArrayList;
 
 const boxImgSrc = "images/box.png";
 
@@ -18,6 +21,70 @@ const Sprite = struct { texture: *sdl.Texture, dim: struct {
     w: f32,
     h: f32,
 } };
+
+const Point = struct {
+    x: i32,
+    y: i32,
+};
+
+const Object = struct {
+    bodyId: box2d.b2BodyId,
+    sprite: Sprite,
+};
+
+const SharedResources = struct {
+    worldId: box2d.b2WorldId,
+    renderer: *sdl.Renderer,
+    boxTexture: *sdl.Texture,
+};
+
+var sharedResources: ?SharedResources = null;
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
+var objects: ArrayList(Object) = ArrayList(Object).init(allocator);
+
+fn createCube(position: Point) void {
+    if (sharedResources) |shared| {
+        const worldId = shared.worldId;
+        const boxTexture = shared.boxTexture;
+
+        var bodyDef = box2d.b2DefaultBodyDef();
+        bodyDef.type = box2d.b2_dynamicBody;
+        bodyDef.position = p2m(position);
+        const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
+        const dynamicBox = box2d.b2MakeBox(0.5, 0.5);
+        var shapeDef = box2d.b2DefaultShapeDef();
+        shapeDef.density = 1.0;
+        shapeDef.friction = 0.3;
+        _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
+        const sprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 1, .h = 1 } };
+
+        const object = Object{ .bodyId = bodyId, .sprite = sprite };
+        objects.append(object) catch {};
+    }
+}
+
+fn drawObject(object: Object) !void {
+    if (sharedResources) |shared| {
+        const renderer = shared.renderer;
+
+        const bodyId = object.bodyId;
+        const sprite = object.sprite;
+        const boxPosMeter = box2d.b2Body_GetPosition(bodyId);
+        const boxRotation = box2d.b2Body_GetRotation(bodyId);
+        const rotationAngle = box2d.b2Rot_GetAngle(boxRotation);
+
+        const pos = m2PixelPos(boxPosMeter.x, boxPosMeter.y, sprite.dim.w, sprite.dim.h);
+        const rect = sdl.Rect{
+            .x = pos.x,
+            .y = pos.y,
+            .w = m2P(sprite.dim.w),
+            .h = m2P(sprite.dim.h),
+        };
+        try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
+    }
+}
 
 pub fn main() !void {
     try sdl.init(.{ .audio = true, .video = true });
@@ -40,6 +107,9 @@ pub fn main() !void {
     const boxTexture = try sdl.createTextureFromSurface(renderer, boxSurface);
     defer sdl.destroyTexture(boxTexture);
 
+    // instantiate shared resources
+    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId };
+
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
     groundDef.position = meters(5, 1);
@@ -49,20 +119,6 @@ pub fn main() !void {
     _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
 
     const groundSprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 10, .h = 1 } };
-
-    // Falling Box (Dynamic Body)
-
-    var bodyDef = box2d.b2DefaultBodyDef();
-    bodyDef.type = box2d.b2_dynamicBody;
-    bodyDef.position = meters(10, 10);
-    const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
-    box2d.b2Body_SetAngularVelocity(bodyId, 10.0);
-    const dynamicBox = box2d.b2MakeBox(0.5, 0.5);
-    var shapeDef = box2d.b2DefaultShapeDef();
-    shapeDef.density = 1.0;
-    shapeDef.friction = 0.3;
-    _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
-    const boxSprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 1, .h = 1 } };
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -75,6 +131,9 @@ pub fn main() !void {
             switch (event.type) {
                 sdl.EventType.quit => {
                     running = false;
+                },
+                sdl.EventType.mousebuttondown => {
+                    mouseButtonDown(event.button);
                 },
                 else => {},
             }
@@ -98,26 +157,20 @@ pub fn main() !void {
         };
         try sdl.renderCopyEx(renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
-        // Draw box
-
-        const boxPosMeter = box2d.b2Body_GetPosition(bodyId);
-        const boxRotation = box2d.b2Body_GetRotation(bodyId);
-        const rotationAngle = box2d.b2Rot_GetAngle(boxRotation);
-
-        const boxPos = m2PixelPos(boxPosMeter.x, boxPosMeter.y, boxSprite.dim.w, boxSprite.dim.h);
-        const boxRect = sdl.Rect{
-            .x = boxPos.x,
-            .y = boxPos.y,
-            .w = m2P(boxSprite.dim.w),
-            .h = m2P(boxSprite.dim.h),
-        };
-        try sdl.renderCopyEx(renderer, boxSprite.texture, null, &boxRect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
+        for (objects.items) |object| {
+            try drawObject(object);
+        }
 
         // Debug
         try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
         try sdl.renderDrawLine(renderer, c.window.width / 2, 0, c.window.width / 2, c.window.height);
         sdl.renderPresent(renderer);
     }
+}
+
+fn mouseButtonDown(event: sdl.MouseButtonEvent) void {
+    print("Click!!", .{});
+    createCube(.{ .x = event.x, .y = event.y });
 }
 
 fn m2PixelPos(x: f32, y: f32, w: f32, h: f32) Point {
@@ -127,14 +180,14 @@ fn m2PixelPos(x: f32, y: f32, w: f32, h: f32) Point {
     };
 }
 
+fn p2m(p: Point) box2d.b2Vec2 {
+    return box2d.b2Vec2{ .x = @as(f32, @floatFromInt(p.x)) / c.met2pix, .y = @as(f32, @floatFromInt(p.y)) / c.met2pix };
+}
+
 fn meters(x: f32, y: f32) box2d.b2Vec2 {
     return box2d.b2Vec2{ .x = x, .y = (c.window.height / c.met2pix) - y };
 }
 
-const Point = struct {
-    x: i32,
-    y: i32,
-};
 fn m2Pixel(
     coord: box2d.b2Vec2,
 ) Point {
