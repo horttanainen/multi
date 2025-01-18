@@ -86,6 +86,13 @@ fn drawObject(object: Object) !void {
     }
 }
 
+fn imgIntoShape() void {
+    // 1. use marching squares algorithm to calculate shape edges. Output list of points in ccw order. -> complex polygon
+    // 2. simplfiy the polygon. E.g douglas pecker
+    // 3. use earclipping to triangulate the polygon
+    // 4. assing polygons to box2d body. Box2d will treat them as single body
+}
+
 pub fn main() !void {
     try sdl.init(.{ .audio = true, .video = true });
     defer sdl.quit();
@@ -105,6 +112,7 @@ pub fn main() !void {
     // load box texture
     const boxSurface = try image.load(boxImgSrc);
     const boxTexture = try sdl.createTextureFromSurface(renderer, boxSurface);
+    defer sdl.freeSurface(boxSurface);
     defer sdl.destroyTexture(boxTexture);
 
     // instantiate shared resources
