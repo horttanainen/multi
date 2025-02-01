@@ -46,7 +46,8 @@ const SharedResources = struct {
     beanTexture: *sdl.Texture,
 };
 
-var debugPolygon: ?[]IVec2 = null; // Will store the simplified polygon vertices
+var debugPolygon: ?[]IVec2 = null;
+var debugTriangles: ?[][3]IVec2 = null;
 
 var sharedResources: ?SharedResources = null;
 
@@ -510,6 +511,7 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     const triangles = try earClipping(ccw);
+    debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
 }
 
@@ -545,7 +547,7 @@ pub fn main() !void {
     defer sdl.freeSurface(beanSurface);
     const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
 
-    try imgIntoShape(starSurface);
+    try imgIntoShape(beanSurface);
 
     // instantiate shared resources
     sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture };
@@ -616,9 +618,13 @@ pub fn main() !void {
             };
             try sdl.renderCopyEx(renderer, texture, null, &starRect, 0, null, sdl.RendererFlip.none);
 
-            // Now overlay the debug polygon, offset by the starRect position.
-            if (debugPolygon) |poly| {
-                try debugDrawPolygon(renderer, poly, .{ .x = starRect.x, .y = starRect.y });
+            // if (debugPolygon) |poly| {
+            //     try debugDrawPolygon(renderer, poly, .{ .x = starRect.x, .y = starRect.y });
+            // }
+            if (debugTriangles) |triangles| {
+                for (triangles) |triangle| {
+                    try debugDrawPolygon(renderer, &triangle, .{ .x = starRect.x, .y = starRect.y });
+                }
             }
         }
 
@@ -658,7 +664,7 @@ fn m2P(x: f32) i32 {
     return @as(i32, @intFromFloat(x * conf.met2pix));
 }
 
-fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []IVec2, offset: IVec2) !void {
+fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []const IVec2, offset: IVec2) !void {
     // Set a bright color for the overlay (magenta here)
     try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
 
@@ -670,32 +676,5 @@ fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []IVec2, offset: IVec2) !v
         const current = polygon[i];
         const next = polygon[(i + 1) % n];
         try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
-    }
-
-    // For each vertex, compute an arrow showing the edge direction.
-    // (Here we take the vector from current to next and normalize it.)
-    const arrowLength: f32 = 10.0;
-    for (0..n) |i| {
-        const current = polygon[i];
-        const next = polygon[(i + 1) % n];
-        const dx = next.x - current.x;
-        const dy = next.y - current.y;
-        const len = @sqrt(@as(f32, @floatFromInt(dx * dx + dy * dy)));
-        var dirX: f32 = 0;
-        var dirY: f32 = 0;
-        if (len > 0.0) {
-            dirX = @as(f32, @floatFromInt(dx)) / len;
-            dirY = @as(f32, @floatFromInt(dy)) / len;
-        }
-        const tipX = @as(f32, @floatFromInt(current.x)) + arrowLength * dirX;
-        const tipY = @as(f32, @floatFromInt(current.y)) + arrowLength * dirY;
-        // Draw the arrow line
-        try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + @as(i32, @intFromFloat(tipX)), offset.y + @as(i32, @intFromFloat(tipY)));
-        // Draw a point at the vertex
-        try sdl.renderDrawPoint(
-            renderer,
-            offset.x + current.x,
-            offset.y + current.y,
-        );
     }
 }
