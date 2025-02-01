@@ -44,7 +44,7 @@ const SharedResources = struct {
     starTexture: *sdl.Texture,
 };
 
-var debugPolygon: ?[]Vec2 = null; // Will store the simplified polygon vertices
+var debugPolygon: ?[]IVec2 = null; // Will store the simplified polygon vertices
 
 // For displaying the star image along with its debug overlay:
 var starImageWidth: i32 = 128;
@@ -56,108 +56,195 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 var objects: ArrayList(Object) = ArrayList(Object).init(allocator);
 
-fn isPointInTriangle(pt: Vec2, a: Vec2, b: Vec2, c: Vec2) bool {
-    const v0 = Vec2{ .x = c.x - a.x, .y = c.y - a.y };
-    const v1 = Vec2{ .x = b.x - a.x, .y = b.y - a.y };
-    const v2 = Vec2{ .x = pt.x - a.x, .y = pt.y - a.y };
-
-    const dot00 = v0.x * v0.x + v0.y * v0.y;
-    const dot01 = v0.x * v1.x + v0.y * v1.y;
-    const dot02 = v0.x * v2.x + v0.y * v2.y;
-    const dot11 = v1.x * v1.x + v1.y * v1.y;
-    const dot12 = v1.x * v2.x + v1.y * v2.y;
-
-    const invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01);
-    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-    return (u >= 0.0) and (v >= 0.0) and (u + v < 1.0);
+//Pavlidis
+fn getPixelAlpha(pixels: [*]const u8, pitch: usize, x: usize, y: usize) u8 {
+    // ABGR8888: Alpha is the first byte of each pixel
+    return pixels[y * pitch + x * 4];
 }
 
-fn isConvex(a: Vec2, b: Vec2, c: Vec2) bool {
-    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    return cross > 0.0;
+fn isInside(x: i32, y: i32, pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) bool {
+    if (x < 0 or y < 0 or @as(usize, @intCast(x)) >= width or @as(usize, @intCast(y)) >= height) return false;
+    const alpha = getPixelAlpha(pixels, pitch, @as(usize, @intCast(x)), @as(usize, @intCast(y)));
+    return alpha >= threshold;
 }
 
-fn findEar(vertices: []Vec2) ?usize {
-    const n = vertices.len;
+// Define the 8–neighbor offsets in clockwise order starting from North.
+const neighbors: [8]IVec2 = .{
+    .{ .x = 0, .y = -1 }, // N, index 0
+    .{ .x = 1, .y = -1 }, // NE, index 1
+    .{ .x = 1, .y = 0 }, // E,  index 2
+    .{ .x = 1, .y = 1 }, // SE, index 3
+    .{ .x = 0, .y = 1 }, // S,  index 4
+    .{ .x = -1, .y = 1 }, // SW, index 5
+    .{ .x = -1, .y = 0 }, // W,  index 6
+    .{ .x = -1, .y = -1 }, // NW, index 7
+};
 
-    for (0..n) |i| {
-        const prevIndex = (i + n - 1) % n;
-        const nextIndex = (i + 1) % n;
+// Helper: given a direction vector, return its neighbor index.
+fn neighborIndex(dir: IVec2) !usize {
+    for (0..8) |i| {
+        if (neighbors[i].x == dir.x and neighbors[i].y == dir.y) return @intCast(i);
+    }
+    return error.OverFlow;
+}
 
-        const prev = vertices[prevIndex];
-        const current = vertices[i];
-        const next = vertices[nextIndex];
+fn findP123Directions(dir: IVec2) ![3]IVec2 {
+    const p2 = try neighborIndex(dir);
+    const p1 = @mod(@as(i32, @intCast(p2)) - 1, 8);
+    const p3 = p2 + 1 % 8;
 
-        if (!isConvex(prev, current, next)) {
-            std.debug.print("Vertex {} is not convex: prev=({}, {}), current=({}, {}), next=({}, {})\n", .{ i, prev.x, prev.y, current.x, current.y, next.x, next.y });
-            continue;
-        }
+    return [3]IVec2{ neighbors[@intCast(p1)], neighbors[p2], neighbors[@intCast(p3)] };
+}
 
-        var isEar = true;
-        for (0..n) |j| {
-            if (j == prevIndex or j == i or j == nextIndex) continue;
-            if (isPointInTriangle(vertices[j], prev, current, next)) {
-                isEar = false;
+fn turnRight(dir: IVec2) !IVec2 {
+    const curDirInd = try neighborIndex(dir);
+    const rightInd = (curDirInd + 2) % 8;
+    return neighbors[rightInd];
+}
+
+fn turnLeft(dir: IVec2) !IVec2 {
+    const curDirInd = try neighborIndex(dir);
+    const leftInd = @mod(@as(i32, @intCast(curDirInd)) - 2, 8);
+    return neighbors[@intCast(leftInd)];
+}
+/// Traces a contour using a Pavlidis/Moore neighbor–tracing algorithm.
+/// Returns an array of Vec2 points (in pixel coordinates) that form the contour.
+pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) ![]IVec2 {
+    var contour = std.ArrayList(IVec2).init(allocator);
+
+    // Step 1. Find a starting boundary pixel.
+    // A starting boundary pixel is one that is inside but its left pixel is not
+    var start: IVec2 = undefined;
+    var foundStart = false;
+    for (0..width) |x| {
+        for (0..height) |yk| {
+            const y = (height - 1) - yk;
+            if (isInside(@intCast(x), @intCast(y), pixels, width, height, pitch, threshold)) {
+                if (isInside(@intCast(x - 1), @intCast(y), pixels, width, height, pitch, threshold)) {
+                    break;
+                }
+                if (isInside(@intCast(x - 1), @intCast(y + 1), pixels, width, height, pitch, threshold)) {
+                    break;
+                }
+                if (isInside(@intCast(x + 1), @intCast(y + 1), pixels, width, height, pitch, threshold)) {
+                    break;
+                }
+                start = IVec2{ .x = @intCast(x), .y = @intCast(y) };
+                foundStart = true;
                 break;
             }
         }
+        if (foundStart) break;
+    }
+    if (!foundStart) {
+        std.debug.print("Did not find countour!\n", .{});
+        return contour.toOwnedSlice();
+    }
 
-        if (isEar) {
-            return i;
+    var encounteredStart: i32 = 0;
+    // Step 2. Initialize the tracing.
+    var current = start;
+
+    // Append the starting point.
+    try contour.append(start);
+
+    var curDir: IVec2 = .{ .x = 0, .y = -1 };
+
+    var rotations: i32 = 0;
+    // Step 3. Trace the contour.
+    while (encounteredStart < 2) {
+        const p123Directions = try findP123Directions(curDir);
+        const p1 = IVec2{ .x = current.x + p123Directions[0].x, .y = current.y + p123Directions[0].y };
+        const p2 = IVec2{ .x = current.x + p123Directions[1].x, .y = current.y + p123Directions[1].y };
+        const p3 = IVec2{ .x = current.x + p123Directions[2].x, .y = current.y + p123Directions[2].y };
+
+        if (isInside(@intCast(p1.x), @intCast(p1.y), pixels, width, height, pitch, threshold)) {
+            try contour.append(p1);
+            current = p1;
+            curDir = try turnLeft(curDir);
+            rotations = 0;
+        } else if (isInside(@intCast(p2.x), @intCast(p2.y), pixels, width, height, pitch, threshold)) {
+            try contour.append(p2);
+            current = p2;
+            rotations = 0;
+        } else if (isInside(@intCast(p3.x), @intCast(p3.y), pixels, width, height, pitch, threshold)) {
+            try contour.append(p3);
+            current = p3;
+            rotations = 0;
+        } else if (rotations > 2) {
+            std.debug.print("Isolated pixel!!!\n", .{});
+            return contour.toOwnedSlice();
+        } else {
+            curDir = try turnRight(curDir);
+            rotations += 1;
+        }
+        if (rotations == 0 and current.x == start.x and current.y == start.y) {
+            encounteredStart += 1;
+        }
+    }
+    return contour.toOwnedSlice();
+}
+
+fn perpendicularDistance(pointI: IVec2, lineStartI: IVec2, lineEndI: IVec2) f32 {
+    const point = Vec2{ .x = @floatFromInt(pointI.x), .y = @floatFromInt(pointI.y) };
+    const lineStart = Vec2{ .x = @floatFromInt(lineStartI.x), .y = @floatFromInt(lineStartI.y) };
+    const lineEnd = Vec2{ .x = @floatFromInt(lineEndI.x), .y = @floatFromInt(lineEndI.y) };
+
+    const dx = lineEnd.x - lineStart.x;
+    const dy = lineEnd.y - lineStart.y;
+
+    if (dx == 0.0 and dy == 0.0) {
+        // Line start and end are the same point
+        return @abs(point.x - lineStart.x) + @abs(point.y - lineStart.y);
+    }
+
+    const numerator = @abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x);
+    const denominator = @sqrt(dx * dx + dy * dy);
+    return numerator / denominator;
+}
+
+fn douglasPeucker(vertices: []IVec2, epsilon: f32) ![]IVec2 {
+    if (vertices.len <= 2) {
+        return vertices;
+    }
+
+    var maxDistance: f32 = 0.0;
+    var index: usize = 0;
+
+    for (1..vertices.len) |i| {
+        const dist = perpendicularDistance(vertices[i], vertices[0], vertices[vertices.len - 1]);
+        if (dist > maxDistance) {
+            maxDistance = dist;
+            index = i;
         }
     }
 
-    return null;
-}
+    if (maxDistance > epsilon) {
+        const left = try douglasPeucker(vertices[0 .. index + 1], epsilon);
+        const right = try douglasPeucker(vertices[index..], epsilon);
 
-pub fn earClipping(vertices: []Vec2) ![]const [3]Vec2 {
-    var triangles = ArrayList([3]Vec2).init(allocator);
+        // Merge the results, excluding the duplicate point at the junction
+        var result = ArrayList(IVec2).init(allocator);
+        defer result.deinit();
 
-    var verts = ArrayList(Vec2).init(allocator);
-    for (vertices) |v| try verts.append(v);
+        try result.appendSlice(left[0 .. left.len - 1]);
+        try result.appendSlice(right);
 
-    while (verts.items.len > 3) {
-        const earIndex = findEar(verts.items) orelse {
-            std.debug.panic("Could not find an ear. Is the polygon simple?", .{});
-        };
+        return result.toOwnedSlice();
+    } else {
+        // Only keep the endpoints
+        var simplified = ArrayList(IVec2).init(allocator);
+        defer simplified.deinit();
 
-        const prevIndex = (earIndex + verts.items.len - 1) % verts.items.len;
-        const nextIndex = (earIndex + 1) % verts.items.len;
+        try simplified.append(vertices[0]);
+        try simplified.append(vertices[vertices.len - 1]);
 
-        const prev = verts.items[prevIndex];
-        const current = verts.items[earIndex];
-        const next = verts.items[nextIndex];
-
-        try triangles.append(.{ prev, current, next });
-
-        _ = verts.orderedRemove(earIndex);
+        return simplified.toOwnedSlice();
     }
-
-    // Add the final triangle
-    triangles.append(.{ verts.items[0], verts.items[1], verts.items[2] }) catch {};
-
-    return triangles.toOwnedSlice();
 }
 
-// CCW
-
-fn isCounterClockwise(vertices: []Vec2) bool {
-    var sum: f32 = 0.0;
-    const n = vertices.len;
-    for (0..n) |i| {
-        const current = vertices[i];
-        const next = vertices[(i + 1) % n];
-        sum += (next.x - current.x) * (next.y + current.y);
-    }
-    return sum > 0.0;
-}
-
-// degenerates
-
-fn removeDuplicateVertices(vertices: []Vec2) ![]Vec2 {
-    var unique = ArrayList(Vec2).init(allocator);
+fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
+    var unique = ArrayList(IVec2).init(allocator);
     defer unique.deinit();
 
     for (vertices) |v| {
@@ -175,11 +262,22 @@ fn removeDuplicateVertices(vertices: []Vec2) ![]Vec2 {
     return unique.toOwnedSlice();
 }
 
-fn ensureCounterClockwise(vertices: []Vec2) ![]Vec2 {
+fn isCounterClockwise(vertices: []IVec2) bool {
+    var sum: i32 = 0.0;
+    const n = vertices.len;
+    for (0..n) |i| {
+        const current = vertices[i];
+        const next = vertices[(i + 1) % n];
+        sum += (next.x - current.x) * (next.y + current.y);
+    }
+    return sum > 0.0;
+}
+
+fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
     if (isCounterClockwise(vertices)) {
         return vertices;
     } else {
-        var reversed = ArrayList(Vec2).init(allocator);
+        var reversed = ArrayList(IVec2).init(allocator);
 
         var i: usize = vertices.len;
         while (i > 0) {
@@ -189,160 +287,6 @@ fn ensureCounterClockwise(vertices: []Vec2) ![]Vec2 {
 
         return reversed.toOwnedSlice();
     }
-}
-
-// Douglas-Peucker
-
-fn perpendicularDistance(point: Vec2, lineStart: Vec2, lineEnd: Vec2) f32 {
-    const dx = lineEnd.x - lineStart.x;
-    const dy = lineEnd.y - lineStart.y;
-
-    if (dx == 0.0 and dy == 0.0) {
-        // Line start and end are the same point
-        return @abs(point.x - lineStart.x) + @abs(point.y - lineStart.y);
-    }
-
-    const numerator = @abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x);
-    const denominator = @sqrt(dx * dx + dy * dy);
-    return numerator / denominator;
-}
-
-fn douglasPeucker(vertices: []Vec2, epsilon: f32) ![]Vec2 {
-    if (vertices.len <= 2) {
-        return vertices;
-    }
-
-    var maxDistance: f32 = 0.0;
-    var index: usize = 0;
-
-    for (1..vertices.len - 1) |i| {
-        const dist = perpendicularDistance(vertices[i], vertices[0], vertices[vertices.len - 1]);
-        if (dist > maxDistance) {
-            maxDistance = dist;
-            index = i;
-        }
-    }
-
-    if (maxDistance > epsilon) {
-        const left = try douglasPeucker(vertices[0 .. index + 1], epsilon);
-        const right = try douglasPeucker(vertices[index..], epsilon);
-
-        // Merge the results, excluding the duplicate point at the junction
-        var result = ArrayList(Vec2).init(allocator);
-        defer result.deinit();
-
-        try result.appendSlice(left[0 .. left.len - 1]);
-        try result.appendSlice(right);
-
-        return result.toOwnedSlice();
-    } else {
-        // Only keep the endpoints
-        var simplified = ArrayList(Vec2).init(allocator);
-        defer simplified.deinit();
-
-        try simplified.append(vertices[0]);
-        try simplified.append(vertices[vertices.len - 1]);
-
-        return simplified.toOwnedSlice();
-    }
-}
-
-// marching squares
-
-fn getPixelAlpha(pixels: [*]const u8, pitch: usize, x: usize, y: usize) u8 {
-    // ABGR8888: Alpha is the first byte of each pixel
-    return pixels[y * pitch + x * 4];
-
-    // Assuming the image is in SDL_PIXELFORMAT_RGBA8888
-    // return pixels[y * pitch + x * 4 + 3];
-}
-
-fn interpolateEdge(v1: u8, v2: u8, p1: usize, p2: usize, threshold: u8) f32 {
-    if (v1 == v2) return @as(f32, @floatFromInt(p1));
-    return @as(f32, @floatFromInt(p1)) +
-        (@as(f32, @floatFromInt(p2)) - @as(f32, @floatFromInt(p1))) *
-        (@as(f32, @floatFromInt(threshold)) - @as(f32, @floatFromInt(v1))) /
-        (@as(f32, @floatFromInt(v2)) - @as(f32, @floatFromInt(v1)));
-}
-
-fn marchingSquareCase(topLeft: u8, topRight: u8, bottomLeft: u8, bottomRight: u8, threshold: u8) u8 {
-    return (if (topLeft >= threshold) @as(u8, 8) else @as(u8, 0)) |
-        (if (topRight >= threshold) @as(u8, 4) else @as(u8, 0)) |
-        (if (bottomRight >= threshold) @as(u8, 2) else @as(u8, 0)) |
-        (if (bottomLeft >= threshold) @as(u8, 1) else @as(u8, 0));
-}
-
-pub fn marchingSquares(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) ![]Vec2 {
-    var vertices = std.ArrayList(Vec2).init(allocator);
-
-    for (0..height - 1) |y| {
-        for (0..width - 1) |x| {
-            const topLeft = getPixelAlpha(pixels, pitch, x, y);
-            const topRight = getPixelAlpha(pixels, pitch, x + 1, y);
-            const bottomLeft = getPixelAlpha(pixels, pitch, x, y + 1);
-            const bottomRight = getPixelAlpha(pixels, pitch, x + 1, y + 1);
-
-            const caseId = marchingSquareCase(topLeft, topRight, bottomLeft, bottomRight, threshold);
-
-            switch (caseId) {
-                // Single corner cases
-                1 => {
-                    const p1 = interpolateEdge(bottomLeft, topLeft, y + 1, y, threshold);
-                    const p2 = interpolateEdge(bottomLeft, bottomRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = @floatFromInt(x), .y = p1 }) catch {};
-                    vertices.append(.{ .x = p2, .y = @floatFromInt(y + 1) }) catch {};
-                },
-                2 => {
-                    const p1 = interpolateEdge(bottomRight, topRight, y + 1, y, threshold);
-                    const p2 = interpolateEdge(bottomLeft, bottomRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = @floatFromInt(x + 1), .y = p1 }) catch {};
-                    vertices.append(.{ .x = p2, .y = @floatFromInt(y + 1) }) catch {};
-                },
-                4 => {
-                    const p1 = interpolateEdge(topRight, bottomRight, y, y + 1, threshold);
-                    const p2 = interpolateEdge(topLeft, topRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = p1, .y = @floatFromInt(y) }) catch {};
-                    vertices.append(.{ .x = @floatFromInt(x + 1), .y = p2 }) catch {};
-                },
-                8 => {
-                    const p1 = interpolateEdge(topLeft, bottomLeft, y, y + 1, threshold);
-                    const p2 = interpolateEdge(topLeft, topRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = @floatFromInt(x), .y = p1 }) catch {};
-                    vertices.append(.{ .x = p2, .y = @floatFromInt(y) }) catch {};
-                },
-
-                // Saddle point cases
-                5 => {
-                    const p1 = interpolateEdge(bottomLeft, topLeft, y + 1, y, threshold);
-                    const p2 = interpolateEdge(topLeft, topRight, x, x + 1, threshold);
-                    const p3 = interpolateEdge(bottomRight, topRight, y + 1, y, threshold);
-                    const p4 = interpolateEdge(bottomLeft, bottomRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = @floatFromInt(x), .y = p1 }) catch {};
-                    vertices.append(.{ .x = p2, .y = @floatFromInt(y) }) catch {};
-                    vertices.append(.{ .x = @floatFromInt(x + 1), .y = p3 }) catch {};
-                    vertices.append(.{ .x = p4, .y = @floatFromInt(y + 1) }) catch {};
-                },
-
-                // Other cases (symmetry)
-                10 => {
-                    const p1 = interpolateEdge(topRight, bottomRight, y, y + 1, threshold);
-                    const p2 = interpolateEdge(topLeft, topRight, x, x + 1, threshold);
-                    const p3 = interpolateEdge(bottomLeft, topLeft, y + 1, y, threshold);
-                    const p4 = interpolateEdge(bottomLeft, bottomRight, x, x + 1, threshold);
-                    vertices.append(.{ .x = p1, .y = @floatFromInt(y) }) catch {};
-                    vertices.append(.{ .x = p2, .y = @floatFromInt(y) }) catch {};
-                    vertices.append(.{ .x = p3, .y = @floatFromInt(y + 1) }) catch {};
-                    vertices.append(.{ .x = p4, .y = @floatFromInt(y + 1) }) catch {};
-                },
-
-                else => {
-                    // Skip empty or fully filled cells
-                },
-            }
-        }
-    }
-
-    return try vertices.toOwnedSlice();
 }
 
 fn createCube(position: IVec2) void {
@@ -397,51 +341,37 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     const width: usize = @intCast(surface.w);
     const height: usize = @intCast(surface.h);
 
-    const threshold: u8 = 128; // Isovalue threshold for alpha
-    const vertices = try marchingSquares(pixels, width, height, pitch, threshold);
-    debugPolygon = vertices;
-
+    const threshold: u8 = 125; // Isovalue threshold for alpha
+    const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
+    defer allocator.free(vertices);
     // Print the resulting vertices
     for (vertices) |vertex| {
         std.debug.print("Vertex: ({d}, {d})\n", .{ vertex.x, vertex.y });
     }
     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-
     // 2. simplify the polygon. E.g douglas pecker
 
-    //     const epsilon: f32 = 0.1 * @as(f32, @floatFromInt(width));
-    //     const simplified = try douglasPeucker(vertices, epsilon);
-    //     defer allocator.free(simplified);
+    const epsilon: f32 = 0.1 * @as(f32, @floatFromInt(width));
+    const simplified = try douglasPeucker(vertices, epsilon);
+    defer allocator.free(simplified);
 
-    //     // Print the simplified polygon
-    //     for (simplified) |point| {
-    //         std.debug.print("Simplified vertex: ({d}, {d})\n", .{ point.x, point.y });
-    //     }
+    // Print the simplified polygon
+    for (simplified) |point| {
+        std.debug.print("Simplified vertex: ({d}, {d})\n", .{ point.x, point.y });
+    }
 
-    //     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-    //     std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
+    // 3. remove duplicates
+    const withoutDuplicates = try removeDuplicateVertices(simplified);
+    defer allocator.free(withoutDuplicates);
 
-    // // 3. use earclipping to triangulate the polygon
+    // 4. ensure counter clockwise
+    const ccw = try ensureCounterClockwise(withoutDuplicates);
+    debugPolygon = ccw;
 
-    // const ccwVertices = try ensureCounterClockwise(simplified);
-
-    // const withoutDuplicates = try removeDuplicateVertices(ccwVertices);
-
-    // // Print the "corrected" polygon
-    // for (withoutDuplicates) |point| {
-    //     std.debug.print("ccw and duplicate corrected vertex: ({}, {})\n", .{ point.x, point.y });
-    // }
-
-    // const triangles = try earClipping(withoutDuplicates);
-
-    // for (triangles) |triangle| {
-    //     std.debug.print("Triangle: ({}, {}) -> ({}, {}) -> ({}, {})\n", .{
-    //         triangle[0].x, triangle[0].y,
-    //         triangle[1].x, triangle[1].y,
-    //         triangle[2].x, triangle[2].y,
-    //     });
-    // }
-    // // 4. assing polygons to box2d body. Box2d will treat them as single body
+    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
+    std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
+    std.debug.print("Withoud duplicate vertices: {}\n", .{withoutDuplicates.len});
+    std.debug.print("CCW vertices: {}\n", .{ccw.len});
 }
 
 pub fn main() !void {
@@ -581,7 +511,7 @@ fn m2P(x: f32) i32 {
     return @as(i32, @intFromFloat(x * conf.met2pix));
 }
 
-fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []Vec2, offset: IVec2) !void {
+fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []IVec2, offset: IVec2) !void {
     // Set a bright color for the overlay (magenta here)
     try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
 
@@ -592,7 +522,7 @@ fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []Vec2, offset: IVec2) !vo
     for (0..n) |i| {
         const current = polygon[i];
         const next = polygon[(i + 1) % n];
-        try sdl.renderDrawLine(renderer, offset.x + @as(i32, @intFromFloat(current.x)), offset.y + @as(i32, @intFromFloat(current.y)), offset.x + @as(i32, @intFromFloat(next.x)), offset.y + @as(i32, @intFromFloat(next.y)));
+        try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
     }
 
     // For each vertex, compute an arrow showing the edge direction.
@@ -603,22 +533,22 @@ fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []Vec2, offset: IVec2) !vo
         const next = polygon[(i + 1) % n];
         const dx = next.x - current.x;
         const dy = next.y - current.y;
-        const len = std.math.sqrt(dx * dx + dy * dy);
+        const len = @sqrt(@as(f32, @floatFromInt(dx * dx + dy * dy)));
         var dirX: f32 = 0;
         var dirY: f32 = 0;
         if (len > 0.0) {
-            dirX = dx / len;
-            dirY = dy / len;
+            dirX = @as(f32, @floatFromInt(dx)) / len;
+            dirY = @as(f32, @floatFromInt(dy)) / len;
         }
-        const tipX = current.x + arrowLength * dirX;
-        const tipY = current.y + arrowLength * dirY;
+        const tipX = @as(f32, @floatFromInt(current.x)) + arrowLength * dirX;
+        const tipY = @as(f32, @floatFromInt(current.y)) + arrowLength * dirY;
         // Draw the arrow line
-        try sdl.renderDrawLine(renderer, offset.x + @as(i32, @intFromFloat(current.x)), offset.y + @as(i32, @intFromFloat(current.y)), offset.x + @as(i32, @intFromFloat(tipX)), offset.y + @as(i32, @intFromFloat(tipY)));
+        try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + @as(i32, @intFromFloat(tipX)), offset.y + @as(i32, @intFromFloat(tipY)));
         // Draw a point at the vertex
         try sdl.renderDrawPoint(
             renderer,
-            offset.x + @as(i32, @intFromFloat(current.x)),
-            offset.y + @as(i32, @intFromFloat(current.y)),
+            offset.x + current.x,
+            offset.y + current.y,
         );
     }
 }
