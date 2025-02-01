@@ -10,6 +10,7 @@ const ArrayList = std.ArrayList;
 
 const boxImgSrc = "images/box.png";
 const starImgSrc = "images/star.png";
+const beanImgSrc = "images/bean.png";
 
 const Config = struct {
     window: struct { width: i32, height: i32 },
@@ -42,13 +43,10 @@ const SharedResources = struct {
     renderer: *sdl.Renderer,
     boxTexture: *sdl.Texture,
     starTexture: *sdl.Texture,
+    beanTexture: *sdl.Texture,
 };
 
 var debugPolygon: ?[]IVec2 = null; // Will store the simplified polygon vertices
-
-// For displaying the star image along with its debug overlay:
-var starImageWidth: i32 = 128;
-var starImageHeight: i32 = 96;
 
 var sharedResources: ?SharedResources = null;
 
@@ -120,10 +118,10 @@ pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: 
         for (0..height) |yk| {
             const y = (height - 1) - yk;
             if (isInside(@intCast(x), @intCast(y), pixels, width, height, pitch, threshold)) {
-                if (isInside(@intCast(x - 1), @intCast(y), pixels, width, height, pitch, threshold)) {
+                if (isInside(@as(i32, @intCast(x)) - 1, @intCast(y), pixels, width, height, pitch, threshold)) {
                     break;
                 }
-                if (isInside(@intCast(x - 1), @intCast(y + 1), pixels, width, height, pitch, threshold)) {
+                if (isInside(@as(i32, @intCast(x)) - 1, @intCast(y + 1), pixels, width, height, pitch, threshold)) {
                     break;
                 }
                 if (isInside(@intCast(x + 1), @intCast(y + 1), pixels, width, height, pitch, threshold)) {
@@ -152,7 +150,7 @@ pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: 
 
     var rotations: i32 = 0;
     // Step 3. Trace the contour.
-    while (encounteredStart < 2) {
+    while (encounteredStart < 1) {
         const p123Directions = try findP123Directions(curDir);
         const p1 = IVec2{ .x = current.x + p123Directions[0].x, .y = current.y + p123Directions[0].y };
         const p2 = IVec2{ .x = current.x + p123Directions[1].x, .y = current.y + p123Directions[1].y };
@@ -351,7 +349,7 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
     // 2. simplify the polygon. E.g douglas pecker
 
-    const epsilon: f32 = 0.1 * @as(f32, @floatFromInt(width));
+    const epsilon: f32 = 0.05 * @as(f32, @floatFromInt(width));
     const simplified = try douglasPeucker(vertices, epsilon);
     defer allocator.free(simplified);
 
@@ -398,13 +396,18 @@ pub fn main() !void {
 
     // load star texture
     const starSurface = try image.load(starImgSrc);
+    defer sdl.freeSurface(starSurface);
     const starTexture = try sdl.createTextureFromSurface(renderer, starSurface);
 
+    // load bean texture
+    const beanSurface = try image.load(beanImgSrc);
+    defer sdl.freeSurface(beanSurface);
+    const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
+
     try imgIntoShape(starSurface);
-    defer sdl.freeSurface(starSurface);
 
     // instantiate shared resources
-    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture };
+    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture };
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
@@ -458,16 +461,19 @@ pub fn main() !void {
         }
 
         if (sharedResources) |sharedR| {
-            const starT = sharedR.starTexture;
+            const texture = sharedR.starTexture;
+
+            var size: sdl.Point = undefined;
+            try sdl.queryTexture(texture, null, null, &size.x, &size.y);
             // Define where on the screen you want the star image.
             // For instance, here we place it at (100, 100)
             const starRect = sdl.Rect{
                 .x = 100,
                 .y = 100,
-                .w = starImageWidth,
-                .h = starImageHeight,
+                .w = size.x,
+                .h = size.y,
             };
-            try sdl.renderCopyEx(renderer, starT, null, &starRect, 0, null, sdl.RendererFlip.none);
+            try sdl.renderCopyEx(renderer, texture, null, &starRect, 0, null, sdl.RendererFlip.none);
 
             // Now overlay the debug polygon, offset by the starRect position.
             if (debugPolygon) |poly| {
