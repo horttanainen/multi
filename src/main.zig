@@ -443,9 +443,10 @@ fn createShape(position: IVec2, triangles: [][3]IVec2) void {
         bodyDef.position = p2m(position);
         const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
 
-        createBox2DMultiPolygon(bodyId, triangles);
+        const size = IVec2{ .x = 128, .y = 96 };
+        const dim = p2m(size);
+        createBox2DMultiPolygon(bodyId, triangles, size);
 
-        const dim = p2m(.{ .x = 128, .y = 96 });
         const sprite = Sprite{ .texture = texture, .dim = .{ .w = dim.x, .h = dim.y } };
 
         const object = Object{ .bodyId = bodyId, .sprite = sprite };
@@ -455,10 +456,14 @@ fn createShape(position: IVec2, triangles: [][3]IVec2) void {
 
 /// Creates a Box2D compound (multi–polygon) shape on the given body,
 /// using the provided triangles (each triangle is a [3]IVec2).
-pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2) void {
+pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dim: IVec2) void {
     // For each triangle, create a polygon fixture on the body.
-    for (triangles) |triangle| {
-        std.debug.print("Triangle: {any}", .{triangle});
+    for (triangles) |tri| {
+        var triangle: [3]IVec2 = undefined;
+        triangle[0] = .{ .x = tri[0].x - @divFloor(dim.x, 2), .y = tri[0].y - @divFloor(dim.y, 2) };
+        triangle[1] = .{ .x = tri[1].x - @divFloor(dim.x, 2), .y = tri[1].y - @divFloor(dim.y, 2) };
+        triangle[2] = .{ .x = tri[2].x - @divFloor(dim.x, 2), .y = tri[2].y - @divFloor(dim.y, 2) };
+
         // Convert the triangle's vertices from IVec2 (pixel space)
         // to box2d.b2Vec2 (meter space) using the provided conversion.
         var verts: [3]box2d.b2Vec2 = undefined;
@@ -564,7 +569,7 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
 
-    createShape(.{ .x = 200, .y = 500 }, triangles);
+    createShape(.{ .x = 200, .y = 100 }, triangles);
 }
 
 pub fn main() !void {
