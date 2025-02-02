@@ -433,6 +433,56 @@ fn createCube(position: IVec2) void {
     }
 }
 
+fn createShape(position: IVec2, triangles: [][3]IVec2) void {
+    if (sharedResources) |shared| {
+        const worldId = shared.worldId;
+        const texture = shared.starTexture;
+
+        var bodyDef = box2d.b2DefaultBodyDef();
+        bodyDef.type = box2d.b2_dynamicBody;
+        bodyDef.position = p2m(position);
+        const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
+
+        createBox2DMultiPolygon(bodyId, triangles);
+
+        const dim = p2m(.{ .x = 128, .y = 96 });
+        const sprite = Sprite{ .texture = texture, .dim = .{ .w = dim.x, .h = dim.y } };
+
+        const object = Object{ .bodyId = bodyId, .sprite = sprite };
+        objects.append(object) catch {};
+    }
+}
+
+/// Creates a Box2D compound (multi–polygon) shape on the given body,
+/// using the provided triangles (each triangle is a [3]IVec2).
+pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2) void {
+    // For each triangle, create a polygon fixture on the body.
+    for (triangles) |triangle| {
+        std.debug.print("Triangle: {any}", .{triangle});
+        // Convert the triangle's vertices from IVec2 (pixel space)
+        // to box2d.b2Vec2 (meter space) using the provided conversion.
+        var verts: [3]box2d.b2Vec2 = undefined;
+        verts[0] = p2m(triangle[0]);
+        verts[1] = p2m(triangle[1]);
+        verts[2] = p2m(triangle[2]);
+
+        // Create a default shape definition.
+        var shapeDef = box2d.b2DefaultShapeDef();
+        shapeDef.density = 1.0;
+        shapeDef.friction = 0.3;
+        // (You may adjust properties like density, friction, or restitution as needed.)
+
+        const hull = box2d.b2ComputeHull(&verts[0], 3);
+
+        const poly: box2d.b2Polygon = box2d.b2MakePolygon(&hull, 0.01);
+
+        // Create a polygon shape (fixture) on the body using the triangle vertices.
+        // The b2CreatePolygonShape function expects a pointer to an array of b2Vec2
+        // and the number of vertices is inferred by the fixture or shape definition.
+        _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &poly);
+    }
+}
+
 fn drawObject(object: Object) !void {
     if (sharedResources) |shared| {
         const renderer = shared.renderer;
@@ -513,6 +563,8 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     const triangles = try earClipping(ccw);
     debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
+
+    createShape(.{ .x = 200, .y = 500 }, triangles);
 }
 
 pub fn main() !void {
@@ -547,10 +599,10 @@ pub fn main() !void {
     defer sdl.freeSurface(beanSurface);
     const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
 
-    try imgIntoShape(beanSurface);
-
     // instantiate shared resources
     sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture };
+
+    try imgIntoShape(starSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
