@@ -11,6 +11,7 @@ const ArrayList = std.ArrayList;
 const boxImgSrc = "images/box.png";
 const starImgSrc = "images/star.png";
 const beanImgSrc = "images/bean.png";
+const ballImgSrc = "images/ball.png";
 
 const Config = struct {
     window: struct { width: i32, height: i32 },
@@ -41,6 +42,7 @@ const SharedResources = struct {
     boxTexture: *sdl.Texture,
     starTexture: *sdl.Texture,
     beanTexture: *sdl.Texture,
+    ballTexture: *sdl.Texture,
 };
 
 var debugPolygon: ?[]IVec2 = null;
@@ -433,7 +435,7 @@ fn createCube(position: IVec2) void {
 fn createShape(position: IVec2, triangles: [][3]IVec2) !void {
     if (sharedResources) |shared| {
         const worldId = shared.worldId;
-        const texture = shared.beanTexture;
+        const texture = shared.ballTexture;
 
         var bodyDef = box2d.b2DefaultBodyDef();
         bodyDef.type = box2d.b2_dynamicBody;
@@ -560,14 +562,14 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
     std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
     std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
-    std.debug.print("Withoud duplicate vertices: {}\n", .{withoutDuplicates.len});
+    std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
     std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     const triangles = try earClipping(ccw);
     debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
 
-    try createShape(.{ .x = 200, .y = 100 }, triangles);
+    try createShape(.{ .x = 400, .y = 100 }, triangles);
 }
 
 pub fn main() !void {
@@ -602,10 +604,15 @@ pub fn main() !void {
     defer sdl.freeSurface(beanSurface);
     const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
 
-    // instantiate shared resources
-    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture };
+    // load ball texture
+    const ballSurface = try image.load(ballImgSrc);
+    defer sdl.freeSurface(beanSurface);
+    const ballTexture = try sdl.createTextureFromSurface(renderer, ballSurface);
 
-    try imgIntoShape(beanSurface);
+    // instantiate shared resources
+    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture };
+
+    try imgIntoShape(ballSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
@@ -699,7 +706,7 @@ fn mouseButtonDown(event: sdl.MouseButtonEvent) void {
 fn m2PixelPos(x: f32, y: f32, w: f32, h: f32) IVec2 {
     return IVec2{
         .x = @as(i32, @intFromFloat(((w / 2.0) + x) * conf.met2pix - conf.met2pix * w)),
-        .y = @as(i32, @intFromFloat(((h / 2.0) + y) * conf.met2pix - conf.met2pix * h / 2.0)),
+        .y = @as(i32, @intFromFloat(((h / 2.0) + y) * conf.met2pix - conf.met2pix * h)),
     };
 }
 
