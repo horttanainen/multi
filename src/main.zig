@@ -19,10 +19,7 @@ const Config = struct {
 
 const conf: Config = .{ .window = .{ .width = 800, .height = 800 }, .met2pix = 80 };
 
-const Sprite = struct { texture: *sdl.Texture, dim: struct {
-    w: f32,
-    h: f32,
-} };
+const Sprite = struct { texture: *sdl.Texture, dimM: Vec2 };
 
 const IVec2 = struct {
     x: i32,
@@ -426,28 +423,29 @@ fn createCube(position: IVec2) void {
         shapeDef.density = 1.0;
         shapeDef.friction = 0.3;
         _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
-        const sprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 1, .h = 1 } };
+        const sprite = Sprite{ .texture = boxTexture, .dimM = .{ .x = 1, .y = 1 } };
 
         const object = Object{ .bodyId = bodyId, .sprite = sprite };
         objects.append(object) catch {};
     }
 }
 
-fn createShape(position: IVec2, triangles: [][3]IVec2) void {
+fn createShape(position: IVec2, triangles: [][3]IVec2) !void {
     if (sharedResources) |shared| {
         const worldId = shared.worldId;
-        const texture = shared.starTexture;
+        const texture = shared.beanTexture;
 
         var bodyDef = box2d.b2DefaultBodyDef();
         bodyDef.type = box2d.b2_dynamicBody;
         bodyDef.position = p2m(position);
         const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
 
-        const size = IVec2{ .x = 128, .y = 96 };
-        const dim = p2m(size);
-        createBox2DMultiPolygon(bodyId, triangles, size);
+        var size: sdl.Point = undefined;
+        try sdl.queryTexture(texture, null, null, &size.x, &size.y);
+        const dimM = p2m(.{ .x = size.x, .y = size.y });
+        createBox2DMultiPolygon(bodyId, triangles, .{ .x = size.x, .y = size.y });
 
-        const sprite = Sprite{ .texture = texture, .dim = .{ .w = dim.x, .h = dim.y } };
+        const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
         const object = Object{ .bodyId = bodyId, .sprite = sprite };
         objects.append(object) catch {};
@@ -456,13 +454,13 @@ fn createShape(position: IVec2, triangles: [][3]IVec2) void {
 
 /// Creates a Box2D compound (multi–polygon) shape on the given body,
 /// using the provided triangles (each triangle is a [3]IVec2).
-pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dim: IVec2) void {
+pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2) void {
     // For each triangle, create a polygon fixture on the body.
     for (triangles) |tri| {
         var triangle: [3]IVec2 = undefined;
-        triangle[0] = .{ .x = tri[0].x - @divFloor(dim.x, 2), .y = tri[0].y - @divFloor(dim.y, 2) };
-        triangle[1] = .{ .x = tri[1].x - @divFloor(dim.x, 2), .y = tri[1].y - @divFloor(dim.y, 2) };
-        triangle[2] = .{ .x = tri[2].x - @divFloor(dim.x, 2), .y = tri[2].y - @divFloor(dim.y, 2) };
+        triangle[0] = .{ .x = tri[0].x - @divFloor(dimP.x, 2), .y = tri[0].y - @divFloor(dimP.y, 2) };
+        triangle[1] = .{ .x = tri[1].x - @divFloor(dimP.x, 2), .y = tri[1].y - @divFloor(dimP.y, 2) };
+        triangle[2] = .{ .x = tri[2].x - @divFloor(dimP.x, 2), .y = tri[2].y - @divFloor(dimP.y, 2) };
 
         // Convert the triangle's vertices from IVec2 (pixel space)
         // to box2d.b2Vec2 (meter space) using the provided conversion.
@@ -498,12 +496,12 @@ fn drawObject(object: Object) !void {
         const boxRotation = box2d.b2Body_GetRotation(bodyId);
         const rotationAngle = box2d.b2Rot_GetAngle(boxRotation);
 
-        const pos = m2PixelPos(boxPosMeter.x, boxPosMeter.y, sprite.dim.w, sprite.dim.h);
+        const pos = m2PixelPos(boxPosMeter.x, boxPosMeter.y, sprite.dimM.x, sprite.dimM.y);
         const rect = sdl.Rect{
             .x = pos.x,
             .y = pos.y,
-            .w = m2P(sprite.dim.w),
-            .h = m2P(sprite.dim.h),
+            .w = m2P(sprite.dimM.x),
+            .h = m2P(sprite.dimM.y),
         };
         try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
     }
@@ -569,7 +567,7 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
 
-    createShape(.{ .x = 200, .y = 100 }, triangles);
+    try createShape(.{ .x = 200, .y = 100 }, triangles);
 }
 
 pub fn main() !void {
@@ -607,7 +605,7 @@ pub fn main() !void {
     // instantiate shared resources
     sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture };
 
-    try imgIntoShape(starSurface);
+    try imgIntoShape(beanSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
@@ -617,7 +615,7 @@ pub fn main() !void {
     const groundShapeDef = box2d.b2DefaultShapeDef();
     _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
 
-    const groundSprite = Sprite{ .texture = boxTexture, .dim = .{ .w = 10, .h = 1 } };
+    const groundSprite = Sprite{ .texture = boxTexture, .dimM = .{ .x = 10, .y = 1 } };
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -647,17 +645,18 @@ pub fn main() !void {
         // Draw ground
         const gPosMeter = box2d.b2Body_GetPosition(groundId);
 
-        const groundPos = m2PixelPos(gPosMeter.x, gPosMeter.y, groundSprite.dim.w, groundSprite.dim.h);
+        const groundPos = m2PixelPos(gPosMeter.x, gPosMeter.y, groundSprite.dimM.x, groundSprite.dimM.y);
         const groundRect = sdl.Rect{
             .x = groundPos.x,
             .y = groundPos.y,
-            .w = m2P(groundSprite.dim.w),
-            .h = m2P(groundSprite.dim.h),
+            .w = m2P(groundSprite.dimM.x),
+            .h = m2P(groundSprite.dimM.y),
         };
         try sdl.renderCopyEx(renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
         for (objects.items) |object| {
             try drawObject(object);
+            try visualizePolygons(renderer, object);
         }
 
         if (sharedResources) |sharedR| {
@@ -733,5 +732,38 @@ fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []const IVec2, offset: IVe
         const current = polygon[i];
         const next = polygon[(i + 1) % n];
         try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
+    }
+}
+
+fn visualizePolygons(renderer: *sdl.Renderer, object: Object) !void {
+    const bodyId = object.bodyId;
+    const sprite = object.sprite;
+    const posMeter = box2d.b2Body_GetPosition(bodyId);
+    const offset = m2PixelPos(posMeter.x, posMeter.y, sprite.dimM.x, sprite.dimM.y);
+
+    const numberOfPolygons = box2d.b2Body_GetShapeCount(bodyId);
+    const shapes = try allocator.alloc(box2d.b2ShapeId, @intCast(numberOfPolygons));
+    defer allocator.free(shapes);
+    _ = box2d.b2Body_GetShapes(bodyId, &shapes[0], @intCast(shapes.len));
+
+    try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 255, .b = 0, .a = 255 });
+    const rect = sdl.Rect{ .x = offset.x, .y = offset.y, .w = m2P(sprite.dimM.x), .h = m2P(sprite.dimM.y) };
+    try sdl.renderDrawRect(renderer, rect);
+    try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
+    for (shapes) |shapeId| {
+        const polygon = box2d.b2Shape_GetPolygon(shapeId);
+        const vertices = polygon.vertices;
+        const numberOfVertices = polygon.count;
+        std.debug.print("Number of vertices: {}\n", .{numberOfVertices});
+        for (0..@intCast(numberOfVertices)) |i| {
+            const c = vertices[i];
+            std.debug.print("c: {}\n", .{c});
+            const current = m2Pixel(.{ .x = c.x + sprite.dimM.x / 2, .y = c.y + sprite.dimM.y / 2 });
+            const n = vertices[(i + 1) % @as(usize, @intCast(numberOfVertices))];
+            std.debug.print("n: {}\n", .{n});
+            const next = m2Pixel(.{ .x = n.x + sprite.dimM.x / 2, .y = n.y + sprite.dimM.y / 2 });
+            try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
+        }
+        std.debug.print("\n\n", .{});
     }
 }
