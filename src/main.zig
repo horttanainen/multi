@@ -38,6 +38,15 @@ const Object = struct {
 
 var objects: ArrayList(Object) = ArrayList(Object).init(allocator);
 
+//TODO: refactor until only main function remains in this file
+//TODO: make entities out of objects. use userdata for two way linking
+//TODO: Create level out of image. May need to use segments as in: https://bhopkins.net/pages/mmphysics/
+//TODO: spawn player
+//TODO: add rudimentary controls
+//TODO: add goal collider
+//TODO: spawn new level after entering goal
+//TODO: create larger level than window and move camera with player
+
 fn createCube(position: IVec2) void {
     if (shared.resources) |resources| {
         const worldId = resources.worldId;
