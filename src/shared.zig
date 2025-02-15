@@ -1,3 +1,4 @@
+const std = @import("std");
 const sdl = @import("zsdl2");
 const box2d = @import("box2d").native;
 const image = @import("zsdl2_image");
@@ -21,6 +22,9 @@ pub const SharedResources = struct {
     ballTexture: *sdl.Texture,
     ballSurface: *sdl.Surface,
 };
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const allocator = gpa.allocator();
 
 pub var resources: ?SharedResources = null;
 
