@@ -620,6 +620,16 @@ pub fn main() !void {
     const subStepCount = 4;
     var running = true;
 
+    var debugDraw = box2d.b2DefaultDebugDraw();
+    debugDraw.context = &sharedResources;
+    debugDraw.DrawSolidPolygon = &debugDrawSolidPolygon;
+    debugDraw.DrawPolygon = &debugDrawPolygon;
+    debugDraw.DrawSegment = &debugDrawSegment;
+    debugDraw.DrawPoint = &debugDrawPoint;
+    debugDraw.drawShapes = true;
+    debugDraw.drawAABBs = false;
+    debugDraw.drawContacts = true;
+
     while (running) {
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
@@ -627,6 +637,9 @@ pub fn main() !void {
             switch (event.type) {
                 sdl.EventType.quit => {
                     running = false;
+                },
+                sdl.EventType.keydown => {
+                    running = keyDown(event.key);
                 },
                 sdl.EventType.mousebuttondown => {
                     mouseButtonDown(event.button);
@@ -655,8 +668,8 @@ pub fn main() !void {
 
         for (objects.items) |object| {
             try drawObject(object);
-            try visualizePolygons(renderer, object);
         }
+        box2d.b2World_Draw(worldId, &debugDraw);
 
         // Debug
         try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
@@ -665,8 +678,19 @@ pub fn main() !void {
     }
 }
 
+fn keyDown(event: sdl.KeyboardEvent) bool {
+    print("Clack!!\n", .{});
+    var running = true;
+    switch (event.keysym.scancode) {
+        sdl.Scancode.escape => {
+            running = false;
+        },
+        else => {},
+    }
+    return running;
+}
 fn mouseButtonDown(event: sdl.MouseButtonEvent) void {
-    print("Click!!", .{});
+    print("Click!!\n", .{});
     createCube(.{ .x = event.x, .y = event.y });
 }
 
@@ -694,46 +718,123 @@ fn m2P(x: f32) i32 {
     return @as(i32, @intFromFloat(x * conf.met2pix));
 }
 
-fn debugDrawPolygon(renderer: *sdl.Renderer, polygon: []const IVec2, offset: IVec2) !void {
-    // Set a bright color for the overlay (magenta here)
-    try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
+fn b2Mul(rot: box2d.b2Rot, v: box2d.b2Vec2) box2d.b2Vec2 {
+    return box2d.b2Vec2{
+        .x = rot.c * v.x - rot.s * v.y,
+        .y = rot.s * v.x + rot.c * v.y,
+    };
+}
 
-    const n = polygon.len;
-    if (n == 0) return;
+fn debugDrawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+    _ = radius;
+    // Retrieve our shared resources from the context pointer.
+    const res: *SharedResources = @alignCast(@ptrCast(context));
 
-    // Draw lines connecting the vertices (wrap-around at the end)
-    for (0..n) |i| {
-        const current = polygon[i];
-        const next = polygon[(i + 1) % n];
-        try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
+    const r: u8 = @intCast((color >> 16) & 0xFF);
+    const g: u8 = @intCast((color >> 8) & 0xFF);
+    const b: u8 = @intCast(color & 0xFF);
+
+    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+        std.debug.print("Error setting draw color\n", .{});
+        return;
+    };
+
+    if (vertexCount == 0) return;
+
+    const rot = transform.q;
+    // The transform's position, converted to pixel coordinates.
+
+    // Draw each edge of the polygon.
+    for (0..@intCast(vertexCount)) |i| {
+        // Rotate and translate the current vertex.
+        const v_current: box2d.b2Vec2 = vertices[i];
+        const rotated_current: box2d.b2Vec2 = b2Mul(rot, v_current);
+        const world_current: box2d.b2Vec2 = box2d.b2Vec2{
+            .x = transform.p.x + rotated_current.x,
+            .y = transform.p.y + rotated_current.y,
+        };
+        const current: IVec2 = m2Pixel(world_current);
+
+        // Do the same for the next vertex (with wrap-around)
+        const v_next: box2d.b2Vec2 = vertices[(i + 1) % @as(usize, @intCast(vertexCount))];
+        const rotated_next: box2d.b2Vec2 = b2Mul(rot, v_next);
+        const world_next: box2d.b2Vec2 = box2d.b2Vec2{
+            .x = transform.p.x + rotated_next.x,
+            .y = transform.p.y + rotated_next.y,
+        };
+        const next: IVec2 = m2Pixel(world_next);
+
+        sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+            std.debug.print("Error drawing line\n", .{});
+            return;
+        };
     }
 }
 
-fn visualizePolygons(renderer: *sdl.Renderer, object: Object) !void {
-    const bodyId = object.bodyId;
-    const sprite = object.sprite;
-    const posMeter = box2d.b2Body_GetPosition(bodyId);
-    const offset = m2PixelPos(posMeter.x, posMeter.y, sprite.dimM.x, sprite.dimM.y);
+fn debugDrawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+    const res: *SharedResources = @alignCast(@ptrCast(context));
 
-    const numberOfPolygons = box2d.b2Body_GetShapeCount(bodyId);
-    const shapes = try allocator.alloc(box2d.b2ShapeId, @intCast(numberOfPolygons));
-    defer allocator.free(shapes);
-    _ = box2d.b2Body_GetShapes(bodyId, &shapes[0], @intCast(shapes.len));
+    const r: u8 = @intCast((color >> 16) & 0xFF);
+    const g: u8 = @intCast((color >> 8) & 0xFF);
+    const b: u8 = @intCast(color & 0xFF);
 
-    try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 255, .b = 0, .a = 255 });
-    const rect = sdl.Rect{ .x = offset.x, .y = offset.y, .w = m2P(sprite.dimM.x), .h = m2P(sprite.dimM.y) };
-    try sdl.renderDrawRect(renderer, rect);
-    try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
-    for (shapes) |shapeId| {
-        const polygon = box2d.b2Shape_GetPolygon(shapeId);
-        const vertices = polygon.vertices;
-        const numberOfVertices = polygon.count;
-        for (0..@intCast(numberOfVertices)) |i| {
-            const c = vertices[i];
-            const current = m2Pixel(.{ .x = c.x + sprite.dimM.x / 2, .y = c.y + sprite.dimM.y / 2 });
-            const n = vertices[(i + 1) % @as(usize, @intCast(numberOfVertices))];
-            const next = m2Pixel(.{ .x = n.x + sprite.dimM.x / 2, .y = n.y + sprite.dimM.y / 2 });
-            try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
-        }
+    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+        std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
+        return;
+    };
+
+    if (vertexCount == 0) return;
+
+    // Draw lines connecting the vertices (wrap-around at the end)
+    for (0..@intCast(vertexCount)) |i| {
+        const current: IVec2 = m2Pixel(vertices[i]);
+        const next: IVec2 = m2Pixel(vertices[(i + 1) % @as(usize, @intCast(vertexCount))]);
+        sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+            std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
+            return;
+        };
     }
+}
+
+fn debugDrawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+    const res: *SharedResources = @alignCast(@ptrCast(context));
+
+    const r: u8 = @intCast((color >> 16) & 0xFF);
+    const g: u8 = @intCast((color >> 8) & 0xFF);
+    const b: u8 = @intCast(color & 0xFF);
+
+    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+        std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
+        return;
+    };
+
+    const current: IVec2 = m2Pixel(p1);
+    const next: IVec2 = m2Pixel(p2);
+
+    sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+        std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
+        return;
+    };
+}
+
+fn debugDrawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+    const res: *SharedResources = @alignCast(@ptrCast(context));
+
+    const r: u8 = @intCast((color >> 16) & 0xFF);
+    const g: u8 = @intCast((color >> 8) & 0xFF);
+    const b: u8 = @intCast(color & 0xFF);
+
+    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+        std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
+        return;
+    };
+
+    const current: IVec2 = m2Pixel(p1);
+
+    const rect = sdl.Rect{ .x = current.x, .y = current.y, .w = @intFromFloat(size), .h = @intFromFloat(size) };
+
+    sdl.renderFillRect(res.renderer, rect) catch {
+        std.debug.print("encountered error in debugDrawPolygon when trying to renderFillRect\n", .{});
+        return;
+    };
 }
