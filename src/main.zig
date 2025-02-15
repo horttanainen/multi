@@ -1,51 +1,25 @@
 const sdl = @import("zsdl2");
-const image = @import("zsdl2_image");
 const box2d = @import("box2d").native;
 const assert = @import("std").debug.assert;
 const print = @import("std").debug.print;
 const std = @import("std");
 
+const config = @import("config.zig").config;
+const Vec2 = @import("vector.zig").Vec2;
+const IVec2 = @import("vector.zig").IVec2;
+const init = @import("shared.zig").init;
+const shared = @import("shared.zig");
+const SharedResources = @import("shared.zig").SharedResources;
+
 const PI = std.math.pi;
 const ArrayList = std.ArrayList;
 
-const boxImgSrc = "images/box.png";
-const starImgSrc = "images/star.png";
-const beanImgSrc = "images/bean.png";
-const ballImgSrc = "images/ball.png";
-
-const Config = struct {
-    window: struct { width: i32, height: i32 },
-    met2pix: i32,
-};
-
-const conf: Config = .{ .window = .{ .width = 800, .height = 800 }, .met2pix = 80 };
-
 const Sprite = struct { texture: *sdl.Texture, dimM: Vec2 };
-
-const IVec2 = struct {
-    x: i32,
-    y: i32,
-};
-const Vec2 = struct {
-    x: f32,
-    y: f32,
-};
 
 const Object = struct {
     bodyId: box2d.b2BodyId,
     sprite: Sprite,
 };
-
-const SharedResources = struct {
-    worldId: box2d.b2WorldId,
-    renderer: *sdl.Renderer,
-    boxTexture: *sdl.Texture,
-    starTexture: *sdl.Texture,
-    beanTexture: *sdl.Texture,
-    ballTexture: *sdl.Texture,
-};
-
-var sharedResources: ?SharedResources = null;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
@@ -409,9 +383,9 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
 }
 
 fn createCube(position: IVec2) void {
-    if (sharedResources) |shared| {
-        const worldId = shared.worldId;
-        const boxTexture = shared.boxTexture;
+    if (shared.resources) |resources| {
+        const worldId = resources.worldId;
+        const boxTexture = resources.boxTexture;
 
         var bodyDef = box2d.b2DefaultBodyDef();
         bodyDef.type = box2d.b2_dynamicBody;
@@ -430,8 +404,8 @@ fn createCube(position: IVec2) void {
 }
 
 fn createShape(position: IVec2, texture: *sdl.Texture, triangles: [][3]IVec2) !void {
-    if (sharedResources) |shared| {
-        const worldId = shared.worldId;
+    if (shared.resources) |resources| {
+        const worldId = resources.worldId;
 
         var bodyDef = box2d.b2DefaultBodyDef();
         bodyDef.type = box2d.b2_dynamicBody;
@@ -485,8 +459,8 @@ pub fn createBox2DMultiPolygon(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, di
 }
 
 fn drawObject(object: Object) !void {
-    if (sharedResources) |shared| {
-        const renderer = shared.renderer;
+    if (shared.resources) |resources| {
+        const renderer = resources.renderer;
 
         const bodyId = object.bodyId;
         const sprite = object.sprite;
@@ -566,62 +540,34 @@ fn imgIntoShape(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void
 }
 
 pub fn main() !void {
-    try sdl.init(.{ .audio = true, .video = true });
+    const resources = try init();
+
+    // clean up
     defer sdl.quit();
 
-    const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, conf.window.width, conf.window.height, .{ .opengl = true, .shown = true });
-    defer sdl.destroyWindow(window);
+    defer sdl.destroyWindow(resources.window);
+    defer sdl.destroyRenderer(resources.renderer);
 
-    const renderer = try sdl.createRenderer(window, -1, .{ .accelerated = true, .present_vsync = true });
-    defer sdl.destroyRenderer(renderer);
-
-    // Initialize Box2D World
-    const gravity = box2d.b2Vec2{ .x = 0.0, .y = 10 };
-    var worldDef = box2d.b2DefaultWorldDef();
-    worldDef.gravity = gravity;
-    const worldId = box2d.b2CreateWorld(&worldDef);
-
-    // load box texture
-    const boxSurface = try image.load(boxImgSrc);
-    const boxTexture = try sdl.createTextureFromSurface(renderer, boxSurface);
-    defer sdl.freeSurface(boxSurface);
-    defer sdl.destroyTexture(boxTexture);
-
-    // load star texture
-    const starSurface = try image.load(starImgSrc);
-    const starTexture = try sdl.createTextureFromSurface(renderer, starSurface);
-
-    // load bean texture
-    const beanSurface = try image.load(beanImgSrc);
-    const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
-
-    // load ball texture
-    const ballSurface = try image.load(ballImgSrc);
-    const ballTexture = try sdl.createTextureFromSurface(renderer, ballSurface);
-
-    // instantiate shared resources
-    sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture };
-
-    try imgIntoShape(.{ .x = 300, .y = 200 }, starTexture, starSurface);
-    try imgIntoShape(.{ .x = 600, .y = 150 }, beanTexture, beanSurface);
-    try imgIntoShape(.{ .x = 400, .y = 100 }, ballTexture, ballSurface);
+    try imgIntoShape(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
+    try imgIntoShape(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
+    try imgIntoShape(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
     groundDef.position = meters(5, 1);
-    const groundId = box2d.b2CreateBody(worldId, &groundDef);
+    const groundId = box2d.b2CreateBody(resources.worldId, &groundDef);
     const groundBox = box2d.b2MakeBox(5, 0.5);
     const groundShapeDef = box2d.b2DefaultShapeDef();
     _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
 
-    const groundSprite = Sprite{ .texture = boxTexture, .dimM = .{ .x = 10, .y = 1 } };
+    const groundSprite = Sprite{ .texture = resources.boxTexture, .dimM = .{ .x = 10, .y = 1 } };
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
     var running = true;
 
     var debugDraw = box2d.b2DefaultDebugDraw();
-    debugDraw.context = &sharedResources;
+    debugDraw.context = &shared.resources;
     debugDraw.DrawSolidPolygon = &debugDrawSolidPolygon;
     debugDraw.DrawPolygon = &debugDrawPolygon;
     debugDraw.DrawSegment = &debugDrawSegment;
@@ -649,10 +595,10 @@ pub fn main() !void {
         }
 
         // Step Box2D physics world
-        box2d.b2World_Step(worldId, timeStep, subStepCount);
+        box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
 
-        try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
-        try sdl.renderClear(renderer);
+        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
+        try sdl.renderClear(resources.renderer);
 
         // Draw ground
         const gPosMeter = box2d.b2Body_GetPosition(groundId);
@@ -664,17 +610,17 @@ pub fn main() !void {
             .w = m2P(groundSprite.dimM.x),
             .h = m2P(groundSprite.dimM.y),
         };
-        try sdl.renderCopyEx(renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
+        try sdl.renderCopyEx(resources.renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
         for (objects.items) |object| {
             try drawObject(object);
         }
-        box2d.b2World_Draw(worldId, &debugDraw);
+        box2d.b2World_Draw(resources.worldId, &debugDraw);
 
         // Debug
-        try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
-        try sdl.renderDrawLine(renderer, conf.window.width / 2, 0, conf.window.width / 2, conf.window.height);
-        sdl.renderPresent(renderer);
+        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
+        try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
+        sdl.renderPresent(resources.renderer);
     }
 }
 
@@ -696,26 +642,26 @@ fn mouseButtonDown(event: sdl.MouseButtonEvent) void {
 
 fn m2PixelPos(x: f32, y: f32, w: f32, h: f32) IVec2 {
     return IVec2{
-        .x = @as(i32, @intFromFloat(((w / 2.0) + x) * conf.met2pix - conf.met2pix * w)),
-        .y = @as(i32, @intFromFloat(((h / 2.0) + y) * conf.met2pix - conf.met2pix * h)),
+        .x = @as(i32, @intFromFloat(((w / 2.0) + x) * config.met2pix - config.met2pix * w)),
+        .y = @as(i32, @intFromFloat(((h / 2.0) + y) * config.met2pix - config.met2pix * h)),
     };
 }
 
 fn p2m(p: IVec2) box2d.b2Vec2 {
-    return box2d.b2Vec2{ .x = @as(f32, @floatFromInt(p.x)) / conf.met2pix, .y = @as(f32, @floatFromInt(p.y)) / conf.met2pix };
+    return box2d.b2Vec2{ .x = @as(f32, @floatFromInt(p.x)) / config.met2pix, .y = @as(f32, @floatFromInt(p.y)) / config.met2pix };
 }
 
 fn meters(x: f32, y: f32) box2d.b2Vec2 {
-    return box2d.b2Vec2{ .x = x, .y = (conf.window.height / conf.met2pix) - y };
+    return box2d.b2Vec2{ .x = x, .y = (config.window.height / config.met2pix) - y };
 }
 
 fn m2Pixel(
     coord: box2d.b2Vec2,
 ) IVec2 {
-    return .{ .x = @as(i32, @intFromFloat(coord.x * conf.met2pix)), .y = @as(i32, @intFromFloat(coord.y * conf.met2pix)) };
+    return .{ .x = @as(i32, @intFromFloat(coord.x * config.met2pix)), .y = @as(i32, @intFromFloat(coord.y * config.met2pix)) };
 }
 fn m2P(x: f32) i32 {
-    return @as(i32, @intFromFloat(x * conf.met2pix));
+    return @as(i32, @intFromFloat(x * config.met2pix));
 }
 
 fn b2Mul(rot: box2d.b2Rot, v: box2d.b2Vec2) box2d.b2Vec2 {
