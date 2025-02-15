@@ -45,9 +45,6 @@ const SharedResources = struct {
     ballTexture: *sdl.Texture,
 };
 
-var debugPolygon: ?[]IVec2 = null;
-var debugTriangles: ?[][3]IVec2 = null;
-
 var sharedResources: ?SharedResources = null;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -432,10 +429,9 @@ fn createCube(position: IVec2) void {
     }
 }
 
-fn createShape(position: IVec2, triangles: [][3]IVec2) !void {
+fn createShape(position: IVec2, texture: *sdl.Texture, triangles: [][3]IVec2) !void {
     if (sharedResources) |shared| {
         const worldId = shared.worldId;
-        const texture = shared.ballTexture;
 
         var bodyDef = box2d.b2DefaultBodyDef();
         bodyDef.type = box2d.b2_dynamicBody;
@@ -509,7 +505,7 @@ fn drawObject(object: Object) !void {
     }
 }
 
-fn imgIntoShape(img: *sdl.Surface) !void {
+fn imgIntoShape(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
     std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
 
     // 1. use marching squares algorithm to calculate shape edges. Output list of points in ccw order. -> complex polygon
@@ -557,8 +553,6 @@ fn imgIntoShape(img: *sdl.Surface) !void {
         std.debug.print("CCW vertex: ({d}, {d})\n", .{ point.x, point.y });
     }
 
-    debugPolygon = ccw;
-
     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
     std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
     std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
@@ -566,10 +560,9 @@ fn imgIntoShape(img: *sdl.Surface) !void {
     std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     const triangles = try earClipping(ccw);
-    debugTriangles = triangles;
     std.debug.print("triangles: {}\n", .{triangles.len});
 
-    try createShape(.{ .x = 400, .y = 100 }, triangles);
+    try createShape(position, texture, triangles);
 }
 
 pub fn main() !void {
@@ -596,23 +589,22 @@ pub fn main() !void {
 
     // load star texture
     const starSurface = try image.load(starImgSrc);
-    defer sdl.freeSurface(starSurface);
     const starTexture = try sdl.createTextureFromSurface(renderer, starSurface);
 
     // load bean texture
     const beanSurface = try image.load(beanImgSrc);
-    defer sdl.freeSurface(beanSurface);
     const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
 
     // load ball texture
     const ballSurface = try image.load(ballImgSrc);
-    defer sdl.freeSurface(beanSurface);
     const ballTexture = try sdl.createTextureFromSurface(renderer, ballSurface);
 
     // instantiate shared resources
     sharedResources = SharedResources{ .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture };
 
-    try imgIntoShape(ballSurface);
+    try imgIntoShape(.{ .x = 300, .y = 200 }, starTexture, starSurface);
+    try imgIntoShape(.{ .x = 600, .y = 150 }, beanTexture, beanSurface);
+    try imgIntoShape(.{ .x = 400, .y = 100 }, ballTexture, ballSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
@@ -664,31 +656,6 @@ pub fn main() !void {
         for (objects.items) |object| {
             try drawObject(object);
             try visualizePolygons(renderer, object);
-        }
-
-        if (sharedResources) |sharedR| {
-            const texture = sharedR.starTexture;
-
-            var size: sdl.Point = undefined;
-            try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-            // Define where on the screen you want the star image.
-            // For instance, here we place it at (100, 100)
-            const starRect = sdl.Rect{
-                .x = 100,
-                .y = 100,
-                .w = size.x,
-                .h = size.y,
-            };
-            try sdl.renderCopyEx(renderer, texture, null, &starRect, 0, null, sdl.RendererFlip.none);
-
-            // if (debugPolygon) |poly| {
-            //     try debugDrawPolygon(renderer, poly, .{ .x = starRect.x, .y = starRect.y });
-            // }
-            if (debugTriangles) |triangles| {
-                for (triangles) |triangle| {
-                    try debugDrawPolygon(renderer, &triangle, .{ .x = starRect.x, .y = starRect.y });
-                }
-            }
         }
 
         // Debug
@@ -761,16 +728,12 @@ fn visualizePolygons(renderer: *sdl.Renderer, object: Object) !void {
         const polygon = box2d.b2Shape_GetPolygon(shapeId);
         const vertices = polygon.vertices;
         const numberOfVertices = polygon.count;
-        std.debug.print("Number of vertices: {}\n", .{numberOfVertices});
         for (0..@intCast(numberOfVertices)) |i| {
             const c = vertices[i];
-            std.debug.print("c: {}\n", .{c});
             const current = m2Pixel(.{ .x = c.x + sprite.dimM.x / 2, .y = c.y + sprite.dimM.y / 2 });
             const n = vertices[(i + 1) % @as(usize, @intCast(numberOfVertices))];
-            std.debug.print("n: {}\n", .{n});
             const next = m2Pixel(.{ .x = n.x + sprite.dimM.x / 2, .y = n.y + sprite.dimM.y / 2 });
             try sdl.renderDrawLine(renderer, offset.x + current.x, offset.y + current.y, offset.x + next.x, offset.y + next.y);
         }
-        std.debug.print("\n\n", .{});
     }
 }
