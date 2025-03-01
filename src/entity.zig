@@ -4,11 +4,7 @@ const box2d = @import("box2d").native;
 
 const AutoArrayHashMap = std.AutoArrayHashMap;
 
-const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
-const douglasPeucker = @import("douglas.zig").douglasPeucker;
-const earClipping = @import("ear.zig").earClipping;
-const removeDuplicateVertices = @import("polygon.zig").removeDuplicateVertices;
-const ensureCounterClockwise = @import("polygon.zig").ensureCounterClockwise;
+const polygon = @import("polygon.zig");
 
 const PI = std.math.pi;
 
@@ -73,61 +69,7 @@ pub fn createBox(position: IVec2) !void {
 }
 
 pub fn createFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
-    std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
-
-    // 1. use marching squares algorithm to calculate shape edges. Output list of points in ccw order. -> complex polygon
-    const surface = img.*;
-    const pixels: [*]const u8 = @ptrCast(surface.pixels);
-    const pitch: usize = @intCast(surface.pitch);
-    const width: usize = @intCast(surface.w);
-    const height: usize = @intCast(surface.h);
-
-    const threshold: u8 = 125; // Isovalue threshold for alpha
-    const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
-    defer allocator.free(vertices);
-    // Print the resulting vertices
-    for (vertices) |vertex| {
-        std.debug.print("Vertex: ({d}, {d})\n", .{ vertex.x, vertex.y });
-    }
-    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-
-    // 2. simplify the polygon. E.g douglas pecker
-
-    const epsilon: f32 = 0.05 * @as(f32, @floatFromInt(width));
-    const simplified = try douglasPeucker(vertices, epsilon);
-    defer allocator.free(simplified);
-
-    // Print the simplified polygon
-    for (simplified) |point| {
-        std.debug.print("Simplified vertex: ({d}, {d})\n", .{ point.x, point.y });
-    }
-
-    // 3. remove duplicates
-
-    // Remove last vertex since it is same as first
-    const prunedVertices = simplified[0 .. simplified.len - 1];
-    const withoutDuplicates = try removeDuplicateVertices(prunedVertices);
-    defer allocator.free(withoutDuplicates);
-
-    for (withoutDuplicates) |point| {
-        std.debug.print("Without duplicate vertex: ({d}, {d})\n", .{ point.x, point.y });
-    }
-
-    // 4. ensure counter clockwise
-    const ccw = try ensureCounterClockwise(withoutDuplicates);
-
-    for (ccw) |point| {
-        std.debug.print("CCW vertex: ({d}, {d})\n", .{ point.x, point.y });
-    }
-
-    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-    std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
-    std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
-    std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
-    std.debug.print("CCW vertices: {}\n", .{ccw.len});
-
-    const triangles = try earClipping(ccw);
-    std.debug.print("triangles: {}\n", .{triangles.len});
+    const triangles = try polygon.triangulate(img);
 
     try createShape(position, texture, triangles);
 }

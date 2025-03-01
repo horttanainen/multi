@@ -23,7 +23,6 @@ const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: make entities out of objects. use userdata for two way linking
 //TODO: Create level out of image. May need to use segments as in: https://bhopkins.net/pages/mmphysics/
 //TODO: spawn player
 //TODO: add rudimentary controls
