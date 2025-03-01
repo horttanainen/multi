@@ -9,6 +9,7 @@ const boxImgSrc = "images/box.png";
 const starImgSrc = "images/star.png";
 const beanImgSrc = "images/bean.png";
 const ballImgSrc = "images/ball.png";
+const nickiImgSrc = "images/nicki.png";
 
 pub const SharedResources = struct {
     worldId: box2d.b2WorldId,
@@ -21,6 +22,8 @@ pub const SharedResources = struct {
     beanSurface: *sdl.Surface,
     ballTexture: *sdl.Texture,
     ballSurface: *sdl.Surface,
+    nickiTexture: *sdl.Texture,
+    nickiSurface: *sdl.Surface,
 };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -56,8 +59,12 @@ pub fn init() !SharedResources {
     const ballSurface = try image.load(ballImgSrc);
     const ballTexture = try sdl.createTextureFromSurface(renderer, ballSurface);
 
+    // load nicki texture
+    const nickiSurface = try image.load(nickiImgSrc);
+    const nickiTexture = try sdl.createTextureFromSurface(renderer, nickiSurface);
+
     // instantiate shared resources
-    const s = SharedResources{ .window = window, .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface };
+    const s = SharedResources{ .window = window, .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .nickiTexture = nickiTexture };
     resources = s;
     return s;
 }
