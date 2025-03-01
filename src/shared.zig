@@ -12,6 +12,8 @@ const ballImgSrc = "images/ball.png";
 const nickiImgSrc = "images/nicki.png";
 const levelImgSrc = "images/level.png";
 
+const SharedResourcesError = error{Uninitialized};
+
 pub const SharedResources = struct {
     worldId: box2d.b2WorldId,
     window: *sdl.Window,
@@ -33,6 +35,13 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
 
 pub var resources: ?SharedResources = null;
+
+pub fn getResources() !SharedResources {
+    if (resources) |r| {
+        return r;
+    }
+    return SharedResourcesError.Uninitialized;
+}
 
 pub fn init() !SharedResources {
     try sdl.init(.{ .audio = true, .video = true });

@@ -19,6 +19,7 @@ const debug = @import("debug.zig");
 const keyDown = @import("control.zig").keyDown;
 const mouseButtonDown = @import("control.zig").mouseButtonDown;
 
+const level = @import("level.zig");
 const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
@@ -39,6 +40,8 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
+    // try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelTexture, resources.levelSurface);
+
     // try entity.createFromImg(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
     // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
     // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
@@ -49,7 +52,7 @@ pub fn main() !void {
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
-    groundDef.position = meters(5, 1);
+    groundDef.position = meters(5, 0.5);
     const groundId = box2d.b2CreateBody(resources.worldId, &groundDef);
     const groundBox = box2d.b2MakeBox(5, 0.5);
     const groundShapeDef = box2d.b2DefaultShapeDef();
@@ -107,14 +110,16 @@ pub fn main() !void {
         };
         try sdl.renderCopyEx(resources.renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
+        // try level.draw();
         for (entity.entities.values()) |e| {
             try entity.draw(e);
         }
         box2d.b2World_Draw(resources.worldId, &debugDraw);
 
         // Debug
-        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 0, .g = 255, .b = 0, .a = 255 });
+        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
         try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
+        try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
         sdl.renderPresent(resources.renderer);
     }
 }
