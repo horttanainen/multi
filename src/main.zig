@@ -14,22 +14,14 @@ const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
 const m2P = @import("conversion.zig").m2P;
 
-const debugDrawSolidPolygon = @import("debug.zig").debugDrawSolidPolygon;
-const debugDrawPolygon = @import("debug.zig").debugDrawPolygon;
-const debugDrawSegment = @import("debug.zig").debugDrawSegment;
-const debugDrawPoint = @import("debug.zig").debugDrawPoint;
+const debug = @import("debug.zig");
 
 const keyDown = @import("control.zig").keyDown;
 const mouseButtonDown = @import("control.zig").mouseButtonDown;
 
-const imgIntoShape = @import("object.zig").imgIntoShape;
-
-const Object = @import("object.zig").Object;
-const Sprite = @import("object.zig").Sprite;
-
-const object = @import("object.zig");
-
-const drawObject = @import("draw.zig").drawObject;
+const entity = @import("entity.zig");
+const Entity = entity.Entity;
+const Sprite = entity.Sprite;
 
 //TODO: make entities out of objects. use userdata for two way linking
 //TODO: Create level out of image. May need to use segments as in: https://bhopkins.net/pages/mmphysics/
@@ -48,13 +40,13 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
-    // try imgIntoShape(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
-    // try imgIntoShape(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
-    // try imgIntoShape(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
-    try imgIntoShape(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try imgIntoShape(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try imgIntoShape(.{ .x = 400, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try imgIntoShape(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
+    // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
+    // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
+    try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    try entity.createFromImg(.{ .x = 400, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
 
     // Ground (Static Body)
     var groundDef = box2d.b2DefaultBodyDef();
@@ -72,10 +64,10 @@ pub fn main() !void {
 
     var debugDraw = box2d.b2DefaultDebugDraw();
     debugDraw.context = &shared.resources;
-    debugDraw.DrawSolidPolygon = &debugDrawSolidPolygon;
-    debugDraw.DrawPolygon = &debugDrawPolygon;
-    debugDraw.DrawSegment = &debugDrawSegment;
-    debugDraw.DrawPoint = &debugDrawPoint;
+    debugDraw.DrawSolidPolygon = &debug.drawSolidPolygon;
+    debugDraw.DrawPolygon = &debug.drawPolygon;
+    debugDraw.DrawSegment = &debug.drawSegment;
+    debugDraw.DrawPoint = &debug.drawPoint;
     debugDraw.drawShapes = true;
     debugDraw.drawAABBs = false;
     debugDraw.drawContacts = true;
@@ -92,7 +84,7 @@ pub fn main() !void {
                     running = keyDown(event.key);
                 },
                 sdl.EventType.mousebuttondown => {
-                    mouseButtonDown(event.button);
+                    try mouseButtonDown(event.button);
                 },
                 else => {},
             }
@@ -116,8 +108,8 @@ pub fn main() !void {
         };
         try sdl.renderCopyEx(resources.renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
-        for (object.objects.items) |obj| {
-            try drawObject(obj);
+        for (entity.entities.values()) |e| {
+            try entity.draw(e);
         }
         box2d.b2World_Draw(resources.worldId, &debugDraw);
 

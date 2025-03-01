@@ -1,6 +1,6 @@
 const sdl = @import("zsdl2");
 
-const createCube = @import("object.zig").createCube;
+const entity = @import("entity.zig");
 
 pub fn keyDown(event: sdl.KeyboardEvent) bool {
     var running = true;
@@ -13,6 +13,6 @@ pub fn keyDown(event: sdl.KeyboardEvent) bool {
     return running;
 }
 
-pub fn mouseButtonDown(event: sdl.MouseButtonEvent) void {
-    createCube(.{ .x = event.x, .y = event.y });
+pub fn mouseButtonDown(event: sdl.MouseButtonEvent) !void {
+    try entity.createBox(.{ .x = event.x, .y = event.y });
 }

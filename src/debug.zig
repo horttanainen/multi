@@ -15,7 +15,7 @@ fn b2Mul(rot: box2d.b2Rot, v: box2d.b2Vec2) box2d.b2Vec2 {
     };
 }
 
-pub fn debugDrawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
     _ = radius;
     // Retrieve our shared resources from the context pointer.
     const res: *SharedResources = @alignCast(@ptrCast(context));
@@ -61,7 +61,7 @@ pub fn debugDrawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const b
     }
 }
 
-pub fn debugDrawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
@@ -86,7 +86,7 @@ pub fn debugDrawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, co
     }
 }
 
-pub fn debugDrawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
@@ -107,7 +107,7 @@ pub fn debugDrawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexCo
     };
 }
 
-pub fn debugDrawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
