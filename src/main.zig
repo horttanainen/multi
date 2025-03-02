@@ -42,23 +42,17 @@ pub fn main() !void {
 
     // try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelTexture, resources.levelSurface);
 
-    // try entity.createFromImg(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
+    // try entity.createStaticFromImg(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
     // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
     // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
-    try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try entity.createFromImg(.{ .x = 400, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    try entity.createStaticFromImg(.{ .x = 400, .y = 300 }, resources.nickiTexture, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
 
-    // Ground (Static Body)
-    var groundDef = box2d.b2DefaultBodyDef();
-    groundDef.position = meters(5, 0.5);
-    const groundId = box2d.b2CreateBody(resources.worldId, &groundDef);
-    const groundBox = box2d.b2MakeBox(5, 0.5);
-    const groundShapeDef = box2d.b2DefaultShapeDef();
-    _ = box2d.b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
-
-    const groundSprite = Sprite{ .texture = resources.boxTexture, .dimM = .{ .x = 10, .y = 1 } };
+    try entity.createStaticFromImg(.{ .x = 400, .y = 700 }, resources.beanTexture, resources.beanSurface);
+    try entity.createStaticFromImg(.{ .x = 0, .y = 700 }, resources.beanTexture, resources.beanSurface);
+    try entity.createStaticFromImg(.{ .x = 800, .y = 700 }, resources.ballTexture, resources.ballSurface);
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -97,18 +91,6 @@ pub fn main() !void {
 
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);
-
-        // Draw ground
-        const gPosMeter = box2d.b2Body_GetPosition(groundId);
-
-        const groundPos = m2PixelPos(gPosMeter.x, gPosMeter.y, groundSprite.dimM.x, groundSprite.dimM.y);
-        const groundRect = sdl.Rect{
-            .x = groundPos.x,
-            .y = groundPos.y,
-            .w = m2P(groundSprite.dimM.x),
-            .h = m2P(groundSprite.dimM.y),
-        };
-        try sdl.renderCopyEx(resources.renderer, groundSprite.texture, null, &groundRect, 0, null, sdl.RendererFlip.none);
 
         // try level.draw();
         for (entity.entities.values()) |e| {

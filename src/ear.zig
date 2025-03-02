@@ -25,38 +25,25 @@ fn isConvex(a: IVec2, b: IVec2, c: IVec2) bool {
     return cross < 0;
 }
 
-// Helper: Returns true if point p lies inside the triangle defined by a, b, c.
-// This implementation converts coordinates to float and uses barycentric coordinates.
+fn sign(p1: Vec2, p2: Vec2, p3: Vec2) f32 {
+    return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+}
+
 fn isPointInTriangle(p: IVec2, a: IVec2, b: IVec2, c: IVec2) bool {
-    // Convert integer coordinates to floating–point values.
-    const pFloat = Vec2{ .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) };
-    const aFloat = Vec2{ .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) };
-    const bFloat = Vec2{ .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) };
-    const cFloat = Vec2{ .x = @floatFromInt(c.x), .y = @floatFromInt(c.y) };
+    // Convert coordinates to floating–point.
+    const pF = Vec2{ .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) };
+    const aF = Vec2{ .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) };
+    const bF = Vec2{ .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) };
+    const cF = Vec2{ .x = @floatFromInt(c.x), .y = @floatFromInt(c.y) };
 
-    // Compute twice the signed area of triangle ABC using the cross product.
-    // areaABC = (b - a) × (c - a)
-    const vectorBA_x = bFloat.x - aFloat.x;
-    const vectorBA_y = bFloat.y - aFloat.y;
-    const vectorCA_x = cFloat.x - aFloat.x;
-    const vectorCA_y = cFloat.y - aFloat.y;
-    const areaABC = vectorBA_x * vectorCA_y - vectorBA_y * vectorCA_x;
+    const d1 = sign(pF, aF, bF);
+    const d2 = sign(pF, bF, cF);
+    const d3 = sign(pF, cF, aF);
 
-    // If the area is zero, the triangle is degenerate (vertices are collinear).
-    if (areaABC == 0.0) return false;
+    const hasNeg = (d1 < 0.0) or (d2 < 0.0) or (d3 < 0.0);
+    const hasPos = (d1 > 0.0) or (d2 > 0.0) or (d3 > 0.0);
 
-    // Compute barycentric coordinates (s and t) for point p with respect to triangle ABC.
-    // These formulas come from solving:
-    //    p = a + s*(c - a) + t*(b - a)
-    // Rearranging and solving for s and t gives:
-    const s_numerator = (cFloat.x - aFloat.x) * (aFloat.y - pFloat.y) - (cFloat.y - aFloat.y) * (aFloat.x - pFloat.x);
-    const t_numerator = (bFloat.x - aFloat.x) * (aFloat.y - pFloat.y) - (bFloat.y - aFloat.y) * (aFloat.x - pFloat.x);
-    const s = s_numerator / areaABC;
-    const t = t_numerator / areaABC;
-
-    // For point p to be inside the triangle, both s and t must be nonnegative
-    // and their sum must not exceed 1.
-    return (s >= 0.0 and t >= 0.0 and (s + t) <= 1.0);
+    return !(hasNeg and hasPos);
 }
 
 pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
@@ -71,13 +58,12 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
     while (verts.items.len > 3) {
         std.debug.print("number of remaining vertices: {}\n", .{verts.items.len});
         var maybeEarInd: ?usize = null;
+        var prevIndex: usize = 0;
+        var nextIndex: usize = 0;
 
         for (0..verts.items.len) |i| {
-            const prevIndex = @mod(@as(i32, @intCast(i)) - 1, @as(i32, @intCast(verts.items.len)));
-            std.debug.print("prevIndex: {}\n", .{prevIndex});
-            std.debug.print("index: {}\n", .{i});
-            const nextIndex = @mod(i + 1, verts.items.len);
-            std.debug.print("nextIndex: {}\n", .{nextIndex});
+            prevIndex = @intCast(@mod(@as(i32, @intCast(i)) - 1, @as(i32, @intCast(verts.items.len))));
+            nextIndex = @mod(i + 1, verts.items.len);
 
             const a = verts.items[@intCast(prevIndex)];
             const b = verts.items[i];
@@ -88,17 +74,16 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
             std.debug.print("Is convex!!\n", .{});
 
             // Check that no other vertex lies inside triangle (a, b, c)
+            var isEar = true;
             for (0..verts.items.len) |j| {
                 if (j == prevIndex or j == i or j == nextIndex) continue;
                 if (isPointInTriangle(verts.items[j], a, b, c)) {
-                    continue;
+                    isEar = false;
+                    break;
                 }
-                std.debug.print("No points inside triangle!!\n", .{});
-
-                maybeEarInd = i;
-                break;
             }
-            if (maybeEarInd) |_| {
+            if (isEar) {
+                maybeEarInd = i;
                 break;
             }
         }
@@ -107,12 +92,10 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
             std.debug.print("Found ear!!\n\n", .{});
 
             // Form a triangle with the ear.
-            const prevIndex = @mod(@as(i32, @intCast(earIndex)) - 1, @as(i32, @intCast(verts.items.len)));
-            const nextIndex = @mod(earIndex + 1, verts.items.len);
             const earTriangle: [3]IVec2 = .{
                 verts.items[@intCast(prevIndex)],
                 verts.items[earIndex],
-                verts.items[nextIndex],
+                verts.items[@intCast(nextIndex)],
             };
             try triangles.append(earTriangle);
 

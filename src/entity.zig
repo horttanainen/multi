@@ -47,6 +47,22 @@ pub fn draw(entity: Entity) !void {
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
+pub fn createStaticFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
+    const triangles = try polygon.triangulate(img);
+
+    var size: sdl.Point = undefined;
+    try sdl.queryTexture(texture, null, null, &size.x, &size.y);
+    const dimM = p2m(.{ .x = size.x, .y = size.y });
+
+    const bodyId = try box.createStaticBody(position);
+    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y });
+
+    const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
+
+    const entity = Entity{ .bodyId = bodyId, .sprite = sprite };
+    try entities.put(bodyId, entity);
+}
+
 pub fn createBox(position: IVec2) !void {
     const resources = try shared.getResources();
     const boxTexture = resources.boxTexture;

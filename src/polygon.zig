@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("zsdl2");
 
 const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
+const visvalingam = @import("visvalingam.zig").visvalingam;
 const douglasPeucker = @import("douglas.zig").douglasPeucker;
 const earClipping = @import("ear.zig").earClipping;
 
@@ -22,34 +23,37 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
     const width: usize = @intCast(surface.w);
     const height: usize = @intCast(surface.h);
 
-    const threshold: u8 = 125; // Isovalue threshold for alpha
+    const threshold: u8 = 150; // Isovalue threshold for alpha
     const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
     defer allocator.free(vertices);
 
     // 2. simplify the polygon. E.g douglas pecker
+    // const epsilon: f32 = 0.001 * @as(f32, @floatFromInt(width));
+    // const simplified = try douglasPeucker(vertices, epsilon);
 
-    const epsilon: f32 = 0.05 * @as(f32, @floatFromInt(width));
-    const simplified = try douglasPeucker(vertices, epsilon);
+    const epsilonArea: f32 = 0.001 * @as(f32, @floatFromInt(width * height));
+    const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
 
     // 3. remove duplicates
+    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
+    std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
 
     // Remove last vertex since it is same as first
     const prunedVertices = simplified[0 .. simplified.len - 1];
+    std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
+
     const withoutDuplicates = try removeDuplicateVertices(prunedVertices);
+    std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
     defer allocator.free(withoutDuplicates);
 
     // 4. ensure counter clockwise
     const ccw = try ensureCounterClockwise(withoutDuplicates);
 
+    std.debug.print("CCW vertices: {}\n", .{ccw.len});
+
     // 5. split into triangles
     const triangles = try earClipping(ccw);
-
-    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-    std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
-    std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
-    std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
-    std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     std.debug.print("triangles: {}\n", .{triangles.len});
     return triangles;

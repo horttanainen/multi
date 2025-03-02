@@ -5,8 +5,16 @@ const allocator = @import("shared.zig").allocator;
 
 //Pavlidis
 fn getPixelAlpha(pixels: [*]const u8, pitch: usize, x: usize, y: usize) u8 {
-    // ABGR8888: Alpha is the first byte of each pixel
-    return pixels[y * pitch + x * 4];
+    // const r = pixels[y * pitch + x * 4];
+    // const g = pixels[y * pitch + x * 4 + 1];
+    // const b = pixels[y * pitch + x * 4 + 2];
+    const a = pixels[y * pitch + x * 4 + 3];
+
+    // std.debug.print("r {d}!\n", .{r});
+    // std.debug.print("g {d}!\n", .{g});
+    // std.debug.print("b {d}!\n", .{b});
+    // std.debug.print("a {d}!\n", .{a});
+    return a;
 }
 
 fn isInside(x: i32, y: i32, pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) bool {
@@ -38,7 +46,7 @@ fn neighborIndex(dir: IVec2) !usize {
 fn findP123Directions(dir: IVec2) ![3]IVec2 {
     const p2 = try neighborIndex(dir);
     const p1 = @mod(@as(i32, @intCast(p2)) - 1, 8);
-    const p3 = p2 + 1 % 8;
+    const p3 = (p2 + 1) % 8;
 
     return [3]IVec2{ neighbors[@intCast(p1)], neighbors[p2], neighbors[@intCast(p3)] };
 }
@@ -60,7 +68,6 @@ pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: 
     var contour = std.ArrayList(IVec2).init(allocator);
 
     // Step 1. Find a starting boundary pixel.
-    // A starting boundary pixel is one that is inside but its left pixel is not
     var start: IVec2 = undefined;
     var foundStart = false;
     for (0..width) |x| {
