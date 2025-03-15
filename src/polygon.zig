@@ -8,6 +8,7 @@ const earClipping = @import("ear.zig").earClipping;
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
+const equals = @import("vector.zig").equals;
 
 const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
@@ -39,11 +40,7 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
     std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
     std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
 
-    // Remove last vertex since it is same as first
-    const prunedVertices = simplified[0 .. simplified.len - 1];
-    std.debug.print("Pruned polygon vertices: {}\n", .{prunedVertices.len});
-
-    const withoutDuplicates = try removeDuplicateVertices(prunedVertices);
+    const withoutDuplicates = try removeDuplicateVertices(simplified);
     std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
     defer allocator.free(withoutDuplicates);
 
@@ -64,13 +61,14 @@ pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
     defer unique.deinit();
 
     for (vertices) |v| {
-        if (unique.items.len == 0) {
-            try unique.append(v);
-            continue;
+        var isUnique = true;
+        for (unique.items) |uV| {
+            if (equals(uV, v)) {
+                isUnique = false;
+                break;
+            }
         }
-        const item = unique.getLast();
-
-        if (item.x != v.x and item.y != v.y) {
+        if (isUnique) {
             try unique.append(v);
         }
     }
