@@ -40,19 +40,13 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
-    // try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelTexture, resources.levelSurface);
+    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelTexture, resources.levelSurface);
 
-    // try entity.createStaticFromImg(.{ .x = 300, .y = 200 }, resources.starTexture, resources.starSurface);
-    // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
-    // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
+    try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
+    try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
     // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
     // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    try entity.createStaticFromImg(.{ .x = 400, .y = 300 }, resources.nickiTexture, resources.nickiSurface);
     // try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-
-    try entity.createStaticFromImg(.{ .x = 400, .y = 700 }, resources.beanTexture, resources.beanSurface);
-    try entity.createStaticFromImg(.{ .x = 0, .y = 700 }, resources.beanTexture, resources.beanSurface);
-    try entity.createStaticFromImg(.{ .x = 800, .y = 700 }, resources.ballTexture, resources.ballSurface);
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -92,7 +86,7 @@ pub fn main() !void {
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);
 
-        // try level.draw();
+        try level.draw();
         for (entity.entities.values()) |e| {
             try entity.draw(e);
         }
