@@ -19,13 +19,13 @@ const debug = @import("debug.zig");
 const keyDown = @import("control.zig").keyDown;
 const mouseButtonDown = @import("control.zig").mouseButtonDown;
 
+const player = @import("player.zig");
+
 const level = @import("level.zig");
 const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: Create level out of image. May need to use segments as in: https://bhopkins.net/pages/mmphysics/
-//TODO: spawn player
 //TODO: add rudimentary controls
 //TODO: add goal collider
 //TODO: spawn new level after entering goal
@@ -40,13 +40,15 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
-    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelTexture, resources.levelSurface);
+    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface);
 
-    try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanTexture, resources.beanSurface);
-    try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballTexture, resources.ballSurface);
-    // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
-    // try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiTexture, resources.nickiSurface);
+    try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanSurface);
+    // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballSurface);
+    // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiSurface);
+    // try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiSurface);
+
+    try player.spawn(.{ .x = 200, .y = 400 });
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
@@ -89,6 +91,9 @@ pub fn main() !void {
         try level.draw();
         for (entity.entities.values()) |e| {
             try entity.draw(e);
+        }
+        if (player.player) |p| {
+            try entity.draw(p.entity);
         }
         box2d.b2World_Draw(resources.worldId, &debugDraw);
 

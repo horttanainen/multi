@@ -47,7 +47,11 @@ pub fn draw(entity: Entity) !void {
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
-pub fn createStaticFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
+pub fn createStaticFromImg(position: IVec2, img: *sdl.Surface) !void {
+    const resources = try shared.getResources();
+
+    const texture = try sdl.createTextureFromSurface(resources.renderer, img);
+
     const triangles = try polygon.triangulate(img);
 
     var size: sdl.Point = undefined;
@@ -65,7 +69,7 @@ pub fn createStaticFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Sur
 
 pub fn createBox(position: IVec2) !void {
     const resources = try shared.getResources();
-    const boxTexture = resources.boxTexture;
+    const texture = try sdl.createTextureFromSurface(resources.renderer, resources.boxSurface);
 
     const bodyId = try box.createDynamicBody(position);
     const dynamicBox = box2d.b2MakeBox(0.5, 0.5);
@@ -73,14 +77,16 @@ pub fn createBox(position: IVec2) !void {
     shapeDef.density = 1.0;
     shapeDef.friction = 0.3;
     _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
-    const sprite = Sprite{ .texture = boxTexture, .dimM = .{ .x = 1, .y = 1 } };
+    const sprite = Sprite{ .texture = texture, .dimM = .{ .x = 1, .y = 1 } };
 
     const entity = Entity{ .bodyId = bodyId, .sprite = sprite };
     try entities.put(bodyId, entity);
 }
 
-pub fn createFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
+pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
+    const resources = try shared.getResources();
     const triangles = try polygon.triangulate(img);
+    const texture = try sdl.createTextureFromSurface(resources.renderer, img);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);

@@ -35,7 +35,6 @@ pub fn visvalingam(vertices: []IVec2, epsilonArea: f32) ![]IVec2 {
 
     while (minimumArea <= epsilonArea) {
         if (leastContributingPointInd) |ind| {
-            std.debug.print("Removing vertex: {}\n", .{ind});
             _ = verts.orderedRemove(ind);
         }
 

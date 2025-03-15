@@ -6,6 +6,17 @@ const shared = @import("shared.zig");
 const p2m = @import("conversion.zig").p2m;
 const m2P = @import("conversion.zig").m2P;
 
+pub fn createNonRotatingDynamicBody(position: IVec2) !box2d.b2BodyId {
+    const resources = try shared.getResources();
+    const worldId = resources.worldId;
+    var bodyDef = box2d.b2DefaultBodyDef();
+    bodyDef.type = box2d.b2_dynamicBody;
+    bodyDef.position = p2m(position);
+    bodyDef.fixedRotation = true;
+    const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
+    return bodyId;
+}
+
 pub fn createDynamicBody(position: IVec2) !box2d.b2BodyId {
     const resources = try shared.getResources();
     const worldId = resources.worldId;

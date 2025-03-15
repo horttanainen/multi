@@ -5,6 +5,7 @@ const image = @import("zsdl2_image");
 
 const config = @import("config.zig").config;
 
+const lieroImgSrc = "images/liero.png";
 const boxImgSrc = "images/box.png";
 const starImgSrc = "images/star.png";
 const beanImgSrc = "images/bean.png";
@@ -18,17 +19,13 @@ pub const SharedResources = struct {
     worldId: box2d.b2WorldId,
     window: *sdl.Window,
     renderer: *sdl.Renderer,
-    boxTexture: *sdl.Texture,
-    starTexture: *sdl.Texture,
+    boxSurface: *sdl.Surface,
     starSurface: *sdl.Surface,
-    beanTexture: *sdl.Texture,
     beanSurface: *sdl.Surface,
-    ballTexture: *sdl.Texture,
     ballSurface: *sdl.Surface,
-    nickiTexture: *sdl.Texture,
     nickiSurface: *sdl.Surface,
-    levelTexture: *sdl.Texture,
     levelSurface: *sdl.Surface,
+    lieroSurface: *sdl.Surface,
 };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -55,32 +52,16 @@ pub fn init() !SharedResources {
     worldDef.gravity = gravity;
     const worldId = box2d.b2CreateWorld(&worldDef);
 
-    // load box texture
     const boxSurface = try image.load(boxImgSrc);
-    const boxTexture = try sdl.createTextureFromSurface(renderer, boxSurface);
-
-    // load star texture
     const starSurface = try image.load(starImgSrc);
-    const starTexture = try sdl.createTextureFromSurface(renderer, starSurface);
-
-    // load bean texture
     const beanSurface = try image.load(beanImgSrc);
-    const beanTexture = try sdl.createTextureFromSurface(renderer, beanSurface);
-
-    // load ball texture
     const ballSurface = try image.load(ballImgSrc);
-    const ballTexture = try sdl.createTextureFromSurface(renderer, ballSurface);
-
-    // load nicki texture
     const nickiSurface = try image.load(nickiImgSrc);
-    const nickiTexture = try sdl.createTextureFromSurface(renderer, nickiSurface);
-
-    // load level texture
     const levelSurface = try image.load(levelImgSrc);
-    const levelTexture = try sdl.createTextureFromSurface(renderer, levelSurface);
+    const lieroSurface = try image.load(lieroImgSrc);
 
     // instantiate shared resources
-    const s = SharedResources{ .window = window, .renderer = renderer, .boxTexture = boxTexture, .worldId = worldId, .starTexture = starTexture, .beanTexture = beanTexture, .ballTexture = ballTexture, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .nickiTexture = nickiTexture, .levelSurface = levelSurface, .levelTexture = levelTexture };
+    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .lieroSurface = lieroSurface };
 
     resources = s;
     return s;

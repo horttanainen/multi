@@ -57,7 +57,6 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
     }
 
     while (verts.items.len > 3) {
-        std.debug.print("number of remaining vertices: {}\n", .{verts.items.len});
         var maybeEarInd: ?usize = null;
         var prevIndex: usize = 0;
         var nextIndex: usize = 0;
@@ -72,7 +71,6 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
 
             // Only consider convex vertices.
             if (!isConvex(a, b, c)) continue;
-            std.debug.print("Is convex!!\n", .{});
 
             // Check that no other vertex lies inside triangle (a, b, c)
             var isEar = true;
@@ -90,7 +88,6 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
         }
 
         if (maybeEarInd) |earIndex| {
-            std.debug.print("Found ear!!\n\n", .{});
 
             // Form a triangle with the ear.
             const earTriangle: [3]IVec2 = .{
@@ -103,7 +100,6 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
             // Remove the ear vertex.
             _ = verts.orderedRemove(earIndex);
         } else {
-            std.debug.print("No ear found; polygon may be non-simple.\n", .{});
             return triangles.toOwnedSlice();
         }
     }

@@ -18,7 +18,11 @@ var maybeLevel: ?Entity = null;
 
 const LevelError = error{Uninitialized};
 
-pub fn createFromImg(position: IVec2, texture: *sdl.Texture, img: *sdl.Surface) !void {
+pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
+    const resources = try shared.getResources();
+
+    const texture = try sdl.createTextureFromSurface(resources.renderer, img);
+
     const triangles = try polygon.triangulate(img);
 
     var size: sdl.Point = undefined;
