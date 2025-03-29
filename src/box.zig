@@ -1,4 +1,4 @@
-const box2d = @import("box2d").native;
+const box2d = @import("box2dnative.zig");
 const IVec2 = @import("vector.zig").IVec2;
 
 const shared = @import("shared.zig");

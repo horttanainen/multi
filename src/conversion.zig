@@ -1,5 +1,5 @@
 const std = @import("std");
-const box2d = @import("box2d").native;
+const box2d = @import("box2dnative.zig");
 
 const config = @import("config.zig").config;
 const Vec2 = @import("vector.zig").Vec2;
