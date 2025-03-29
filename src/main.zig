@@ -1,5 +1,5 @@
 const sdl = @import("zsdl2");
-const box2d = @import("box2d").native;
+const box2d = @import("box2dnative.zig");
 const std = @import("std");
 
 const config = @import("config.zig").config;
@@ -14,10 +14,11 @@ const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
 const m2P = @import("conversion.zig").m2P;
 
+const frictionCallback = @import("friction.zig").frictionCallback;
+
 const debug = @import("debug.zig");
 
-const keyDown = @import("control.zig").keyDown;
-const mouseButtonDown = @import("control.zig").mouseButtonDown;
+const control = @import("control.zig");
 
 const player = @import("player.zig");
 
@@ -26,7 +27,6 @@ const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: add rudimentary controls
 //TODO: add goal collider
 //TODO: spawn new level after entering goal
 //TODO: create larger level than window and move camera with player
@@ -52,7 +52,6 @@ pub fn main() !void {
 
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
-    var running = true;
 
     var debugDraw = box2d.b2DefaultDebugDraw();
     debugDraw.context = &shared.resources;
@@ -63,27 +62,30 @@ pub fn main() !void {
     debugDraw.drawShapes = true;
     debugDraw.drawAABBs = false;
     debugDraw.drawContacts = true;
+    debugDraw.drawFrictionImpulses = true;
 
-    while (running) {
+    box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
+
+    while (!shared.quitGame) {
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
         while (sdl.pollEvent(&event)) {
             switch (event.type) {
                 sdl.EventType.quit => {
-                    running = false;
-                },
-                sdl.EventType.keydown => {
-                    running = keyDown(event.key);
+                    shared.quitGame = true;
                 },
                 sdl.EventType.mousebuttondown => {
-                    try mouseButtonDown(event.button);
+                    try control.mouseButtonDown(event.button);
                 },
                 else => {},
             }
         }
 
+        control.handleKeyboardInput();
+
         // Step Box2D physics world
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
+        player.clampSpeed();
 
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);

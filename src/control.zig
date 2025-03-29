@@ -1,16 +1,27 @@
 const sdl = @import("zsdl2");
 
+const shared = @import("shared.zig");
+const player = @import("player.zig");
 const entity = @import("entity.zig");
 
-pub fn keyDown(event: sdl.KeyboardEvent) bool {
-    var running = true;
-    switch (event.keysym.scancode) {
-        sdl.Scancode.escape => {
-            running = false;
-        },
-        else => {},
+pub fn handleKeyboardInput() void {
+    const currentKeyStates = sdl.getKeyboardState();
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
+        player.moveLeft();
     }
-    return running;
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 1) {
+        player.moveRight();
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 1) {
+        player.jump();
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
+        shared.quitGame = true;
+    }
+
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
+        player.brake();
+    }
 }
 
 pub fn mouseButtonDown(event: sdl.MouseButtonEvent) !void {

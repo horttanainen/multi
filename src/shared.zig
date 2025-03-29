@@ -31,6 +31,8 @@ pub const SharedResources = struct {
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
 
+pub var quitGame = false;
+
 pub var resources: ?SharedResources = null;
 
 pub fn getResources() !SharedResources {
