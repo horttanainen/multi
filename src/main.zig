@@ -87,6 +87,8 @@ pub fn main() !void {
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
         player.clampSpeed();
 
+        try player.checkFootSensor();
+
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);
 

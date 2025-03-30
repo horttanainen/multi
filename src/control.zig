@@ -22,6 +22,10 @@ pub fn handleKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
         player.brake();
     }
+
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 0) {
+        player.allowJump = true;
+    }
 }
 
 pub fn mouseButtonDown(event: sdl.MouseButtonEvent) !void {
