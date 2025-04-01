@@ -30,6 +30,7 @@ const Sprite = entity.Sprite;
 //TODO: add goal collider
 //TODO: spawn new level after entering goal
 //TODO: create larger level than window and move camera with player
+//TODO: add slides
 
 pub fn main() !void {
     const resources = try init();
@@ -42,7 +43,7 @@ pub fn main() !void {
 
     try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface);
 
-    try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanSurface);
+    // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanSurface);
     // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballSurface);
     // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiSurface);
     // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiSurface);
@@ -87,7 +88,7 @@ pub fn main() !void {
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
         player.clampSpeed();
 
-        try player.checkFootSensor();
+        try player.checkSensors();
 
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);

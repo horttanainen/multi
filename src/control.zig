@@ -14,6 +14,7 @@ pub fn handleKeyboardInput() void {
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 1) {
         player.jump();
+        player.allowJump = false;
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         shared.quitGame = true;
