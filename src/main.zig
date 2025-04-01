@@ -27,10 +27,32 @@ const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//level editor todos:
+//TODO: create rudimentary level editor: user can draw window sized level using rocks
+//TODO: user can use beams in level editor
+//TODO: user can create spawn for player
+//TODO: user can create goal for player
+//TODO: user can create level that is bigger than screen
+
+//level oriented physics demo game todos:
 //TODO: add goal collider
 //TODO: spawn new level after entering goal
 //TODO: create larger level than window and move camera with player
-//TODO: add slides
+//TODO: create about 10 different physics and gravity based
+
+//Single player game todos:
+//TODO: add sliding
+//TODO: add sounds
+//TODO: add jetpack
+//TODO: add liero/worms grappling hook
+//TODO: add quake bazooka (investigate box2d bullet)
+//TODO: add enemies to shoot
+
+//Multiplayer todos:
+//TODO: add splitscreen multiplayer
+//TODO: investigate how to sync games when running on different machines
+//TODO: add localhost multiplayer
+//TODO: add real multiplayer
 
 pub fn main() !void {
     const resources = try init();
