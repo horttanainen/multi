@@ -16,7 +16,7 @@ pub const Player = struct { entity: entity.Entity, bodyShapeId: box2d.b2ShapeId,
 
 pub var player: ?Player = null;
 pub var isMoving: bool = false;
-pub var isInAir: bool = false;
+pub var touchesGround: bool = false;
 pub var allowJump: bool = true;
 pub var touchesWallOnLeft: bool = false;
 pub var touchesWallOnRight: bool = false;
@@ -85,13 +85,13 @@ pub fn jump() void {
     }
 
     if (player) |p| {
-        if (!isInAir) {
+        if (touchesGround) {
             airJumpCounter = 0;
         }
 
-        if (isInAir and airJumpCounter < config.player.maxAirJumps) {
+        if (!touchesGround and airJumpCounter < config.player.maxAirJumps) {
             airJumpCounter += 1;
-        } else if (isInAir and airJumpCounter >= config.player.maxAirJumps) {
+        } else if (!touchesGround and airJumpCounter >= config.player.maxAirJumps) {
             return;
         }
 
@@ -147,7 +147,7 @@ pub fn checkSensors() !void {
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                isInAir = false;
+                touchesGround = true;
             }
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 touchesWallOnLeft = true;
@@ -165,7 +165,7 @@ pub fn checkSensors() !void {
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                isInAir = true;
+                touchesGround = false;
             }
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 touchesWallOnLeft = false;
