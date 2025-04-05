@@ -55,9 +55,13 @@ const Sprite = entity.Sprite;
 //TODO: add real multiplayer
 
 //Engine:
+//TODO: separate rendering and physics related stuff in main
+//TODO: read gaffer on games for the millionth time https://gafferongames.com/post/fix_your_timestep/
+//TODO: read https://gamedev.stackexchange.com/questions/86609/box2d-recommended-step-velocity-and-position-iterations
+//TODO: read https://gamedev.stackexchange.com/questions/130784/box2d-fixed-timestep-and-interpolation
 //TODO: fix timestep
-//TODO: separate rendering and physics related stuff
 //TODO: show fps like steam does
+//TODO: migrate to zig 0.14
 
 pub fn main() !void {
     const resources = try init();
@@ -93,6 +97,10 @@ pub fn main() !void {
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
     while (!shared.quitGame and !shared.goalReached) {
+
+        // Step Box2D physics world
+        box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
+
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
         while (sdl.pollEvent(&event)) {
@@ -109,8 +117,6 @@ pub fn main() !void {
 
         control.handleKeyboardInput();
 
-        // Step Box2D physics world
-        box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
         player.clampSpeed();
 
         try player.checkSensors();
