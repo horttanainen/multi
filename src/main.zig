@@ -2,13 +2,14 @@ const sdl = @import("zsdl2");
 const box2d = @import("box2dnative.zig");
 const std = @import("std");
 
-const config = @import("config.zig").config;
+const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 const init = @import("shared.zig").init;
 const shared = @import("shared.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
+const sensor = @import("sensor.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -69,6 +70,8 @@ pub fn main() !void {
 
     try player.spawn(.{ .x = 200, .y = 400 });
 
+    try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
+
     const timeStep: f32 = 1.0 / 60.0;
     const subStepCount = 4;
 
@@ -85,7 +88,7 @@ pub fn main() !void {
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
-    while (!shared.quitGame) {
+    while (!shared.quitGame and !shared.goalReached) {
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
         while (sdl.pollEvent(&event)) {
@@ -107,11 +110,15 @@ pub fn main() !void {
         player.clampSpeed();
 
         try player.checkSensors();
+        try sensor.checkGoal();
 
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);
 
         try level.draw();
+        if (sensor.maybeGoalSensor) |goalSensor| {
+            try entity.draw(goalSensor);
+        }
         for (entity.entities.values()) |e| {
             try entity.draw(e);
         }

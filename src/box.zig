@@ -38,13 +38,17 @@ pub fn createStaticBody(position: IVec2) !box2d.b2BodyId {
     return bodyId;
 }
 
-pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2, shapeDef: box2d.b2ShapeDef) !void {
+pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2, shapeDef: box2d.b2ShapeDef) ![]box2d.b2ShapeId {
     const polygons = try createPolygons(triangles, dimP);
     defer shared.allocator.free(polygons);
+    var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
 
     for (polygons) |polygon| {
-        _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
+        const shapeId = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
+        try shapeIds.append(shapeId);
     }
+
+    return shapeIds.toOwnedSlice();
 }
 
 fn createPolygons(triangles: [][3]IVec2, dimP: IVec2) ![]box2d.b2Polygon {

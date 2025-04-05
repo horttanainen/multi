@@ -6,7 +6,7 @@ const entity = @import("entity.zig");
 const shared = @import("shared.zig");
 const box = @import("box.zig");
 
-const config = @import("config.zig").config;
+const config = @import("config.zig");
 
 const p2m = @import("conversion.zig").p2m;
 
@@ -45,8 +45,8 @@ pub fn spawn(position: IVec2) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.density = 1.0;
     shapeDef.friction = config.player.movementFriction;
+    shapeDef.material = config.player.materialId;
     const shapeId = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
-    box2d.b2Shape_SetMaterial(shapeId, config.player.materialId);
 
     const footBox = box2d.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.b2DefaultShapeDef();
@@ -65,7 +65,10 @@ pub fn spawn(position: IVec2) !void {
 
     const sprite = entity.Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
-    player = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
+    var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
+    try shapeIds.append(shapeId);
+
+    player = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice() }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
 }
 
 // var last: u64 = 0;

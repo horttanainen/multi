@@ -20,10 +20,7 @@ const p2m = @import("conversion.zig").p2m;
 const m2P = @import("conversion.zig").m2P;
 
 pub const Sprite = struct { texture: *sdl.Texture, dimM: Vec2 };
-pub const Entity = struct {
-    bodyId: box2d.b2BodyId,
-    sprite: Sprite,
-};
+pub const Entity = struct { bodyId: box2d.b2BodyId, sprite: Sprite, shapeIds: []box2d.b2ShapeId };
 
 pub var entities: AutoArrayHashMap(box2d.b2BodyId, Entity) = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 
@@ -68,10 +65,10 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
     const dimM = p2m(.{ .x = size.x, .y = size.y });
 
-    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
+    const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
     const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
-    const entity = Entity{ .bodyId = bodyId, .sprite = sprite };
+    const entity = Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds };
     return entity;
 }
