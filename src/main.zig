@@ -54,6 +54,11 @@ const Sprite = entity.Sprite;
 //TODO: add localhost multiplayer
 //TODO: add real multiplayer
 
+//Engine:
+//TODO: fix timestep
+//TODO: separate rendering and physics related stuff
+//TODO: show fps like steam does
+
 pub fn main() !void {
     const resources = try init();
 
