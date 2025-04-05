@@ -1,7 +1,7 @@
 const std = @import("std");
 const box2d = @import("box2dnative.zig");
 
-const config = @import("config.zig").config;
+const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 
