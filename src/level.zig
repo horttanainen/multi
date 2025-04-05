@@ -18,7 +18,7 @@ var maybeLevel: ?Entity = null;
 
 const LevelError = error{Uninitialized};
 
-pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
+pub fn createFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !void {
     const resources = try shared.getResources();
 
     const texture = try sdl.createTextureFromSurface(resources.renderer, img);
@@ -30,7 +30,7 @@ pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
     const dimM = p2m(.{ .x = size.x, .y = size.y });
 
     const bodyId = try box.createStaticBody(position);
-    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y });
+    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
     const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 

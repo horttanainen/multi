@@ -47,7 +47,7 @@ pub fn draw(entity: Entity) !void {
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, rotationAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
-pub fn createStaticFromImg(position: IVec2, img: *sdl.Surface) !void {
+pub fn createStaticFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.ShapeDef) !void {
     const resources = try shared.getResources();
 
     const texture = try sdl.createTextureFromSurface(resources.renderer, img);
@@ -59,7 +59,7 @@ pub fn createStaticFromImg(position: IVec2, img: *sdl.Surface) !void {
     const dimM = p2m(.{ .x = size.x, .y = size.y });
 
     const bodyId = try box.createStaticBody(position);
-    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y });
+    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
     const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
@@ -83,7 +83,7 @@ pub fn createBox(position: IVec2) !void {
     try entities.put(bodyId, entity);
 }
 
-pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
+pub fn createFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !void {
     const resources = try shared.getResources();
     const triangles = try polygon.triangulate(img);
     const texture = try sdl.createTextureFromSurface(resources.renderer, img);
@@ -93,7 +93,7 @@ pub fn createFromImg(position: IVec2, img: *sdl.Surface) !void {
     const dimM = p2m(.{ .x = size.x, .y = size.y });
 
     const bodyId = try box.createDynamicBody(position);
-    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y });
+    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
     const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 

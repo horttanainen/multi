@@ -38,7 +38,7 @@ const Sprite = entity.Sprite;
 //TODO: add goal collider
 //TODO: spawn new level after entering goal
 //TODO: create larger level than window and move camera with player
-//TODO: create about 10 different physics and gravity based
+//TODO: create about 10 different physics and gravity based levels
 
 //Single player game todos:
 //TODO: add sliding
@@ -63,7 +63,9 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
-    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface);
+    var shapeDef = box2d.b2DefaultShapeDef();
+    shapeDef.friction = 0.5;
+    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface, shapeDef);
 
     // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanSurface);
     // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballSurface);

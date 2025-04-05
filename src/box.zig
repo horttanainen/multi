@@ -1,3 +1,4 @@
+const std = @import("std");
 const box2d = @import("box2dnative.zig");
 const IVec2 = @import("vector.zig").IVec2;
 
@@ -37,7 +38,18 @@ pub fn createStaticBody(position: IVec2) !box2d.b2BodyId {
     return bodyId;
 }
 
-pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2) !void {
+pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2, shapeDef: box2d.b2ShapeDef) !void {
+    const polygons = try createPolygons(triangles, dimP);
+    defer shared.allocator.free(polygons);
+
+    for (polygons) |polygon| {
+        _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
+    }
+}
+
+fn createPolygons(triangles: [][3]IVec2, dimP: IVec2) ![]box2d.b2Polygon {
+    var polygons = std.ArrayList(box2d.b2Polygon).init(shared.allocator);
+
     for (triangles) |tri| {
         var triangle: [3]IVec2 = undefined;
         triangle[0] = .{ .x = tri[0].x - @divFloor(dimP.x, 2), .y = tri[0].y - @divFloor(dimP.y, 2) };
@@ -48,14 +60,12 @@ pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: I
         verts[1] = p2m(triangle[1]);
         verts[2] = p2m(triangle[2]);
 
-        var shapeDef = box2d.b2DefaultShapeDef();
-        shapeDef.density = 1.0;
-        shapeDef.friction = 0.3;
-
         const hull = box2d.b2ComputeHull(&verts[0], 3);
 
         const poly: box2d.b2Polygon = box2d.b2MakePolygon(&hull, 0.01);
 
-        _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &poly);
+        try polygons.append(poly);
     }
+
+    return polygons.toOwnedSlice();
 }
