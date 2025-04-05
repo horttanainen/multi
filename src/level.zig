@@ -11,30 +11,17 @@ const p2m = @import("conversion.zig").p2m;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
 
 const IVec2 = @import("vector.zig").IVec2;
-const Sprite = @import("entity.zig").Sprite;
-const Entity = @import("entity.zig").Entity;
+const entity = @import("entity.zig");
+const Sprite = entity.Sprite;
+const Entity = entity.Entity;
 
 var maybeLevel: ?Entity = null;
 
 const LevelError = error{Uninitialized};
 
 pub fn createFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !void {
-    const resources = try shared.getResources();
-
-    const texture = try sdl.createTextureFromSurface(resources.renderer, img);
-
-    const triangles = try polygon.triangulate(img);
-
-    var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-    const dimM = p2m(.{ .x = size.x, .y = size.y });
-
     const bodyId = try box.createStaticBody(position);
-    try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
-
-    const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
-
-    maybeLevel = Entity{ .bodyId = bodyId, .sprite = sprite };
+    maybeLevel = try entity.createEntityForBody(bodyId, img, shapeDef);
 }
 
 pub fn getLevel() !Entity {

@@ -1,3 +1,4 @@
+const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl2");
 
 const shared = @import("shared.zig");
@@ -30,5 +31,8 @@ pub fn handleKeyboardInput() void {
 }
 
 pub fn mouseButtonDown(event: sdl.MouseButtonEvent) !void {
-    try entity.createBox(.{ .x = event.x, .y = event.y });
+    const resources = try shared.getResources();
+    var shapeDef = box2d.b2DefaultShapeDef();
+    shapeDef.friction = 0.5;
+    try entity.createFromImg(.{ .x = event.x, .y = event.y }, resources.boxSurface, shapeDef);
 }

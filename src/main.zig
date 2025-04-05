@@ -67,12 +67,6 @@ pub fn main() !void {
     shapeDef.friction = 0.5;
     try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface, shapeDef);
 
-    // try entity.createFromImg(.{ .x = 600, .y = 150 }, resources.beanSurface);
-    // try entity.createFromImg(.{ .x = 400, .y = 100 }, resources.ballSurface);
-    // try entity.createFromImg(.{ .x = 700, .y = 0 }, resources.nickiSurface);
-    // try entity.createFromImg(.{ .x = 500, .y = 0 }, resources.nickiSurface);
-    // try entity.createFromImg(.{ .x = 200, .y = 0 }, resources.nickiSurface);
-
     try player.spawn(.{ .x = 200, .y = 400 });
 
     const timeStep: f32 = 1.0 / 60.0;
