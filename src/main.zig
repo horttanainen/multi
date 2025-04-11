@@ -61,7 +61,6 @@ const Sprite = entity.Sprite;
 //TODO: read https://gamedev.stackexchange.com/questions/130784/box2d-fixed-timestep-and-interpolation
 //TODO: fix timestep
 //TODO: show fps like steam does
-//TODO: migrate to zig 0.14
 
 pub fn main() !void {
     const resources = try init();
