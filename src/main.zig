@@ -10,6 +10,7 @@ const shared = @import("shared.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
 const sensor = @import("sensor.zig");
+const text = @import("text.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -96,7 +97,6 @@ pub fn main() !void {
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
     while (!shared.quitGame and !shared.goalReached) {
-
         // Step Box2D physics world
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
 
@@ -140,6 +140,9 @@ pub fn main() !void {
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
         try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
         try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
+
+        try text.writeAt("FPS: and still counting!!!", .{ .x = 200, .y = 200 });
+
         sdl.renderPresent(resources.renderer);
     }
 }

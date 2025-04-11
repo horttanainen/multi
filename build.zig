@@ -20,9 +20,14 @@ pub fn build(b: *std.Build) !void {
     const sdl_image = sdl_image_dep.artifact("SDL2_image");
     exe.linkLibrary(sdl_image);
 
+    const sdl_ttf_dep = b.dependency("SDL_ttf", .{ .target = target, .optimize = optimize });
+    const sdl_ttf = sdl_ttf_dep.artifact("SDL2_ttf");
+    exe.linkLibrary(sdl_ttf);
+
     const zsdl = b.dependency("zsdl", .{ .target = target, .optimize = optimize });
     exe.root_module.addImport("zsdl", zsdl.module("zsdl2"));
     exe.root_module.addImport("zsdl_image", zsdl.module("zsdl2_image"));
+    exe.root_module.addImport("zsdl_ttf", zsdl.module("zsdl2_ttf"));
 
     exe.addCSourceFiles(.{ .root = b.path("./box2d/src/"), .files = &[_][]const u8{
         "aabb.c",

@@ -15,6 +15,11 @@
             .url = "https://github.com/allyourcodebase/SDL_image/archive/25919dd8cdbfc7db543c7c22fbc85b20ce4b2cf0.tar.gz",
             .hash = "SDL_image-2.8.4--aJoHUMWAADytIssRiwrOBGJwPirddZGNUHQERTI1rNk",
         },
+        // Have to use my own fork for now... The duplicate freetype import from harfbuzz breaks build on the upstream
+        .SDL_ttf = .{
+            .url = "https://github.com/horttanainen/SDL_ttf/archive/5dc632d8751edabdfb1fd8532ccbbdd21ffbf048.tar.gz",
+            .hash = "SDL_ttf-2.24.0-PNW5xHsMAABDyMdxPMxeqyjUqS96sKxybuPPpzwx2_oC",
+        },
     },
     .paths = .{
         "build.zig",

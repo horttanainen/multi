@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
+const ttf = @import("zsdl_ttf");
 
 const box2d = @import("box2dnative.zig");
 
@@ -15,9 +16,11 @@ const nickiImgSrc = "images/nicki.png";
 const levelImgSrc = "images/level.png";
 const duffImgSrc = "images/duff.png";
 
+const monocraftSrc = "fonts/monocraft.ttf";
+
 const SharedResourcesError = error{Uninitialized};
 
-pub const SharedResources = struct { worldId: box2d.b2WorldId, window: *sdl.Window, renderer: *sdl.Renderer, boxSurface: *sdl.Surface, starSurface: *sdl.Surface, beanSurface: *sdl.Surface, ballSurface: *sdl.Surface, nickiSurface: *sdl.Surface, levelSurface: *sdl.Surface, lieroSurface: *sdl.Surface, duffSurface: *sdl.Surface };
+pub const SharedResources = struct { worldId: box2d.b2WorldId, window: *sdl.Window, renderer: *sdl.Renderer, boxSurface: *sdl.Surface, starSurface: *sdl.Surface, beanSurface: *sdl.Surface, ballSurface: *sdl.Surface, nickiSurface: *sdl.Surface, levelSurface: *sdl.Surface, lieroSurface: *sdl.Surface, duffSurface: *sdl.Surface, monocraftFont: *ttf.Font };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
@@ -36,6 +39,10 @@ pub fn getResources() !SharedResources {
 
 pub fn init() !SharedResources {
     try sdl.init(.{ .audio = true, .video = true });
+
+    try ttf.init();
+
+    const monocraftFont = try ttf.Font.open(monocraftSrc, 16);
 
     const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, config.window.width, config.window.height, .{ .opengl = true, .shown = true });
 
@@ -56,7 +63,7 @@ pub fn init() !SharedResources {
     const duffSurface = try image.load(duffImgSrc);
 
     // instantiate shared resources
-    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .lieroSurface = lieroSurface, .duffSurface = duffSurface };
+    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .lieroSurface = lieroSurface, .duffSurface = duffSurface, .monocraftFont = monocraftFont };
 
     resources = s;
     return s;
