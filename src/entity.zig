@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl2");
+const sdl = @import("zsdl");
 const box2d = @import("box2dnative.zig");
 
 const AutoArrayHashMap = std.AutoArrayHashMap;

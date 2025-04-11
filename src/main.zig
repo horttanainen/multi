@@ -1,4 +1,4 @@
-const sdl = @import("zsdl2");
+const sdl = @import("zsdl");
 const box2d = @import("box2dnative.zig");
 const std = @import("std");
 

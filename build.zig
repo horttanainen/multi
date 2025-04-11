@@ -1,5 +1,4 @@
 const std = @import("std");
-const box2d = @import("Box2D.zig/build.zig");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -13,16 +12,17 @@ pub fn build(b: *std.Build) !void {
     });
     exe.linkLibC();
 
-    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/opt/sdl2_image/lib" });
-    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/opt/sdl2/lib" });
-    exe.addIncludePath(.{ .cwd_relative = "/usr/local/opt/sdl2_image/include" });
-    exe.addIncludePath(.{ .cwd_relative = "/usr/local/opt/sdl2/include" });
-    exe.linkSystemLibrary("SDL2");
-    exe.linkSystemLibrary("SDL2_image");
+    const sdl_dep = b.dependency("SDL", .{ .target = target, .optimize = optimize });
+    const sdl = sdl_dep.artifact("SDL2");
+    exe.linkLibrary(sdl);
 
-    const zsdl = b.dependency("zsdl", .{});
-    exe.root_module.addImport("zsdl2", zsdl.module("zsdl2"));
-    exe.root_module.addImport("zsdl2_image", zsdl.module("zsdl2_image"));
+    const sdl_image_dep = b.dependency("SDL_image", .{ .target = target, .optimize = optimize });
+    const sdl_image = sdl_image_dep.artifact("SDL2_image");
+    exe.linkLibrary(sdl_image);
+
+    const zsdl = b.dependency("zsdl", .{ .target = target, .optimize = optimize });
+    exe.root_module.addImport("zsdl", zsdl.module("zsdl2"));
+    exe.root_module.addImport("zsdl_image", zsdl.module("zsdl2_image"));
 
     exe.addCSourceFiles(.{ .root = b.path("./box2d/src/"), .files = &[_][]const u8{
         "aabb.c",

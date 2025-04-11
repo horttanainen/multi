@@ -1,6 +1,6 @@
 const std = @import("std");
 const box2d = @import("box2dnative.zig");
-const sdl = @import("zsdl2");
+const sdl = @import("zsdl");
 
 const entity = @import("entity.zig");
 const shared = @import("shared.zig");

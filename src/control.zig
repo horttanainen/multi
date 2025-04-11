@@ -1,5 +1,5 @@
 const box2d = @import("box2dnative.zig");
-const sdl = @import("zsdl2");
+const sdl = @import("zsdl");
 
 const shared = @import("shared.zig");
 const player = @import("player.zig");

@@ -1,19 +1,19 @@
-
 .{
-    .name = "multi",
+    .name = .multi,
+    .fingerprint = 0xc59143053b31ea74,
     .version = "0.0.0",
     .dependencies = .{
-        .sdl = .{
-            .url = "https://github.com/allyourcodebase/SDL/archive/fe896e655b24890f5e13ba8b740ebe0e20c4a23b.tar.gz",
-            .hash = "1220503f94b77f9c057139384cc37f020c291208f7bdee60285c71b315961cf717bd",
-        },
-        .sdl_image = .{
-            .url = "https://github.com/allyourcodebase/SDL_image/archive/d7b87f0cd57a1dff93fd0b2455ed7674ae776d4c.tar.gz",
-            .hash = "12209c505bb1364c6e408995274e8ce037cf5f41ad74f323f1e978efb16422ae2f3b",
-        },
         .zsdl = .{
-            .url = "https://github.com/zig-gamedev/zsdl/archive/43ffed63cab408d2f6210792452937abd22fd922.tar.gz",
-            .hash = "122054122c0d50255b5451ce6b4d2d868bd6fdd6d7c8d76897f139237f9d30054439",
+            .url = "https://github.com/zig-gamedev/zsdl/archive/41efa4c1ef3c59eed8f2ea3d10480ef071932249.tar.gz",
+            .hash = "122076b80c37e4885edc0083cf9f0c10b08c5b3a30dceea5ae189749388806db87b4",
+        },
+        .SDL = .{
+            .url = "git+https://github.com/allyourcodebase/SDL.git#181dd2c6a69a8392a8457a5e80e3ab2e4871e643",
+            .hash = "SDL-2.32.4-JToi30-TEgH42-HFmgINmgFPrAXOjaNp734Jh_wep6ZN",
+        },
+        .SDL_image = .{
+            .url = "https://github.com/allyourcodebase/SDL_image/archive/25919dd8cdbfc7db543c7c22fbc85b20ce4b2cf0.tar.gz",
+            .hash = "SDL_image-2.8.4--aJoHUMWAADytIssRiwrOBGJwPirddZGNUHQERTI1rNk",
         },
     },
     .paths = .{

@@ -1,7 +1,8 @@
 const std = @import("std");
-const sdl = @import("zsdl2");
+const sdl = @import("zsdl");
+const image = @import("zsdl_image");
+
 const box2d = @import("box2dnative.zig");
-const image = @import("zsdl2_image");
 
 const config = @import("config.zig");
 
