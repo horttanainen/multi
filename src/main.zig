@@ -10,8 +10,8 @@ const shared = @import("shared.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
 const sensor = @import("sensor.zig");
-const text = @import("text.zig");
 const time = @import("time.zig");
+const fps = @import("fps.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -62,7 +62,6 @@ const Sprite = entity.Sprite;
 //TODO: read https://gamedev.stackexchange.com/questions/86609/box2d-recommended-step-velocity-and-position-iterations
 //TODO: read https://gamedev.stackexchange.com/questions/130784/box2d-fixed-timestep-and-interpolation
 //TODO: fix timestep
-//TODO: show fps like steam does
 
 pub fn main() !void {
     const resources = try init();
@@ -97,14 +96,9 @@ pub fn main() !void {
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
-    var fpsTextBuf: [100]u8 = undefined;
-    var fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{0});
-
     while (!shared.quitGame and !shared.goalReached) {
         time.frameBegin();
         // const deltaS = @divFloor((currentTime - lastTime), freqMs) * 1000.0;
-
-        const fps = time.calculateFps();
 
         // Step Box2D physics world
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
@@ -150,8 +144,7 @@ pub fn main() !void {
         try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
         try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
 
-        fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{fps});
-        try text.writeAt(fpsText, .{ .x = 200, .y = 200 });
+        try fps.show();
 
         sdl.renderPresent(resources.renderer);
         time.frameEnd();
