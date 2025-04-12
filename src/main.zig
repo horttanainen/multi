@@ -11,6 +11,7 @@ const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
 const sensor = @import("sensor.zig");
 const text = @import("text.zig");
+const time = @import("time.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -96,24 +97,14 @@ pub fn main() !void {
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
-    const freqMs = sdl.getPerformanceFrequency();
-    var lastTime = sdl.getPerformanceCounter();
-
-    var frameCounter: u64 = 0;
-    var frameTimer = lastTime;
-
     var fpsTextBuf: [100]u8 = undefined;
-    var fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{frameCounter});
+    var fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{0});
 
     while (!shared.quitGame and !shared.goalReached) {
-        const currentTime = sdl.getPerformanceCounter();
+        time.frameBegin();
         // const deltaS = @divFloor((currentTime - lastTime), freqMs) * 1000.0;
 
-        if (currentTime > frameTimer + freqMs) {
-            fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{frameCounter});
-            frameCounter = 0;
-            frameTimer = currentTime;
-        }
+        const fps = time.calculateFps();
 
         // Step Box2D physics world
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
@@ -159,11 +150,10 @@ pub fn main() !void {
         try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
         try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
 
-        lastTime = currentTime;
-        frameCounter += 1;
-
+        fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{fps});
         try text.writeAt(fpsText, .{ .x = 200, .y = 200 });
 
         sdl.renderPresent(resources.renderer);
+        time.frameEnd();
     }
 }
