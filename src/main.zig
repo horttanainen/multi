@@ -96,7 +96,25 @@ pub fn main() !void {
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
+    const freqMs = sdl.getPerformanceFrequency();
+    var lastTime = sdl.getPerformanceCounter();
+
+    var frameCounter: u64 = 0;
+    var frameTimer = lastTime;
+
+    var fpsTextBuf: [100]u8 = undefined;
+    var fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{frameCounter});
+
     while (!shared.quitGame and !shared.goalReached) {
+        const currentTime = sdl.getPerformanceCounter();
+        // const deltaS = @divFloor((currentTime - lastTime), freqMs) * 1000.0;
+
+        if (currentTime > frameTimer + freqMs) {
+            fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{frameCounter});
+            frameCounter = 0;
+            frameTimer = currentTime;
+        }
+
         // Step Box2D physics world
         box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
 
@@ -141,7 +159,10 @@ pub fn main() !void {
         try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
         try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
 
-        try text.writeAt("FPS: and still counting!!!", .{ .x = 200, .y = 200 });
+        lastTime = currentTime;
+        frameCounter += 1;
+
+        try text.writeAt(fpsText, .{ .x = 200, .y = 200 });
 
         sdl.renderPresent(resources.renderer);
     }
