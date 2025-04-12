@@ -25,6 +25,7 @@ const control = @import("control.zig");
 
 const player = @import("player.zig");
 
+const box = @import("box.zig");
 const level = @import("level.zig");
 const entity = @import("entity.zig");
 const Entity = entity.Entity;
@@ -55,13 +56,12 @@ const Sprite = entity.Sprite;
 //TODO: investigate how to sync games when running on different machines
 //TODO: add localhost multiplayer
 //TODO: add real multiplayer
+//TODO: read https://mas-bandwidth.com/what-is-lag/
+//TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
+//TODO: read https://gafferongames.com/post/deterministic_lockstep/
 
 //Engine:
-//TODO: separate rendering and physics related stuff in main
-//TODO: read gaffer on games for the millionth time https://gafferongames.com/post/fix_your_timestep/
-//TODO: read https://gamedev.stackexchange.com/questions/86609/box2d-recommended-step-velocity-and-position-iterations
-//TODO: read https://gamedev.stackexchange.com/questions/130784/box2d-fixed-timestep-and-interpolation
-//TODO: fix timestep
+//TODO: separate engine code from game logic
 
 pub fn main() !void {
     const resources = try init();
@@ -80,20 +80,6 @@ pub fn main() !void {
 
     try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
 
-    const timeStep: f32 = 1.0 / 60.0;
-    const subStepCount = 4;
-
-    var debugDraw = box2d.b2DefaultDebugDraw();
-    debugDraw.context = &shared.resources;
-    debugDraw.DrawSolidPolygon = &debug.drawSolidPolygon;
-    debugDraw.DrawPolygon = &debug.drawPolygon;
-    debugDraw.DrawSegment = &debug.drawSegment;
-    debugDraw.DrawPoint = &debug.drawPoint;
-    debugDraw.drawShapes = true;
-    debugDraw.drawAABBs = false;
-    debugDraw.drawContacts = true;
-    debugDraw.drawFrictionImpulses = true;
-
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
     while (!shared.quitGame and !shared.goalReached) {
@@ -101,7 +87,12 @@ pub fn main() !void {
         // const deltaS = @divFloor((currentTime - lastTime), freqMs) * 1000.0;
 
         // Step Box2D physics world
-        box2d.b2World_Step(resources.worldId, timeStep, subStepCount);
+        while (time.accumulator >= config.physics.dt) {
+            box.updateStates();
+            box2d.b2World_Step(resources.worldId, config.physics.dt, config.physics.subStepCount);
+            time.accumulator -= config.physics.dt;
+        }
+        time.alpha = time.accumulator / config.physics.dt;
 
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
@@ -124,6 +115,7 @@ pub fn main() !void {
         try player.checkSensors();
         try sensor.checkGoal();
 
+        //draw
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
         try sdl.renderClear(resources.renderer);
 
@@ -137,16 +129,13 @@ pub fn main() !void {
         if (player.player) |p| {
             try entity.draw(p.entity);
         }
-        box2d.b2World_Draw(resources.worldId, &debugDraw);
-
-        // Debug
-        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 255, .a = 255 });
-        try sdl.renderDrawLine(resources.renderer, config.window.width / 2, 0, config.window.width / 2, config.window.height);
-        try sdl.renderDrawLine(resources.renderer, 0, config.window.height - (config.window.height / 10), config.window.width, config.window.height - (config.window.height / 10));
+        try debug.draw();
 
         try fps.show();
 
         sdl.renderPresent(resources.renderer);
+
+        // keep track of time spend per frame
         time.frameEnd();
     }
 }

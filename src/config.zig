@@ -6,6 +6,8 @@ pub const met2pix = 80;
 
 pub const goalMaterialId = 420;
 
+pub const physics = .{ .dt = 1.0 / 60.0, .subStepCount = 4 };
+
 // pub const g = struct { window: struct { width: i32, height: i32 }, met2pix: i32, player: struct { materialId: i32, restingFriction: f32, movementFriction: f32, sidewaysMovementForce: f32, jumpImpulse: f32, maxAirJumps: i32, maxMovementSpeed: f32 } };
 
 pub const Player = struct { materialId: i32, restingFriction: f32, movementFriction: f32, sidewaysMovementForce: f32, jumpImpulse: f32, maxAirJumps: i32, maxMovementSpeed: f32 };

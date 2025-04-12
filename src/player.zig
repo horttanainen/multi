@@ -68,21 +68,10 @@ pub fn spawn(position: IVec2) !void {
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
     try shapeIds.append(shapeId);
 
-    player = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice() }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
+    player = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
 }
 
-// var last: u64 = 0;
-// var deltaTime: u64 = 0;
-
 pub fn jump() void {
-    // const now = sdl.getPerformanceCounter();
-
-    // deltaTime = (now - last) * 1000 / sdl.getPerformanceFrequency();
-    // if (deltaTime < 200) {
-    //     return;
-    // }
-    // last = now;
-
     if (!allowJump) {
         return;
     }

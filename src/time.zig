@@ -11,13 +11,22 @@ var fps: u64 = 0;
 
 var currentTime: u64 = 0;
 
+pub var alpha: f64 = 0;
+pub var accumulator: f64 = 0;
+var frameTime: f64 = 0;
+
 pub fn init() void {
     freqMs = sdl.getPerformanceFrequency();
-    frameTimer = sdl.getPerformanceCounter();
+    lastTime = sdl.getPerformanceCounter();
 }
 
 pub fn frameBegin() void {
     currentTime = sdl.getPerformanceCounter();
+    frameTime = (@as(f64, @floatFromInt(currentTime - lastTime))) / @as(f64, @floatFromInt(freqMs));
+    if (frameTime > 0.25) {
+        frameTime = 0.25;
+    }
+    accumulator += frameTime;
 }
 
 pub fn frameEnd() void {

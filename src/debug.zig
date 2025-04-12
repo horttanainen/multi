@@ -8,6 +8,21 @@ const shared = @import("shared.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const m2Pixel = @import("conversion.zig").m2Pixel;
 
+var dDraw: ?box2d.b2DebugDraw = null;
+pub fn init() void {
+    var debugDraw = box2d.b2DefaultDebugDraw();
+    debugDraw.context = &shared.resources;
+    debugDraw.DrawSolidPolygon = &drawSolidPolygon;
+    debugDraw.DrawPolygon = &drawPolygon;
+    debugDraw.DrawSegment = &drawSegment;
+    debugDraw.DrawPoint = &drawPoint;
+    debugDraw.drawShapes = true;
+    debugDraw.drawAABBs = false;
+    debugDraw.drawContacts = true;
+    debugDraw.drawFrictionImpulses = true;
+    dDraw = debugDraw;
+}
+
 fn b2Mul(rot: box2d.b2Rot, v: box2d.b2Vec2) box2d.b2Vec2 {
     return box2d.b2Vec2{
         .x = rot.c * v.x - rot.s * v.y,
@@ -127,4 +142,12 @@ pub fn drawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: 
         std.debug.print("encountered error in debugDrawPolygon when trying to renderFillRect\n", .{});
         return;
     };
+}
+
+pub fn draw() !void {
+    const resources = try shared.getResources();
+
+    if (dDraw) |*debugDraw| {
+        box2d.b2World_Draw(resources.worldId, debugDraw);
+    }
 }

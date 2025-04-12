@@ -6,6 +6,7 @@ const ttf = @import("zsdl_ttf");
 const box2d = @import("box2dnative.zig");
 
 const time = @import("time.zig");
+const debug = @import("debug.zig");
 const config = @import("config.zig");
 
 const lieroImgSrc = "images/liero.png";
@@ -41,6 +42,7 @@ pub fn getResources() !SharedResources {
 pub fn init() !SharedResources {
     try sdl.init(.{ .audio = true, .video = true });
     time.init();
+    debug.init();
 
     try ttf.init();
 
