@@ -11,5 +11,5 @@ pub fn show() !void {
     const fps = time.calculateFps();
 
     const fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{fps});
-    try text.writeAt(fpsText, .{ .x = config.window.width - 80, .y = 2 });
+    try text.writeAt(fpsText, .{ .x = config.window.width - 90, .y = 2 });
 }
