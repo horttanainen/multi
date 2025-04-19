@@ -5,7 +5,6 @@ const std = @import("std");
 const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
-const init = @import("shared.zig").init;
 const shared = @import("shared.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
@@ -65,15 +64,11 @@ const Sprite = entity.Sprite;
 //TODO: separate engine code from game logic
 
 pub fn main() !void {
-    const resources = try init();
-
-    // clean up
-    defer sdl.quit();
-
-    defer sdl.destroyWindow(resources.window);
-    defer sdl.destroyRenderer(resources.renderer);
+    const resources = try shared.init();
+    defer shared.cleanup();
 
     try level.create();
+    defer level.cleanup();
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 

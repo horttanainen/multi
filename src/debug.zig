@@ -9,9 +9,9 @@ const SharedResources = @import("shared.zig").SharedResources;
 const m2Pixel = @import("conversion.zig").m2Pixel;
 
 var dDraw: ?box2d.b2DebugDraw = null;
-pub fn init() void {
+pub fn init() !void {
     var debugDraw = box2d.b2DefaultDebugDraw();
-    debugDraw.context = &shared.resources;
+    debugDraw.context = &shared.maybeResources;
     debugDraw.DrawSolidPolygon = &drawSolidPolygon;
     debugDraw.DrawPolygon = &drawPolygon;
     debugDraw.DrawSegment = &drawSegment;

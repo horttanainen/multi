@@ -180,3 +180,10 @@ pub fn checkSensors() !void {
         }
     }
 }
+
+pub fn cleanup() void {
+    if (maybePlayer) |player| {
+        shared.allocator.free(player.entity.shapeIds);
+    }
+    maybePlayer = null;
+}

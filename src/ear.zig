@@ -52,6 +52,7 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
 
     // Make a mutable copy of the vertices.
     var verts = ArrayList(IVec2).init(allocator);
+    defer verts.deinit();
     for (vertices) |v| {
         try verts.append(v);
     }

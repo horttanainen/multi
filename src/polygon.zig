@@ -5,6 +5,7 @@ const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
 const visvalingam = @import("visvalingam.zig").visvalingam;
 const douglasPeucker = @import("douglas.zig").douglasPeucker;
 const earClipping = @import("ear.zig").earClipping;
+const shared = @import("shared.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
@@ -46,6 +47,7 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
 
     // 4. ensure counter clockwise
     const ccw = try ensureCounterClockwise(withoutDuplicates);
+    defer shared.allocator.free(ccw);
 
     std.debug.print("CCW vertices: {}\n", .{ccw.len});
 

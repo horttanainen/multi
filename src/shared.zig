@@ -8,6 +8,7 @@ const box2d = @import("box2dnative.zig");
 const time = @import("time.zig");
 const debug = @import("debug.zig");
 const config = @import("config.zig");
+const entity = @import("entity.zig");
 
 const lieroImgSrc = "images/liero.png";
 const boxImgSrc = "images/box.png";
@@ -30,10 +31,10 @@ pub const allocator = gpa.allocator();
 pub var quitGame = false;
 pub var goalReached = false;
 
-pub var resources: ?SharedResources = null;
+pub var maybeResources: ?SharedResources = null;
 
 pub fn getResources() !SharedResources {
-    if (resources) |r| {
+    if (maybeResources) |r| {
         return r;
     }
     return SharedResourcesError.Uninitialized;
@@ -42,7 +43,6 @@ pub fn getResources() !SharedResources {
 pub fn init() !SharedResources {
     try sdl.init(.{ .audio = true, .video = true });
     time.init();
-    debug.init();
 
     try ttf.init();
 
@@ -69,6 +69,25 @@ pub fn init() !SharedResources {
     // instantiate shared resources
     const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .lieroSurface = lieroSurface, .duffSurface = duffSurface, .monocraftFont = monocraftFont };
 
-    resources = s;
+    maybeResources = s;
+
+    try debug.init();
+
     return s;
+}
+
+pub fn cleanup() void {
+    if (maybeResources) |resources| {
+        box2d.b2DestroyWorld(resources.worldId);
+        ttf.Font.close(resources.monocraftFont);
+        sdl.destroyRenderer(resources.renderer);
+        sdl.destroyWindow(resources.window);
+    }
+    ttf.quit();
+    sdl.quit();
+
+    entity.cleanup();
+
+    const deInitStatus = gpa.deinit();
+    if (deInitStatus == .leak) @panic("We are leaking memory");
 }

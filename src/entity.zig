@@ -79,6 +79,7 @@ pub fn createFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.b2Shape
 pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !Entity {
     const resources = try shared.getResources();
     const triangles = try polygon.triangulate(img);
+    defer shared.allocator.free(triangles);
     const texture = try sdl.createTextureFromSurface(resources.renderer, img);
 
     var size: sdl.Point = undefined;
@@ -96,4 +97,8 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
         .shapeIds = shapeIds,
     };
     return entity;
+}
+
+pub fn cleanup() void {
+    entities.deinit();
 }

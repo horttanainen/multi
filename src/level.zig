@@ -63,3 +63,12 @@ pub fn create() !void {
 
     try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
 }
+
+pub fn cleanup() void {
+    player.cleanup();
+    sensor.cleanup();
+    if (maybeLevel) |level| {
+        shared.allocator.free(level.shapeIds);
+    }
+    maybeLevel = null;
+}

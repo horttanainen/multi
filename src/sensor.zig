@@ -63,3 +63,10 @@ pub fn checkGoal() !void {
         }
     }
 }
+
+pub fn cleanup() void {
+    if (maybeGoalSensor) |goalSensor| {
+        shared.allocator.free(goalSensor.shapeIds);
+    }
+    maybeGoalSensor = null;
+}
