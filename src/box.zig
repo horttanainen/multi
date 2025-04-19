@@ -2,11 +2,6 @@ const std = @import("std");
 const box2d = @import("box2dnative.zig");
 const IVec2 = @import("vector.zig").IVec2;
 
-const entity = @import("entity.zig");
-const Entity = entity.Entity;
-
-const player = @import("player.zig");
-
 const shared = @import("shared.zig");
 
 const p2m = @import("conversion.zig").p2m;
@@ -89,13 +84,4 @@ pub fn getState(bodyId: box2d.b2BodyId) State {
     const rotationAngle = box2d.b2Rot_GetAngle(box2d.b2Body_GetRotation(bodyId));
 
     return .{ .pos = position, .rotAngle = rotationAngle };
-}
-
-pub fn updateStates() void {
-    for (entity.entities.values()) |*e| {
-        e.state = getState(e.bodyId);
-    }
-    if (player.player) |*p| {
-        p.entity.state = getState(p.entity.bodyId);
-    }
 }

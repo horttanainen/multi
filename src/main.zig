@@ -13,6 +13,7 @@ const sensor = @import("sensor.zig");
 const time = @import("time.zig");
 const fps = @import("fps.zig");
 const renderer = @import("renderer.zig");
+const physics = @import("physics.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -85,15 +86,8 @@ pub fn main() !void {
 
     while (!shared.quitGame and !shared.goalReached) {
         time.frameBegin();
-        // const deltaS = @divFloor((currentTime - lastTime), freqMs) * 1000.0;
 
-        // Step Box2D physics world
-        while (time.accumulator >= config.physics.dt) {
-            box.updateStates();
-            box2d.b2World_Step(resources.worldId, config.physics.dt, config.physics.subStepCount);
-            time.accumulator -= config.physics.dt;
-        }
-        time.alpha = time.accumulator / config.physics.dt;
+        try physics.step();
 
         // Event handling
         var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
@@ -118,7 +112,7 @@ pub fn main() !void {
 
         try renderer.render();
 
-        // keep track of time spend per frame
+        // keep track of time spent per frame
         time.frameEnd();
     }
 }

@@ -44,7 +44,7 @@ pub fn createGoalSensorFromImg(position: IVec2, img: *sdl.Surface) !void {
 pub fn checkGoal() !void {
     const resources = try shared.getResources();
     if (maybeGoalSensor) |goalSensor| {
-        if (player.player) |p| {
+        if (player.maybePlayer) |p| {
             const sensorEvents = box2d.b2World_GetSensorEvents(resources.worldId);
 
             for (0..@intCast(sensorEvents.beginCount)) |i| {

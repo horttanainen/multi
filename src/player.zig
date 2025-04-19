@@ -14,7 +14,7 @@ const IVec2 = @import("vector.zig").IVec2;
 
 pub const Player = struct { entity: entity.Entity, bodyShapeId: box2d.b2ShapeId, footSensorShapeId: box2d.b2ShapeId, leftWallSensorId: box2d.b2ShapeId, rightWallSensorId: box2d.b2ShapeId };
 
-pub var player: ?Player = null;
+pub var maybePlayer: ?Player = null;
 pub var isMoving: bool = false;
 pub var touchesGround: bool = false;
 pub var allowJump: bool = true;
@@ -25,15 +25,22 @@ var airJumpCounter: i32 = 0;
 const PlayerError = error{PlayerUnspawned};
 
 pub fn getPlayer() !Player {
-    if (player) |p| {
+    if (maybePlayer) |p| {
         return p;
     }
     return PlayerError.PlayerUnspawned;
 }
 
 pub fn draw() !void {
-    const p = try getPlayer();
-    try entity.draw(p.entity);
+    if (maybePlayer) |player| {
+        try entity.draw(player.entity);
+    }
+}
+
+pub fn updateState() void {
+    if (maybePlayer) |*player| {
+        player.entity.state = box.getState(player.entity.bodyId);
+    }
 }
 
 pub fn spawn(position: IVec2) !void {
@@ -73,7 +80,7 @@ pub fn spawn(position: IVec2) !void {
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
     try shapeIds.append(shapeId);
 
-    player = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
+    maybePlayer = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
 }
 
 pub fn jump() void {
@@ -81,7 +88,7 @@ pub fn jump() void {
         return;
     }
 
-    if (player) |p| {
+    if (maybePlayer) |p| {
         if (touchesGround) {
             airJumpCounter = 0;
         }
@@ -107,19 +114,19 @@ pub fn brake() void {
 
 pub fn moveLeft() void {
     isMoving = true;
-    if (player) |p| {
+    if (maybePlayer) |p| {
         box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 }, true);
     }
 }
 
 pub fn moveRight() void {
     isMoving = true;
-    if (player) |p| {
+    if (maybePlayer) |p| {
         box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 }, true);
     }
 }
 pub fn clampSpeed() void {
-    if (player) |p| {
+    if (maybePlayer) |p| {
         var velocity = box2d.b2Body_GetLinearVelocity(p.entity.bodyId);
         if (velocity.x > config.player.maxMovementSpeed) {
             velocity.x = config.player.maxMovementSpeed;
@@ -133,7 +140,7 @@ pub fn clampSpeed() void {
 
 pub fn checkSensors() !void {
     const resources = try shared.getResources();
-    if (player) |p| {
+    if (maybePlayer) |p| {
         const sensorEvents = box2d.b2World_GetSensorEvents(resources.worldId);
 
         for (0..@intCast(sensorEvents.beginCount)) |i| {
