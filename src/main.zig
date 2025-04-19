@@ -39,7 +39,6 @@ const Sprite = entity.Sprite;
 //TODO: user can create level that is bigger than screen
 
 //level oriented physics demo game todos:
-//TODO: spawn new level after entering goal
 //TODO: create larger level than window and move camera with player
 //TODO: create about 10 different physics and gravity based levels
 
