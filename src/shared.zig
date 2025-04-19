@@ -17,13 +17,14 @@ const beanImgSrc = "images/bean.png";
 const ballImgSrc = "images/ball.png";
 const nickiImgSrc = "images/nicki.png";
 const levelImgSrc = "images/level.png";
+const level2ImgSrc = "images/level2.png";
 const duffImgSrc = "images/duff.png";
 
 const monocraftSrc = "fonts/monocraft.ttf";
 
 const SharedResourcesError = error{Uninitialized};
 
-pub const SharedResources = struct { worldId: box2d.b2WorldId, window: *sdl.Window, renderer: *sdl.Renderer, boxSurface: *sdl.Surface, starSurface: *sdl.Surface, beanSurface: *sdl.Surface, ballSurface: *sdl.Surface, nickiSurface: *sdl.Surface, levelSurface: *sdl.Surface, lieroSurface: *sdl.Surface, duffSurface: *sdl.Surface, monocraftFont: *ttf.Font };
+pub const SharedResources = struct { worldId: box2d.b2WorldId, window: *sdl.Window, renderer: *sdl.Renderer, boxSurface: *sdl.Surface, starSurface: *sdl.Surface, beanSurface: *sdl.Surface, ballSurface: *sdl.Surface, nickiSurface: *sdl.Surface, levelSurface: *sdl.Surface, level2Surface: *sdl.Surface, lieroSurface: *sdl.Surface, duffSurface: *sdl.Surface, monocraftFont: *ttf.Font };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
@@ -63,11 +64,12 @@ pub fn init() !SharedResources {
     const ballSurface = try image.load(ballImgSrc);
     const nickiSurface = try image.load(nickiImgSrc);
     const levelSurface = try image.load(levelImgSrc);
+    const level2Surface = try image.load(level2ImgSrc);
     const lieroSurface = try image.load(lieroImgSrc);
     const duffSurface = try image.load(duffImgSrc);
 
     // instantiate shared resources
-    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .lieroSurface = lieroSurface, .duffSurface = duffSurface, .monocraftFont = monocraftFont };
+    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .level2Surface = level2Surface, .lieroSurface = lieroSurface, .duffSurface = duffSurface, .monocraftFont = monocraftFont };
 
     maybeResources = s;
 
@@ -85,8 +87,6 @@ pub fn cleanup() void {
     }
     ttf.quit();
     sdl.quit();
-
-    entity.cleanup();
 
     const deInitStatus = gpa.deinit();
     if (deInitStatus == .leak) @panic("We are leaking memory");

@@ -100,5 +100,10 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
 }
 
 pub fn cleanup() void {
+    for (entities.values()) |entity| {
+        box2d.b2DestroyBody(entity.bodyId);
+        shared.allocator.free(entity.shapeIds);
+    }
     entities.deinit();
+    entities = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 }

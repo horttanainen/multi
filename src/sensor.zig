@@ -66,6 +66,7 @@ pub fn checkGoal() !void {
 
 pub fn cleanup() void {
     if (maybeGoalSensor) |goalSensor| {
+        box2d.b2DestroyBody(goalSensor.bodyId);
         shared.allocator.free(goalSensor.shapeIds);
     }
     maybeGoalSensor = null;

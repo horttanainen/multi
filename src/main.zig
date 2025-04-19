@@ -72,12 +72,16 @@ pub fn main() !void {
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
-    while (!shared.quitGame and !shared.goalReached) {
+    while (!shared.quitGame) {
         time.frameBegin();
 
         try physics.step();
 
         try input.handle();
+
+        if (shared.goalReached) {
+            try level.reset();
+        }
 
         player.clampSpeed();
 

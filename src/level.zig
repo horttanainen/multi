@@ -18,6 +18,7 @@ const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
 var maybeLevel: ?Entity = null;
+var levelNumber: i32 = 0;
 
 const LevelError = error{Uninitialized};
 
@@ -53,22 +54,47 @@ pub fn draw() !void {
 }
 
 pub fn create() !void {
+    const evenLevel = @mod(levelNumber, 2);
+
     const resources = try shared.getResources();
+
+    const levelSurface = if (evenLevel == 0) resources.levelSurface else resources.level2Surface;
 
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
-    try createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface, shapeDef);
+    try createFromImg(.{ .x = 400, .y = 400 }, levelSurface, shapeDef);
+
+    try entity.createFromImg(.{ .x = 400, .y = 400 }, resources.beanSurface, shapeDef);
 
     try player.spawn(.{ .x = 200, .y = 400 });
 
-    try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
+    if (evenLevel == 0) {
+        try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
+    } else {
+        try sensor.createGoalSensorFromImg(.{ .x = 100, .y = 300 }, resources.duffSurface);
+    }
+
+    levelNumber += 1;
 }
 
 pub fn cleanup() void {
     player.cleanup();
     sensor.cleanup();
+    entity.cleanup();
     if (maybeLevel) |level| {
         shared.allocator.free(level.shapeIds);
     }
     maybeLevel = null;
+}
+
+pub fn reset() !void {
+    shared.goalReached = false;
+    player.cleanup();
+    sensor.cleanup();
+    entity.cleanup();
+    if (maybeLevel) |level| {
+        box2d.b2DestroyBody(level.bodyId);
+        shared.allocator.free(level.shapeIds);
+    }
+    try create();
 }

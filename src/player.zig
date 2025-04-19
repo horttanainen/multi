@@ -183,6 +183,7 @@ pub fn checkSensors() !void {
 
 pub fn cleanup() void {
     if (maybePlayer) |player| {
+        box2d.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
     }
     maybePlayer = null;
