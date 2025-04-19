@@ -12,6 +12,7 @@ const allocator = @import("shared.zig").allocator;
 const sensor = @import("sensor.zig");
 const time = @import("time.zig");
 const fps = @import("fps.zig");
+const renderer = @import("renderer.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -115,25 +116,7 @@ pub fn main() !void {
         try player.checkSensors();
         try sensor.checkGoal();
 
-        //draw
-        try sdl.setRenderDrawColor(resources.renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
-        try sdl.renderClear(resources.renderer);
-
-        try level.draw();
-        if (sensor.maybeGoalSensor) |goalSensor| {
-            try entity.draw(goalSensor);
-        }
-        for (entity.entities.values()) |e| {
-            try entity.draw(e);
-        }
-        if (player.player) |p| {
-            try entity.draw(p.entity);
-        }
-        try debug.draw();
-
-        try fps.show();
-
-        sdl.renderPresent(resources.renderer);
+        try renderer.render();
 
         // keep track of time spend per frame
         time.frameEnd();

@@ -5,7 +5,7 @@ const config = @import("config.zig");
 const time = @import("time.zig");
 const text = @import("text.zig");
 
-pub fn show() !void {
+pub fn draw() !void {
     var fpsTextBuf: [100]u8 = undefined;
 
     const fps = time.calculateFps();

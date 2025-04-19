@@ -26,6 +26,12 @@ pub const Entity = struct { bodyId: box2d.b2BodyId, state: ?State, sprite: Sprit
 
 pub var entities: AutoArrayHashMap(box2d.b2BodyId, Entity) = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 
+pub fn drawAll() !void {
+    for (entities.values()) |e| {
+        try draw(e);
+    }
+}
+
 pub fn draw(entity: Entity) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;

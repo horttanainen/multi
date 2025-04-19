@@ -18,6 +18,20 @@ const Entity = entity.Entity;
 
 pub var maybeGoalSensor: ?Entity = null;
 
+const SensorError = error{GoalUninitialized};
+
+pub fn getGoalSensor() !Entity {
+    if (maybeGoalSensor) |goalSensor| {
+        return goalSensor;
+    }
+    return SensorError.GoalUninitialized;
+}
+
+pub fn drawGoal() !void {
+    const goalSensor = try getGoalSensor();
+    try entity.draw(goalSensor);
+}
+
 pub fn createGoalSensorFromImg(position: IVec2, img: *sdl.Surface) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.isSensor = true;

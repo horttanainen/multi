@@ -22,13 +22,18 @@ pub var touchesWallOnLeft: bool = false;
 pub var touchesWallOnRight: bool = false;
 var airJumpCounter: i32 = 0;
 
-const PlayerError = error{NotSpawned};
+const PlayerError = error{PlayerUnspawned};
 
 pub fn getPlayer() !Player {
     if (player) |p| {
         return p;
     }
-    return PlayerError.NotSpawned;
+    return PlayerError.PlayerUnspawned;
+}
+
+pub fn draw() !void {
+    const p = try getPlayer();
+    try entity.draw(p.entity);
 }
 
 pub fn spawn(position: IVec2) !void {
