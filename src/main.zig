@@ -14,6 +14,7 @@ const time = @import("time.zig");
 const fps = @import("fps.zig");
 const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
+const input = @import("input.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -22,8 +23,6 @@ const m2P = @import("conversion.zig").m2P;
 const frictionCallback = @import("friction.zig").frictionCallback;
 
 const debug = @import("debug.zig");
-
-const control = @import("control.zig");
 
 const player = @import("player.zig");
 
@@ -89,21 +88,7 @@ pub fn main() !void {
 
         try physics.step();
 
-        // Event handling
-        var event: sdl.Event = .{ .type = sdl.EventType.firstevent };
-        while (sdl.pollEvent(&event)) {
-            switch (event.type) {
-                sdl.EventType.quit => {
-                    shared.quitGame = true;
-                },
-                sdl.EventType.mousebuttondown => {
-                    try control.mouseButtonDown(event.button);
-                },
-                else => {},
-            }
-        }
-
-        control.handleKeyboardInput();
+        try input.handle();
 
         player.clampSpeed();
 
