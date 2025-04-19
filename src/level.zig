@@ -5,6 +5,8 @@ const box2d = @import("box2dnative.zig");
 const polygon = @import("polygon.zig");
 const box = @import("box.zig");
 const shared = @import("shared.zig");
+const player = @import("player.zig");
+const sensor = @import("sensor.zig");
 
 const m2P = @import("conversion.zig").m2P;
 const p2m = @import("conversion.zig").p2m;
@@ -48,4 +50,16 @@ pub fn draw() !void {
         .h = m2P(sprite.dimM.y),
     };
     try sdl.renderCopy(renderer, sprite.texture, null, &rect);
+}
+
+pub fn create() !void {
+    const resources = try shared.getResources();
+
+    var shapeDef = box2d.b2DefaultShapeDef();
+    shapeDef.friction = 0.5;
+    try createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface, shapeDef);
+
+    try player.spawn(.{ .x = 200, .y = 400 });
+
+    try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
 }

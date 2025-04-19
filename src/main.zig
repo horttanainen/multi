@@ -73,13 +73,7 @@ pub fn main() !void {
     defer sdl.destroyWindow(resources.window);
     defer sdl.destroyRenderer(resources.renderer);
 
-    var shapeDef = box2d.b2DefaultShapeDef();
-    shapeDef.friction = 0.5;
-    try level.createFromImg(.{ .x = 400, .y = 400 }, resources.levelSurface, shapeDef);
-
-    try player.spawn(.{ .x = 200, .y = 400 });
-
-    try sensor.createGoalSensorFromImg(.{ .x = 700, .y = 550 }, resources.duffSurface);
+    try level.create();
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
