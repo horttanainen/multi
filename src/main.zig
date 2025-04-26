@@ -64,6 +64,9 @@ const Sprite = entity.Sprite;
 //Engine:
 //TODO: separate engine code from game logic
 
+//Bugs to fix:
+//Clicking does not work relative to camera
+
 pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
