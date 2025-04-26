@@ -18,7 +18,7 @@ const entity = @import("entity.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
-var maybeLevel: ?Entity = null;
+pub var maybeLevel: ?Entity = null;
 var levelNumber: i32 = 0;
 
 const LevelError = error{Uninitialized};
@@ -97,5 +97,6 @@ pub fn reset() !void {
         box2d.b2DestroyBody(level.bodyId);
         shared.allocator.free(level.shapeIds);
     }
+    maybeLevel = null;
     try create();
 }
