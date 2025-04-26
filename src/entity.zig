@@ -18,9 +18,7 @@ const allocator = @import("shared.zig").allocator;
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 
-const m2PixelPos = @import("conversion.zig").m2PixelPos;
-const p2m = @import("conversion.zig").p2m;
-const m2P = @import("conversion.zig").m2P;
+const conv = @import("conversion.zig");
 
 pub const Sprite = struct { texture: *sdl.Texture, dimM: Vec2 };
 pub const Entity = struct { bodyId: box2d.b2BodyId, state: ?State, sprite: Sprite, shapeIds: []box2d.b2ShapeId };
@@ -44,13 +42,13 @@ pub fn draw(entity: Entity) !void {
     const renderer = resources.renderer;
 
     const state = getInterpolatedState(entity);
-    const pos = camera.relativePosition(m2PixelPos(state.pos.x, state.pos.y, entity.sprite.dimM.x, entity.sprite.dimM.y));
+    const pos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, entity.sprite.dimM.x, entity.sprite.dimM.y));
 
     const rect = sdl.Rect{
         .x = pos.x,
         .y = pos.y,
-        .w = m2P(entity.sprite.dimM.x),
-        .h = m2P(entity.sprite.dimM.y),
+        .w = conv.m2P(entity.sprite.dimM.x),
+        .h = conv.m2P(entity.sprite.dimM.y),
     };
     try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
@@ -75,7 +73,7 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-    const dimM = p2m(.{ .x = size.x, .y = size.y });
+    const dimM = conv.p2m(.{ .x = size.x, .y = size.y });
 
     const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
@@ -115,6 +113,6 @@ fn getInterpolatedState(entity: Entity) State {
 
 pub fn getPosition(entity: Entity) IVec2 {
     const state = getInterpolatedState(entity);
-    const pos = m2PixelPos(state.pos.x, state.pos.y, entity.sprite.dimM.x, entity.sprite.dimM.y);
+    const pos = conv.m2Pixel(state.pos);
     return pos;
 }

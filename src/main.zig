@@ -62,9 +62,6 @@ const Sprite = entity.Sprite;
 //Engine:
 //TODO: separate engine code from game logic
 
-//Bugs to fix:
-//TODO: center camera on player. Might need bypassing m2PixelPos
-
 pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
