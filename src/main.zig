@@ -64,7 +64,6 @@ const Sprite = entity.Sprite;
 
 //Bugs to fix:
 //TODO: center camera on player. Might need bypassing m2PixelPos
-//TODO: Clicking does not work relative to camera
 
 pub fn main() !void {
     const resources = try shared.init();

@@ -11,6 +11,10 @@ const conv = @import("conversion.zig");
 
 pub var camPos: vec.IVec2 = .{ .x = 0, .y = 0 };
 
+pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
+    return vec.iadd(pos, camPos);
+}
+
 pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
     return vec.isubtract(pos, camPos);
 }

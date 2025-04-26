@@ -1,6 +1,7 @@
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 
+const camera = @import("camera.zig");
 const shared = @import("shared.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -34,5 +35,5 @@ pub fn mouseButtonDown(event: sdl.MouseButtonEvent) !void {
     const resources = try shared.getResources();
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
-    try entity.createFromImg(.{ .x = event.x, .y = event.y }, resources.boxSurface, shapeDef);
+    try entity.createFromImg(camera.relativePositionForCreating(.{ .x = event.x, .y = event.y }), resources.boxSurface, shapeDef);
 }
