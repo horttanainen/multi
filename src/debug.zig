@@ -5,6 +5,7 @@ const box2d = @import("box2dnative.zig");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 const shared = @import("shared.zig");
+const camera = @import("camera.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const m2Pixel = @import("conversion.zig").m2Pixel;
 
@@ -19,7 +20,7 @@ pub fn init() !void {
     debugDraw.drawShapes = true;
     debugDraw.drawAABBs = false;
     debugDraw.drawContacts = true;
-    debugDraw.drawFrictionImpulses = true;
+    debugDraw.drawFrictionImpulses = false;
     dDraw = debugDraw;
 }
 
@@ -58,7 +59,7 @@ pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.
             .x = transform.p.x + rotated_current.x,
             .y = transform.p.y + rotated_current.y,
         };
-        const current: IVec2 = m2Pixel(world_current);
+        const current: IVec2 = camera.relativePosition(m2Pixel(world_current));
 
         // Do the same for the next vertex (with wrap-around)
         const v_next: box2d.b2Vec2 = vertices[(i + 1) % @as(usize, @intCast(vertexCount))];
@@ -67,7 +68,7 @@ pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.
             .x = transform.p.x + rotated_next.x,
             .y = transform.p.y + rotated_next.y,
         };
-        const next: IVec2 = m2Pixel(world_next);
+        const next: IVec2 = camera.relativePosition(m2Pixel(world_next));
 
         sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
             std.debug.print("Error drawing line\n", .{});
@@ -92,8 +93,8 @@ pub fn drawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: 
 
     // Draw lines connecting the vertices (wrap-around at the end)
     for (0..@intCast(vertexCount)) |i| {
-        const current: IVec2 = m2Pixel(vertices[i]);
-        const next: IVec2 = m2Pixel(vertices[(i + 1) % @as(usize, @intCast(vertexCount))]);
+        const current: IVec2 = camera.relativePosition(m2Pixel(vertices[i]));
+        const next: IVec2 = camera.relativePosition(m2Pixel(vertices[(i + 1) % @as(usize, @intCast(vertexCount))]));
         sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
             std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
             return;
@@ -113,8 +114,8 @@ pub fn drawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, 
         return;
     };
 
-    const current: IVec2 = m2Pixel(p1);
-    const next: IVec2 = m2Pixel(p2);
+    const current: IVec2 = camera.relativePosition(m2Pixel(p1));
+    const next: IVec2 = camera.relativePosition(m2Pixel(p2));
 
     sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
@@ -134,7 +135,7 @@ pub fn drawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: 
         return;
     };
 
-    const current: IVec2 = m2Pixel(p1);
+    const current: IVec2 = camera.relativePosition(m2Pixel(p1));
 
     const rect = sdl.Rect{ .x = current.x, .y = current.y, .w = @intFromFloat(size), .h = @intFromFloat(size) };
 

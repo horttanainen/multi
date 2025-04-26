@@ -14,6 +14,7 @@ const fps = @import("fps.zig");
 const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
 const input = @import("input.zig");
+const camera = @import("camera.zig");
 
 const meters = @import("conversion.zig").meters;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
@@ -86,6 +87,8 @@ pub fn main() !void {
 
         try player.checkSensors();
         try sensor.checkGoal();
+
+        camera.followPlayer();
 
         try renderer.render();
 

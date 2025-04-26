@@ -7,6 +7,7 @@ const box = @import("box.zig");
 const shared = @import("shared.zig");
 const player = @import("player.zig");
 const sensor = @import("sensor.zig");
+const camera = @import("camera.zig");
 
 const m2P = @import("conversion.zig").m2P;
 const p2m = @import("conversion.zig").p2m;
@@ -43,7 +44,7 @@ pub fn draw() !void {
     const sprite = level.sprite;
     const posMeter = box2d.b2Body_GetPosition(bodyId);
 
-    const pos = m2PixelPos(posMeter.x, posMeter.y, sprite.dimM.x, sprite.dimM.y);
+    const pos = camera.relativePosition(m2PixelPos(posMeter.x, posMeter.y, sprite.dimM.x, sprite.dimM.y));
     const rect = sdl.Rect{
         .x = pos.x,
         .y = pos.y,
