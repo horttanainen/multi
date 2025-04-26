@@ -40,8 +40,6 @@ const Sprite = entity.Sprite;
 //TODO: user can create level that is bigger than screen
 
 //level oriented physics demo game todos:
-//TODO: Stop camera from going over level boundaries
-//TODO: center camera on player. Might need bypassing m2PixelPos
 //TODO: create about 10 different physics and gravity based levels
 
 //Single player game todos:
@@ -65,7 +63,8 @@ const Sprite = entity.Sprite;
 //TODO: separate engine code from game logic
 
 //Bugs to fix:
-//Clicking does not work relative to camera
+//TODO: center camera on player. Might need bypassing m2PixelPos
+//TODO: Clicking does not work relative to camera
 
 pub fn main() !void {
     const resources = try shared.init();
