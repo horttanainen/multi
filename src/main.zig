@@ -43,6 +43,7 @@ const Sprite = entity.Sprite;
 //TODO: create about 10 different physics and gravity based levels
 
 //Single player game todos:
+//TODO: make player feet collider rounded so it does not stick into corners
 //TODO: add sliding
 //TODO: add sounds
 //TODO: add jetpack
