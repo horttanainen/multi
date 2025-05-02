@@ -34,6 +34,8 @@ const Sprite = entity.Sprite;
 
 //level editor todos:
 //TODO: create rudimentary level editor: user can draw window sized level using rocks
+//TODO: user can drop images into a folder to use in the editor
+//TODO: add option for user to create parallax background from images
 //TODO: user can use beams in level editor
 //TODO: user can create spawn for player
 //TODO: user can create goal for player
