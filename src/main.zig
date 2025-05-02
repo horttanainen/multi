@@ -63,6 +63,9 @@ const Sprite = entity.Sprite;
 //Engine:
 //TODO: separate engine code from game logic
 
+//Bugs:
+//TODO: jumping should have some delay to prevent "double jumping" from the ground
+
 pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
