@@ -11,12 +11,15 @@ pub fn handle() !void {
             sdl.EventType.quit => {
                 shared.quitGame = true;
             },
-            sdl.EventType.mousebuttondown => {
-                try control.mouseButtonDown(event.button);
-            },
             else => {},
         }
     }
 
-    control.handleKeyboardInput();
+    if (shared.editingLevel) {
+        control.handleLevelEditorKeyboardInput();
+        control.handleLevelEditorMouseInput();
+    } else {
+        control.handleGameKeyboardInput();
+        try control.handleGameMouseInput();
+    }
 }

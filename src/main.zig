@@ -33,8 +33,11 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
+//TODO: pressing l enters level editor mode
 //TODO: create rudimentary level editor: user can draw window sized level using rocks
 //TODO: user can drop images into a folder to use in the editor
+//TODO: user can choose to create static objects or dynamic
+//TODO: user can save level
 //TODO: add option for user to create parallax background from images
 //TODO: user can use beams in level editor
 //TODO: user can create spawn for player
@@ -68,6 +71,7 @@ const Sprite = entity.Sprite;
 //Bugs:
 //TODO: jumping should have some delay to prevent "double jumping" from the ground
 //TODO: sometimes jumping wont work because of the crappy sensor logic that sometimes misses player returning to ground. We probably should periodically check if player is touching ground to decide if we are back on the ground again.
+//TODO: some shapes, such as star.png, crash triangulation. I suspect my version of pavlidis is buggy
 
 pub fn main() !void {
     const resources = try shared.init();
@@ -85,20 +89,26 @@ pub fn main() !void {
 
         try input.handle();
 
-        if (shared.goalReached) {
-            try level.reset();
+        if (shared.editingLevel) {} else {
+            try gameLoop();
         }
-
-        player.clampSpeed();
-
-        try player.checkSensors();
-        try sensor.checkGoal();
-
-        camera.followPlayer();
 
         try renderer.render();
 
         // keep track of time spent per frame
         time.frameEnd();
     }
+}
+
+fn gameLoop() !void {
+    if (shared.goalReached) {
+        try level.reset();
+    }
+
+    player.clampSpeed();
+
+    try player.checkSensors();
+    try sensor.checkGoal();
+
+    camera.followPlayer();
 }

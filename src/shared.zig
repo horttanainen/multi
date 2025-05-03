@@ -9,6 +9,7 @@ const time = @import("time.zig");
 const debug = @import("debug.zig");
 const config = @import("config.zig");
 const entity = @import("entity.zig");
+const delay = @import("delay.zig");
 
 const lieroImgSrc = "images/liero.png";
 const boxImgSrc = "images/box.png";
@@ -31,6 +32,7 @@ pub const allocator = gpa.allocator();
 
 pub var quitGame = false;
 pub var goalReached = false;
+pub var editingLevel = false;
 
 pub var maybeResources: ?SharedResources = null;
 
@@ -42,7 +44,7 @@ pub fn getResources() !SharedResources {
 }
 
 pub fn init() !SharedResources {
-    try sdl.init(.{ .audio = true, .video = true });
+    try sdl.init(.{ .audio = true, .video = true, .timer = true });
     time.init();
 
     try ttf.init();
@@ -79,6 +81,8 @@ pub fn init() !SharedResources {
 }
 
 pub fn cleanup() void {
+    delay.cleanup();
+
     if (maybeResources) |resources| {
         box2d.b2DestroyWorld(resources.worldId);
         ttf.Font.close(resources.monocraftFont);
