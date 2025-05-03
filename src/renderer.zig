@@ -4,7 +4,7 @@ const sdl = @import("zsdl");
 const camera = @import("camera.zig");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
-const fps = @import("fps.zig");
+const ui = @import("ui.zig");
 const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -34,7 +34,8 @@ pub fn render() !void {
         try drawVerticalLine(@as(i32, @intCast(y)) * 100);
     }
 
-    try fps.draw();
+    try ui.drawMode();
+    try ui.drawFps();
 
     sdl.renderPresent(renderer);
 }

@@ -10,7 +10,6 @@ const SharedResources = @import("shared.zig").SharedResources;
 const allocator = @import("shared.zig").allocator;
 const sensor = @import("sensor.zig");
 const time = @import("time.zig");
-const fps = @import("fps.zig");
 const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
 const input = @import("input.zig");
