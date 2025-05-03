@@ -2,6 +2,7 @@ const std = @import("std");
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 
+const delay = @import("delay.zig");
 const entity = @import("entity.zig");
 const shared = @import("shared.zig");
 const box = @import("box.zig");
@@ -17,7 +18,6 @@ pub const Player = struct { entity: entity.Entity, bodyShapeId: box2d.b2ShapeId,
 pub var maybePlayer: ?Player = null;
 pub var isMoving: bool = false;
 pub var touchesGround: bool = false;
-pub var allowJump: bool = true;
 pub var touchesWallOnLeft: bool = false;
 pub var touchesWallOnRight: bool = false;
 var airJumpCounter: i32 = 0;
@@ -84,7 +84,7 @@ pub fn spawn(position: IVec2) !void {
 }
 
 pub fn jump() void {
-    if (!allowJump) {
+    if (delay.check("jump")) {
         return;
     }
 
@@ -105,6 +105,7 @@ pub fn jump() void {
         }
 
         box2d.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
+        delay.action("jump", 500);
     }
 }
 

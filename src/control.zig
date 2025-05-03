@@ -24,7 +24,7 @@ pub fn handleGameMouseInput() !void {
             shapeDef.friction = 0.5;
             try entity.createFromImg(camera.relativePositionForCreating(.{ .x = x, .y = y }), resources.boxSurface, shapeDef);
 
-            try delay.action("boxcreate", 200);
+            delay.action("boxcreate", 200);
         }
     }
 }
@@ -39,7 +39,6 @@ pub fn handleGameKeyboardInput() void {
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 1) {
         player.jump();
-        player.allowJump = false;
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         shared.quitGame = true;
@@ -50,10 +49,6 @@ pub fn handleGameKeyboardInput() void {
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
         player.brake();
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 0) {
-        player.allowJump = true;
     }
 }
 

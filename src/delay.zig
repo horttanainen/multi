@@ -20,8 +20,10 @@ pub fn check(name: [:0]const u8) bool {
     return delayedActions.contains(name);
 }
 
-pub fn action(name: [:0]const u8, delayMs: u32) !void {
-    try delayedActions.put(name, true);
+pub fn action(name: [:0]const u8, delayMs: u32) void {
+    delayedActions.put(name, true) catch {
+        return;
+    };
     const keyPtr = delayedActions.getKeyPtr(name);
 
     _ = addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
