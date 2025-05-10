@@ -1,6 +1,7 @@
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 
+const config = @import("config.zig");
 const delay = @import("delay.zig");
 const camera = @import("camera.zig");
 const shared = @import("shared.zig");
@@ -24,7 +25,7 @@ pub fn handleGameMouseInput() !void {
             shapeDef.friction = 0.5;
             try entity.createFromImg(camera.relativePositionForCreating(.{ .x = x, .y = y }), resources.boxSurface, shapeDef);
 
-            delay.action("boxcreate", 200);
+            delay.action("boxcreate", config.boxCreateDelayMs);
         }
     }
 }
@@ -41,12 +42,15 @@ pub fn handleGameKeyboardInput() void {
         player.jump();
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
-        shared.quitGame = true;
+        if (!delay.check("quitGame")) {
+            shared.quitGame = true;
+            delay.action("quitGame", config.quitGameDelayMs);
+        }
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             shared.editingLevel = true;
-            delay.action("leveleditortoggle", 1000);
+            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
 
@@ -67,12 +71,22 @@ pub fn handleLevelEditorMouseInput() void {
 pub fn handleLevelEditorKeyboardInput() void {
     const currentKeyStates = sdl.getKeyboardState();
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
-        levelEditor.moveLeft();
+        camera.moveLeft();
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 1) {
+        camera.moveRight();
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
+        if (!delay.check("leveleditortoggle")) {
+            shared.editingLevel = false;
+            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
+            delay.action("quitGame", config.quitGameDelayMs);
+        }
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             shared.editingLevel = false;
-            delay.action("leveleditortoggle", 1000);
+            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
 }

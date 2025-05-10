@@ -3,6 +3,7 @@ const box2d = @import("box2dnative.zig");
 const IVec2 = @import("vector.zig").IVec2;
 
 const shared = @import("shared.zig");
+const time = @import("time.zig");
 
 const p2m = @import("conversion.zig").p2m;
 const m2P = @import("conversion.zig").m2P;
@@ -84,4 +85,16 @@ pub fn getState(bodyId: box2d.b2BodyId) State {
     const rotationAngle = box2d.b2Rot_GetAngle(box2d.b2Body_GetRotation(bodyId));
 
     return .{ .pos = position, .rotAngle = rotationAngle };
+}
+
+pub fn getInterpolatedState(maybeEarlierState: ?State, currentState: State) State {
+    var interpolatedPosMeter = currentState.pos;
+    var interpolatedRotationAngle = currentState.rotAngle;
+    if (maybeEarlierState) |earlierState| {
+        interpolatedPosMeter = box2d.b2Vec2{ .x = @floatCast(time.alpha * currentState.pos.x + (1 - time.alpha) * earlierState.pos.x), .y = @floatCast(time.alpha * currentState.pos.y + (1 - time.alpha) * earlierState.pos.y) };
+
+        interpolatedRotationAngle = @floatCast(time.alpha * currentState.rotAngle + (1 - time.alpha) * earlierState.rotAngle);
+    }
+
+    return .{ .pos = interpolatedPosMeter, .rotAngle = interpolatedRotationAngle };
 }
