@@ -41,7 +41,9 @@ pub fn draw(entity: Entity) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
-    const state = getInterpolatedState(entity);
+    const currentState = box.getState(entity.bodyId);
+    const state = box.getInterpolatedState(entity.state, currentState);
+
     const pos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, entity.sprite.dimM.x, entity.sprite.dimM.y));
 
     const rect = sdl.Rect{
@@ -97,22 +99,9 @@ pub fn cleanup() void {
     entities = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 }
 
-fn getInterpolatedState(entity: Entity) State {
-    const currentState = box.getState(entity.bodyId);
-
-    var interpolatedPosMeter = currentState.pos;
-    var interpolatedRotationAngle = currentState.rotAngle;
-    if (entity.state) |earlierState| {
-        interpolatedPosMeter = box2d.b2Vec2{ .x = @floatCast(time.alpha * currentState.pos.x + (1 - time.alpha) * earlierState.pos.x), .y = @floatCast(time.alpha * currentState.pos.y + (1 - time.alpha) * earlierState.pos.y) };
-
-        interpolatedRotationAngle = @floatCast(time.alpha * currentState.rotAngle + (1 - time.alpha) * earlierState.rotAngle);
-    }
-
-    return .{ .pos = interpolatedPosMeter, .rotAngle = interpolatedRotationAngle };
-}
-
 pub fn getPosition(entity: Entity) IVec2 {
-    const state = getInterpolatedState(entity);
+    const currentState = box.getState(entity.bodyId);
+    const state = box.getInterpolatedState(entity.state, currentState);
     const pos = conv.m2Pixel(state.pos);
     return pos;
 }
