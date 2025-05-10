@@ -1,0 +1,39 @@
+{
+    "size": {
+        "x": 1680,
+        "y": 1680
+    },
+    "entities": [
+        {
+            "dynamic": false,
+            "friction": 0.5,
+            "imgPath": "images/level.png",
+            "pos": {
+                "x": 400,
+                "y": 400
+            }
+        },
+        {
+            "dynamic": true,
+            "friction": 0.5,
+            "imgPath": "images/bean.png",
+            "pos": {
+                "x": 400,
+                "y": 400
+            }
+        }
+    ],
+    "spawn": {
+        "x": 250,
+        "y": 450
+    },
+    "goal": {
+        "dynamic": false,
+        "friction": 0,
+        "imgPath": "images/duff.png",
+        "pos": {
+            "x": 700,
+            "y": 550
+        }
+    }
+}

@@ -34,25 +34,6 @@ const LevelError = error{
     Uninitialized,
 };
 
-// pub fn draw() !void {
-//     const resources = try shared.getResources();
-//     const renderer = resources.renderer;
-//     const level = try getLevel();
-
-//     const bodyId = level.bodyId;
-//     const sprite = level.sprite;
-//     const posMeter = box2d.b2Body_GetPosition(bodyId);
-
-//     const pos = camera.relativePosition(m2PixelPos(posMeter.x, posMeter.y, sprite.dimM.x, sprite.dimM.y));
-//     const rect = sdl.Rect{
-//         .x = pos.x,
-//         .y = pos.y,
-//         .w = m2P(sprite.dimM.x),
-//         .h = m2P(sprite.dimM.y),
-//     };
-//     try sdl.renderCopy(renderer, sprite.texture, null, &rect);
-// }
-
 pub const SerializableEntity = struct {
     dynamic: bool,
     friction: f32,
@@ -67,83 +48,18 @@ pub const Level = struct {
     goal: SerializableEntity,
 };
 
-const levels = [_]Level{
-    Level{
-        .size = IVec2{ .x = 1680, .y = 1680 },
-        .entities = [2]SerializableEntity{
-            .{
-                .dynamic = false,
-                .friction = 0.5,
-                .imgPath = "images/level.png",
-                .pos = IVec2{
-                    .x = 400,
-                    .y = 400,
-                },
-            },
-            .{
-                .dynamic = true,
-                .friction = 0.5,
-                .imgPath = "images/bean.png",
-                .pos = IVec2{
-                    .x = 400,
-                    .y = 400,
-                },
-            },
-        },
-        .spawn = IVec2{
-            .x = 250,
-            .y = 450,
-        },
-        .goal = SerializableEntity{
-            .dynamic = false,
-            .friction = 0,
-            .imgPath = "images/duff.png",
-            .pos = IVec2{
-                .x = 700,
-                .y = 550,
-            },
-        },
-    },
-    Level{
-        .size = IVec2{ .x = 840, .y = 840 },
-        .entities = [_]SerializableEntity{
-            .{
-                .dynamic = false,
-                .friction = 0.5,
-                .imgPath = "images/level2.png",
-                .pos = IVec2{
-                    .x = 400,
-                    .y = 400,
-                },
-            },
-            .{
-                .dynamic = true,
-                .friction = 0.5,
-                .imgPath = "images/bean.png",
-                .pos = IVec2{
-                    .x = 400,
-                    .y = 400,
-                },
-            },
-        },
-        .spawn = IVec2{
-            .x = 600,
-            .y = 50,
-        },
-        .goal = SerializableEntity{
-            .dynamic = false,
-            .friction = 0,
-            .imgPath = "images/duff.png",
-            .pos = IVec2{
-                .x = 100,
-                .y = 250,
-            },
-        },
-    },
-};
+pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
+    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 2048);
+    defer shared.allocator.free(data);
+    const parsed = try std.json.parseFromSlice(Level, shared.allocator, data, .{ .allocate = .alloc_always });
+    return parsed;
+}
 
 pub fn create() !void {
-    const levelToDeserialize = levels[levelNumber];
+    const levelJson = if (levelNumber == 0) "levels/riku.json" else "levels/ducks.json";
+    const parsed = try parseLevel(levelJson);
+    defer parsed.deinit();
+    const levelToDeserialize = parsed.value;
 
     for (levelToDeserialize.entities) |e| {
         const surface = try image.load(e.imgPath);
@@ -160,7 +76,7 @@ pub fn create() !void {
     const goalSurface = try image.load(levelToDeserialize.goal.imgPath);
     try sensor.createGoalSensorFromImg(levelToDeserialize.goal.pos, goalSurface);
 
-    levelNumber = @mod(levelNumber + 1, levels.len);
+    levelNumber = @mod(levelNumber + 1, 2);
     size = levelToDeserialize.size;
 }
 
