@@ -105,7 +105,7 @@ pub fn jump() void {
         }
 
         box2d.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
-        delay.action("jump", 500);
+        delay.action("jump", config.jumpDelayMs);
     }
 }
 
@@ -114,18 +114,20 @@ pub fn brake() void {
 }
 
 pub fn moveLeft() void {
-    isMoving = true;
-    if (maybePlayer) |p| {
-        box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 }, true);
-    }
+    applyForce(box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
 }
 
 pub fn moveRight() void {
+    applyForce(box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
+}
+
+fn applyForce(force: box2d.b2Vec2) void {
     isMoving = true;
     if (maybePlayer) |p| {
-        box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 }, true);
+        box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, force, true);
     }
 }
+
 pub fn clampSpeed() void {
     if (maybePlayer) |p| {
         var velocity = box2d.b2Body_GetLinearVelocity(p.entity.bodyId);
