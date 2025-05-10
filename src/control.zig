@@ -76,6 +76,12 @@ pub fn handleLevelEditorKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 1) {
         camera.moveRight();
     }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.w)] == 1) {
+        camera.moveUp();
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.s)] == 1) {
+        camera.moveDown();
+    }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             shared.editingLevel = false;

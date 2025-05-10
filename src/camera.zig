@@ -17,9 +17,10 @@ var maybeCamera: ?Camera = null;
 pub fn spawn(position: vec.IVec2) !void {
     const bodyId = try box.createDynamicBody(position);
     box2d.b2Body_SetGravityScale(bodyId, 0);
+    box2d.b2Body_SetLinearDamping(bodyId, 2);
 
     var shapeDef = box2d.b2DefaultShapeDef();
-    shapeDef.friction = 0.5;
+    shapeDef.friction = 1;
     shapeDef.isSensor = true;
 
     const polygon = box2d.b2MakeSquare(0.5);
@@ -61,11 +62,19 @@ pub fn followKeyboard() void {
 }
 
 pub fn moveLeft() void {
-    applyForce(box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(box2d.b2Vec2{ .x = -config.levelEditorCameraMovementForce, .y = 0 });
 }
 
 pub fn moveRight() void {
-    applyForce(box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(box2d.b2Vec2{ .x = config.levelEditorCameraMovementForce, .y = 0 });
+}
+
+pub fn moveUp() void {
+    applyForce(box2d.b2Vec2{ .x = 0, .y = -config.levelEditorCameraMovementForce });
+}
+
+pub fn moveDown() void {
+    applyForce(box2d.b2Vec2{ .x = 0, .y = config.levelEditorCameraMovementForce });
 }
 
 fn applyForce(force: box2d.b2Vec2) void {
