@@ -55,9 +55,29 @@ pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
     return parsed;
 }
 
+pub fn findLevels() ![][]const u8 {
+    var dir = try std.fs.cwd().openDir("levels", .{});
+    defer dir.close();
+
+    var fileList = std.ArrayList([]const u8).init(shared.allocator);
+
+    var dirIterator = dir.iterate();
+
+    while (try dirIterator.next()) |dirContent| {
+        try fileList.append(dirContent.name);
+    }
+
+    return fileList.toOwnedSlice();
+}
+
 pub fn create() !void {
-    const levelJson = if (levelNumber == 0) "levels/riku.json" else "levels/ducks.json";
-    const parsed = try parseLevel(levelJson);
+    const levels = try findLevels();
+    defer shared.allocator.free(levels);
+
+    var textBuf: [100]u8 = undefined;
+    const levelPath = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levels[levelNumber]});
+
+    const parsed = try parseLevel(levelPath);
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 
@@ -76,7 +96,7 @@ pub fn create() !void {
     const goalSurface = try image.load(levelToDeserialize.goal.imgPath);
     try sensor.createGoalSensorFromImg(levelToDeserialize.goal.pos, goalSurface);
 
-    levelNumber = @mod(levelNumber + 1, 2);
+    levelNumber = @mod(levelNumber + 1, levels.len);
     size = levelToDeserialize.size;
 }
 
