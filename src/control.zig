@@ -1,6 +1,7 @@
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 
+const box = @import("box.zig");
 const config = @import("config.zig");
 const delay = @import("delay.zig");
 const camera = @import("camera.zig");
@@ -23,7 +24,8 @@ pub fn handleGameMouseInput() !void {
             const resources = try shared.getResources();
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
-            try entity.createFromImg(camera.relativePositionForCreating(.{ .x = x, .y = y }), resources.boxSurface, shapeDef);
+            const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(.{ .x = x, .y = y }));
+            try entity.createFromImg(resources.boxSurface, shapeDef, bodyDef);
 
             delay.action("boxcreate", config.boxCreateDelayMs);
         }
