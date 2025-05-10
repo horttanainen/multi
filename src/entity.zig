@@ -20,10 +20,21 @@ const IVec2 = @import("vector.zig").IVec2;
 
 const conv = @import("conversion.zig");
 
-pub const Sprite = struct { texture: *sdl.Texture, dimM: Vec2 };
-pub const Entity = struct { bodyId: box2d.b2BodyId, state: ?State, sprite: Sprite, shapeIds: []box2d.b2ShapeId };
+pub const Sprite = struct {
+    texture: *sdl.Texture,
+    dimM: Vec2,
+};
+pub const Entity = struct {
+    bodyId: box2d.b2BodyId,
+    state: ?State,
+    sprite: Sprite,
+    shapeIds: []box2d.b2ShapeId,
+};
 
-pub var entities: AutoArrayHashMap(box2d.b2BodyId, Entity) = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
+pub var entities: AutoArrayHashMap(
+    box2d.b2BodyId,
+    Entity,
+) = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 
 pub fn updateStates() void {
     for (entities.values()) |*e| {
@@ -55,14 +66,8 @@ pub fn draw(entity: Entity) !void {
     try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
-pub fn createStaticFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.ShapeDef) !void {
-    const bodyId = try box.createStaticBody(position);
-    const entity = try createEntityForBody(bodyId, img, shapeDef);
-    try entities.put(bodyId, entity);
-}
-
-pub fn createFromImg(position: IVec2, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !void {
-    const bodyId = try box.createDynamicBody(position);
+pub fn createFromImg(img: *sdl.Surface, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef) !void {
+    const bodyId = try box.createBody(bodyDef);
     const entity = try createEntityForBody(bodyId, img, shapeDef);
     try entities.put(bodyId, entity);
 }

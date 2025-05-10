@@ -51,7 +51,8 @@ pub fn spawn(position: IVec2) !void {
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
     const dimM = p2m(.{ .x = size.x, .y = size.y });
 
-    const bodyId = try box.createNonRotatingDynamicBody(position);
+    const bodyDef = box.createNonRotatingDynamicBodyDef(position);
+    const bodyId = try box.createBody(bodyDef);
 
     const dynamicBox = box2d.b2MakeBox(0.1, 0.33);
     var shapeDef = box2d.b2DefaultShapeDef();

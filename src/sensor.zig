@@ -36,7 +36,8 @@ pub fn createGoalSensorFromImg(position: IVec2, img: *sdl.Surface) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.isSensor = true;
     shapeDef.material = config.goalMaterialId;
-    const bodyId = try box.createStaticBody(position);
+    const bodyDef = box.createStaticBodyDef(position);
+    const bodyId = try box.createBody(bodyDef);
     const e = try entity.createEntityForBody(bodyId, img, shapeDef);
     maybeGoalSensor = e;
 }

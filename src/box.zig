@@ -13,33 +13,28 @@ pub const State = struct {
     rotAngle: f32,
 };
 
-pub fn createNonRotatingDynamicBody(position: IVec2) !box2d.b2BodyId {
-    const resources = try shared.getResources();
-    const worldId = resources.worldId;
-    var bodyDef = box2d.b2DefaultBodyDef();
-    bodyDef.type = box2d.b2_dynamicBody;
-    bodyDef.position = p2m(position);
+pub fn createNonRotatingDynamicBodyDef(position: IVec2) box2d.b2BodyDef {
+    var bodyDef = createDynamicBodyDef(position);
     bodyDef.fixedRotation = true;
-    const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
-    return bodyId;
+    return bodyDef;
 }
 
-pub fn createDynamicBody(position: IVec2) !box2d.b2BodyId {
-    const resources = try shared.getResources();
-    const worldId = resources.worldId;
+pub fn createDynamicBodyDef(position: IVec2) box2d.b2BodyDef {
     var bodyDef = box2d.b2DefaultBodyDef();
     bodyDef.type = box2d.b2_dynamicBody;
     bodyDef.position = p2m(position);
-    const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
-    return bodyId;
+    return bodyDef;
 }
 
-pub fn createStaticBody(position: IVec2) !box2d.b2BodyId {
+pub fn createStaticBodyDef(position: IVec2) box2d.b2BodyDef {
+    var bodyDef = createDynamicBodyDef(position);
+    bodyDef.type = box2d.b2_staticBody;
+    return bodyDef;
+}
+
+pub fn createBody(bodyDef: box2d.b2BodyDef) !box2d.b2BodyId {
     const resources = try shared.getResources();
     const worldId = resources.worldId;
-    var bodyDef = box2d.b2DefaultBodyDef();
-    bodyDef.type = box2d.b2_staticBody;
-    bodyDef.position = p2m(position);
     const bodyId = box2d.b2CreateBody(worldId, &bodyDef);
     return bodyId;
 }
