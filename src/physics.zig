@@ -5,6 +5,7 @@ const config = @import("config.zig");
 const time = @import("time.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
+const camera = @import("camera.zig");
 
 pub fn step() !void {
     const resources = try shared.getResources();
@@ -12,6 +13,7 @@ pub fn step() !void {
     while (time.accumulator >= config.physics.dt) {
         entity.updateStates();
         player.updateState();
+        camera.updateState();
         box2d.b2World_Step(resources.worldId, config.physics.dt, config.physics.subStepCount);
         time.accumulator -= config.physics.dt;
     }

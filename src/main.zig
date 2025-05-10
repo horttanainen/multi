@@ -74,6 +74,7 @@ pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
 
+    try camera.spawn(.{ .x = 200, .y = 400 });
     try level.create();
     defer level.cleanup();
 
@@ -86,7 +87,9 @@ pub fn main() !void {
 
         try input.handle();
 
-        if (shared.editingLevel) {} else {
+        if (shared.editingLevel) {
+            levelEditorLoop();
+        } else {
             try gameLoop();
         }
 
@@ -95,6 +98,10 @@ pub fn main() !void {
         // keep track of time spent per frame
         time.frameEnd();
     }
+}
+
+fn levelEditorLoop() void {
+    camera.followKeyboard();
 }
 
 fn gameLoop() !void {
