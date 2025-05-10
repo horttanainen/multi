@@ -32,7 +32,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
-//TODO: make the current level "change" logic use somekind of serialized solution
 //TODO: create rudimentary level editor: user can draw window sized level using rocks
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
