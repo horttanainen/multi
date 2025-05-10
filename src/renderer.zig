@@ -21,7 +21,6 @@ pub fn render() !void {
     try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
     try sdl.renderClear(renderer);
 
-    try level.draw();
     try sensor.drawGoal();
     try entity.drawAll();
     try player.draw();
