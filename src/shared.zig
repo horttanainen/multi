@@ -25,7 +25,21 @@ const monocraftSrc = "fonts/monocraft.ttf";
 
 const SharedResourcesError = error{Uninitialized};
 
-pub const SharedResources = struct { worldId: box2d.b2WorldId, window: *sdl.Window, renderer: *sdl.Renderer, boxSurface: *sdl.Surface, starSurface: *sdl.Surface, beanSurface: *sdl.Surface, ballSurface: *sdl.Surface, nickiSurface: *sdl.Surface, levelSurface: *sdl.Surface, level2Surface: *sdl.Surface, lieroSurface: *sdl.Surface, duffSurface: *sdl.Surface, monocraftFont: *ttf.Font };
+pub const SharedResources = struct {
+    worldId: box2d.b2WorldId,
+    window: *sdl.Window,
+    renderer: *sdl.Renderer,
+    boxSurface: *sdl.Surface,
+    starSurface: *sdl.Surface,
+    beanSurface: *sdl.Surface,
+    ballSurface: *sdl.Surface,
+    nickiSurface: *sdl.Surface,
+    levelSurface: *sdl.Surface,
+    level2Surface: *sdl.Surface,
+    lieroSurface: *sdl.Surface,
+    duffSurface: *sdl.Surface,
+    monocraftFont: *ttf.Font,
+};
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub const allocator = gpa.allocator();
@@ -71,7 +85,21 @@ pub fn init() !SharedResources {
     const duffSurface = try image.load(duffImgSrc);
 
     // instantiate shared resources
-    const s = SharedResources{ .window = window, .renderer = renderer, .boxSurface = boxSurface, .worldId = worldId, .starSurface = starSurface, .beanSurface = beanSurface, .ballSurface = ballSurface, .nickiSurface = nickiSurface, .levelSurface = levelSurface, .level2Surface = level2Surface, .lieroSurface = lieroSurface, .duffSurface = duffSurface, .monocraftFont = monocraftFont };
+    const s = SharedResources{
+        .window = window,
+        .renderer = renderer,
+        .boxSurface = boxSurface,
+        .worldId = worldId,
+        .starSurface = starSurface,
+        .beanSurface = beanSurface,
+        .ballSurface = ballSurface,
+        .nickiSurface = nickiSurface,
+        .levelSurface = levelSurface,
+        .level2Surface = level2Surface,
+        .lieroSurface = lieroSurface,
+        .duffSurface = duffSurface,
+        .monocraftFont = monocraftFont,
+    };
 
     maybeResources = s;
 
