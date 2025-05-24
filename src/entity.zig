@@ -21,6 +21,7 @@ const conv = @import("conversion.zig");
 
 pub const Sprite = struct {
     texture: *sdl.Texture,
+    surface: *sdl.Surface,
     dimM: vec.Vec2,
 };
 pub const Entity = struct {
@@ -89,7 +90,7 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
 
     const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
-    const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
+    const sprite = Sprite{ .surface = img, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
     const entity = Entity{ .state = null, .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds, .highlighted = false };
     return entity;

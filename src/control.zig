@@ -91,6 +91,26 @@ pub fn handleLevelEditorKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.s)] == 1) {
         camera.moveDown();
     }
+
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.c)] == 1) {
+        if (!delay.check("levelEditorClick")) {
+            levelEditor.copySelection();
+            delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+        }
+    }
+
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.v)] == 1) {
+        if (!delay.check("levelEditorClick")) {
+            var x: i32 = 0;
+            var y: i32 = 0;
+            _ = sdl.getMouseState(&x, &y);
+            levelEditor.pasteSelection(.{ .x = x, .y = y }) catch {
+                std.debug.print("Error pasteing selection\n", .{});
+            };
+            delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+        }
+    }
+
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             shared.editingLevel = false;

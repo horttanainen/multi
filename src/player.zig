@@ -45,7 +45,8 @@ pub fn updateState() void {
 
 pub fn spawn(position: IVec2) !void {
     const resources = try shared.getResources();
-    const texture = try sdl.createTextureFromSurface(resources.renderer, resources.lieroSurface);
+    const surface = resources.lieroSurface;
+    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
@@ -76,7 +77,7 @@ pub fn spawn(position: IVec2) !void {
     rightWallShapeDef.isSensor = true;
     const rightWallSensorId = box2d.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
-    const sprite = entity.Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
+    const sprite = entity.Sprite{ .surface = surface, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
     try shapeIds.append(shapeId);
