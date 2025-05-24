@@ -5,7 +5,7 @@
     },
     "entities": [
         {
-            "dynamic": false,
+            "type": "static",
             "friction": 0.5,
             "imgPath": "images/level2.png",
             "pos": {
@@ -14,26 +14,31 @@
             }
         },
         {
-            "dynamic": true,
+            "type": "dynamic",
             "friction": 0.5,
             "imgPath": "images/bean.png",
             "pos": {
                 "x": 400,
                 "y": 400
             }
+        },
+        {
+            "type": "goal",
+            "friction": 0,
+              "imgPath": "images/duff.png",
+              "pos": {
+                  "x": 100,
+                  "y": 250
+              }
+        },
+        {
+            "type": "spawn",
+            "friction": 0,
+              "imgPath": "images/spawn.png",
+              "pos": {
+                  "x": 600,
+                  "y": 50
+              }
         }
-    ],
-    "spawn": {
-        "x": 600,
-        "y": 50
-    },
-    "goal": {
-        "dynamic": false,
-        "friction": 0,
-        "imgPath": "images/duff.png",
-        "pos": {
-            "x": 100,
-            "y": 250
-        }
-    }
+    ]
 }

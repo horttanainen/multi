@@ -3,6 +3,7 @@ const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 const box2d = @import("box2dnative.zig");
 
+const config = @import("config.zig");
 const polygon = @import("polygon.zig");
 const box = @import("box.zig");
 const shared = @import("shared.zig");
@@ -35,7 +36,7 @@ const LevelError = error{
 };
 
 pub const SerializableEntity = struct {
-    dynamic: bool,
+    type: []const u8,
     friction: f32,
     imgPath: [:0]const u8,
     pos: IVec2,
@@ -44,8 +45,6 @@ pub const SerializableEntity = struct {
 pub const Level = struct {
     size: IVec2,
     entities: []SerializableEntity,
-    spawn: IVec2,
-    goal: SerializableEntity,
 };
 
 pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
@@ -81,20 +80,31 @@ pub fn create() !void {
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 
+    var spawnLocation = IVec2{ .x = 0, .y = 0 };
+
     for (levelToDeserialize.entities) |e| {
         const surface = try image.load(e.imgPath);
         var shapeDef = box2d.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
 
-        const bodyDef = if (e.dynamic) box.createDynamicBodyDef(e.pos) else box.createStaticBodyDef(e.pos);
-
-        try entity.createFromImg(surface, shapeDef, bodyDef);
+        if (std.mem.eql(u8, e.type, "dynamic")) {
+            const bodyDef = box.createDynamicBodyDef(e.pos);
+            try entity.createFromImg(surface, shapeDef, bodyDef);
+        } else if (std.mem.eql(u8, e.type, "static")) {
+            const bodyDef = box.createStaticBodyDef(e.pos);
+            try entity.createFromImg(surface, shapeDef, bodyDef);
+        } else if (std.mem.eql(u8, e.type, "goal")) {
+            try sensor.createGoalSensorFromImg(e.pos, surface);
+        } else if (std.mem.eql(u8, e.type, "spawn")) {
+            const bodyDef = box.createStaticBodyDef(e.pos);
+            shapeDef.isSensor = true;
+            shapeDef.material = config.spawnMaterialId;
+            try entity.createFromImg(surface, shapeDef, bodyDef);
+            spawnLocation = e.pos;
+        }
     }
 
-    try player.spawn(levelToDeserialize.spawn);
-
-    const goalSurface = try image.load(levelToDeserialize.goal.imgPath);
-    try sensor.createGoalSensorFromImg(levelToDeserialize.goal.pos, goalSurface);
+    try player.spawn(spawnLocation);
 
     levelNumber = @mod(levelNumber + 1, levels.len);
     size = levelToDeserialize.size;

@@ -8,6 +8,7 @@ pub const window = .{
 pub const met2pix = 80;
 
 pub const goalMaterialId = 420;
+pub const spawnMaterialId = 69;
 
 pub const physics = .{
     .dt = 1.0 / 60.0,
