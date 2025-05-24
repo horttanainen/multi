@@ -32,6 +32,12 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
+//TODO: when entering level editor, a folder is created for the level and the current level.json is copied as the base version.
+//TODO: All edits create a new version of the copied json in the folder.
+//TODO: Pressing r in level editor reloads the level from latest version
+//TODO: pressing ctrl z in level editor loads the previous version of the json.
+//TODO: pressing ctrl r in level editor loads the next version of the json.
+//TODO: closing the game removes all other versions of the level from the folder except the one being open.
 //TODO: user can move entities
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
