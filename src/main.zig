@@ -32,12 +32,10 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
-//TODO: create rudimentary level editor: user can draw window sized level using rocks
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
 //TODO: user can save level
 //TODO: add option for user to create parallax background from images
-//TODO: user can use beams in level editor
 //TODO: user can create spawn for player
 //TODO: user can create goal for player
 //TODO: user can create level that is bigger than screen
