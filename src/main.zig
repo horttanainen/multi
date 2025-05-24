@@ -32,7 +32,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
-//TODO: user can copy and paste entities
 //TODO: user can move entities
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
