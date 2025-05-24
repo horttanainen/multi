@@ -93,3 +93,11 @@ pub fn getInterpolatedState(maybeEarlierState: ?State, currentState: State) Stat
 
     return .{ .pos = interpolatedPosMeter, .rotAngle = interpolatedRotationAngle };
 }
+
+pub fn subtract(a: box2d.b2Vec2, b: box2d.b2Vec2) box2d.b2Vec2 {
+    return .{ .x = a.x - b.x, .y = a.y - b.y };
+}
+
+pub fn add(a: box2d.b2Vec2, b: box2d.b2Vec2) box2d.b2Vec2 {
+    return .{ .x = a.x + b.x, .y = a.y + b.y };
+}

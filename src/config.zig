@@ -40,4 +40,5 @@ pub const levelEditorCameraMovementForce = 10;
 pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
+pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;

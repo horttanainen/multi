@@ -1,3 +1,4 @@
+const std = @import("std");
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 
@@ -64,10 +65,16 @@ pub fn handleGameKeyboardInput() void {
 pub fn handleLevelEditorMouseInput() void {
     var x: i32 = 0;
     var y: i32 = 0;
-    const currentMouseStates = sdl.getMouseState(&x, &y);
+    const currentMouseState: u5 = @intCast(sdl.getMouseState(&x, &y));
 
-    //discard for now
-    _ = currentMouseStates;
+    if (currentMouseState & leftButtonMask == 1) {
+        if (!delay.check("levelEditorClick")) {
+            levelEditor.selectEntityAt(.{ .x = x, .y = y }) catch {
+                std.debug.print("Error selecting entity\n", .{});
+            };
+            delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+        }
+    }
 }
 
 pub fn handleLevelEditorKeyboardInput() void {

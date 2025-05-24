@@ -15,19 +15,19 @@ const PI = std.math.pi;
 const shared = @import("shared.zig");
 const allocator = @import("shared.zig").allocator;
 
-const Vec2 = @import("vector.zig").Vec2;
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
 
 pub const Sprite = struct {
     texture: *sdl.Texture,
-    dimM: Vec2,
+    dimM: vec.Vec2,
 };
 pub const Entity = struct {
     bodyId: box2d.b2BodyId,
     state: ?State,
     sprite: Sprite,
+    highlighted: bool,
     shapeIds: []box2d.b2ShapeId,
 };
 
@@ -43,12 +43,12 @@ pub fn updateStates() void {
 }
 
 pub fn drawAll() !void {
-    for (entities.values()) |e| {
+    for (entities.values()) |*e| {
         try draw(e);
     }
 }
 
-pub fn draw(entity: Entity) !void {
+pub fn draw(entity: *Entity) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
@@ -63,6 +63,11 @@ pub fn draw(entity: Entity) !void {
         .w = conv.m2P(entity.sprite.dimM.x),
         .h = conv.m2P(entity.sprite.dimM.y),
     };
+
+    try sdl.setTextureColorMod(entity.sprite.texture, 255, 255, 255);
+    if (entity.highlighted) {
+        try sdl.setTextureColorMod(entity.sprite.texture, 100, 100, 100);
+    }
     try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
@@ -86,12 +91,7 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
 
     const sprite = Sprite{ .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
-    const entity = Entity{
-        .state = null,
-        .bodyId = bodyId,
-        .sprite = sprite,
-        .shapeIds = shapeIds,
-    };
+    const entity = Entity{ .state = null, .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds, .highlighted = false };
     return entity;
 }
 
@@ -104,9 +104,13 @@ pub fn cleanup() void {
     entities = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 }
 
-pub fn getPosition(entity: Entity) IVec2 {
+pub fn getPosition(entity: Entity) vec.IVec2 {
     const currentState = box.getState(entity.bodyId);
     const state = box.getInterpolatedState(entity.state, currentState);
     const pos = conv.m2Pixel(state.pos);
     return pos;
+}
+
+pub fn getEntity(bodyId: box2d.b2BodyId) ?*Entity {
+    return entities.getPtr(bodyId);
 }

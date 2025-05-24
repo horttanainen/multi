@@ -32,8 +32,8 @@ pub fn getPlayer() !Player {
 }
 
 pub fn draw() !void {
-    if (maybePlayer) |player| {
-        try entity.draw(player.entity);
+    if (maybePlayer) |*player| {
+        try entity.draw(&player.entity);
     }
 }
 
@@ -81,7 +81,7 @@ pub fn spawn(position: IVec2) !void {
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
     try shapeIds.append(shapeId);
 
-    maybePlayer = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
+    maybePlayer = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null, .highlighted = false }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
 }
 
 pub fn jump() void {

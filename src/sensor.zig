@@ -28,8 +28,8 @@ pub fn getGoalSensor() !Entity {
 }
 
 pub fn drawGoal() !void {
-    const goalSensor = try getGoalSensor();
-    try entity.draw(goalSensor);
+    var goalSensor = try getGoalSensor();
+    try entity.draw(&goalSensor);
 }
 
 pub fn createGoalSensorFromImg(position: IVec2, img: *sdl.Surface) !void {
