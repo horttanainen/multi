@@ -13,12 +13,6 @@ const delay = @import("delay.zig");
 
 const lieroImgSrc = "images/liero.png";
 const boxImgSrc = "images/box.png";
-const starImgSrc = "images/star.png";
-const beanImgSrc = "images/bean.png";
-const ballImgSrc = "images/ball.png";
-const nickiImgSrc = "images/nicki.png";
-const levelImgSrc = "images/level.png";
-const level2ImgSrc = "images/level2.png";
 const duffImgSrc = "images/duff.png";
 
 const monocraftSrc = "fonts/monocraft.ttf";
@@ -30,12 +24,6 @@ pub const SharedResources = struct {
     window: *sdl.Window,
     renderer: *sdl.Renderer,
     boxSurface: *sdl.Surface,
-    starSurface: *sdl.Surface,
-    beanSurface: *sdl.Surface,
-    ballSurface: *sdl.Surface,
-    nickiSurface: *sdl.Surface,
-    levelSurface: *sdl.Surface,
-    level2Surface: *sdl.Surface,
     lieroSurface: *sdl.Surface,
     duffSurface: *sdl.Surface,
     monocraftFont: *ttf.Font,
@@ -75,12 +63,6 @@ pub fn init() !SharedResources {
     const worldId = box2d.b2CreateWorld(&worldDef);
 
     const boxSurface = try image.load(boxImgSrc);
-    const starSurface = try image.load(starImgSrc);
-    const beanSurface = try image.load(beanImgSrc);
-    const ballSurface = try image.load(ballImgSrc);
-    const nickiSurface = try image.load(nickiImgSrc);
-    const levelSurface = try image.load(levelImgSrc);
-    const level2Surface = try image.load(level2ImgSrc);
     const lieroSurface = try image.load(lieroImgSrc);
     const duffSurface = try image.load(duffImgSrc);
 
@@ -88,14 +70,8 @@ pub fn init() !SharedResources {
     const s = SharedResources{
         .window = window,
         .renderer = renderer,
-        .boxSurface = boxSurface,
         .worldId = worldId,
-        .starSurface = starSurface,
-        .beanSurface = beanSurface,
-        .ballSurface = ballSurface,
-        .nickiSurface = nickiSurface,
-        .levelSurface = levelSurface,
-        .level2Surface = level2Surface,
+        .boxSurface = boxSurface,
         .lieroSurface = lieroSurface,
         .duffSurface = duffSurface,
         .monocraftFont = monocraftFont,
