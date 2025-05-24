@@ -27,6 +27,8 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
             var shapes: [1]box2d.b2ShapeId = undefined;
             _ = box2d.b2Body_GetShapes(copiedBodyId, &shapes, 1);
             shapeDef.friction = box2d.b2Shape_GetFriction(shapes[0]);
+            shapeDef.isSensor = box2d.b2Shape_IsSensor(shapes[0]);
+            shapeDef.material = box2d.b2Shape_GetMaterial(shapes[0]);
 
             try entity.createFromImg(e.sprite.surface, shapeDef, bodyDef);
         }

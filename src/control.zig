@@ -69,7 +69,7 @@ pub fn handleLevelEditorMouseInput() void {
 
     if (currentMouseState & leftButtonMask == 1) {
         if (!delay.check("levelEditorClick")) {
-            levelEditor.selectEntityAt(.{ .x = x, .y = y }) catch {
+            levelEditor.selectEntityAt(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch {
                 std.debug.print("Error selecting entity\n", .{});
             };
             delay.action("levelEditorClick", config.levelEditorClickDelayMs);
@@ -104,7 +104,7 @@ pub fn handleLevelEditorKeyboardInput() void {
             var x: i32 = 0;
             var y: i32 = 0;
             _ = sdl.getMouseState(&x, &y);
-            levelEditor.pasteSelection(.{ .x = x, .y = y }) catch {
+            levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch {
                 std.debug.print("Error pasteing selection\n", .{});
             };
             delay.action("levelEditorClick", config.levelEditorClickDelayMs);
