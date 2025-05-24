@@ -43,13 +43,13 @@ pub const SerializableEntity = struct {
 
 pub const Level = struct {
     size: IVec2,
-    entities: [2]SerializableEntity,
+    entities: []SerializableEntity,
     spawn: IVec2,
     goal: SerializableEntity,
 };
 
 pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 2048);
+    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 4096);
     defer shared.allocator.free(data);
     const parsed = try std.json.parseFromSlice(Level, shared.allocator, data, .{ .allocate = .alloc_always });
     return parsed;
