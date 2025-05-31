@@ -118,3 +118,32 @@ pub fn overlapAABBCallback(shapeId: box2d.b2ShapeId, context: ?*anyopaque) callc
     // immediately stop searching for additional shapeIds
     return false;
 }
+
+fn findTemporaryFolders() ![][]const u8 {
+    var dir = try std.fs.cwd().openDir("levels", .{});
+    defer dir.close();
+
+    var folderList = std.ArrayList([]const u8).init(shared.allocator);
+
+    var dirIterator = dir.iterate();
+
+    while (try dirIterator.next()) |dirContent| {
+        if (dirContent.kind == std.fs.File.Kind.directory) {
+            try folderList.append(dirContent.name);
+        }
+    }
+
+    return folderList.toOwnedSlice();
+}
+
+pub fn cleanup() !void {
+    var dir = try std.fs.cwd().openDir("levels", .{});
+    defer dir.close();
+
+    const folders = try findTemporaryFolders();
+    defer shared.allocator.free(folders);
+
+    for (folders) |folder| {
+        try dir.deleteTree(folder);
+    }
+}

@@ -27,17 +27,18 @@ const player = @import("player.zig");
 
 const box = @import("box.zig");
 const level = @import("level.zig");
+const levelEditor = @import("levelEditor.zig");
 const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
+//TODO: closing the game removes all other versions of the level from the folder except the one being open. Json is moved to level folder.
 //TODO: pause time when entering level editor
 //TODO: All edits create a new version of the copied json in the folder.
 //TODO: Pressing r in level editor reloads the level from latest version
 //TODO: pressing ctrl z in level editor loads the previous version of the json.
 //TODO: pressing ctrl r in level editor loads the next version of the json.
-//TODO: closing the game removes all other versions of the level from the folder except the one being open. Json is moved to level folder.
 //TODO: user can move entities
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
@@ -82,6 +83,9 @@ pub fn main() !void {
     try camera.spawn(.{ .x = 200, .y = 400 });
     try level.create();
     defer level.cleanup();
+    defer levelEditor.cleanup() catch |err| {
+        std.debug.print("Error cleaning up created level folders: {!}\n", .{err});
+    };
 
     box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
