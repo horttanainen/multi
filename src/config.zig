@@ -42,3 +42,4 @@ pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
 pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;
+pub const reloadLevelDelayMs = 200;

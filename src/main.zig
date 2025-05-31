@@ -81,7 +81,7 @@ pub fn main() !void {
     defer shared.cleanup();
 
     try camera.spawn(.{ .x = 200, .y = 400 });
-    try level.create();
+    try level.loadByNumber(0);
     defer level.cleanup();
     defer levelEditor.cleanup() catch |err| {
         std.debug.print("Error cleaning up created level folders: {!}\n", .{err});
@@ -115,7 +115,7 @@ fn levelEditorLoop() void {
 
 fn gameLoop() !void {
     if (shared.goalReached) {
-        try level.reset();
+        try level.next();
     }
 
     player.clampSpeed();

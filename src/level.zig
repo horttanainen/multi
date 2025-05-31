@@ -74,14 +74,20 @@ pub fn findLevels() ![][]const u8 {
     return fileList.toOwnedSlice();
 }
 
-pub fn create() !void {
+pub fn loadByNumber(number: usize) !void {
     const levels = try findLevels();
     defer shared.allocator.free(levels);
 
-    var textBuf: [100]u8 = undefined;
-    const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levels[levelNumber]});
+    const levelName = levels[number];
 
-    json = try std.fmt.bufPrintZ(&textBuf2, "{s}", .{levels[levelNumber]});
+    const j = try std.fmt.bufPrintZ(&textBuf2, "{s}", .{levelName});
+    try loadByName(j);
+}
+
+fn loadByName(levelName: [:0]const u8) !void {
+    var textBuf: [100]u8 = undefined;
+    const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levelName});
+    json = levelName;
 
     const parsed = try parseLevel(levelP);
     defer parsed.deinit();
@@ -112,9 +118,12 @@ pub fn create() !void {
     }
 
     try player.spawn(spawnLocation);
-
-    levelNumber = @mod(levelNumber + 1, levels.len);
     size = levelToDeserialize.size;
+}
+
+pub fn reload() !void {
+    reset();
+    try loadByName(json);
 }
 
 pub fn cleanup() void {
@@ -123,10 +132,19 @@ pub fn cleanup() void {
     entity.cleanup();
 }
 
-pub fn reset() !void {
+pub fn reset() void {
     shared.goalReached = false;
     player.cleanup();
     sensor.cleanup();
     entity.cleanup();
-    try create();
+}
+
+pub fn next() !void {
+    reset();
+
+    const levels = try findLevels();
+    defer shared.allocator.free(levels);
+    levelNumber = @mod(levelNumber + 1, levels.len);
+
+    try loadByNumber(levelNumber);
 }

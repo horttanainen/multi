@@ -10,6 +10,7 @@ const shared = @import("shared.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const levelEditor = @import("levelEditor.zig");
+const level = @import("level.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -35,6 +36,14 @@ pub fn handleGameMouseInput() !void {
 
 pub fn handleGameKeyboardInput() void {
     const currentKeyStates = sdl.getKeyboardState();
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1) {
+        if (!delay.check("reloadLevel")) {
+            level.reload() catch |err| {
+                std.debug.print("Error reloading level: {!}\n", .{err});
+            };
+            delay.action("reloadLevel", config.reloadLevelDelayMs);
+        }
+    }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
         player.moveLeft();
     }
