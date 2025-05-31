@@ -33,7 +33,6 @@ const Sprite = entity.Sprite;
 
 //level editor todos:
 //TODO: pause time when entering level editor
-//TODO: when entering level editor, a folder is created for the level and the current level.json is copied as the base version.
 //TODO: All edits create a new version of the copied json in the folder.
 //TODO: Pressing r in level editor reloads the level from latest version
 //TODO: pressing ctrl z in level editor loads the previous version of the json.

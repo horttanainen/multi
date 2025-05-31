@@ -52,7 +52,9 @@ pub fn handleGameKeyboardInput() void {
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
-            levelEditor.enter();
+            levelEditor.enter() catch |err| {
+                std.debug.print("Error entering level editor: {!}\n", .{err});
+            };
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }

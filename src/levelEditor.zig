@@ -6,6 +6,7 @@ const entity = @import("entity.zig");
 const shared = @import("shared.zig");
 const conv = @import("conversion.zig");
 const box = @import("box.zig");
+const level = @import("level.zig");
 const vec = @import("vector.zig");
 
 var maybeSelectedBodyId: ?box2d.b2BodyId = null;
@@ -35,8 +36,43 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
     }
 }
 
-pub fn enter() void {
+fn createRandomAlphabeticalString(length: usize) ![]u8 {
+    var buffer = std.ArrayList(u8).init(shared.allocator);
+
+    for (0..length) |_| {
+        const randomInt = std.crypto.random.intRangeAtMost(u8, 97, 122);
+        try buffer.append(randomInt);
+    }
+
+    return buffer.toOwnedSlice();
+}
+
+pub fn enter() !void {
     shared.editingLevel = true;
+
+    const randomString = try createRandomAlphabeticalString(4);
+    defer shared.allocator.free(randomString);
+
+    var it = std.mem.splitSequence(u8, level.json, ".");
+    const levelName = it.first();
+
+    std.debug.print("levelName: {s}\n", .{levelName});
+
+    var textBuf1: [100]u8 = undefined;
+    const levelToEditName = try std.fmt.bufPrintZ(&textBuf1, "{s}{s}", .{ levelName, randomString });
+
+    std.debug.print("levelToEditName: {s}\n", .{levelToEditName});
+
+    var textBuf2: [100]u8 = undefined;
+    const editDirPath = try std.fmt.bufPrintZ(&textBuf2, "levels/{s}", .{levelToEditName});
+
+    std.debug.print("editDirPath: {s}\n", .{editDirPath});
+
+    try std.fs.cwd().makeDir(editDirPath);
+
+    const levelsD = try std.fs.cwd().openDir("levels", std.fs.Dir.OpenOptions{});
+    const editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
+    try std.fs.Dir.copyFile(levelsD, level.json, editingD, "1.json", std.fs.Dir.CopyFileOptions{});
 }
 
 pub fn exit() void {

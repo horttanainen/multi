@@ -22,6 +22,9 @@ const Entity = entity.Entity;
 
 var levelNumber: usize = 0;
 
+var textBuf2: [100]u8 = undefined;
+pub var json: [:0]const u8 = undefined;
+
 pub const position: IVec2 = .{
     .x = 400,
     .y = 400,
@@ -63,7 +66,9 @@ pub fn findLevels() ![][]const u8 {
     var dirIterator = dir.iterate();
 
     while (try dirIterator.next()) |dirContent| {
-        try fileList.append(dirContent.name);
+        if (dirContent.kind == std.fs.File.Kind.file) {
+            try fileList.append(dirContent.name);
+        }
     }
 
     return fileList.toOwnedSlice();
@@ -74,9 +79,11 @@ pub fn create() !void {
     defer shared.allocator.free(levels);
 
     var textBuf: [100]u8 = undefined;
-    const levelPath = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levels[levelNumber]});
+    const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levels[levelNumber]});
 
-    const parsed = try parseLevel(levelPath);
+    json = try std.fmt.bufPrintZ(&textBuf2, "{s}", .{levels[levelNumber]});
+
+    const parsed = try parseLevel(levelP);
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 
