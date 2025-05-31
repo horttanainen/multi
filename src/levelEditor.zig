@@ -36,6 +36,10 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
 }
 
 pub fn selectEntityAt(pos: vec.IVec2) !void {
+    if (maybeSelectedBodyId) |selectedBodyId| {
+        setSelection(selectedBodyId, false);
+    }
+
     const posM = conv.p2m(pos);
     const aabb = box2d.b2AABB{
         .lowerBound = box.subtract(posM, .{ .x = 0.1, .y = 0.1 }),
@@ -47,29 +51,23 @@ pub fn selectEntityAt(pos: vec.IVec2) !void {
     _ = box2d.b2World_OverlapAABB(resources.worldId, aabb, filter, &overlapAABBCallback, null);
 }
 
+fn setSelection(bodyId: box2d.b2BodyId, select: bool) void {
+    maybeSelectedBodyId = null;
+    const maybeE1 = entity.getEntity(bodyId);
+    if (maybeE1) |e| {
+        e.highlighted = select;
+    }
+    if (select) {
+        maybeSelectedBodyId = bodyId;
+    }
+}
+
 pub fn overlapAABBCallback(shapeId: box2d.b2ShapeId, context: ?*anyopaque) callconv(.C) bool {
     _ = context;
 
     const bodyId = box2d.b2Shape_GetBody(shapeId);
 
-    if (maybeSelectedBodyId) |selectedBodyId| {
-        const maybeE1 = entity.getEntity(selectedBodyId);
-        if (maybeE1) |e| {
-            e.highlighted = false;
-        }
-
-        const maybeE2 = entity.getEntity(bodyId);
-        if (maybeE2) |e| {
-            e.highlighted = true;
-        }
-    } else {
-        const maybeE = entity.getEntity(bodyId);
-        if (maybeE) |e| {
-            e.highlighted = true;
-        }
-    }
-
-    maybeSelectedBodyId = bodyId;
+    setSelection(bodyId, true);
     // immediately stop searching for additional shapeIds
     return false;
 }
