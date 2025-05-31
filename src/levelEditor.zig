@@ -35,6 +35,17 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
     }
 }
 
+pub fn enter() void {
+    shared.editingLevel = true;
+}
+
+pub fn exit() void {
+    if (maybeSelectedBodyId) |selectedBodyId| {
+        setSelection(selectedBodyId, false);
+    }
+    shared.editingLevel = false;
+}
+
 pub fn selectEntityAt(pos: vec.IVec2) !void {
     if (maybeSelectedBodyId) |selectedBodyId| {
         setSelection(selectedBodyId, false);

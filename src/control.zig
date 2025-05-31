@@ -52,7 +52,7 @@ pub fn handleGameKeyboardInput() void {
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
-            shared.editingLevel = true;
+            levelEditor.enter();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
@@ -113,14 +113,14 @@ pub fn handleLevelEditorKeyboardInput() void {
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         if (!delay.check("leveleditortoggle")) {
-            shared.editingLevel = false;
+            levelEditor.exit();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
-            shared.editingLevel = false;
+            levelEditor.exit();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
