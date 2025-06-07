@@ -23,7 +23,7 @@ const Entity = entity.Entity;
 var levelNumber: usize = 0;
 
 var jsonTextBuf: [100]u8 = undefined;
-pub var json: [:0]const u8 = undefined;
+pub var json: []const u8 = undefined;
 
 pub const position: vec.IVec2 = .{
     .x = 400,
@@ -71,9 +71,9 @@ pub fn findLevels() ![][]const u8 {
     return fileList.toOwnedSlice();
 }
 
-fn loadByName(levelName: [:0]const u8) !void {
+fn loadByName(levelName: []const u8) !void {
     var textBuf: [100]u8 = undefined;
-    const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levelName});
+    const levelP = try std.fmt.bufPrint(&textBuf, "levels/{s}", .{levelName});
     json = levelName;
 
     const parsed = try parseFromPath(levelP);
@@ -131,6 +131,6 @@ pub fn next() !void {
 
     const levelName = levels[levelNumber];
 
-    const j = try std.fmt.bufPrintZ(&jsonTextBuf, "{s}", .{levelName});
+    const j = try std.fmt.bufPrint(&jsonTextBuf, "{s}", .{levelName});
     try loadByName(j);
 }

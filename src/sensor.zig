@@ -32,7 +32,7 @@ pub fn drawGoal() !void {
     try entity.draw(&goalSensor);
 }
 
-pub fn createGoalSensorFromImg(position: IVec2, imgPath: [:0]const u8) !void {
+pub fn createGoalSensorFromImg(position: IVec2, imgPath: []const u8) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.isSensor = true;
     shapeDef.material = config.goalMaterialId;

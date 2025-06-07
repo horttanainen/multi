@@ -95,7 +95,7 @@ fn createCopyOfCurrentLevel() !void {
     std.debug.print("levelName: {s}\n", .{levelName});
 
     var textBuf1: [100]u8 = undefined;
-    const levelToEditName = try std.fmt.bufPrintZ(&textBuf1, "{s}{s}", .{
+    const levelToEditName = try std.fmt.bufPrint(&textBuf1, "{s}{s}", .{
         levelName,
         randomString,
     });
@@ -103,7 +103,7 @@ fn createCopyOfCurrentLevel() !void {
     std.debug.print("levelToEditName: {s}\n", .{levelToEditName});
 
     var editDirPathBuf: [100]u8 = undefined;
-    const editDirPath = try std.fmt.bufPrintZ(&editDirPathBuf, "levels/{s}", .{levelToEditName});
+    const editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "levels/{s}", .{levelToEditName});
 
     std.debug.print("editDirPath: {s}\n", .{editDirPath});
 

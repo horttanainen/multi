@@ -24,7 +24,7 @@ pub const Sprite = struct {
     texture: *sdl.Texture,
     surface: *sdl.Surface,
     dimM: vec.Vec2,
-    imgPath: [:0]const u8,
+    imgPath: []const u8,
 };
 pub const Entity = struct {
     type: []const u8,
@@ -39,7 +39,7 @@ pub const Entity = struct {
 pub const SerializableEntity = struct {
     type: []const u8,
     friction: f32,
-    imgPath: [:0]const u8,
+    imgPath: []const u8,
     pos: vec.IVec2,
 };
 
@@ -83,18 +83,21 @@ pub fn draw(entity: *Entity) !void {
     try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
-pub fn createFromImg(imgPath: [:0]const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
+pub fn createFromImg(imgPath: []const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box.createBody(bodyDef);
     const entity = try createEntityForBody(bodyId, imgPath, shapeDef, entityType);
     try entities.put(bodyId, entity);
     return entity;
 }
 
-pub fn createEntityForBody(bodyId: box2d.b2BodyId, imagePath: [:0]const u8, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
-    const imgPath = try shared.allocator.dupeZ(u8, imagePath);
+pub fn createEntityForBody(bodyId: box2d.b2BodyId, imagePath: []const u8, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
+    const imgPath = try shared.allocator.dupe(u8, imagePath);
     const entityType = try shared.allocator.dupe(u8, eType);
 
-    const surface = try image.load(imgPath);
+    const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
+    defer shared.allocator.free(imgPathZ);
+    const surface = try image.load(imgPathZ);
+
     const resources = try shared.getResources();
     const triangles = try polygon.triangulate(surface);
     defer shared.allocator.free(triangles);
