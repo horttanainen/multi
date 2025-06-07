@@ -11,8 +11,8 @@ const config = @import("config.zig");
 const entity = @import("entity.zig");
 const delay = @import("delay.zig");
 
-const lieroImgSrc = "images/liero.png";
-const boxImgSrc = "images/box.png";
+pub const lieroImgSrc = "images/liero.png";
+pub const boxImgSrc = "images/box.png";
 const duffImgSrc = "images/duff.png";
 
 const monocraftSrc = "fonts/monocraft.ttf";
@@ -23,8 +23,6 @@ pub const SharedResources = struct {
     worldId: box2d.b2WorldId,
     window: *sdl.Window,
     renderer: *sdl.Renderer,
-    boxSurface: *sdl.Surface,
-    lieroSurface: *sdl.Surface,
     duffSurface: *sdl.Surface,
     monocraftFont: *ttf.Font,
 };
@@ -62,8 +60,6 @@ pub fn init() !SharedResources {
     worldDef.gravity = gravity;
     const worldId = box2d.b2CreateWorld(&worldDef);
 
-    const boxSurface = try image.load(boxImgSrc);
-    const lieroSurface = try image.load(lieroImgSrc);
     const duffSurface = try image.load(duffImgSrc);
 
     // instantiate shared resources
@@ -71,8 +67,6 @@ pub fn init() !SharedResources {
         .window = window,
         .renderer = renderer,
         .worldId = worldId,
-        .boxSurface = boxSurface,
-        .lieroSurface = lieroSurface,
         .duffSurface = duffSurface,
         .monocraftFont = monocraftFont,
     };

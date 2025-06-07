@@ -1,6 +1,7 @@
 const std = @import("std");
 const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
+const image = @import("zsdl_image");
 
 const delay = @import("delay.zig");
 const entity = @import("entity.zig");
@@ -45,7 +46,7 @@ pub fn updateState() void {
 
 pub fn spawn(position: IVec2) !void {
     const resources = try shared.getResources();
-    const surface = resources.lieroSurface;
+    const surface = try image.load(shared.lieroImgSrc);
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
@@ -77,12 +78,31 @@ pub fn spawn(position: IVec2) !void {
     rightWallShapeDef.isSensor = true;
     const rightWallSensorId = box2d.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
-    const sprite = entity.Sprite{ .surface = surface, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
+    const sprite = entity.Sprite{
+        .surface = surface,
+        .texture = texture,
+        .imgPath = shared.lieroImgSrc,
+        .dimM = .{ .x = dimM.x, .y = dimM.y },
+    };
 
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
     try shapeIds.append(shapeId);
 
-    maybePlayer = Player{ .entity = entity.Entity{ .bodyId = bodyId, .sprite = sprite, .shapeIds = try shapeIds.toOwnedSlice(), .state = null, .highlighted = false }, .bodyShapeId = shapeId, .footSensorShapeId = footSensorShapeId, .leftWallSensorId = leftWallSensorId, .rightWallSensorId = rightWallSensorId };
+    maybePlayer = Player{
+        .entity = entity.Entity{
+            .type = "dynamic",
+            .friction = config.player.movementFriction,
+            .bodyId = bodyId,
+            .sprite = sprite,
+            .shapeIds = try shapeIds.toOwnedSlice(),
+            .state = null,
+            .highlighted = false,
+        },
+        .bodyShapeId = shapeId,
+        .footSensorShapeId = footSensorShapeId,
+        .leftWallSensorId = leftWallSensorId,
+        .rightWallSensorId = rightWallSensorId,
+    };
 }
 
 pub fn jump() void {

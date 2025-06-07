@@ -81,7 +81,7 @@ pub fn main() !void {
     defer shared.cleanup();
 
     try camera.spawn(.{ .x = 200, .y = 400 });
-    try level.loadByNumber(0);
+    try level.next();
     defer level.cleanup();
     defer levelEditor.cleanup() catch |err| {
         std.debug.print("Error cleaning up created level folders: {!}\n", .{err});

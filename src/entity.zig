@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("zsdl");
+const image = @import("zsdl_image");
 const box2d = @import("box2dnative.zig");
 
 const AutoArrayHashMap = std.AutoArrayHashMap;
@@ -23,13 +24,23 @@ pub const Sprite = struct {
     texture: *sdl.Texture,
     surface: *sdl.Surface,
     dimM: vec.Vec2,
+    imgPath: [:0]const u8,
 };
 pub const Entity = struct {
+    type: []const u8,
+    friction: f32,
     bodyId: box2d.b2BodyId,
     state: ?State,
     sprite: Sprite,
     highlighted: bool,
     shapeIds: []box2d.b2ShapeId,
+};
+
+pub const SerializableEntity = struct {
+    type: []const u8,
+    friction: f32,
+    imgPath: [:0]const u8,
+    pos: vec.IVec2,
 };
 
 pub var entities: AutoArrayHashMap(
@@ -72,17 +83,22 @@ pub fn draw(entity: *Entity) !void {
     try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
 }
 
-pub fn createFromImg(img: *sdl.Surface, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef) !void {
+pub fn createFromImg(imgPath: [:0]const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box.createBody(bodyDef);
-    const entity = try createEntityForBody(bodyId, img, shapeDef);
+    const entity = try createEntityForBody(bodyId, imgPath, shapeDef, entityType);
     try entities.put(bodyId, entity);
+    return entity;
 }
 
-pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: box2d.b2ShapeDef) !Entity {
+pub fn createEntityForBody(bodyId: box2d.b2BodyId, imagePath: [:0]const u8, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
+    const imgPath = try shared.allocator.dupeZ(u8, imagePath);
+    const entityType = try shared.allocator.dupe(u8, eType);
+
+    const surface = try image.load(imgPath);
     const resources = try shared.getResources();
-    const triangles = try polygon.triangulate(img);
+    const triangles = try polygon.triangulate(surface);
     defer shared.allocator.free(triangles);
-    const texture = try sdl.createTextureFromSurface(resources.renderer, img);
+    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
@@ -90,16 +106,22 @@ pub fn createEntityForBody(bodyId: box2d.b2BodyId, img: *sdl.Surface, shapeDef: 
 
     const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
 
-    const sprite = Sprite{ .surface = img, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
+    const sprite = Sprite{ .surface = surface, .imgPath = imgPath, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
 
-    const entity = Entity{ .state = null, .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds, .highlighted = false };
+    const entity = Entity{ .type = entityType, .friction = shapeDef.friction, .state = null, .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds, .highlighted = false };
     return entity;
+}
+
+pub fn cleanupOne(entity: Entity) void {
+    box2d.b2DestroyBody(entity.bodyId);
+    shared.allocator.free(entity.shapeIds);
+    shared.allocator.free(entity.sprite.imgPath);
+    shared.allocator.free(entity.type);
 }
 
 pub fn cleanup() void {
     for (entities.values()) |entity| {
-        box2d.b2DestroyBody(entity.bodyId);
-        shared.allocator.free(entity.shapeIds);
+        cleanupOne(entity);
     }
     entities.deinit();
     entities = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
@@ -114,4 +136,13 @@ pub fn getPosition(entity: Entity) vec.IVec2 {
 
 pub fn getEntity(bodyId: box2d.b2BodyId) ?*Entity {
     return entities.getPtr(bodyId);
+}
+
+pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
+    return SerializableEntity{
+        .type = entity.type,
+        .pos = pos,
+        .friction = entity.friction,
+        .imgPath = entity.sprite.imgPath,
+    };
 }

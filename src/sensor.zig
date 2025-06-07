@@ -32,13 +32,13 @@ pub fn drawGoal() !void {
     try entity.draw(&goalSensor);
 }
 
-pub fn createGoalSensorFromImg(position: IVec2, img: *sdl.Surface) !void {
+pub fn createGoalSensorFromImg(position: IVec2, imgPath: [:0]const u8) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.isSensor = true;
     shapeDef.material = config.goalMaterialId;
     const bodyDef = box.createStaticBodyDef(position);
     const bodyId = try box.createBody(bodyDef);
-    const e = try entity.createEntityForBody(bodyId, img, shapeDef);
+    const e = try entity.createEntityForBody(bodyId, imgPath, shapeDef, "goal");
     maybeGoalSensor = e;
 }
 
@@ -67,8 +67,7 @@ pub fn checkGoal() !void {
 
 pub fn cleanup() void {
     if (maybeGoalSensor) |goalSensor| {
-        box2d.b2DestroyBody(goalSensor.bodyId);
-        shared.allocator.free(goalSensor.shapeIds);
+        entity.cleanupOne(goalSensor);
     }
     maybeGoalSensor = null;
 }

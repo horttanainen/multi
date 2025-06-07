@@ -23,11 +23,10 @@ pub fn handleGameMouseInput() !void {
 
     if (currentMouseState & leftButtonMask == 1) {
         if (!delay.check("boxcreate")) {
-            const resources = try shared.getResources();
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
             const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(.{ .x = x, .y = y }));
-            try entity.createFromImg(resources.boxSurface, shapeDef, bodyDef);
+            _ = try entity.createFromImg(shared.boxImgSrc, shapeDef, bodyDef, "dynamic");
 
             delay.action("boxcreate", config.boxCreateDelayMs);
         }
@@ -115,8 +114,8 @@ pub fn handleLevelEditorKeyboardInput() void {
             var x: i32 = 0;
             var y: i32 = 0;
             _ = sdl.getMouseState(&x, &y);
-            levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch {
-                std.debug.print("Error pasteing selection\n", .{});
+            levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch |err| {
+                std.debug.print("Error pasteing selection: {!}\n", .{err});
             };
             delay.action("levelEditorClick", config.levelEditorClickDelayMs);
         }

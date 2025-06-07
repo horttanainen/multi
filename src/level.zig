@@ -15,21 +15,21 @@ const m2P = @import("conversion.zig").m2P;
 const p2m = @import("conversion.zig").p2m;
 const m2PixelPos = @import("conversion.zig").m2PixelPos;
 
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
 const entity = @import("entity.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
 var levelNumber: usize = 0;
 
-var textBuf2: [100]u8 = undefined;
+var jsonTextBuf: [100]u8 = undefined;
 pub var json: [:0]const u8 = undefined;
 
-pub const position: IVec2 = .{
+pub const position: vec.IVec2 = .{
     .x = 400,
     .y = 400,
 };
-pub var size: IVec2 = .{
+pub var size: vec.IVec2 = .{
     .x = 100,
     .y = 100,
 };
@@ -38,16 +38,9 @@ const LevelError = error{
     Uninitialized,
 };
 
-pub const SerializableEntity = struct {
-    type: []const u8,
-    friction: f32,
-    imgPath: [:0]const u8,
-    pos: IVec2,
-};
-
 pub const Level = struct {
-    size: IVec2,
-    entities: []SerializableEntity,
+    size: vec.IVec2,
+    entities: []entity.SerializableEntity,
 };
 
 pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
@@ -74,16 +67,6 @@ pub fn findLevels() ![][]const u8 {
     return fileList.toOwnedSlice();
 }
 
-pub fn loadByNumber(number: usize) !void {
-    const levels = try findLevels();
-    defer shared.allocator.free(levels);
-
-    const levelName = levels[number];
-
-    const j = try std.fmt.bufPrintZ(&textBuf2, "{s}", .{levelName});
-    try loadByName(j);
-}
-
 fn loadByName(levelName: [:0]const u8) !void {
     var textBuf: [100]u8 = undefined;
     const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levelName});
@@ -93,26 +76,24 @@ fn loadByName(levelName: [:0]const u8) !void {
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 
-    var spawnLocation = IVec2{ .x = 0, .y = 0 };
+    var spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
 
     for (levelToDeserialize.entities) |e| {
-        const surface = try image.load(e.imgPath);
         var shapeDef = box2d.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
-
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box.createDynamicBodyDef(e.pos);
-            try entity.createFromImg(surface, shapeDef, bodyDef);
+            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             const bodyDef = box.createStaticBodyDef(e.pos);
-            try entity.createFromImg(surface, shapeDef, bodyDef);
+            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "static");
         } else if (std.mem.eql(u8, e.type, "goal")) {
-            try sensor.createGoalSensorFromImg(e.pos, surface);
+            try sensor.createGoalSensorFromImg(e.pos, e.imgPath);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
             const bodyDef = box.createStaticBodyDef(e.pos);
             shapeDef.isSensor = true;
             shapeDef.material = config.spawnMaterialId;
-            try entity.createFromImg(surface, shapeDef, bodyDef);
+            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
         }
     }
@@ -134,9 +115,7 @@ pub fn cleanup() void {
 
 pub fn reset() void {
     shared.goalReached = false;
-    player.cleanup();
-    sensor.cleanup();
-    entity.cleanup();
+    cleanup();
 }
 
 pub fn next() !void {
@@ -146,5 +125,8 @@ pub fn next() !void {
     defer shared.allocator.free(levels);
     levelNumber = @mod(levelNumber + 1, levels.len);
 
-    try loadByNumber(levelNumber);
+    const levelName = levels[levelNumber];
+
+    const j = try std.fmt.bufPrintZ(&jsonTextBuf, "{s}", .{levelName});
+    try loadByName(j);
 }
