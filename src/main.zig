@@ -32,15 +32,30 @@ const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Single player game todos:
+//TODO: add quake bazooka (investigate box2d bullet)
+//TODO: add crosshair
+//TODO: make bazooka break level
+//TODO: add stupid enemy that only stands still that can be killed
+//TODO: make killing of enemy very gibby and bloody
+//TODO: support controller
+//TODO: make player turn to direction of movement
+//TODO: make player feet collider rounded so it does not stick into corners
+//TODO: add sliding
+//TODO: add sounds
+//TODO: add jetpack
+//TODO: add liero/worms grappling hook
+//TODO: add enemies to shoot
+//TODO: instagib mode
+
 //level editor todos:
-//TODO: pause time when entering level editor
 //TODO: Pressing r in level editor reloads the level from latest version
 //TODO: pressing ctrl z in level editor loads the previous version of the json.
 //TODO: pressing ctrl r in level editor loads the next version of the json.
 //TODO: user can move entities
 //TODO: user can drop images into a folder to use in the editor
 //TODO: user can choose to create static objects or dynamic
-//TODO: user can save level
+//TODO: pause time when entering level editor
 //TODO: add option for user to create parallax background from images
 //TODO: user can create spawn for player
 //TODO: user can create goal for player
@@ -48,16 +63,7 @@ const Sprite = entity.Sprite;
 
 //level oriented physics demo game todos:
 //TODO: create about 10 different physics and gravity based levels
-
-//Single player game todos:
-//TODO: make player feet collider rounded so it does not stick into corners
-//TODO: add sliding
-//TODO: add sounds
-//TODO: add jetpack
-//TODO: add liero/worms grappling hook
-//TODO: add quake bazooka (investigate box2d bullet)
-//TODO: add enemies to shoot
-//TODO: instagib mode
+//TODO: create levels with enemies
 
 //Multiplayer todos:
 //TODO: add splitscreen multiplayer
