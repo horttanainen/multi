@@ -49,7 +49,7 @@ pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
 }
 
 pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 4096);
+    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, config.maxLevelSizeInBytes);
     defer shared.allocator.free(data);
     return parseFromData(data);
 }

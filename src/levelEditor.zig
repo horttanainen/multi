@@ -8,6 +8,7 @@ const conv = @import("conversion.zig");
 const box = @import("box.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
+const config = @import("config.zig");
 
 var maybeSelectedBodyId: ?box2d.b2BodyId = null;
 var maybeCopiedBodyId: ?box2d.b2BodyId = null;
@@ -67,7 +68,7 @@ fn createNewVersion() !void {
 fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
-        const data = try currentlyOpenLevelFile.readToEndAlloc(shared.allocator, 100000);
+        const data = try currentlyOpenLevelFile.readToEndAlloc(shared.allocator, config.maxLevelSizeInBytes);
         defer shared.allocator.free(data);
         const parsed = try level.parseFromData(data);
         defer parsed.deinit();
@@ -210,7 +211,7 @@ pub fn cleanup() !void {
 
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
         try currentlyOpenFile.seekTo(0);
-        const data = try currentlyOpenFile.readToEndAlloc(shared.allocator, 100000);
+        const data = try currentlyOpenFile.readToEndAlloc(shared.allocator, config.maxLevelSizeInBytes);
         defer shared.allocator.free(data);
 
         const randomString = try createRandomAlphabeticalString(4);

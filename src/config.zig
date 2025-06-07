@@ -5,6 +5,8 @@ pub const window = .{
     .height = 800,
 };
 
+pub const maxLevelSizeInBytes = 1024 * 1024;
+
 pub const met2pix = 80;
 
 pub const goalMaterialId = 420;
