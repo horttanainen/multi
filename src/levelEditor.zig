@@ -13,6 +13,8 @@ var maybeSelectedBodyId: ?box2d.b2BodyId = null;
 
 var maybeCopiedBodyId: ?box2d.b2BodyId = null;
 
+var maybeCurrentlyOpenLevelFile: ?std.fs.File = null;
+
 pub fn copySelection() void {
     maybeCopiedBodyId = maybeSelectedBodyId;
 }
@@ -31,12 +33,40 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
             shapeDef.isSensor = box2d.b2Shape_IsSensor(shapes[0]);
             shapeDef.material = box2d.b2Shape_GetMaterial(shapes[0]);
 
-            try entity.createFromImg(e.sprite.surface, shapeDef, bodyDef);
+            std.debug.print("about to create\n", .{});
+            const newEntity = try entity.createFromImg(e.sprite.imgPath, shapeDef, bodyDef, e.type);
+
+            const serializedE = entity.serialize(newEntity, pos);
+            try addEntityToLevel(serializedE);
         }
     }
 }
 
-fn createRandomAlphabeticalString(length: usize) ![]u8 {
+fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
+    if (maybeCurrentlyOpenLevelFile) |currentlyOpenLevelFile| {
+        try currentlyOpenLevelFile.seekTo(0);
+        const data = try currentlyOpenLevelFile.readToEndAlloc(shared.allocator, 100000);
+        defer shared.allocator.free(data);
+        const parsed = try level.parseFromData(data);
+        defer parsed.deinit();
+        var serializableLevel = parsed.value;
+
+        var entities = std.ArrayList(entity.SerializableEntity).init(shared.allocator);
+        defer entities.deinit();
+
+        try entities.appendSlice(serializableLevel.entities);
+        try entities.append(serializableEntity);
+
+        serializableLevel.entities = try entities.toOwnedSlice();
+        defer shared.allocator.free(serializableLevel.entities);
+
+        try currentlyOpenLevelFile.setEndPos(0);
+        try currentlyOpenLevelFile.seekTo(0);
+        try std.json.stringify(serializableLevel, .{ .whitespace = .indent_2 }, currentlyOpenLevelFile.writer());
+    }
+}
+
+fn createRandomAlphabeticalString(length: usize) ![]const u8 {
     var buffer = std.ArrayList(u8).init(shared.allocator);
 
     for (0..length) |_| {
@@ -50,6 +80,12 @@ fn createRandomAlphabeticalString(length: usize) ![]u8 {
 pub fn enter() !void {
     shared.editingLevel = true;
 
+    if (maybeCurrentlyOpenLevelFile == null) {
+        try createCopyOfCurrentLevel();
+    }
+}
+
+fn createCopyOfCurrentLevel() !void {
     const randomString = try createRandomAlphabeticalString(4);
     defer shared.allocator.free(randomString);
 
@@ -59,20 +95,27 @@ pub fn enter() !void {
     std.debug.print("levelName: {s}\n", .{levelName});
 
     var textBuf1: [100]u8 = undefined;
-    const levelToEditName = try std.fmt.bufPrintZ(&textBuf1, "{s}{s}", .{ levelName, randomString });
+    const levelToEditName = try std.fmt.bufPrintZ(&textBuf1, "{s}{s}", .{
+        levelName,
+        randomString,
+    });
 
     std.debug.print("levelToEditName: {s}\n", .{levelToEditName});
 
-    var textBuf2: [100]u8 = undefined;
-    const editDirPath = try std.fmt.bufPrintZ(&textBuf2, "levels/{s}", .{levelToEditName});
+    var editDirPathBuf: [100]u8 = undefined;
+    const editDirPath = try std.fmt.bufPrintZ(&editDirPathBuf, "levels/{s}", .{levelToEditName});
 
     std.debug.print("editDirPath: {s}\n", .{editDirPath});
 
     try std.fs.cwd().makeDir(editDirPath);
 
-    const levelsD = try std.fs.cwd().openDir("levels", std.fs.Dir.OpenOptions{});
-    const editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
+    var levelsD = try std.fs.cwd().openDir("levels", std.fs.Dir.OpenOptions{});
+    defer levelsD.close();
+    var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
+    defer editingD.close();
     try std.fs.Dir.copyFile(levelsD, level.json, editingD, "1.json", std.fs.Dir.CopyFileOptions{});
+
+    maybeCurrentlyOpenLevelFile = try editingD.openFile("1.json", .{ .mode = .read_write });
 }
 
 pub fn exit() void {
@@ -140,8 +183,29 @@ pub fn cleanup() !void {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
 
+    if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
+        try currentlyOpenFile.seekTo(0);
+        const data = try currentlyOpenFile.readToEndAlloc(shared.allocator, 100000);
+        defer shared.allocator.free(data);
+
+        const randomString = try createRandomAlphabeticalString(4);
+        defer shared.allocator.free(randomString);
+
+        var buffer: [100]u8 = undefined;
+        const newFileName = try std.fmt.bufPrint(&buffer, "{s}.json", .{randomString});
+
+        const newFile = try dir.createFile(newFileName, .{});
+        defer newFile.close();
+
+        try newFile.writeAll(data);
+    }
+
     const folders = try findTemporaryFolders();
     defer shared.allocator.free(folders);
+
+    if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
+        currentlyOpenFile.close();
+    }
 
     for (folders) |folder| {
         try dir.deleteTree(folder);

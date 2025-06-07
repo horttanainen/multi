@@ -43,11 +43,15 @@ pub const Level = struct {
     entities: []entity.SerializableEntity,
 };
 
-pub fn parseLevel(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 4096);
-    defer shared.allocator.free(data);
+pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
     const parsed = try std.json.parseFromSlice(Level, shared.allocator, data, .{ .allocate = .alloc_always });
     return parsed;
+}
+
+pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
+    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, 4096);
+    defer shared.allocator.free(data);
+    return parseFromData(data);
 }
 
 pub fn findLevels() ![][]const u8 {
@@ -72,7 +76,7 @@ fn loadByName(levelName: [:0]const u8) !void {
     const levelP = try std.fmt.bufPrintZ(&textBuf, "levels/{s}", .{levelName});
     json = levelName;
 
-    const parsed = try parseLevel(levelP);
+    const parsed = try parseFromPath(levelP);
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 

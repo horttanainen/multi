@@ -33,7 +33,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //level editor todos:
-//TODO: closing the game removes all other versions of the level from the folder except the one being open. Json is moved to level folder.
 //TODO: pause time when entering level editor
 //TODO: All edits create a new version of the copied json in the folder.
 //TODO: Pressing r in level editor reloads the level from latest version
