@@ -10,10 +10,12 @@ const level = @import("level.zig");
 const vec = @import("vector.zig");
 
 var maybeSelectedBodyId: ?box2d.b2BodyId = null;
-
 var maybeCopiedBodyId: ?box2d.b2BodyId = null;
 
+var editDirPathBuf: [100]u8 = undefined;
+var editDirPath: []const u8 = undefined;
 var maybeCurrentlyOpenLevelFile: ?std.fs.File = null;
+var currentVersion: u32 = 0;
 
 pub fn copySelection() void {
     maybeCopiedBodyId = maybeSelectedBodyId;
@@ -37,9 +39,29 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
             const newEntity = try entity.createFromImg(e.sprite.imgPath, shapeDef, bodyDef, e.type);
 
             const serializedE = entity.serialize(newEntity, pos);
+            try createNewVersion();
             try addEntityToLevel(serializedE);
         }
     }
+}
+
+fn createNewVersion() !void {
+    const oldVersion = currentVersion;
+    currentVersion += 1;
+    var textBuf1: [100]u8 = undefined;
+    const newFile = try std.fmt.bufPrint(&textBuf1, "{d}.json", .{currentVersion});
+    var textBuf2: [100]u8 = undefined;
+    const oldFile = try std.fmt.bufPrint(&textBuf2, "{d}.json", .{oldVersion});
+
+    var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
+    defer editingD.close();
+    try std.fs.Dir.copyFile(editingD, oldFile, editingD, newFile, std.fs.Dir.CopyFileOptions{});
+
+    if (maybeCurrentlyOpenLevelFile) |currentlyOpenLevelFile| {
+        currentlyOpenLevelFile.close();
+    }
+
+    maybeCurrentlyOpenLevelFile = try editingD.openFile(newFile, .{ .mode = .read_write });
 }
 
 fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
@@ -81,6 +103,7 @@ pub fn enter() !void {
     shared.editingLevel = true;
 
     if (maybeCurrentlyOpenLevelFile == null) {
+        currentVersion = 0;
         try createCopyOfCurrentLevel();
     }
 }
@@ -102,20 +125,22 @@ fn createCopyOfCurrentLevel() !void {
 
     std.debug.print("levelToEditName: {s}\n", .{levelToEditName});
 
-    var editDirPathBuf: [100]u8 = undefined;
-    const editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "levels/{s}", .{levelToEditName});
+    editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "levels/{s}", .{levelToEditName});
 
     std.debug.print("editDirPath: {s}\n", .{editDirPath});
 
     try std.fs.cwd().makeDir(editDirPath);
 
+    var textBuf2: [100]u8 = undefined;
+    const version = try std.fmt.bufPrint(&textBuf2, "{d}.json", .{currentVersion});
+
     var levelsD = try std.fs.cwd().openDir("levels", std.fs.Dir.OpenOptions{});
     defer levelsD.close();
     var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
     defer editingD.close();
-    try std.fs.Dir.copyFile(levelsD, level.json, editingD, "1.json", std.fs.Dir.CopyFileOptions{});
+    try std.fs.Dir.copyFile(levelsD, level.json, editingD, version, std.fs.Dir.CopyFileOptions{});
 
-    maybeCurrentlyOpenLevelFile = try editingD.openFile("1.json", .{ .mode = .read_write });
+    maybeCurrentlyOpenLevelFile = try editingD.openFile(version, .{ .mode = .read_write });
 }
 
 pub fn exit() void {

@@ -34,7 +34,6 @@ const Sprite = entity.Sprite;
 
 //level editor todos:
 //TODO: pause time when entering level editor
-//TODO: All edits create a new version of the copied json in the folder.
 //TODO: Pressing r in level editor reloads the level from latest version
 //TODO: pressing ctrl z in level editor loads the previous version of the json.
 //TODO: pressing ctrl r in level editor loads the next version of the json.
@@ -58,6 +57,7 @@ const Sprite = entity.Sprite;
 //TODO: add liero/worms grappling hook
 //TODO: add quake bazooka (investigate box2d bullet)
 //TODO: add enemies to shoot
+//TODO: instagib mode
 
 //Multiplayer todos:
 //TODO: add splitscreen multiplayer
