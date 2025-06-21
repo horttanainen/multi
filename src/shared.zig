@@ -11,6 +11,7 @@ const config = @import("config.zig");
 const entity = @import("entity.zig");
 const delay = @import("delay.zig");
 
+pub const crosshairImgSrc = "images/crosshair.png";
 pub const lieroImgSrc = "images/liero.png";
 pub const boxImgSrc = "images/box.png";
 const duffImgSrc = "images/duff.png";

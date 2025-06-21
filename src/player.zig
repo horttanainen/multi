@@ -3,24 +3,37 @@ const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
+const camera = @import("camera.zig");
 const delay = @import("delay.zig");
 const entity = @import("entity.zig");
+const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box = @import("box.zig");
 
 const config = @import("config.zig");
 
-const p2m = @import("conversion.zig").p2m;
+const conv = @import("conversion.zig");
 
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
 
-pub const Player = struct { entity: entity.Entity, bodyShapeId: box2d.b2ShapeId, footSensorShapeId: box2d.b2ShapeId, leftWallSensorId: box2d.b2ShapeId, rightWallSensorId: box2d.b2ShapeId };
+pub const Player = struct {
+    entity: entity.Entity,
+    bodyShapeId: box2d.b2ShapeId,
+    footSensorShapeId: box2d.b2ShapeId,
+    leftWallSensorId: box2d.b2ShapeId,
+    rightWallSensorId: box2d.b2ShapeId,
+};
+
+pub var maybeCrosshair: ?sprite.Sprite = null;
 
 pub var maybePlayer: ?Player = null;
+
 pub var isMoving: bool = false;
 pub var touchesGround: bool = false;
 pub var touchesWallOnLeft: bool = false;
 pub var touchesWallOnRight: bool = false;
+pub var aimDirection = vec.west;
+
 var airJumpCounter: i32 = 0;
 var movingRight: bool = false;
 
@@ -40,6 +53,21 @@ pub fn draw() !void {
         } else {
             try entity.drawFlipped(&player.entity);
         }
+        if (maybeCrosshair) |crosshair| {
+            const currentState = box.getState(player.entity.bodyId);
+            const state = box.getInterpolatedState(player.entity.state, currentState);
+            const playerPos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, player.entity.sprite.sizeM.x, player.entity.sprite.sizeM.y));
+
+            const crosshairDisplacement = vec.mul(aimDirection, 100);
+            const crosshairDisplacementI: vec.IVec2 = .{
+                .x = @intFromFloat(crosshairDisplacement.x),
+                .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
+            };
+
+            const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
+
+            try sprite.drawWithOptions(crosshair, crosshairPos, 0, false, false);
+        }
     }
 }
 
@@ -49,14 +77,14 @@ pub fn updateState() void {
     }
 }
 
-pub fn spawn(position: IVec2) !void {
+pub fn spawn(position: vec.IVec2) !void {
     const resources = try shared.getResources();
     const surface = try image.load(shared.lieroImgSrc);
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-    const dimM = p2m(.{ .x = size.x, .y = size.y });
+    const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
 
     const bodyDef = box.createNonRotatingDynamicBodyDef(position);
     const bodyId = try box.createBody(bodyDef);
@@ -83,11 +111,18 @@ pub fn spawn(position: IVec2) !void {
     rightWallShapeDef.isSensor = true;
     const rightWallSensorId = box2d.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
-    const sprite = entity.Sprite{
+    const s = sprite.Sprite{
         .surface = surface,
         .texture = texture,
         .imgPath = shared.lieroImgSrc,
-        .dimM = .{ .x = dimM.x, .y = dimM.y },
+        .sizeM = .{
+            .x = sizeM.x,
+            .y = sizeM.y,
+        },
+        .sizeP = .{
+            .x = size.x,
+            .y = size.y,
+        },
     };
 
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
@@ -98,7 +133,7 @@ pub fn spawn(position: IVec2) !void {
             .type = "dynamic",
             .friction = config.player.movementFriction,
             .bodyId = bodyId,
-            .sprite = sprite,
+            .sprite = s,
             .shapeIds = try shapeIds.toOwnedSlice(),
             .state = null,
             .highlighted = false,
@@ -108,6 +143,8 @@ pub fn spawn(position: IVec2) !void {
         .leftWallSensorId = leftWallSensorId,
         .rightWallSensorId = rightWallSensorId,
     };
+
+    maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc);
 }
 
 pub fn jump() void {
@@ -213,10 +250,22 @@ pub fn checkSensors() !void {
     }
 }
 
+pub fn aim(direction: vec.Vec2) void {
+    var dir = direction;
+    if (vec.equals(dir, vec.zero)) {
+        dir = vec.add(dir, if (movingRight) vec.east else vec.west);
+    }
+    aimDirection = dir;
+}
+
 pub fn cleanup() void {
     if (maybePlayer) |player| {
         box2d.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
     }
+    if (maybeCrosshair) |crosshair| {
+        sprite.cleanup(crosshair);
+    }
+    maybeCrosshair = null;
     maybePlayer = null;
 }

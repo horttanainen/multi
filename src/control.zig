@@ -11,6 +11,7 @@ const player = @import("player.zig");
 const entity = @import("entity.zig");
 const levelEditor = @import("levelEditor.zig");
 const level = @import("level.zig");
+const vec = @import("vector.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -43,6 +44,21 @@ pub fn handleGameKeyboardInput() void {
             delay.action("reloadLevel", config.reloadLevelDelayMs);
         }
     }
+
+    var aimDirection = vec.zero;
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.left)] == 1) {
+        aimDirection = vec.add(aimDirection, vec.west);
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.right)] == 1) {
+        aimDirection = vec.add(aimDirection, vec.east);
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.up)] == 1) {
+        aimDirection = vec.add(aimDirection, vec.north);
+    }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.down)] == 1) {
+        aimDirection = vec.add(aimDirection, vec.south);
+    }
+
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
         player.moveLeft();
     }
@@ -70,6 +86,8 @@ pub fn handleGameKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
         player.brake();
     }
+
+    player.aim(aimDirection);
 }
 
 pub fn handleLevelEditorMouseInput() void {

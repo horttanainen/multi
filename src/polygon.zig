@@ -9,7 +9,7 @@ const shared = @import("shared.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
-const equals = @import("vector.zig").equals;
+const vec = @import("vector.zig");
 
 const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
@@ -65,7 +65,7 @@ pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
     for (vertices) |v| {
         var isUnique = true;
         for (unique.items) |uV| {
-            if (equals(uV, v)) {
+            if (vec.iequals(uV, v)) {
                 isUnique = false;
                 break;
             }

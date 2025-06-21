@@ -18,14 +18,11 @@ const allocator = @import("shared.zig").allocator;
 
 const vec = @import("vector.zig");
 
+const sprite = @import("sprite.zig");
+const Sprite = sprite.Sprite;
+
 const conv = @import("conversion.zig");
 
-pub const Sprite = struct {
-    texture: *sdl.Texture,
-    surface: *sdl.Surface,
-    dimM: vec.Vec2,
-    imgPath: []const u8,
-};
 pub const Entity = struct {
     type: []const u8,
     friction: f32,
@@ -69,26 +66,12 @@ pub fn draw(entity: *Entity) !void {
 }
 
 fn drawWithOptions(entity: *Entity, flip: bool) !void {
-    const resources = try shared.getResources();
-    const renderer = resources.renderer;
-
     const currentState = box.getState(entity.bodyId);
     const state = box.getInterpolatedState(entity.state, currentState);
 
-    const pos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, entity.sprite.dimM.x, entity.sprite.dimM.y));
+    const pos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, entity.sprite.sizeM.x, entity.sprite.sizeM.y));
 
-    const rect = sdl.Rect{
-        .x = pos.x,
-        .y = pos.y,
-        .w = conv.m2P(entity.sprite.dimM.x),
-        .h = conv.m2P(entity.sprite.dimM.y),
-    };
-
-    try sdl.setTextureColorMod(entity.sprite.texture, 255, 255, 255);
-    if (entity.highlighted) {
-        try sdl.setTextureColorMod(entity.sprite.texture, 100, 100, 100);
-    }
-    try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
+    try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip);
 }
 
 pub fn createFromImg(imgPath: []const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
@@ -99,35 +82,32 @@ pub fn createFromImg(imgPath: []const u8, shapeDef: box2d.b2ShapeDef, bodyDef: b
 }
 
 pub fn createEntityForBody(bodyId: box2d.b2BodyId, imagePath: []const u8, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
-    const imgPath = try shared.allocator.dupe(u8, imagePath);
     const entityType = try shared.allocator.dupe(u8, eType);
 
-    const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
-    defer shared.allocator.free(imgPathZ);
-    const surface = try image.load(imgPathZ);
+    const s = try sprite.createFromImg(imagePath);
 
-    const resources = try shared.getResources();
-    const triangles = try polygon.triangulate(surface);
+    const triangles = try polygon.triangulate(s.surface);
     defer shared.allocator.free(triangles);
-    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
-    var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-    const dimM = conv.p2m(.{ .x = size.x, .y = size.y });
+    const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
 
-    const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = size.x, .y = size.y }, shapeDef);
-
-    const sprite = Sprite{ .surface = surface, .imgPath = imgPath, .texture = texture, .dimM = .{ .x = dimM.x, .y = dimM.y } };
-
-    const entity = Entity{ .type = entityType, .friction = shapeDef.friction, .state = null, .bodyId = bodyId, .sprite = sprite, .shapeIds = shapeIds, .highlighted = false };
+    const entity = Entity{
+        .type = entityType,
+        .friction = shapeDef.friction,
+        .state = null,
+        .bodyId = bodyId,
+        .sprite = s,
+        .shapeIds = shapeIds,
+        .highlighted = false,
+    };
     return entity;
 }
 
 pub fn cleanupOne(entity: Entity) void {
     box2d.b2DestroyBody(entity.bodyId);
     shared.allocator.free(entity.shapeIds);
-    shared.allocator.free(entity.sprite.imgPath);
     shared.allocator.free(entity.type);
+    sprite.cleanup(entity.sprite);
 }
 
 pub fn cleanup() void {

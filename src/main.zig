@@ -33,10 +33,9 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add crosshair
 //TODO: add quake bazooka (investigate box2d bullet)
 //TODO: make bazooka break level
-//TODO: add stupid enemy that only stands still that can be killed
+//TODO: add stupid enemy that only stands still and can be killed
 //TODO: make killing of enemy very gibby and bloody
 //TODO: support controller
 //TODO: make player feet collider rounded so it does not stick into corners

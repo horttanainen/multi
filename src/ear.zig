@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
-const equals = @import("vector.zig").equals;
+const vec = @import("vector.zig");
 
 const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
@@ -76,7 +76,7 @@ pub fn earClipping(vertices: []const IVec2) ![][3]IVec2 {
             // Check that no other vertex lies inside triangle (a, b, c)
             var isEar = true;
             for (verts.items) |vertex| {
-                if (equals(vertex, a) or equals(vertex, b) or equals(vertex, c)) continue;
+                if (vec.iequals(vertex, a) or vec.iequals(vertex, b) or vec.iequals(vertex, c)) continue;
                 if (isPointInTriangle(vertex, a, b, c)) {
                     isEar = false;
                     break;
