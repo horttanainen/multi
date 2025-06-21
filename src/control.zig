@@ -86,6 +86,11 @@ pub fn handleGameKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
         player.brake();
     }
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lshift)] == 1) {
+        player.shoot() catch |err| {
+            std.debug.print("Error shooting: {!}\n", .{err});
+        };
+    }
 
     player.aim(aimDirection);
 }

@@ -48,27 +48,31 @@ pub fn getPlayer() !Player {
 
 pub fn draw() !void {
     if (maybePlayer) |*player| {
-        if (movingRight) {
+        if (aimDirection.x > 0) {
             try entity.draw(&player.entity);
         } else {
             try entity.drawFlipped(&player.entity);
         }
         if (maybeCrosshair) |crosshair| {
-            const currentState = box.getState(player.entity.bodyId);
-            const state = box.getInterpolatedState(player.entity.state, currentState);
-            const playerPos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, player.entity.sprite.sizeM.x, player.entity.sprite.sizeM.y));
-
-            const crosshairDisplacement = vec.mul(aimDirection, 100);
-            const crosshairDisplacementI: vec.IVec2 = .{
-                .x = @intFromFloat(crosshairDisplacement.x),
-                .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
-            };
-
-            const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
-
-            try sprite.drawWithOptions(crosshair, crosshairPos, 0, false, false);
+            const pos = calcCrosshairPosition(player.*);
+            try sprite.drawWithOptions(crosshair, pos, 0, false, false);
         }
     }
+}
+
+fn calcCrosshairPosition(player: Player) vec.IVec2 {
+    const currentState = box.getState(player.entity.bodyId);
+    const state = box.getInterpolatedState(player.entity.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, player.entity.sprite.sizeM.x, player.entity.sprite.sizeM.y));
+
+    const crosshairDisplacement = vec.mul(aimDirection, 100);
+    const crosshairDisplacementI: vec.IVec2 = .{
+        .x = @intFromFloat(crosshairDisplacement.x),
+        .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
+    };
+
+    const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
+    return crosshairPos;
 }
 
 pub fn updateState() void {
@@ -256,6 +260,27 @@ pub fn aim(direction: vec.Vec2) void {
         dir = vec.add(dir, if (movingRight) vec.east else vec.west);
     }
     aimDirection = dir;
+}
+
+pub fn shoot() !void {
+    if (!delay.check("shoot")) {
+        if (maybePlayer) |*player| {
+            const pos = calcCrosshairPosition(player.*);
+
+            var shapeDef = box2d.b2DefaultShapeDef();
+            shapeDef.friction = 0.5;
+
+            const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(pos));
+            const cannonBall = try entity.createFromImg(shared.cannonBallmgSrc, shapeDef, bodyDef, "dynamic");
+
+            box2d.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, .{
+                .x = aimDirection.x * config.cannonStartImpulse,
+                .y = -aimDirection.y * config.cannonStartImpulse,
+            }, true);
+        }
+
+        delay.action("shoot", config.shootDelayMs);
+    }
 }
 
 pub fn cleanup() void {

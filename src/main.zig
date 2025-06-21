@@ -33,8 +33,14 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add quake bazooka (investigate box2d bullet)
-//TODO: make bazooka break level
+//TODO: add kickback so that player moves slightly to the opposite direction of projectile
+//TODO: make projectile of box2d bullet type to enable ccd and such
+//TODO: add sensor to projectile to explode on first collision
+//TODO: add visualisation for explosion
+//TODO: add sound for explosion
+//TODO: make explosion push objects around relative to their distance from the center of the explosion
+//TODO: make explosion break level
+//TODO: allow explosion to break objects
 //TODO: add stupid enemy that only stands still and can be killed
 //TODO: make killing of enemy very gibby and bloody
 //TODO: support controller

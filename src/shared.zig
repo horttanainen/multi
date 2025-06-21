@@ -14,6 +14,7 @@ const delay = @import("delay.zig");
 pub const crosshairImgSrc = "images/crosshair.png";
 pub const lieroImgSrc = "images/liero.png";
 pub const boxImgSrc = "images/box.png";
+pub const cannonBallmgSrc = "images/cannonball.png";
 const duffImgSrc = "images/duff.png";
 
 const monocraftSrc = "fonts/monocraft.ttf";

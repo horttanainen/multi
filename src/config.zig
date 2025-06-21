@@ -17,6 +17,8 @@ pub const physics = .{
     .subStepCount = 4,
 };
 
+pub const cannonStartImpulse = 10;
+
 pub const Player = struct {
     materialId: i32,
     restingFriction: f32,
@@ -42,6 +44,7 @@ pub const levelEditorCameraMovementForce = 10;
 pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
+pub const shootDelayMs = 500;
 pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
