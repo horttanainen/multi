@@ -60,7 +60,15 @@ pub fn drawAll() !void {
     }
 }
 
+pub fn drawFlipped(entity: *Entity) !void {
+    try drawWithOptions(entity, true);
+}
+
 pub fn draw(entity: *Entity) !void {
+    try drawWithOptions(entity, false);
+}
+
+fn drawWithOptions(entity: *Entity, flip: bool) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
@@ -80,7 +88,7 @@ pub fn draw(entity: *Entity) !void {
     if (entity.highlighted) {
         try sdl.setTextureColorMod(entity.sprite.texture, 100, 100, 100);
     }
-    try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, sdl.RendererFlip.none);
+    try sdl.renderCopyEx(renderer, entity.sprite.texture, null, &rect, state.rotAngle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
 pub fn createFromImg(imgPath: []const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {

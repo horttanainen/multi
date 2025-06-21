@@ -22,6 +22,7 @@ pub var touchesGround: bool = false;
 pub var touchesWallOnLeft: bool = false;
 pub var touchesWallOnRight: bool = false;
 var airJumpCounter: i32 = 0;
+var movingRight: bool = false;
 
 const PlayerError = error{PlayerUnspawned};
 
@@ -34,7 +35,11 @@ pub fn getPlayer() !Player {
 
 pub fn draw() !void {
     if (maybePlayer) |*player| {
-        try entity.draw(&player.entity);
+        if (movingRight) {
+            try entity.draw(&player.entity);
+        } else {
+            try entity.drawFlipped(&player.entity);
+        }
     }
 }
 
@@ -136,10 +141,12 @@ pub fn brake() void {
 }
 
 pub fn moveLeft() void {
+    movingRight = false;
     applyForce(box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
 }
 
 pub fn moveRight() void {
+    movingRight = true;
     applyForce(box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
 }
 
