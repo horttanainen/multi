@@ -30,7 +30,6 @@ const Sprite = entity.Sprite;
 
 //Single player game todos:
 //TODO: add sensor to projectile to explode on first collision
-//TODO: make projectile of box2d bullet type to enable ccd and such
 //TODO: add visualisation for explosion
 //TODO: add sound for explosion
 //TODO: split projectile into pieces

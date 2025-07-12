@@ -274,7 +274,8 @@ pub fn shoot() !void {
             const crosshairPos = calcCrosshairPosition(player.*);
             const position = camera.relativePositionForCreating(crosshairPos);
             const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
-            const bodyDef = box.createDynamicBodyDef(pos);
+            var bodyDef = box.createDynamicBodyDef(pos);
+            bodyDef.isBullet = true;
             const cannonBall = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 
             const cannonImpulse = vec.mul(vec.normalize(.{
