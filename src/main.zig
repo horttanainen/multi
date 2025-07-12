@@ -33,7 +33,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add kickback so that player moves slightly to the opposite direction of projectile
 //TODO: make projectile of box2d bullet type to enable ccd and such
 //TODO: add sensor to projectile to explode on first collision
 //TODO: add visualisation for explosion
