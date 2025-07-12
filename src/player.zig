@@ -273,10 +273,10 @@ pub fn shoot() !void {
             const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(pos));
             const cannonBall = try entity.createFromImg(shared.cannonBallmgSrc, shapeDef, bodyDef, "dynamic");
 
-            box2d.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, .{
-                .x = aimDirection.x * config.cannonStartImpulse,
-                .y = -aimDirection.y * config.cannonStartImpulse,
-            }, true);
+            const cannonImpulse = vec.mul(vec.normalize(.{ .x = aimDirection.x, .y = -aimDirection.y,}), config.cannonImpulse);
+
+            box2d.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, vec.toBox2d(cannonImpulse), true);
+            box2d.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
         }
 
         delay.action("shoot", config.shootDelayMs);

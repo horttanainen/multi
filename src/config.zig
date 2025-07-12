@@ -17,7 +17,7 @@ pub const physics = .{
     .subStepCount = 4,
 };
 
-pub const cannonStartImpulse = 10;
+pub const cannonImpulse = 10;
 
 pub const Player = struct {
     materialId: i32,
