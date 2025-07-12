@@ -44,6 +44,18 @@ pub fn mul(a: Vec2, b: f32) Vec2 {
     };
 }
 
+pub fn normalize(a: Vec2) Vec2 {
+    const length = magnitude(a);
+    return .{
+        .x = a.x / length,
+        .y = a.y / length,
+    };
+}
+
+pub fn magnitude(a: Vec2) f32 {
+    return @sqrt(a.x * a.x + a.y * a.y);
+}
+
 pub const west: Vec2 = .{ .x = -1, .y = 0 };
 pub const east: Vec2 = .{ .x = 1, .y = 0 };
 pub const north: Vec2 = .{ .x = 0, .y = 1 };
