@@ -7,18 +7,17 @@
             .url = "https://github.com/zig-gamedev/zsdl/archive/41efa4c1ef3c59eed8f2ea3d10480ef071932249.tar.gz",
             .hash = "122076b80c37e4885edc0083cf9f0c10b08c5b3a30dceea5ae189749388806db87b4",
         },
-        .SDL = .{
-            .url = "git+https://github.com/allyourcodebase/SDL.git#181dd2c6a69a8392a8457a5e80e3ab2e4871e643",
-            .hash = "SDL-2.32.4-JToi30-TEgH42-HFmgINmgFPrAXOjaNp734Jh_wep6ZN",
-        },
         .SDL_image = .{
-            .url = "https://github.com/allyourcodebase/SDL_image/archive/25919dd8cdbfc7db543c7c22fbc85b20ce4b2cf0.tar.gz",
-            .hash = "SDL_image-2.8.4--aJoHUMWAADytIssRiwrOBGJwPirddZGNUHQERTI1rNk",
+            .url = "https://github.com/allyourcodebase/SDL_image/archive/ab9a5274f4261c0c8454762dfb085a793442608d.tar.gz",
+            .hash = "SDL_image-2.8.8--aJoHUMWAAC4JBK2yqhWxmeynIuMwkMrhk07XN0GqQob",
         },
-        // Have to use my own fork for now... The duplicate freetype import from harfbuzz breaks build on the upstream
         .SDL_ttf = .{
-            .url = "https://github.com/horttanainen/SDL_ttf/archive/5dc632d8751edabdfb1fd8532ccbbdd21ffbf048.tar.gz",
-            .hash = "SDL_ttf-2.24.0-PNW5xHsMAABDyMdxPMxeqyjUqS96sKxybuPPpzwx2_oC",
+            .url = "https://github.com/allyourcodebase/SDL_ttf/archive/5b11c90f3449b7d521aa0e74ff0532dacf4249d7.tar.gz",
+            .hash = "SDL_ttf-2.24.0-PNW5xPMOAABvGKR8M05A2LnV6C4qtacG_NmocltNGHz1",
+        },
+        .SDL = .{
+            .url = "https://github.com/allyourcodebase/SDL/archive/005c64130effb6019c42769d3a277180bdbeb0b2.tar.gz",
+            .hash = "SDL-2.32.6-JToi32yUEgFuZPcB2O6IbBHHsP2Ul8QuRYh488w2VnMy",
         },
     },
     .paths = .{
