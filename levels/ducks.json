@@ -9,8 +9,8 @@
             "friction": 0.5,
             "imgPath": "images/level2.png",
             "pos": {
-                "x": 400,
-                "y": 400
+                "x": -420,
+                "y": -420
             }
         },
         {
@@ -18,8 +18,8 @@
             "friction": 0.5,
             "imgPath": "images/bean.png",
             "pos": {
-                "x": 400,
-                "y": 400
+                "x": -20,
+                "y": -700
             }
         },
         {
@@ -27,8 +27,8 @@
             "friction": 0,
               "imgPath": "images/duff.png",
               "pos": {
-                  "x": 100,
-                  "y": 250
+                  "x": -300,
+                  "y": -250
               }
         },
         {
@@ -36,8 +36,8 @@
             "friction": 0,
               "imgPath": "images/spawn.png",
               "pos": {
-                  "x": 600,
-                  "y": 50
+                  "x": 200,
+                  "y": -350
               }
         }
     ]

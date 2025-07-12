@@ -1,8 +1,8 @@
 const std = @import("std");
 
 pub const window = .{
-    .width = 800,
-    .height = 800,
+    .width = 2000,
+    .height = 1200,
 };
 
 pub const maxLevelSizeInBytes = 1024 * 1024;

@@ -9,6 +9,7 @@ const box = @import("box.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
 const config = @import("config.zig");
+const sprite = @import("sprite.zig");
 
 var maybeSelectedBodyId: ?box2d.b2BodyId = null;
 var maybeCopiedBodyId: ?box2d.b2BodyId = null;
@@ -22,10 +23,13 @@ pub fn copySelection() void {
     maybeCopiedBodyId = maybeSelectedBodyId;
 }
 
-pub fn pasteSelection(pos: vec.IVec2) !void {
+pub fn pasteSelection(position: vec.IVec2) !void {
     if (maybeCopiedBodyId) |copiedBodyId| {
         const maybeE = entity.getEntity(copiedBodyId);
         if (maybeE) |e| {
+            const s = try sprite.createFromImg(e.sprite.imgPath);
+            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+
             var bodyDef = box.createDynamicBodyDef(pos);
             bodyDef.type = box2d.b2Body_GetType(e.bodyId);
             var shapeDef = box2d.b2DefaultShapeDef();
@@ -37,9 +41,9 @@ pub fn pasteSelection(pos: vec.IVec2) !void {
             shapeDef.material = box2d.b2Shape_GetMaterial(shapes[0]);
 
             std.debug.print("about to create\n", .{});
-            const newEntity = try entity.createFromImg(e.sprite.imgPath, shapeDef, bodyDef, e.type);
+            const newEntity = try entity.createFromImg(s, shapeDef, bodyDef, e.type);
 
-            const serializedE = entity.serialize(newEntity, pos);
+            const serializedE = entity.serialize(newEntity, position);
             try createNewVersion();
             try addEntityToLevel(serializedE);
         }

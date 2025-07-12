@@ -12,6 +12,8 @@ const entity = @import("entity.zig");
 const levelEditor = @import("levelEditor.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
+const conv = @import("conversion.zig");
+const sprite = @import("sprite.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -26,8 +28,11 @@ pub fn handleGameMouseInput() !void {
         if (!delay.check("boxcreate")) {
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
-            const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(.{ .x = x, .y = y }));
-            _ = try entity.createFromImg(shared.boxImgSrc, shapeDef, bodyDef, "dynamic");
+            const position = camera.relativePositionForCreating(.{ .x = x, .y = y });
+            const s = try sprite.createFromImg(shared.boxImgSrc);
+            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+            const bodyDef = box.createDynamicBodyDef(pos);
+            _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 
             delay.action("boxcreate", config.boxCreateDelayMs);
         }

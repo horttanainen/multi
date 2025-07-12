@@ -1,3 +1,4 @@
+const std = @import("std");
 const box2d = @import("box2dnative.zig");
 
 const vec = @import("vector.zig");
@@ -15,7 +16,10 @@ pub const Camera = struct { posPx: vec.IVec2, bodyId: box2d.b2BodyId, state: ?bo
 var maybeCamera: ?Camera = null;
 
 pub fn spawn(position: vec.IVec2) !void {
-    const bodyDef = box.createDynamicBodyDef(position);
+    const bodyDef = box.createDynamicBodyDef(.{
+        .x = @floatFromInt(position.x),
+        .y = @floatFromInt(position.y),
+    });
     const bodyId = try box.createBody(bodyDef);
     box2d.b2Body_SetGravityScale(bodyId, 0);
     box2d.b2Body_SetLinearDamping(bodyId, 2);
@@ -28,7 +32,11 @@ pub fn spawn(position: vec.IVec2) !void {
 
     _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
 
-    maybeCamera = .{ .posPx = position, .bodyId = bodyId, .state = null };
+    maybeCamera = .{
+        .posPx = position,
+        .bodyId = bodyId,
+        .state = null,
+    };
 }
 
 pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
@@ -101,15 +109,23 @@ fn move(pos: vec.IVec2) void {
         const levelWidthHalf = @divFloor(levelSize.x, 2);
         const levelHeightHalf = @divFloor(levelSize.y, 2);
 
-        if (camera.posPx.x < levelPos.x - levelWidthHalf) {
-            camera.posPx.x = levelPos.x - levelWidthHalf;
-        } else if (camera.posPx.x > levelPos.x + levelWidthHalf - config.window.width) {
-            camera.posPx.x = levelPos.x + levelWidthHalf - config.window.width;
+        if (config.window.width < levelSize.x) {
+            if (camera.posPx.x < levelPos.x - levelWidthHalf) {
+                camera.posPx.x = levelPos.x - levelWidthHalf;
+            } else if (camera.posPx.x >= levelPos.x + levelWidthHalf - config.window.width) {
+                camera.posPx.x = levelPos.x + levelWidthHalf - config.window.width;
+            }
+        } else {
+            camera.posPx.x = -config.window.width / 2;
         }
-        if (camera.posPx.y < levelPos.y - levelHeightHalf) {
-            camera.posPx.y = levelPos.y - levelHeightHalf;
-        } else if (camera.posPx.y > levelPos.y + levelHeightHalf - config.window.height) {
-            camera.posPx.y = levelPos.y + levelHeightHalf - config.window.height;
+        if (config.window.height < levelSize.y) {
+            if (camera.posPx.y < levelPos.y - levelHeightHalf) {
+                camera.posPx.y = levelPos.y - levelHeightHalf;
+            } else if (camera.posPx.y >= levelPos.y + levelHeightHalf - config.window.height) {
+                camera.posPx.y = levelPos.y + levelHeightHalf - config.window.height;
+            }
+        } else {
+            camera.posPx.y = -config.window.height / 2;
         }
     }
 }

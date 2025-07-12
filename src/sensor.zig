@@ -9,11 +9,11 @@ const player = @import("player.zig");
 
 const config = @import("config.zig");
 
-const p2m = @import("conversion.zig").p2m;
+const conv = @import("conversion.zig");
 
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
 const entity = @import("entity.zig");
-const Sprite = entity.Sprite;
+const sprite = @import("sprite.zig");
 const Entity = entity.Entity;
 
 pub var maybeGoalSensor: ?Entity = null;
@@ -32,13 +32,13 @@ pub fn drawGoal() !void {
     try entity.draw(&goalSensor);
 }
 
-pub fn createGoalSensorFromImg(position: IVec2, imgPath: []const u8) !void {
+pub fn createGoalSensorFromImg(position: vec.Vec2, s: sprite.Sprite) !void {
     var shapeDef = box2d.b2DefaultShapeDef();
     shapeDef.isSensor = true;
     shapeDef.material = config.goalMaterialId;
     const bodyDef = box.createStaticBodyDef(position);
     const bodyId = try box.createBody(bodyDef);
-    const e = try entity.createEntityForBody(bodyId, imgPath, shapeDef, "goal");
+    const e = try entity.createEntityForBody(bodyId, s, shapeDef, "goal");
     maybeGoalSensor = e;
 }
 

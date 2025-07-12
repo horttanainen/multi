@@ -10,10 +10,9 @@ const shared = @import("shared.zig");
 const player = @import("player.zig");
 const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
+const sprite = @import("sprite.zig");
 
-const m2P = @import("conversion.zig").m2P;
-const p2m = @import("conversion.zig").p2m;
-const m2PixelPos = @import("conversion.zig").m2PixelPos;
+const conv = @import("conversion.zig");
 
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
@@ -25,9 +24,9 @@ var levelNumber: usize = 0;
 var jsonTextBuf: [100]u8 = undefined;
 pub var json: []const u8 = undefined;
 
-pub const position: vec.IVec2 = .{
-    .x = 400,
-    .y = 400,
+pub var position: vec.IVec2 = .{
+    .x = 0,
+    .y = 0,
 };
 pub var size: vec.IVec2 = .{
     .x = 100,
@@ -85,25 +84,28 @@ fn loadByName(levelName: []const u8) !void {
     for (levelToDeserialize.entities) |e| {
         var shapeDef = box2d.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
+        const s = try sprite.createFromImg(e.imgPath);
+        const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
         if (std.mem.eql(u8, e.type, "dynamic")) {
-            const bodyDef = box.createDynamicBodyDef(e.pos);
-            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "dynamic");
+            const bodyDef = box.createDynamicBodyDef(pos);
+            _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
-            const bodyDef = box.createStaticBodyDef(e.pos);
-            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "static");
+            const bodyDef = box.createStaticBodyDef(pos);
+            _ = try entity.createFromImg(s, shapeDef, bodyDef, "static");
         } else if (std.mem.eql(u8, e.type, "goal")) {
-            try sensor.createGoalSensorFromImg(e.pos, e.imgPath);
+            try sensor.createGoalSensorFromImg(pos, s);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
-            const bodyDef = box.createStaticBodyDef(e.pos);
+            const bodyDef = box.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
             shapeDef.material = config.spawnMaterialId;
-            _ = try entity.createFromImg(e.imgPath, shapeDef, bodyDef, "spawn");
+            _ = try entity.createFromImg(s, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
         }
     }
 
-    try player.spawn(spawnLocation);
     size = levelToDeserialize.size;
+
+    try player.spawn(spawnLocation);
 }
 
 pub fn reload() !void {

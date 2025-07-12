@@ -71,3 +71,4 @@ pub const north: Vec2 = .{ .x = 0, .y = 1 };
 pub const south: Vec2 = .{ .x = 0, .y = -1 };
 
 pub const zero: Vec2 = .{ .x = 0, .y = 0 };
+pub const izero: IVec2 = .{ .x = 0, .y = 0 };

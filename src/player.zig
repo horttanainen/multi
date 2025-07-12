@@ -90,7 +90,9 @@ pub fn spawn(position: vec.IVec2) !void {
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
     const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
 
-    const bodyDef = box.createNonRotatingDynamicBodyDef(position);
+    const pos = conv.pixel2MPos(position.x, position.y, sizeM.x, sizeM.y);
+
+    const bodyDef = box.createNonRotatingDynamicBodyDef(pos);
     const bodyId = try box.createBody(bodyDef);
 
     const dynamicBox = box2d.b2MakeBox(0.1, 0.33);
@@ -265,15 +267,20 @@ pub fn aim(direction: vec.Vec2) void {
 pub fn shoot() !void {
     if (!delay.check("shoot")) {
         if (maybePlayer) |*player| {
-            const pos = calcCrosshairPosition(player.*);
-
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
 
-            const bodyDef = box.createDynamicBodyDef(camera.relativePositionForCreating(pos));
-            const cannonBall = try entity.createFromImg(shared.cannonBallmgSrc, shapeDef, bodyDef, "dynamic");
+            const s = try sprite.createFromImg(shared.cannonBallmgSrc);
+            const crosshairPos = calcCrosshairPosition(player.*);
+            const position = camera.relativePositionForCreating(crosshairPos);
+            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+            const bodyDef = box.createDynamicBodyDef(pos);
+            const cannonBall = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 
-            const cannonImpulse = vec.mul(vec.normalize(.{ .x = aimDirection.x, .y = -aimDirection.y,}), config.cannonImpulse);
+            const cannonImpulse = vec.mul(vec.normalize(.{
+                .x = aimDirection.x,
+                .y = -aimDirection.y,
+            }), config.cannonImpulse);
 
             box2d.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, vec.toBox2d(cannonImpulse), true);
             box2d.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);

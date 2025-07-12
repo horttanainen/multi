@@ -15,10 +15,6 @@ const physics = @import("physics.zig");
 const input = @import("input.zig");
 const camera = @import("camera.zig");
 
-const meters = @import("conversion.zig").meters;
-const m2PixelPos = @import("conversion.zig").m2PixelPos;
-const m2P = @import("conversion.zig").m2P;
-
 const frictionCallback = @import("friction.zig").frictionCallback;
 
 const debug = @import("debug.zig");
@@ -33,10 +29,11 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: make projectile of box2d bullet type to enable ccd and such
 //TODO: add sensor to projectile to explode on first collision
+//TODO: make projectile of box2d bullet type to enable ccd and such
 //TODO: add visualisation for explosion
 //TODO: add sound for explosion
+//TODO: split projectile into pieces
 //TODO: make explosion push objects around relative to their distance from the center of the explosion
 //TODO: make explosion break level
 //TODO: allow explosion to break objects
@@ -88,7 +85,7 @@ pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
 
-    try camera.spawn(.{ .x = 200, .y = 400 });
+    try camera.spawn(.{ .x = 0, .y = 0 });
     try level.next();
     defer level.cleanup();
     defer levelEditor.cleanup() catch |err| {

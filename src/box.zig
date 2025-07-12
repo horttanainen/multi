@@ -1,32 +1,31 @@
 const std = @import("std");
 const box2d = @import("box2dnative.zig");
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
 
 const shared = @import("shared.zig");
 const time = @import("time.zig");
 
-const p2m = @import("conversion.zig").p2m;
-const m2P = @import("conversion.zig").m2P;
+const conv = @import("conversion.zig");
 
 pub const State = struct {
     pos: box2d.b2Vec2,
     rotAngle: f32,
 };
 
-pub fn createNonRotatingDynamicBodyDef(position: IVec2) box2d.b2BodyDef {
+pub fn createNonRotatingDynamicBodyDef(position: vec.Vec2) box2d.b2BodyDef {
     var bodyDef = createDynamicBodyDef(position);
     bodyDef.fixedRotation = true;
     return bodyDef;
 }
 
-pub fn createDynamicBodyDef(position: IVec2) box2d.b2BodyDef {
+pub fn createDynamicBodyDef(position: vec.Vec2) box2d.b2BodyDef {
     var bodyDef = box2d.b2DefaultBodyDef();
     bodyDef.type = box2d.b2_dynamicBody;
-    bodyDef.position = p2m(position);
+    bodyDef.position = vec.toBox2d(position);
     return bodyDef;
 }
 
-pub fn createStaticBodyDef(position: IVec2) box2d.b2BodyDef {
+pub fn createStaticBodyDef(position: vec.Vec2) box2d.b2BodyDef {
     var bodyDef = createDynamicBodyDef(position);
     bodyDef.type = box2d.b2_staticBody;
     return bodyDef;
@@ -39,7 +38,7 @@ pub fn createBody(bodyDef: box2d.b2BodyDef) !box2d.b2BodyId {
     return bodyId;
 }
 
-pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: IVec2, shapeDef: box2d.b2ShapeDef) ![]box2d.b2ShapeId {
+pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]vec.IVec2, dimP: vec.IVec2, shapeDef: box2d.b2ShapeDef) ![]box2d.b2ShapeId {
     const polygons = try createPolygons(triangles, dimP);
     defer shared.allocator.free(polygons);
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
@@ -52,18 +51,18 @@ pub fn createPolygonShape(bodyId: box2d.b2BodyId, triangles: [][3]IVec2, dimP: I
     return shapeIds.toOwnedSlice();
 }
 
-fn createPolygons(triangles: [][3]IVec2, dimP: IVec2) ![]box2d.b2Polygon {
+fn createPolygons(triangles: [][3]vec.IVec2, dimP: vec.IVec2) ![]box2d.b2Polygon {
     var polygons = std.ArrayList(box2d.b2Polygon).init(shared.allocator);
 
     for (triangles) |tri| {
-        var triangle: [3]IVec2 = undefined;
+        var triangle: [3]vec.IVec2 = undefined;
         triangle[0] = .{ .x = tri[0].x - @divFloor(dimP.x, 2), .y = tri[0].y - @divFloor(dimP.y, 2) };
         triangle[1] = .{ .x = tri[1].x - @divFloor(dimP.x, 2), .y = tri[1].y - @divFloor(dimP.y, 2) };
         triangle[2] = .{ .x = tri[2].x - @divFloor(dimP.x, 2), .y = tri[2].y - @divFloor(dimP.y, 2) };
         var verts: [3]box2d.b2Vec2 = undefined;
-        verts[0] = p2m(triangle[0]);
-        verts[1] = p2m(triangle[1]);
-        verts[2] = p2m(triangle[2]);
+        verts[0] = conv.p2m(triangle[0]);
+        verts[1] = conv.p2m(triangle[1]);
+        verts[2] = conv.p2m(triangle[2]);
 
         const hull = box2d.b2ComputeHull(&verts[0], 3);
 

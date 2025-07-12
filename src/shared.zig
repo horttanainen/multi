@@ -53,7 +53,7 @@ pub fn init() !SharedResources {
 
     const monocraftFont = try ttf.Font.open(monocraftSrc, 16);
 
-    const window = try sdl.createWindow("My Super Duper Game Window", 0, 0, config.window.width, config.window.height, .{ .opengl = true, .shown = true });
+    const window = try sdl.createWindow("My Super Duper Game Window", 2000, 0, config.window.width, config.window.height, .{ .opengl = true, .shown = true });
 
     const renderer = try sdl.createRenderer(window, -1, .{ .accelerated = true, .present_vsync = true });
 

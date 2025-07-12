@@ -74,17 +74,15 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip);
 }
 
-pub fn createFromImg(imgPath: []const u8, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
+pub fn createFromImg(s: Sprite, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box.createBody(bodyDef);
-    const entity = try createEntityForBody(bodyId, imgPath, shapeDef, entityType);
+    const entity = try createEntityForBody(bodyId, s, shapeDef, entityType);
     try entities.put(bodyId, entity);
     return entity;
 }
 
-pub fn createEntityForBody(bodyId: box2d.b2BodyId, imagePath: []const u8, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
+pub fn createEntityForBody(bodyId: box2d.b2BodyId, s: Sprite, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try shared.allocator.dupe(u8, eType);
-
-    const s = try sprite.createFromImg(imagePath);
 
     const triangles = try polygon.triangulate(s.surface);
     defer shared.allocator.free(triangles);
@@ -121,7 +119,12 @@ pub fn cleanup() void {
 pub fn getPosition(entity: Entity) vec.IVec2 {
     const currentState = box.getState(entity.bodyId);
     const state = box.getInterpolatedState(entity.state, currentState);
-    const pos = conv.m2Pixel(state.pos);
+    const pos = conv.m2PixelPos(
+        state.pos.x,
+        state.pos.y,
+        entity.sprite.sizeM.x,
+        entity.sprite.sizeM.y,
+    );
     return pos;
 }
 
