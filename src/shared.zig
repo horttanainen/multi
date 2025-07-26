@@ -15,6 +15,8 @@ pub const crosshairImgSrc = "images/crosshair.png";
 pub const lieroImgSrc = "images/liero.png";
 pub const boxImgSrc = "images/box.png";
 pub const cannonBallmgSrc = "images/cannonball.png";
+pub const nickiImgSrc = "images/nicki.png";
+pub const starImgSrc = "images/star.png";
 const duffImgSrc = "images/duff.png";
 
 const monocraftSrc = "fonts/monocraft.ttf";

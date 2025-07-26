@@ -35,43 +35,54 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zsdl_image", zsdl.module("zsdl2_image"));
     exe.root_module.addImport("zsdl_ttf", zsdl.module("zsdl2_ttf"));
 
-    exe.addCSourceFiles(.{ .root = b.path("./box2d/src/"), .files = &[_][]const u8{
-        "aabb.c",
-        "arena_allocator.c",
-        "array.c",
-        "bitset.c",
-        "body.c",
-        "broad_phase.c",
-        "constraint_graph.c",
-        "contact.c",
-        "contact_solver.c",
-        "core.c",
-        "distance.c",
-        "distance_joint.c",
-        "dynamic_tree.c",
-        "geometry.c",
-        "hull.c",
-        "id_pool.c",
-        "island.c",
-        "joint.c",
-        "manifold.c",
-        "math_functions.c",
-        "motor_joint.c",
-        "mouse_joint.c",
-        "prismatic_joint.c",
-        "revolute_joint.c",
-        "sensor.c",
-        "shape.c",
-        "solver.c",
-        "solver_set.c",
-        "table.c",
-        "timer.c",
-        "types.c",
-        "weld_joint.c",
-        "wheel_joint.c",
-        "world.c",
-    } });
+    exe.addCSourceFiles(.{
+        .root = b.path("./box2d/src/"),
+        .files = &[_][]const u8{
+            "aabb.c",
+            "arena_allocator.c",
+            "array.c",
+            "bitset.c",
+            "body.c",
+            "broad_phase.c",
+            "constraint_graph.c",
+            "contact.c",
+            "contact_solver.c",
+            "core.c",
+            "distance.c",
+            "distance_joint.c",
+            "dynamic_tree.c",
+            "geometry.c",
+            "hull.c",
+            "id_pool.c",
+            "island.c",
+            "joint.c",
+            "manifold.c",
+            "math_functions.c",
+            "motor_joint.c",
+            "mouse_joint.c",
+            "prismatic_joint.c",
+            "revolute_joint.c",
+            "sensor.c",
+            "shape.c",
+            "solver.c",
+            "solver_set.c",
+            "table.c",
+            "timer.c",
+            "types.c",
+            "weld_joint.c",
+            "wheel_joint.c",
+            "world.c",
+        },
+    });
     exe.addIncludePath(b.path("./box2d/include/"));
+
+    exe.addCSourceFiles(.{
+        .root = b.path("./triangle/"),
+        .files = &[_][]const u8{
+            "triangle.c",
+        },
+    });
+    exe.addIncludePath(b.path("./triangle/"));
 
     b.installArtifact(exe);
 
