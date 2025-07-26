@@ -78,7 +78,6 @@ const Sprite = entity.Sprite;
 
 //Bugs:
 //TODO: sometimes jumping wont work because of the crappy sensor logic that sometimes misses player returning to ground. We probably should periodically check if player is touching ground to decide if we are back on the ground again.
-//TODO: some shapes, such as star.png, crash triangulation. I suspect my version of pavlidis is buggy
 
 pub fn main() !void {
     const resources = try shared.init();
