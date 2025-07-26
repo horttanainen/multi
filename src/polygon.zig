@@ -16,7 +16,7 @@ const PI = std.math.pi;
 const ArrayList = std.ArrayList;
 
 pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
-    std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
+    // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
 
     const surface = img.*;
     const pixels: [*]const u8 = @ptrCast(surface.pixels);
@@ -28,27 +28,27 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
     const threshold: u8 = 150; // Isovalue threshold for alpha
     const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
     defer allocator.free(vertices);
-    std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
+    // std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
 
     // 2. simplify the polygon.
     const epsilonArea: f32 = 0.001 * @as(f32, @floatFromInt(width * height));
     const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
-    std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
+    // std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
 
     // 3. remove duplicates
     const withoutDuplicates = try removeDuplicateVertices(simplified);
     defer allocator.free(withoutDuplicates);
-    std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
+    // std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
 
     // 4. ensure counter clockwise
     const ccw = try ensureCounterClockwise(withoutDuplicates);
     defer shared.allocator.free(ccw);
-    std.debug.print("CCW vertices: {}\n", .{ccw.len});
+    // std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     // 5. split into triangles
     const triangles = try triangle.triangulate(ccw);
-    std.debug.print("triangles: {}\n", .{triangles.len});
+    // std.debug.print("triangles: {}\n", .{triangles.len});
 
     return triangles;
 }

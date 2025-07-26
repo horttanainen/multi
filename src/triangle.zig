@@ -37,7 +37,7 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
     defer triangle.trifree(out_data.pointlist);
     defer triangle.trifree(out_data.trianglelist);
 
-    triangle.triangulate("pzqV", &in_data, &out_data, @as(?[*:0]const u8, null));
+    triangle.triangulate("pzqQ", &in_data, &out_data, @as(?[*:0]const u8, null));
 
     // Triangle may add Steiner points, so use the full output pointlist
     const triangle_count = out_data.numberoftriangles;
