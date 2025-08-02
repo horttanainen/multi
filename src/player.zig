@@ -137,6 +137,10 @@ pub fn spawn(position: vec.IVec2) !void {
         .surface = surface,
         .texture = texture,
         .imgPath = shared.lieroImgSrc,
+        .scale = .{
+            .x = 1.0,
+            .y = 1.0,
+        },
         .sizeM = .{
             .x = sizeM.x,
             .y = sizeM.y,
@@ -171,7 +175,13 @@ pub fn spawn(position: vec.IVec2) !void {
         .rightWallSensorId = rightWallSensorId,
     };
 
-    maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc);
+    maybeCrosshair = try sprite.createFromImg(
+        shared.crosshairImgSrc,
+        .{
+            .x = 1,
+            .y = 1,
+        },
+    );
 }
 
 pub fn jump() void {
@@ -308,7 +318,13 @@ pub fn shoot() !void {
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
 
-            const s = try sprite.createFromImg(shared.cannonBallmgSrc);
+            const s = try sprite.createFromImg(
+                shared.cannonBallmgSrc,
+                .{
+                    .x = 0.5,
+                    .y = 0.5,
+                },
+            );
             const crosshairPos = calcCrosshairPosition(player.*);
             const position = camera.relativePositionForCreating(crosshairPos);
             const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);

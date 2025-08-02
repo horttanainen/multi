@@ -8,6 +8,10 @@
             "type": "static",
             "friction": 0.5,
             "imgPath": "images/level.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
             "pos": {
                 "x": -840,
                 "y": -840
@@ -17,6 +21,10 @@
             "type": "dynamic",
             "friction": 0.5,
             "imgPath": "images/bean.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
             "pos": {
                 "x": -600,
                 "y": -400
@@ -25,20 +33,28 @@
         {
             "type": "goal",
             "friction": 0,
-              "imgPath": "images/duff.png",
-              "pos": {
-                  "x": 300,
-                  "y": 200
-              }
+            "imgPath": "images/duff.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": 300,
+                "y": 200
+            }
         },
         {
             "type": "spawn",
             "friction": 0,
-              "imgPath": "images/spawn.png",
-              "pos": {
-                  "x": -150,
-                  "y": 150
-              }
+            "imgPath": "images/spawn.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": -150,
+                "y": 150
+            }
         }
     ]
 }

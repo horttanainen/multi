@@ -28,9 +28,20 @@ pub fn handleGameMouseInput() !void {
         if (!delay.check("boxcreate")) {
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
-            const position = camera.relativePositionForCreating(.{ .x = x, .y = y });
-            const s = try sprite.createFromImg(shared.boxImgSrc);
-            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+            const position = camera.relativePositionForCreating(.{
+                .x = x,
+                .y = y,
+            });
+            const s = try sprite.createFromImg(shared.boxImgSrc, .{
+                .x = 1,
+                .y = 1,
+            });
+            const pos = conv.pixel2MPos(
+                position.x,
+                position.y,
+                s.sizeM.x,
+                s.sizeM.y,
+            );
             const bodyDef = box.createDynamicBodyDef(pos);
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 

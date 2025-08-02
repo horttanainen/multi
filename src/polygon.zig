@@ -6,6 +6,7 @@ const visvalingam = @import("visvalingam.zig").visvalingam;
 const douglasPeucker = @import("douglas.zig").douglasPeucker;
 const triangle = @import("triangle.zig");
 const shared = @import("shared.zig");
+const sprite = @import("sprite.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
@@ -15,9 +16,10 @@ const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
 const ArrayList = std.ArrayList;
 
-pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
+pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
 
+    const img = s.surface;
     const surface = img.*;
     const pixels: [*]const u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
@@ -32,6 +34,7 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
 
     // 2. simplify the polygon.
     const epsilonArea: f32 = 0.001 * @as(f32, @floatFromInt(width * height));
+    // std.debug.print("epsilonArea: {d}\n", .{epsilonArea});
     const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
     // std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
@@ -48,9 +51,13 @@ pub fn triangulate(img: *sdl.Surface) ![][3]IVec2 {
 
     // 5. split into triangles
     const triangles = try triangle.triangulate(ccw);
+    defer shared.allocator.free(triangles);
     // std.debug.print("triangles: {}\n", .{triangles.len});
 
-    return triangles;
+    // 6. scale triangles
+    const scaledTriangles = try scaleTriangles(triangles, s.scale);
+
+    return scaledTriangles;
 }
 
 pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
@@ -87,6 +94,32 @@ pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
 
         return reversed.toOwnedSlice();
     }
+}
+
+fn scaleTriangles(triangles: [][3]IVec2, scale: Vec2) ![][3]IVec2 {
+    var scaledTriangles = ArrayList([3]IVec2).init(allocator);
+    for (triangles) |t| {
+        const v1 = t[0];
+        const v2 = t[1];
+        const v3 = t[2];
+        const scaledTriangle: [3]IVec2 = .{
+            .{
+                .x = @intFromFloat(@as(f32, @floatFromInt(v1.x)) * scale.x),
+                .y = @intFromFloat(@as(f32, @floatFromInt(v1.y)) * scale.y),
+            },
+            .{
+                .x = @intFromFloat(@as(f32, @floatFromInt(v2.x)) * scale.x),
+                .y = @intFromFloat(@as(f32, @floatFromInt(v2.y)) * scale.y),
+            },
+            .{
+                .x = @intFromFloat(@as(f32, @floatFromInt(v3.x)) * scale.x),
+                .y = @intFromFloat(@as(f32, @floatFromInt(v3.y)) * scale.y),
+            },
+        };
+        try scaledTriangles.append(scaledTriangle);
+    }
+
+    return scaledTriangles.toOwnedSlice();
 }
 
 fn isCounterClockwise(vertices: []IVec2) bool {

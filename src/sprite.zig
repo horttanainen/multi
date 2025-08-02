@@ -23,6 +23,7 @@ const conv = @import("conversion.zig");
 pub const Sprite = struct {
     texture: *sdl.Texture,
     surface: *sdl.Surface,
+    scale: vec.Vec2,
     sizeM: vec.Vec2,
     sizeP: vec.IVec2,
     imgPath: []const u8,
@@ -53,7 +54,7 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
-pub fn createFromImg(imagePath: []const u8) !Sprite {
+pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2) !Sprite {
     const imgPath = try shared.allocator.dupe(u8, imagePath);
 
     const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
@@ -65,12 +66,16 @@ pub fn createFromImg(imagePath: []const u8) !Sprite {
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
+
+    size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
+    size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
     const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
 
     const sprite = Sprite{
         .surface = surface,
         .imgPath = imgPath,
         .texture = texture,
+        .scale = scale,
         .sizeM = .{
             .x = sizeM.x,
             .y = sizeM.y,

@@ -37,6 +37,7 @@ pub const SerializableEntity = struct {
     type: []const u8,
     friction: f32,
     imgPath: []const u8,
+    scale: vec.Vec2,
     pos: vec.IVec2,
 };
 
@@ -84,7 +85,7 @@ pub fn createFromImg(s: Sprite, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2Bod
 pub fn createEntityForBody(bodyId: box2d.b2BodyId, s: Sprite, shapeDef: box2d.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try shared.allocator.dupe(u8, eType);
 
-    const triangles = try polygon.triangulate(s.surface);
+    const triangles = try polygon.triangulate(s);
     defer shared.allocator.free(triangles);
 
     const shapeIds = try box.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
@@ -135,6 +136,7 @@ pub fn getEntity(bodyId: box2d.b2BodyId) ?*Entity {
 pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
     return SerializableEntity{
         .type = entity.type,
+        .scale = entity.sprite.scale,
         .pos = pos,
         .friction = entity.friction,
         .imgPath = entity.sprite.imgPath,

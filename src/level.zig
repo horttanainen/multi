@@ -84,7 +84,7 @@ fn loadByName(levelName: []const u8) !void {
     for (levelToDeserialize.entities) |e| {
         var shapeDef = box2d.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
-        const s = try sprite.createFromImg(e.imgPath);
+        const s = try sprite.createFromImg(e.imgPath, e.scale);
         const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box.createDynamicBodyDef(pos);

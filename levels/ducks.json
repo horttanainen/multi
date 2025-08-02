@@ -1,6 +1,6 @@
 {
     "size": {
-        "x": 840,
+        "x": 8400,
         "y": 840
     },
     "entities": [
@@ -8,8 +8,12 @@
             "type": "static",
             "friction": 0.5,
             "imgPath": "images/level2.png",
+            "scale": {
+              "x": 10.0,
+              "y": 1.0
+            },
             "pos": {
-                "x": -420,
+                "x": -4200,
                 "y": -420
             }
         },
@@ -17,6 +21,10 @@
             "type": "dynamic",
             "friction": 0.5,
             "imgPath": "images/bean.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
             "pos": {
                 "x": -20,
                 "y": -700
@@ -25,20 +33,28 @@
         {
             "type": "goal",
             "friction": 0,
-              "imgPath": "images/duff.png",
-              "pos": {
-                  "x": -300,
-                  "y": -250
-              }
+            "imgPath": "images/duff.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": -300,
+                "y": -250
+            }
         },
         {
             "type": "spawn",
             "friction": 0,
-              "imgPath": "images/spawn.png",
-              "pos": {
-                  "x": 200,
-                  "y": -350
-              }
+            "imgPath": "images/spawn.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": 200,
+                "y": -350
+            }
         }
     ]
 }

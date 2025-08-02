@@ -29,6 +29,7 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
+//TODO: add walking animation
 //TODO: add sensor to projectile to explode on first collision
 //TODO: add visualisation for explosion
 //TODO: add sound for explosion
@@ -39,12 +40,13 @@ const Sprite = entity.Sprite;
 //TODO: add stupid enemy that only stands still and can be killed
 //TODO: make killing of enemy very gibby and bloody
 //TODO: support controller
+//TODO: add crouch
 //TODO: add sliding
+//TODO: add slope sliding
 //TODO: add sounds
 //TODO: add jetpack
 //TODO: add liero/worms grappling hook
 //TODO: add enemies to shoot
-//TODO: instagib mode
 
 //level editor todos:
 //TODO: Pressing r in level editor reloads the level from latest version
@@ -68,6 +70,7 @@ const Sprite = entity.Sprite;
 //TODO: investigate how to sync games when running on different machines
 //TODO: add localhost multiplayer
 //TODO: add real multiplayer
+//TODO: instagib mode
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
