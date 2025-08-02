@@ -39,7 +39,6 @@ const Sprite = entity.Sprite;
 //TODO: add stupid enemy that only stands still and can be killed
 //TODO: make killing of enemy very gibby and bloody
 //TODO: support controller
-//TODO: make player feet collider rounded so it does not stick into corners
 //TODO: add sliding
 //TODO: add sounds
 //TODO: add jetpack
