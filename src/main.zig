@@ -78,9 +78,6 @@ const Sprite = entity.Sprite;
 //Engine:
 //TODO: separate engine code from game logic
 
-//Bugs:
-//TODO: sometimes jumping wont work because of the crappy sensor logic that sometimes misses player returning to ground. We probably should periodically check if player is touching ground to decide if we are back on the ground again.
-
 pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
