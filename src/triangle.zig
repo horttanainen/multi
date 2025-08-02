@@ -37,7 +37,18 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
     defer triangle.trifree(out_data.pointlist);
     defer triangle.trifree(out_data.trianglelist);
 
-    triangle.triangulate("pzqQ", &in_data, &out_data, @as(?[*:0]const u8, null));
+    // std.debug.print("numberofpoints: {}\n", .{in_data.numberofpoints});
+
+    // std.debug.print("pointlist ptr: {x}\n", .{@intFromPtr(in_data.pointlist)});
+    // for (0..@min(point_count * 2, 10)) |i| {
+    //     std.debug.print("pointlist[{}] = {d}\n", .{ i, in_data.pointlist.?[i] });
+
+    // }
+
+    // std.debug.print("segmentlist ptr: {x}\n", .{@intFromPtr(in_data.segmentlist)});
+    // std.debug.print("numberofsegments: {}\n", .{in_data.numberofsegments});
+
+    triangle.triangulate("pzqQ", &in_data, &out_data, null);
 
     // Triangle may add Steiner points, so use the full output pointlist
     const triangle_count = out_data.numberoftriangles;
@@ -47,8 +58,8 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
     defer shared.allocator.free(output_vertices);
 
     for (output_vertices, 0..) |*out_v, i| {
-        const x = out_data.pointlist[i * 2 + 0];
-        const y = out_data.pointlist[i * 2 + 1];
+        const x = out_data.pointlist.?[i * 2 + 0];
+        const y = out_data.pointlist.?[i * 2 + 1];
         out_v.* = IVec2{
             .x = @intFromFloat(x),
             .y = @intFromFloat(y),
@@ -57,9 +68,9 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
     const tris = try shared.allocator.alloc([3]IVec2, @as(usize, @intCast(triangle_count)));
 
     for (tris, 0..) |*tri, i| {
-        const ia = triangle_indices[i * 3 + 0];
-        const ib = triangle_indices[i * 3 + 1];
-        const ic = triangle_indices[i * 3 + 2];
+        const ia = triangle_indices.?[i * 3 + 0];
+        const ib = triangle_indices.?[i * 3 + 1];
+        const ic = triangle_indices.?[i * 3 + 2];
         tri.* = .{
             output_vertices[@as(usize, @intCast(ia))],
             output_vertices[@as(usize, @intCast(ib))],

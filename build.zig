@@ -81,6 +81,10 @@ pub fn build(b: *std.Build) !void {
         .files = &[_][]const u8{
             "triangle.c",
         },
+        .flags = &[_][]const u8{
+            "-DTRILIBRARY=true",
+            "-DREAL=double",
+        }
     });
     exe.addIncludePath(b.path("./triangle/"));
 

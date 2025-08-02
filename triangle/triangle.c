@@ -210,8 +210,6 @@
 
 /* #define SINGLE */
 
-#define TRILIBRARY true
-
 #ifdef SINGLE
 #define REAL float
 #else /* not SINGLE */
