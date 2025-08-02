@@ -35,6 +35,13 @@ pub fn iadd(a: IVec2, b: IVec2) IVec2 {
     };
 }
 
+pub fn imul(a: IVec2, b: f32) Vec2 {
+    return .{
+        .x = @intFromFloat(@as(f32, @floatFromInt(a.x)) * b),
+        .y = @intFromFloat(@as(f32, @floatFromInt(a.y)) * b),
+    };
+}
+
 pub fn equals(a: Vec2, b: Vec2) bool {
     return a.x == b.x and a.y == b.y;
 }
