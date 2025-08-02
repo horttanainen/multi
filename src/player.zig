@@ -29,6 +29,8 @@ pub var maybeCrosshair: ?sprite.Sprite = null;
 
 pub var maybePlayer: ?Player = null;
 
+var groundContactCount: usize = 0;
+
 pub var isMoving: bool = false;
 pub var touchesGround: bool = false;
 pub var touchesWallOnLeft: bool = false;
@@ -252,9 +254,11 @@ pub fn checkSensors() !void {
             if (box2d.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
                 continue;
             }
+
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                touchesGround = true;
+                groundContactCount += 1;
             }
+
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 touchesWallOnLeft = true;
             }
@@ -274,8 +278,11 @@ pub fn checkSensors() !void {
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                touchesGround = false;
+                if (groundContactCount > 0) {
+                    groundContactCount -= 1;
+                }
             }
+
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 touchesWallOnLeft = false;
             }
@@ -283,6 +290,7 @@ pub fn checkSensors() !void {
                 touchesWallOnRight = false;
             }
         }
+        touchesGround = groundContactCount > 0;
     }
 }
 
