@@ -9,6 +9,7 @@ pub const maxLevelSizeInBytes = 1024 * 1024;
 
 pub const met2pix = 80;
 
+pub const cannonMaterial = 666;
 pub const goalMaterialId = 420;
 pub const spawnMaterialId = 69;
 

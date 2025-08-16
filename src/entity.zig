@@ -46,6 +46,8 @@ pub var entities: AutoArrayHashMap(
     Entity,
 ) = AutoArrayHashMap(box2d.b2BodyId, Entity).init(allocator);
 
+pub var toBeDestroyedEntities = std.ArrayList(Entity).init(allocator);
+
 pub fn updateStates() void {
     for (entities.values()) |*e| {
         e.state = box.getState(e.bodyId);
@@ -114,6 +116,18 @@ pub fn cleanupOne(entity: Entity) void {
     shared.allocator.free(entity.shapeIds);
     shared.allocator.free(entity.type);
     sprite.cleanup(entity.sprite);
+}
+
+pub fn cleanupLater(entity: Entity) !void {
+    try toBeDestroyedEntities.append(entity);
+}
+
+pub fn cleanupMarkedEntities() void {
+    for (toBeDestroyedEntities.items) |de| {
+        cleanupOne(de);
+    }
+    toBeDestroyedEntities.deinit();
+    toBeDestroyedEntities = std.ArrayList(Entity).init(allocator);
 }
 
 pub fn cleanup() void {

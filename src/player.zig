@@ -281,6 +281,33 @@ pub fn clampSpeed() void {
     }
 }
 
+pub fn checkBulletContacts() !void {
+    const resources = try shared.getResources();
+    const contactEvents = box2d.b2World_GetContactEvents(resources.worldId);
+
+    for (0..@intCast(contactEvents.hitCount)) |i| {
+        const event = contactEvents.hitEvents[i];
+
+        const aMaterial = box2d.b2Shape_GetMaterial(event.shapeIdA);
+        const bMaterial = box2d.b2Shape_GetMaterial(event.shapeIdB);
+
+        if (aMaterial == config.cannonMaterial) {
+            const bodyId = box2d.b2Shape_GetBody(event.shapeIdA);
+            const maybeE = entity.entities.fetchSwapRemove(bodyId);
+            if (maybeE) |e| {
+                try entity.cleanupLater(e.value);
+            }
+        }
+        if (bMaterial == config.cannonMaterial) {
+            const bodyId = box2d.b2Shape_GetBody(event.shapeIdB);
+            const maybeE = entity.entities.fetchSwapRemove(bodyId);
+            if (maybeE) |e| {
+                try entity.cleanupLater(e.value);
+            }
+        }
+    }
+}
+
 pub fn checkSensors() !void {
     const resources = try shared.getResources();
     if (maybePlayer) |p| {
@@ -357,6 +384,8 @@ pub fn shoot() !void {
         if (maybePlayer) |*player| {
             var shapeDef = box2d.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
+            shapeDef.material = config.cannonMaterial;
+            shapeDef.enableHitEvents = true;
 
             const s = try sprite.createFromImg(
                 shared.cannonBallmgSrc,

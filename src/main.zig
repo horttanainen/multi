@@ -125,8 +125,11 @@ fn gameLoop() !void {
 
     player.clampSpeed();
 
+    try player.checkBulletContacts();
     try player.checkSensors();
     try sensor.checkGoal();
+
+    entity.cleanupMarkedEntities();
 
     camera.followPlayer();
 }
