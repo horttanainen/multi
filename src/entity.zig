@@ -70,7 +70,14 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     const currentState = box.getState(entity.bodyId);
     const state = box.getInterpolatedState(entity.state, currentState);
 
-    const pos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, entity.sprite.sizeM.x, entity.sprite.sizeM.y));
+    const pos = camera.relativePosition(
+        conv.m2PixelPos(
+            state.pos.x,
+            state.pos.y,
+            entity.sprite.sizeM.x,
+            entity.sprite.sizeM.y,
+        ),
+    );
 
     try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip);
 }

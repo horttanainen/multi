@@ -27,8 +27,17 @@ pub fn pasteSelection(position: vec.IVec2) !void {
     if (maybeCopiedBodyId) |copiedBodyId| {
         const maybeE = entity.getEntity(copiedBodyId);
         if (maybeE) |e| {
-            const s = try sprite.createFromImg(e.sprite.imgPath, e.sprite.scale);
-            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+            const s = try sprite.createFromImg(
+                e.sprite.imgPath,
+                e.sprite.scale,
+                e.sprite.offset,
+            );
+            const pos = conv.pixel2MPos(
+                position.x,
+                position.y,
+                s.sizeM.x,
+                s.sizeM.y,
+            );
 
             var bodyDef = box.createDynamicBodyDef(pos);
             bodyDef.type = box2d.b2Body_GetType(e.bodyId);

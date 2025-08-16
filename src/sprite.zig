@@ -26,6 +26,7 @@ pub const Sprite = struct {
     scale: vec.Vec2,
     sizeM: vec.Vec2,
     sizeP: vec.IVec2,
+    offset: vec.IVec2,
     imgPath: []const u8,
 };
 
@@ -41,8 +42,8 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     const renderer = resources.renderer;
 
     const rect = sdl.Rect{
-        .x = pos.x,
-        .y = pos.y,
+        .x = pos.x + sprite.offset.x,
+        .y = pos.y + sprite.offset.y,
         .w = sprite.sizeP.x,
         .h = sprite.sizeP.y,
     };
@@ -54,7 +55,7 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
-pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2) !Sprite {
+pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !Sprite {
     const imgPath = try shared.allocator.dupe(u8, imagePath);
 
     const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
@@ -76,6 +77,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2) !Sprite {
         .imgPath = imgPath,
         .texture = texture,
         .scale = scale,
+        .offset = offset,
         .sizeM = .{
             .x = sizeM.x,
             .y = sizeM.y,

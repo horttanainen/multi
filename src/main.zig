@@ -14,6 +14,7 @@ const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
 const input = @import("input.zig");
 const camera = @import("camera.zig");
+const animation = @import("animation.zig");
 
 const frictionCallback = @import("friction.zig").frictionCallback;
 
@@ -29,6 +30,7 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
+//TODO: add parallax background
 //TODO: add idle animation
 //TODO: add walking animation
 //TODO: add sensor to projectile to explode on first collision
@@ -104,6 +106,8 @@ pub fn main() !void {
         } else {
             try gameLoop();
         }
+
+        player.animate();
 
         try renderer.render();
 

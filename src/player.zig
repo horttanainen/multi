@@ -9,6 +9,8 @@ const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box = @import("box.zig");
+const animation = @import("animation.zig");
+const time = @import("time.zig");
 
 const config = @import("config.zig");
 
@@ -23,6 +25,7 @@ pub const Player = struct {
     footSensorShapeId: box2d.b2ShapeId,
     leftWallSensorId: box2d.b2ShapeId,
     rightWallSensorId: box2d.b2ShapeId,
+    currentAnimation: animation.Animation,
 };
 
 pub var maybeCrosshair: ?sprite.Sprite = null;
@@ -30,6 +33,8 @@ pub var maybeCrosshair: ?sprite.Sprite = null;
 pub var maybePlayer: ?Player = null;
 
 var groundContactCount: usize = 0;
+var leftWallContactCount: usize = 0;
+var rightWallContactCount: usize = 0;
 
 pub var isMoving: bool = false;
 pub var touchesGround: bool = false;
@@ -52,9 +57,9 @@ pub fn getPlayer() !Player {
 pub fn draw() !void {
     if (maybePlayer) |*player| {
         if (aimDirection.x > 0) {
-            try entity.draw(&player.entity);
-        } else {
             try entity.drawFlipped(&player.entity);
+        } else {
+            try entity.draw(&player.entity);
         }
         if (maybeCrosshair) |crosshair| {
             const pos = calcCrosshairPosition(player.*);
@@ -66,7 +71,14 @@ pub fn draw() !void {
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
     const currentState = box.getState(player.entity.bodyId);
     const state = box.getInterpolatedState(player.entity.state, currentState);
-    const playerPos = camera.relativePosition(conv.m2PixelPos(state.pos.x, state.pos.y, player.entity.sprite.sizeM.x, player.entity.sprite.sizeM.y));
+    const playerPos = camera.relativePosition(
+        conv.m2PixelPos(
+            state.pos.x,
+            state.pos.y,
+            player.entity.sprite.sizeM.x / player.entity.sprite.scale.x,
+            player.entity.sprite.sizeM.y / player.entity.sprite.scale.y,
+        ),
+    );
 
     const crosshairDisplacement = vec.mul(vec.normalize(aimDirection), 100);
     const crosshairDisplacementI: vec.IVec2 = .{
@@ -75,7 +87,7 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
     };
 
     const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
-    return crosshairPos;
+    return vec.iadd(crosshairPos, player.entity.sprite.offset);
 }
 
 pub fn updateState() void {
@@ -149,6 +161,7 @@ pub fn spawn(position: vec.IVec2) !void {
             .x = size.x,
             .y = size.y,
         },
+        .offset = vec.izero,
     };
 
     var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
@@ -157,6 +170,13 @@ pub fn spawn(position: vec.IVec2) !void {
     try shapeIds.append(footSensorShapeId);
     try shapeIds.append(leftWallSensorId);
     try shapeIds.append(rightWallSensorId);
+
+    const anim = try animation.load(
+        "animations/devil/idle",
+        1,
+        .{ .x = 2, .y = 2 },
+        .{ .x = 0, .y = -30 },
+    );
 
     maybePlayer = Player{
         .entity = entity.Entity{
@@ -173,15 +193,26 @@ pub fn spawn(position: vec.IVec2) !void {
         .footSensorShapeId = footSensorShapeId,
         .leftWallSensorId = leftWallSensorId,
         .rightWallSensorId = rightWallSensorId,
+        .currentAnimation = anim,
     };
 
-    maybeCrosshair = try sprite.createFromImg(
-        shared.crosshairImgSrc,
-        .{
-            .x = 1,
-            .y = 1,
-        },
-    );
+    maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
+        .x = 1,
+        .y = 1,
+    }, vec.izero);
+}
+
+pub fn animate() void {
+    if (maybePlayer) |*p| {
+        const timeNowS = time.now();
+        const timePassedS = timeNowS - p.currentAnimation.lastTime;
+        const fpsSeconds = 1 / @as(f64, @floatFromInt(p.currentAnimation.fps));
+        if (timePassedS > fpsSeconds) {
+            p.currentAnimation.current = @mod(p.currentAnimation.current + 1, p.currentAnimation.frames.len);
+            p.entity.sprite = p.currentAnimation.frames[p.currentAnimation.current];
+            p.currentAnimation.lastTime = timeNowS;
+        }
+    }
 }
 
 pub fn jump() void {
@@ -190,9 +221,7 @@ pub fn jump() void {
     }
 
     if (maybePlayer) |p| {
-        if (touchesGround) {
-            airJumpCounter = 0;
-        }
+        groundContactCount = 0;
 
         if (!touchesGround and airJumpCounter < config.player.maxAirJumps) {
             airJumpCounter += 1;
@@ -209,6 +238,8 @@ pub fn jump() void {
                 .x = -config.player.jumpImpulse / 2,
                 .y = -config.player.jumpImpulse,
             };
+            leftWallContactCount = 0;
+            rightWallContactCount = 0;
         }
 
         box2d.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
@@ -266,14 +297,17 @@ pub fn checkSensors() !void {
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
+                airJumpCounter = 0;
                 groundContactCount += 1;
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
-                touchesWallOnLeft = true;
+                airJumpCounter = 0;
+                leftWallContactCount += 1;
             }
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
-                touchesWallOnRight = true;
+                airJumpCounter = 0;
+                rightWallContactCount += 1;
             }
         }
 
@@ -294,13 +328,19 @@ pub fn checkSensors() !void {
             }
 
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
-                touchesWallOnLeft = false;
+                if (leftWallContactCount > 0) {
+                    leftWallContactCount -= 1;
+                }
             }
             if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
-                touchesWallOnRight = false;
+                if (rightWallContactCount > 0) {
+                    rightWallContactCount -= 1;
+                }
             }
         }
         touchesGround = groundContactCount > 0;
+        touchesWallOnRight = rightWallContactCount > 0;
+        touchesWallOnLeft = leftWallContactCount > 0;
     }
 }
 
@@ -324,6 +364,7 @@ pub fn shoot() !void {
                     .x = 0.5,
                     .y = 0.5,
                 },
+                vec.izero,
             );
             const crosshairPos = calcCrosshairPosition(player.*);
             const position = camera.relativePositionForCreating(crosshairPos);
@@ -347,6 +388,10 @@ pub fn shoot() !void {
 
 pub fn cleanup() void {
     if (maybePlayer) |player| {
+        for (player.currentAnimation.frames) |frame| {
+            sprite.cleanup(frame);
+        }
+        shared.allocator.free(player.currentAnimation.frames);
         box2d.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
     }

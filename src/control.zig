@@ -32,10 +32,14 @@ pub fn handleGameMouseInput() !void {
                 .x = x,
                 .y = y,
             });
-            const s = try sprite.createFromImg(shared.boxImgSrc, .{
-                .x = 1,
-                .y = 1,
-            });
+            const s = try sprite.createFromImg(
+                shared.boxImgSrc,
+                .{
+                    .x = 1,
+                    .y = 1,
+                },
+                vec.izero,
+            );
             const pos = conv.pixel2MPos(
                 position.x,
                 position.y,
