@@ -11,6 +11,7 @@ const player = @import("player.zig");
 const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
 const sprite = @import("sprite.zig");
+const background = @import("background.zig");
 
 const conv = @import("conversion.zig");
 
@@ -39,6 +40,7 @@ const LevelError = error{
 
 pub const Level = struct {
     size: vec.IVec2,
+    parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
 
@@ -81,6 +83,12 @@ fn loadByName(levelName: []const u8) !void {
 
     var spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
 
+    for (levelToDeserialize.parallaxEntities) |e| {
+        const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+
+        try background.create(s, e.pos, e.parallaxDistance, e.scale);
+    }
+
     for (levelToDeserialize.entities) |e| {
         var shapeDef = box2d.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
@@ -117,6 +125,7 @@ pub fn cleanup() void {
     player.cleanup();
     sensor.cleanup();
     entity.cleanup();
+    background.cleanup();
 }
 
 pub fn reset() void {
