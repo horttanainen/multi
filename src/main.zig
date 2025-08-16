@@ -31,7 +31,6 @@ const Sprite = entity.Sprite;
 
 //Single player game todos:
 //TODO: add walking animation
-//TODO: add sensor to projectile to explode on first collision
 //TODO: add visualisation for explosion
 //TODO: add sound for explosion
 //TODO: split projectile into pieces
