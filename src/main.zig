@@ -24,7 +24,7 @@ const player = @import("player.zig");
 
 const box = @import("box.zig");
 const level = @import("level.zig");
-const levelEditor = @import("levelEditor.zig");
+const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
