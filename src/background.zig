@@ -6,6 +6,7 @@ const camera = @import("camera.zig");
 
 pub const SerializableParallaxEntity = struct {
     parallaxDistance: i32,
+    fog: f32,
     imgPath: []const u8,
     scale: vec.Vec2,
     pos: vec.IVec2,
@@ -13,6 +14,7 @@ pub const SerializableParallaxEntity = struct {
 
 pub const ParallaxEntity = struct {
     parallaxDistance: i32,
+    fog: f32,
     scale: vec.Vec2,
     pos: vec.IVec2,
     sprite: sprite.Sprite,
@@ -33,16 +35,18 @@ pub fn draw() !void {
             0,
             false,
             false,
+            parallaxEntity.fog,
         );
     }
 }
 
-pub fn create(s: sprite.Sprite, pos: vec.IVec2, parallaxDistance: i32, scale: vec.Vec2) !void {
+pub fn create(s: sprite.Sprite, pos: vec.IVec2, parallaxDistance: i32, scale: vec.Vec2, fog: f32) !void {
     const parallaxEntity = ParallaxEntity{
         .sprite = s,
         .parallaxDistance = parallaxDistance,
         .pos = pos,
         .scale = scale,
+        .fog = fog,
     };
 
     try parallaxEntities.append(parallaxEntity);
@@ -61,3 +65,4 @@ pub fn cleanup() void {
     parallaxEntities.deinit();
     parallaxEntities = std.ArrayList(ParallaxEntity).init(shared.allocator);
 }
+

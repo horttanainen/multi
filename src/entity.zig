@@ -79,7 +79,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
         ),
     );
 
-    try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip);
+    try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip, 0);
 }
 
 pub fn createFromImg(s: Sprite, shapeDef: box2d.b2ShapeDef, bodyDef: box2d.b2BodyDef, entityType: []const u8) !Entity {

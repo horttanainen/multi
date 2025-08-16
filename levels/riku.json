@@ -6,6 +6,7 @@
     "parallaxEntities": [
         {
             "parallaxDistance": 2,
+            "fog": 0.05,
             "imgPath": "images/flames.png",
             "scale": {
               "x": 1.0,
@@ -18,6 +19,7 @@
         },
         {
             "parallaxDistance": 10,
+            "fog": 0.5,
             "imgPath": "images/buildings.png",
             "scale": {
               "x": 2.0,
@@ -30,6 +32,7 @@
         },
         {
             "parallaxDistance": 100,
+            "fog": 0,
             "imgPath": "images/starrysky.jpg",
             "scale": {
               "x": 1.0,

@@ -63,7 +63,7 @@ pub fn draw() !void {
         }
         if (maybeCrosshair) |crosshair| {
             const pos = calcCrosshairPosition(player.*);
-            try sprite.drawWithOptions(crosshair, pos, 0, false, false);
+            try sprite.drawWithOptions(crosshair, pos, 0, false, false, 0);
         }
     }
 }

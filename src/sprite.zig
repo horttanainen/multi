@@ -37,7 +37,7 @@ pub const SerializableEntity = struct {
     pos: vec.IVec2,
 };
 
-pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool) !void {
+pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
@@ -49,6 +49,15 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     };
 
     try sdl.setTextureColorMod(sprite.texture, 255, 255, 255);
+    if (fog > 0) {
+        try sdl.setTextureColorMod(
+            sprite.texture,
+            @intFromFloat(@as(f32, @floatFromInt(255)) * (1 - fog)),
+            @intFromFloat(@as(f32, @floatFromInt(255)) * (1 - fog)),
+            @intFromFloat(@as(f32, @floatFromInt(255)) * (1 - fog)),
+        );
+    }
+
     if (highlight) {
         try sdl.setTextureColorMod(sprite.texture, 100, 100, 100);
     }

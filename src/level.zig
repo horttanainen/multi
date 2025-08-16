@@ -86,7 +86,7 @@ fn loadByName(levelName: []const u8) !void {
     for (levelToDeserialize.parallaxEntities) |e| {
         const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
 
-        try background.create(s, e.pos, e.parallaxDistance, e.scale);
+        try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
     }
 
     for (levelToDeserialize.entities) |e| {
