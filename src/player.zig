@@ -11,6 +11,7 @@ const shared = @import("shared.zig");
 const box = @import("box.zig");
 const animation = @import("animation.zig");
 const time = @import("time.zig");
+const audio = @import("audio.zig");
 
 const config = @import("config.zig");
 
@@ -411,6 +412,7 @@ pub fn shoot() !void {
             box2d.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
         }
 
+        audio.cannonSound();
         delay.action("shoot", config.shootDelayMs);
     }
 }

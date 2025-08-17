@@ -34,8 +34,9 @@ pub fn init() !void {
     const ds: *c.ma_data_source = @ptrCast(&decoder);
     if (c.ma_sound_init_from_data_source(&engine, ds, 0, null, &sound) != c.MA_SUCCESS)
         return error.SoundInitFailed;
+}
 
-    // 5) Start playback (async)
+pub fn cannonSound() void {
     _ = c.ma_sound_start(&sound);
 }
 
