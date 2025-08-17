@@ -76,16 +76,24 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addIncludePath(b.path("./box2d/include/"));
 
+    exe.addIncludePath(b.path("./miniaudio/"));
+
     exe.addCSourceFiles(.{
-        .root = b.path("./triangle/"),
+        .root = b.path("./miniaudio/"),
         .files = &[_][]const u8{
-            "triangle.c",
+            "miniaudio.c",
         },
         .flags = &[_][]const u8{
-            "-DTRILIBRARY=true",
-            "-DREAL=double",
-        }
+            "-DMINIAUDIO_IMPLEMENTATION",
+            "-DMA_ENABLE_MP3",
+        },
     });
+    exe.addCSourceFiles(.{ .root = b.path("./triangle/"), .files = &[_][]const u8{
+        "triangle.c",
+    }, .flags = &[_][]const u8{
+        "-DTRILIBRARY=true",
+        "-DREAL=double",
+    } });
     exe.addIncludePath(b.path("./triangle/"));
 
     b.installArtifact(exe);

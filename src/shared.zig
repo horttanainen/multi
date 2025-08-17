@@ -10,6 +10,7 @@ const debug = @import("debug.zig");
 const config = @import("config.zig");
 const entity = @import("entity.zig");
 const delay = @import("delay.zig");
+const audio = @import("audio.zig");
 
 pub const crosshairImgSrc = "images/crosshair.png";
 pub const lieroImgSrc = "images/liero.png";
@@ -50,6 +51,7 @@ pub fn getResources() !SharedResources {
 pub fn init() !SharedResources {
     try sdl.init(.{ .audio = true, .video = true, .timer = true });
     time.init();
+    try audio.init();
 
     try ttf.init();
 
@@ -84,6 +86,7 @@ pub fn init() !SharedResources {
 
 pub fn cleanup() void {
     delay.cleanup();
+    audio.cleanup();
 
     if (maybeResources) |resources| {
         box2d.b2DestroyWorld(resources.worldId);
