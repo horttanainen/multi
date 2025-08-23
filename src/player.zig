@@ -411,7 +411,7 @@ pub fn shoot() !void {
             box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
         }
 
-        audio.cannonSound();
+        try audio.playFor("sounds/cannon_fire.mp3", config.cannonFireSoundDurationMs);
         delay.action("shoot", config.shootDelayMs);
     }
 }

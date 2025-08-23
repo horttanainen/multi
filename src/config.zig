@@ -6,6 +6,7 @@ pub const window = .{
 };
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
+pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
 pub const met2pix = 80;
 
@@ -19,6 +20,7 @@ pub const physics = .{
 };
 
 pub const cannonImpulse = 10;
+pub const cannonFireSoundDurationMs = 10000;
 
 pub const Player = struct {
     materialId: i32,
