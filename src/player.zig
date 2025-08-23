@@ -296,6 +296,7 @@ pub fn checkBulletContacts() !void {
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
                 try entity.cleanupLater(e.value);
+                try audio.playFor("sounds/cannon_hit.mp3", config.cannonHitSoundDurationMs);
             }
         }
         if (bMaterial == config.cannonMaterial) {
@@ -303,6 +304,7 @@ pub fn checkBulletContacts() !void {
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
                 try entity.cleanupLater(e.value);
+                try audio.playFor("sounds/cannon_hit.mp3", config.cannonHitSoundDurationMs);
             }
         }
     }

@@ -21,6 +21,7 @@ pub const physics = .{
 
 pub const cannonImpulse = 10;
 pub const cannonFireSoundDurationMs = 10000;
+pub const cannonHitSoundDurationMs = 10000;
 
 pub const Player = struct {
     materialId: i32,
