@@ -44,7 +44,12 @@ pub var entities: AutoArrayHashMap(
     Entity,
 ) = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 
-pub var toBeDestroyedEntities = std.array_list.Managed(Entity).init(allocator);
+pub const MarkedEntity = struct {
+    entity: Entity,
+    counter: i32,
+};
+
+pub var markedEntities = std.array_list.Managed(MarkedEntity).init(allocator);
 
 pub fn updateStates() void {
     for (entities.values()) |*e| {
@@ -117,15 +122,32 @@ pub fn cleanupOne(entity: Entity) void {
 }
 
 pub fn cleanupLater(entity: Entity) !void {
-    try toBeDestroyedEntities.append(entity);
+    try markedEntities.append(.{
+        .entity = entity,
+        .counter = 0,
+    });
 }
 
-pub fn cleanupMarkedEntities() void {
+pub fn cleanupMarkedEntities() !void {
+    var toBeDestroyedEntities = std.array_list.Managed(Entity).init(allocator);
+    defer toBeDestroyedEntities.deinit();
+    var entitiesToKeep = std.array_list.Managed(MarkedEntity).init(allocator);
+    for (markedEntities.items) |*markedEntity| {
+        if (markedEntity.counter > 1) {
+            try toBeDestroyedEntities.append(markedEntity.entity);
+        } else {
+            try entitiesToKeep.append(.{
+                .entity = markedEntity.entity,
+                .counter = markedEntity.counter + 1,
+            });
+        }
+    }
+    markedEntities.deinit();
+    markedEntities = entitiesToKeep;
+
     for (toBeDestroyedEntities.items) |de| {
         cleanupOne(de);
     }
-    toBeDestroyedEntities.deinit();
-    toBeDestroyedEntities = std.array_list.Managed(Entity).init(allocator);
 }
 
 pub fn cleanup() void {
@@ -133,6 +155,7 @@ pub fn cleanup() void {
         cleanupOne(entity);
     }
     entities.deinit();
+    markedEntities.deinit();
     entities = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 }
 
