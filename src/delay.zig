@@ -1,18 +1,7 @@
 const std = @import("std");
-const sdl = @import("zsdl");
 
 const shared = @import("shared.zig");
-
-pub const TimerCallback = *const fn (
-    interval: u32,
-    param: ?*anyopaque,
-) callconv(.c) u32;
-
-pub const addTimer = SDL_AddTimer;
-extern fn SDL_AddTimer(interval: u32, callback: TimerCallback, param: ?*anyopaque) i32;
-
-pub const removeTimer = SDL_RemoveTimer;
-extern fn SDL_RemoveTimer(id: i32) c_int;
+const timer = @import("sdl_timer.zig");
 
 pub var delayedActions: std.StringHashMap(bool) = std.StringHashMap(bool).init(shared.allocator);
 
@@ -26,7 +15,7 @@ pub fn action(name: [:0]const u8, delayMs: u32) void {
     };
     const keyPtr = delayedActions.getKeyPtr(name);
 
-    _ = addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
+    _ = timer.addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
 }
 
 fn shutTimer(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
