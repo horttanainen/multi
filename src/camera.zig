@@ -1,8 +1,7 @@
 const std = @import("std");
-const box2d = @import("box2dnative.zig");
 
 const vec = @import("vector.zig");
-const box = @import("box.zig");
+const box2d = @import("box2d.zig");
 const level = @import("level.zig");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
@@ -11,26 +10,26 @@ const entity = @import("entity.zig");
 
 const conv = @import("conversion.zig");
 
-pub const Camera = struct { posPx: vec.IVec2, bodyId: box2d.b2BodyId, state: ?box.State };
+pub const Camera = struct { posPx: vec.IVec2, bodyId: box2d.c.b2BodyId, state: ?box2d.State };
 
 var maybeCamera: ?Camera = null;
 
 pub fn spawn(position: vec.IVec2) !void {
-    const bodyDef = box.createDynamicBodyDef(.{
+    const bodyDef = box2d.createDynamicBodyDef(.{
         .x = @floatFromInt(position.x),
         .y = @floatFromInt(position.y),
     });
-    const bodyId = try box.createBody(bodyDef);
-    box2d.b2Body_SetGravityScale(bodyId, 0);
-    box2d.b2Body_SetLinearDamping(bodyId, 2);
+    const bodyId = try box2d.createBody(bodyDef);
+    box2d.c.b2Body_SetGravityScale(bodyId, 0);
+    box2d.c.b2Body_SetLinearDamping(bodyId, 2);
 
-    var shapeDef = box2d.b2DefaultShapeDef();
+    var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 1;
     shapeDef.isSensor = true;
 
-    const polygon = box2d.b2MakeSquare(0.5);
+    const polygon = box2d.c.b2MakeSquare(0.5);
 
-    _ = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
+    _ = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
 
     maybeCamera = .{
         .posPx = position,
@@ -74,37 +73,37 @@ pub fn followPlayer() void {
 
 pub fn followKeyboard() void {
     if (maybeCamera) |camera| {
-        const currentState = box.getState(camera.bodyId);
-        const state = box.getInterpolatedState(camera.state, currentState);
+        const currentState = box2d.getState(camera.bodyId);
+        const state = box2d.getInterpolatedState(camera.state, currentState);
         move(conv.m2Pixel(state.pos));
     }
 }
 
 pub fn moveLeft() void {
-    applyForce(box2d.b2Vec2{ .x = -config.levelEditorCameraMovementForce, .y = 0 });
+    applyForce(box2d.c.b2Vec2{ .x = -config.levelEditorCameraMovementForce, .y = 0 });
 }
 
 pub fn moveRight() void {
-    applyForce(box2d.b2Vec2{ .x = config.levelEditorCameraMovementForce, .y = 0 });
+    applyForce(box2d.c.b2Vec2{ .x = config.levelEditorCameraMovementForce, .y = 0 });
 }
 
 pub fn moveUp() void {
-    applyForce(box2d.b2Vec2{ .x = 0, .y = -config.levelEditorCameraMovementForce });
+    applyForce(box2d.c.b2Vec2{ .x = 0, .y = -config.levelEditorCameraMovementForce });
 }
 
 pub fn moveDown() void {
-    applyForce(box2d.b2Vec2{ .x = 0, .y = config.levelEditorCameraMovementForce });
+    applyForce(box2d.c.b2Vec2{ .x = 0, .y = config.levelEditorCameraMovementForce });
 }
 
-fn applyForce(force: box2d.b2Vec2) void {
+fn applyForce(force: box2d.c.b2Vec2) void {
     if (maybeCamera) |camera| {
-        box2d.b2Body_ApplyForceToCenter(camera.bodyId, force, true);
+        box2d.c.b2Body_ApplyForceToCenter(camera.bodyId, force, true);
     }
 }
 
 pub fn updateState() void {
     if (maybeCamera) |*camera| {
-        camera.state = box.getState(camera.bodyId);
+        camera.state = box2d.getState(camera.bodyId);
     }
 }
 

@@ -1,4 +1,4 @@
-const box2d = @import("box2dnative.zig");
+const box2d = @import("box2d.zig");
 
 pub const IVec2 = struct {
     x: i32,
@@ -10,7 +10,7 @@ pub const Vec2 = struct {
     y: f32,
 };
 
-pub fn toBox2d(a: Vec2) box2d.b2Vec2 {
+pub fn toBox2d(a: Vec2) box2d.c.b2Vec2 {
     return .{
         .x = a.x,
         .y = a.y,

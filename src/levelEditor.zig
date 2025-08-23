@@ -1,18 +1,17 @@
 const std = @import("std");
 const image = @import("zsdl_image");
-const box2d = @import("box2dnative.zig");
 
 const entity = @import("entity.zig");
 const shared = @import("shared.zig");
 const conv = @import("conversion.zig");
-const box = @import("box.zig");
+const box2d = @import("box2d.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
 const config = @import("config.zig");
 const sprite = @import("sprite.zig");
 
-var maybeSelectedBodyId: ?box2d.b2BodyId = null;
-var maybeCopiedBodyId: ?box2d.b2BodyId = null;
+var maybeSelectedBodyId: ?box2d.c.b2BodyId = null;
+var maybeCopiedBodyId: ?box2d.c.b2BodyId = null;
 
 var editDirPathBuf: [100]u8 = undefined;
 var editDirPath: []const u8 = undefined;
@@ -39,15 +38,15 @@ pub fn pasteSelection(position: vec.IVec2) !void {
                 s.sizeM.y,
             );
 
-            var bodyDef = box.createDynamicBodyDef(pos);
-            bodyDef.type = box2d.b2Body_GetType(e.bodyId);
-            var shapeDef = box2d.b2DefaultShapeDef();
+            var bodyDef = box2d.createDynamicBodyDef(pos);
+            bodyDef.type = box2d.c.b2Body_GetType(e.bodyId);
+            var shapeDef = box2d.c.b2DefaultShapeDef();
 
-            var shapes: [1]box2d.b2ShapeId = undefined;
-            _ = box2d.b2Body_GetShapes(copiedBodyId, &shapes, 1);
-            shapeDef.friction = box2d.b2Shape_GetFriction(shapes[0]);
-            shapeDef.isSensor = box2d.b2Shape_IsSensor(shapes[0]);
-            shapeDef.material = box2d.b2Shape_GetMaterial(shapes[0]);
+            var shapes: [1]box2d.c.b2ShapeId = undefined;
+            _ = box2d.c.b2Body_GetShapes(copiedBodyId, &shapes, 1);
+            shapeDef.friction = box2d.c.b2Shape_GetFriction(shapes[0]);
+            shapeDef.isSensor = box2d.c.b2Shape_IsSensor(shapes[0]);
+            shapeDef.material = box2d.c.b2Shape_GetMaterial(shapes[0]);
 
             std.debug.print("about to create\n", .{});
             const newEntity = try entity.createFromImg(s, shapeDef, bodyDef, e.type);
@@ -67,9 +66,9 @@ fn createNewVersion() !void {
     var textBuf2: [100]u8 = undefined;
     const oldFile = try std.fmt.bufPrint(&textBuf2, "{d}.json", .{oldVersion});
 
-    var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
+    var editingD = try std.fs.cwd().openDir(editDirPath, .{});
     defer editingD.close();
-    try std.fs.Dir.copyFile(editingD, oldFile, editingD, newFile, std.fs.Dir.CopyFileOptions{});
+    try std.fs.Dir.copyFile(editingD, oldFile, editingD, newFile, .{});
 
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenLevelFile| {
         currentlyOpenLevelFile.close();
@@ -79,7 +78,7 @@ fn createNewVersion() !void {
 }
 
 fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
-    if (maybeCurrentlyOpenLevelFile) |currentlyOpenLevelFile| {
+    if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(shared.allocator, config.maxLevelSizeInBytes);
         defer shared.allocator.free(data);
@@ -87,7 +86,7 @@ fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
         defer parsed.deinit();
         var serializableLevel = parsed.value;
 
-        var entities = std.ArrayList(entity.SerializableEntity).init(shared.allocator);
+        var entities = std.array_list.Managed(entity.SerializableEntity).init(shared.allocator);
         defer entities.deinit();
 
         try entities.appendSlice(serializableLevel.entities);
@@ -98,12 +97,19 @@ fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);
-        try std.json.stringify(serializableLevel, .{ .whitespace = .indent_2 }, currentlyOpenLevelFile.writer());
+
+        var buf: [config.maxLevelSizeInBytes]u8 = undefined;
+        var writer = currentlyOpenLevelFile.writer(&buf);
+        var s = std.json.Stringify{
+            .writer = &writer.interface,
+            .options = .{ .whitespace = .indent_2 },
+        };
+        try s.write(serializableLevel);
     }
 }
 
 fn createRandomAlphabeticalString(length: usize) ![]const u8 {
-    var buffer = std.ArrayList(u8).init(shared.allocator);
+    var buffer = std.array_list.Managed(u8).init(shared.allocator);
 
     for (0..length) |_| {
         const randomInt = std.crypto.random.intRangeAtMost(u8, 97, 122);
@@ -152,7 +158,7 @@ fn createCopyOfCurrentLevel() !void {
     defer levelsD.close();
     var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
     defer editingD.close();
-    try std.fs.Dir.copyFile(levelsD, level.json, editingD, version, std.fs.Dir.CopyFileOptions{});
+    try std.fs.Dir.copyFile(levelsD, level.json, editingD, version, .{});
 
     maybeCurrentlyOpenLevelFile = try editingD.openFile(version, .{ .mode = .read_write });
 }
@@ -170,17 +176,17 @@ pub fn selectEntityAt(pos: vec.IVec2) !void {
     }
 
     const posM = conv.p2m(pos);
-    const aabb = box2d.b2AABB{
-        .lowerBound = box.subtract(posM, .{ .x = 0.1, .y = 0.1 }),
-        .upperBound = box.add(posM, .{ .x = 0.1, .y = 0.1 }),
+    const aabb = box2d.c.b2AABB{
+        .lowerBound = box2d.subtract(posM, .{ .x = 0.1, .y = 0.1 }),
+        .upperBound = box2d.add(posM, .{ .x = 0.1, .y = 0.1 }),
     };
     const resources = try shared.getResources();
 
-    const filter = box2d.b2DefaultQueryFilter();
-    _ = box2d.b2World_OverlapAABB(resources.worldId, aabb, filter, &overlapAABBCallback, null);
+    const filter = box2d.c.b2DefaultQueryFilter();
+    _ = box2d.c.b2World_OverlapAABB(resources.worldId, aabb, filter, &overlapAABBCallback, null);
 }
 
-fn setSelection(bodyId: box2d.b2BodyId, select: bool) void {
+fn setSelection(bodyId: box2d.c.b2BodyId, select: bool) void {
     maybeSelectedBodyId = null;
     const maybeE1 = entity.getEntity(bodyId);
     if (maybeE1) |e| {
@@ -191,10 +197,10 @@ fn setSelection(bodyId: box2d.b2BodyId, select: bool) void {
     }
 }
 
-pub fn overlapAABBCallback(shapeId: box2d.b2ShapeId, context: ?*anyopaque) callconv(.C) bool {
+pub fn overlapAABBCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     _ = context;
 
-    const bodyId = box2d.b2Shape_GetBody(shapeId);
+    const bodyId = box2d.c.b2Shape_GetBody(shapeId);
 
     setSelection(bodyId, true);
     // immediately stop searching for additional shapeIds
@@ -205,7 +211,7 @@ fn findTemporaryFolders() ![][]const u8 {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
 
-    var folderList = std.ArrayList([]const u8).init(shared.allocator);
+    var folderList = std.array_list.Managed([]const u8).init(shared.allocator);
 
     var dirIterator = dir.iterate();
 

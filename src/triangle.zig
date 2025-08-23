@@ -1,12 +1,45 @@
 const std = @import("std");
-const triangle = @import("trianglenative.zig");
 const vec = @import("vector.zig");
 const shared = @import("shared.zig");
+
+pub const triangulateio = extern struct {
+    pointlist: ?[*]f64,
+    pointattributelist: ?[*]f64,
+    pointmarkerlist: ?[*]c_int,
+    numberofpoints: c_int,
+    numberofpointattributes: c_int,
+
+    trianglelist: ?[*]c_int,
+    triangleattributelist: ?[*]f64,
+    trianglearealist: ?[*]f64,
+    neighborlist: ?[*]c_int,
+    numberoftriangles: c_int,
+    numberofcorners: c_int,
+    numberoftriangleattributes: c_int,
+
+    segmentlist: ?[*]c_int,
+    segmentmarkerlist: ?[*]c_int,
+    numberofsegments: c_int,
+
+    holelist: ?[*]f64,
+    numberofholes: c_int,
+
+    regionlist: ?[*]f64,
+    numberofregions: c_int,
+
+    edgelist: ?[*]c_int,
+    edgemarkerlist: ?[*]c_int,
+    normlist: ?[*]f64,
+    numberofedges: c_int,
+};
+
+extern fn triangulate(flags: [*:0]const u8, in_: *triangulateio, out: *triangulateio, vorout: ?*triangulateio) void;
+pub extern fn trifree(ptr: ?*anyopaque) void;
+
 const allocator = std.heap.c_allocator;
 
-const IVec2 = vec.IVec2;
 
-pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
+pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
     const point_count = vertices.len;
 
     // Allocate and convert input pointlist (as f64 x/y pairs)
@@ -27,15 +60,15 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
         segmentlist[i * 2 + 1] = @intCast((i + 1) % point_count);
     }
 
-    var in_data: triangle.triangulateio = std.mem.zeroes(triangle.triangulateio);
+    var in_data: triangulateio = std.mem.zeroes(triangulateio);
     in_data.numberofpoints = @as(c_int, @intCast(point_count));
     in_data.pointlist = pointlist.ptr;
     in_data.numberofsegments = @intCast(point_count);
     in_data.segmentlist = segmentlist.ptr;
 
-    var out_data: triangle.triangulateio = std.mem.zeroes(triangle.triangulateio);
-    defer triangle.trifree(out_data.pointlist);
-    defer triangle.trifree(out_data.trianglelist);
+    var out_data: triangulateio = std.mem.zeroes(triangulateio);
+    defer trifree(out_data.pointlist);
+    defer trifree(out_data.trianglelist);
 
     // std.debug.print("numberofpoints: {}\n", .{in_data.numberofpoints});
 
@@ -48,24 +81,24 @@ pub fn triangulate(vertices: []const IVec2) ![][3]IVec2 {
     // std.debug.print("segmentlist ptr: {x}\n", .{@intFromPtr(in_data.segmentlist)});
     // std.debug.print("numberofsegments: {}\n", .{in_data.numberofsegments});
 
-    triangle.triangulate("pzqQ", &in_data, &out_data, null);
+    triangulate("pzqQ", &in_data, &out_data, null);
 
     // Triangle may add Steiner points, so use the full output pointlist
     const triangle_count = out_data.numberoftriangles;
     const triangle_indices = out_data.trianglelist;
     const output_vertex_count = @as(usize, @intCast(out_data.numberofpoints));
-    const output_vertices = try shared.allocator.alloc(IVec2, output_vertex_count);
+    const output_vertices = try shared.allocator.alloc(vec.IVec2, output_vertex_count);
     defer shared.allocator.free(output_vertices);
 
     for (output_vertices, 0..) |*out_v, i| {
         const x = out_data.pointlist.?[i * 2 + 0];
         const y = out_data.pointlist.?[i * 2 + 1];
-        out_v.* = IVec2{
+        out_v.* = vec.IVec2{
             .x = @intFromFloat(x),
             .y = @intFromFloat(y),
         };
     }
-    const tris = try shared.allocator.alloc([3]IVec2, @as(usize, @intCast(triangle_count)));
+    const tris = try shared.allocator.alloc([3]vec.IVec2, @as(usize, @intCast(triangle_count)));
 
     for (tris, 0..) |*tri, i| {
         const ia = triangle_indices.?[i * 3 + 0];

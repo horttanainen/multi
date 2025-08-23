@@ -4,7 +4,6 @@ const IVec2 = @import("vector.zig").IVec2;
 const allocator = @import("shared.zig").allocator;
 
 const PI = std.math.pi;
-const ArrayList = std.ArrayList;
 
 fn triangleArea(pointA: IVec2, pointB: IVec2, pointC: IVec2) f32 {
     const a = Vec2{ .x = @floatFromInt(pointA.x), .y = @floatFromInt(pointA.y) };
@@ -25,7 +24,7 @@ pub fn visvalingam(vertices: []IVec2, epsilonArea: f32) ![]IVec2 {
     }
 
     // Make a mutable copy of the vertices.
-    var verts = ArrayList(IVec2).init(allocator);
+    var verts = std.array_list.Managed(IVec2).init(allocator);
     for (vertices) |v| {
         try verts.append(v);
     }

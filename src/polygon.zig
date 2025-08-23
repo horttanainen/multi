@@ -14,7 +14,6 @@ const vec = @import("vector.zig");
 
 const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
-const ArrayList = std.ArrayList;
 
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
@@ -50,7 +49,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     // 5. split into triangles
-    const triangles = try triangle.triangulate(ccw);
+    const triangles = try triangle.split(ccw);
     defer shared.allocator.free(triangles);
     // std.debug.print("triangles: {}\n", .{triangles.len});
 
@@ -61,7 +60,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
 }
 
 pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
-    var unique = ArrayList(IVec2).init(allocator);
+    var unique = std.array_list.Managed(IVec2).init(allocator);
     defer unique.deinit();
 
     for (vertices) |v| {
@@ -84,7 +83,7 @@ pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
     if (isCounterClockwise(vertices)) {
         return vertices;
     } else {
-        var reversed = ArrayList(IVec2).init(allocator);
+        var reversed = std.array_list.Managed(IVec2).init(allocator);
 
         var i: usize = vertices.len;
         while (i > 0) {
@@ -97,7 +96,7 @@ pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
 }
 
 fn scaleTriangles(triangles: [][3]IVec2, scale: Vec2) ![][3]IVec2 {
-    var scaledTriangles = ArrayList([3]IVec2).init(allocator);
+    var scaledTriangles = std.array_list.Managed([3]IVec2).init(allocator);
     for (triangles) |t| {
         const v1 = t[0];
         const v2 = t[1];

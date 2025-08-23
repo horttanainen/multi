@@ -1,5 +1,4 @@
 const std = @import("std");
-const box2d = @import("box2dnative.zig");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
@@ -8,7 +7,7 @@ const delay = @import("delay.zig");
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
-const box = @import("box.zig");
+const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
 const time = @import("time.zig");
 const audio = @import("audio.zig");
@@ -21,11 +20,11 @@ const vec = @import("vector.zig");
 
 pub const Player = struct {
     entity: entity.Entity,
-    bodyShapeId: box2d.b2ShapeId,
-    lowerBodyShapeId: box2d.b2ShapeId,
-    footSensorShapeId: box2d.b2ShapeId,
-    leftWallSensorId: box2d.b2ShapeId,
-    rightWallSensorId: box2d.b2ShapeId,
+    bodyShapeId: box2d.c.b2ShapeId,
+    lowerBodyShapeId: box2d.c.b2ShapeId,
+    footSensorShapeId: box2d.c.b2ShapeId,
+    leftWallSensorId: box2d.c.b2ShapeId,
+    rightWallSensorId: box2d.c.b2ShapeId,
     currentAnimation: animation.Animation,
 };
 
@@ -70,8 +69,8 @@ pub fn draw() !void {
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
-    const currentState = box.getState(player.entity.bodyId);
-    const state = box.getInterpolatedState(player.entity.state, currentState);
+    const currentState = box2d.getState(player.entity.bodyId);
+    const state = box2d.getInterpolatedState(player.entity.state, currentState);
     const playerPos = camera.relativePosition(
         conv.m2PixelPos(
             state.pos.x,
@@ -93,7 +92,7 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
 
 pub fn updateState() void {
     if (maybePlayer) |*player| {
-        player.entity.state = box.getState(player.entity.bodyId);
+        player.entity.state = box2d.getState(player.entity.bodyId);
     }
 }
 
@@ -108,43 +107,43 @@ pub fn spawn(position: vec.IVec2) !void {
 
     const pos = conv.pixel2MPos(position.x, position.y, sizeM.x, sizeM.y);
 
-    const bodyDef = box.createNonRotatingDynamicBodyDef(pos);
-    const bodyId = try box.createBody(bodyDef);
+    const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
+    const bodyId = try box2d.createBody(bodyDef);
 
-    const dynamicBox = box2d.b2MakeBox(0.1, 0.25);
-    var shapeDef = box2d.b2DefaultShapeDef();
+    const dynamicBox = box2d.c.b2MakeBox(0.1, 0.25);
+    var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.density = 1.0;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = config.player.materialId;
-    const bodyShapeId = box2d.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
+    const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
-    const lowerBodyCircle: box2d.b2Circle = .{
+    const lowerBodyCircle: box2d.c.b2Circle = .{
         .center = .{
             .x = 0,
             .y = 0.25,
         },
         .radius = 0.1,
     };
-    var lowerBodyShapeDef = box2d.b2DefaultShapeDef();
+    var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
     lowerBodyShapeDef.density = 1.0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = config.player.materialId;
-    const lowerBodyShapeId = box2d.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
+    const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
-    const footBox = box2d.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
-    var footShapeDef = box2d.b2DefaultShapeDef();
+    const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
+    var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
-    const footSensorShapeId = box2d.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
+    const footSensorShapeId = box2d.c.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
 
-    const leftWallBox = box2d.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
-    var leftWallShapeDef = box2d.b2DefaultShapeDef();
+    const leftWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
+    var leftWallShapeDef = box2d.c.b2DefaultShapeDef();
     leftWallShapeDef.isSensor = true;
-    const leftWallSensorId = box2d.b2CreatePolygonShape(bodyId, &leftWallShapeDef, &leftWallBox);
+    const leftWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &leftWallShapeDef, &leftWallBox);
 
-    const rightWallBox = box2d.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0.1, .y = 0 }, .{ .c = 1, .s = 0 });
-    var rightWallShapeDef = box2d.b2DefaultShapeDef();
+    const rightWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0.1, .y = 0 }, .{ .c = 1, .s = 0 });
+    var rightWallShapeDef = box2d.c.b2DefaultShapeDef();
     rightWallShapeDef.isSensor = true;
-    const rightWallSensorId = box2d.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
+    const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
     const s = sprite.Sprite{
         .surface = surface,
@@ -165,7 +164,7 @@ pub fn spawn(position: vec.IVec2) !void {
         .offset = vec.izero,
     };
 
-    var shapeIds = std.ArrayList(box2d.b2ShapeId).init(shared.allocator);
+    var shapeIds = std.array_list.Managed(box2d.c.b2ShapeId).init(shared.allocator);
     try shapeIds.append(bodyShapeId);
     try shapeIds.append(lowerBodyShapeId);
     try shapeIds.append(footSensorShapeId);
@@ -230,12 +229,12 @@ pub fn jump() void {
             return;
         }
 
-        var jumpImpulse = box2d.b2Vec2{ .x = 0, .y = -config.player.jumpImpulse };
+        var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -config.player.jumpImpulse };
         if (touchesWallOnRight or touchesWallOnLeft) {
-            jumpImpulse = if (touchesWallOnLeft) box2d.b2Vec2{
+            jumpImpulse = if (touchesWallOnLeft) box2d.c.b2Vec2{
                 .x = config.player.jumpImpulse / 2,
                 .y = -config.player.jumpImpulse,
-            } else box2d.b2Vec2{
+            } else box2d.c.b2Vec2{
                 .x = -config.player.jumpImpulse / 2,
                 .y = -config.player.jumpImpulse,
             };
@@ -243,7 +242,7 @@ pub fn jump() void {
             rightWallContactCount = 0;
         }
 
-        box2d.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
+        box2d.c.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
         delay.action("jump", config.jumpDelayMs);
     }
 }
@@ -254,53 +253,53 @@ pub fn brake() void {
 
 pub fn moveLeft() void {
     movingRight = false;
-    applyForce(box2d.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(box2d.c.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
 }
 
 pub fn moveRight() void {
     movingRight = true;
-    applyForce(box2d.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(box2d.c.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
 }
 
-fn applyForce(force: box2d.b2Vec2) void {
+fn applyForce(force: box2d.c.b2Vec2) void {
     isMoving = true;
     if (maybePlayer) |p| {
-        box2d.b2Body_ApplyForceToCenter(p.entity.bodyId, force, true);
+        box2d.c.b2Body_ApplyForceToCenter(p.entity.bodyId, force, true);
     }
 }
 
 pub fn clampSpeed() void {
     if (maybePlayer) |p| {
-        var velocity = box2d.b2Body_GetLinearVelocity(p.entity.bodyId);
+        var velocity = box2d.c.b2Body_GetLinearVelocity(p.entity.bodyId);
         if (velocity.x > config.player.maxMovementSpeed) {
             velocity.x = config.player.maxMovementSpeed;
-            box2d.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
+            box2d.c.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
         } else if (velocity.x < -config.player.maxMovementSpeed) {
             velocity.x = -config.player.maxMovementSpeed;
-            box2d.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
+            box2d.c.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
         }
     }
 }
 
 pub fn checkBulletContacts() !void {
     const resources = try shared.getResources();
-    const contactEvents = box2d.b2World_GetContactEvents(resources.worldId);
+    const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
 
-        const aMaterial = box2d.b2Shape_GetMaterial(event.shapeIdA);
-        const bMaterial = box2d.b2Shape_GetMaterial(event.shapeIdB);
+        const aMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdA);
+        const bMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdB);
 
         if (aMaterial == config.cannonMaterial) {
-            const bodyId = box2d.b2Shape_GetBody(event.shapeIdA);
+            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
                 try entity.cleanupLater(e.value);
             }
         }
         if (bMaterial == config.cannonMaterial) {
-            const bodyId = box2d.b2Shape_GetBody(event.shapeIdB);
+            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
                 try entity.cleanupLater(e.value);
@@ -312,28 +311,28 @@ pub fn checkBulletContacts() !void {
 pub fn checkSensors() !void {
     const resources = try shared.getResources();
     if (maybePlayer) |p| {
-        const sensorEvents = box2d.b2World_GetSensorEvents(resources.worldId);
+        const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
 
         for (0..@intCast(sensorEvents.beginCount)) |i| {
             const e = sensorEvents.beginEvents[i];
 
-            if (box2d.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
                 continue;
             }
-            if (box2d.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
                 continue;
             }
 
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
                 airJumpCounter = 0;
                 groundContactCount += 1;
             }
 
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 airJumpCounter = 0;
                 leftWallContactCount += 1;
             }
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
                 airJumpCounter = 0;
                 rightWallContactCount += 1;
             }
@@ -342,25 +341,25 @@ pub fn checkSensors() !void {
         for (0..@intCast(sensorEvents.endCount)) |i| {
             const e = sensorEvents.endEvents[i];
 
-            if (box2d.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
                 continue;
             }
-            if (box2d.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
                 continue;
             }
 
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
                 if (groundContactCount > 0) {
                     groundContactCount -= 1;
                 }
             }
 
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
                 if (leftWallContactCount > 0) {
                     leftWallContactCount -= 1;
                 }
             }
-            if (box2d.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
+            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
                 if (rightWallContactCount > 0) {
                     rightWallContactCount -= 1;
                 }
@@ -383,7 +382,7 @@ pub fn aim(direction: vec.Vec2) void {
 pub fn shoot() !void {
     if (!delay.check("shoot")) {
         if (maybePlayer) |*player| {
-            var shapeDef = box2d.b2DefaultShapeDef();
+            var shapeDef = box2d.c.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
             shapeDef.material = config.cannonMaterial;
             shapeDef.enableHitEvents = true;
@@ -399,7 +398,7 @@ pub fn shoot() !void {
             const crosshairPos = calcCrosshairPosition(player.*);
             const position = camera.relativePositionForCreating(crosshairPos);
             const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
-            var bodyDef = box.createDynamicBodyDef(pos);
+            var bodyDef = box2d.createDynamicBodyDef(pos);
             bodyDef.isBullet = true;
             const cannonBall = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 
@@ -408,8 +407,8 @@ pub fn shoot() !void {
                 .y = -aimDirection.y,
             }), config.cannonImpulse);
 
-            box2d.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, vec.toBox2d(cannonImpulse), true);
-            box2d.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
+            box2d.c.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, vec.toBox2d(cannonImpulse), true);
+            box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
         }
 
         audio.cannonSound();
@@ -423,7 +422,7 @@ pub fn cleanup() void {
             sprite.cleanup(frame);
         }
         shared.allocator.free(player.currentAnimation.frames);
-        box2d.b2DestroyBody(player.entity.bodyId);
+        box2d.c.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
     }
     if (maybeCrosshair) |crosshair| {

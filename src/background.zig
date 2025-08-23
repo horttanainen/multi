@@ -20,7 +20,7 @@ pub const ParallaxEntity = struct {
     sprite: sprite.Sprite,
 };
 
-var parallaxEntities = std.ArrayList(ParallaxEntity).init(shared.allocator);
+var parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);
 
 pub fn draw() !void {
     for (parallaxEntities.items) |parallaxEntity| {
@@ -63,6 +63,6 @@ pub fn cleanup() void {
         sprite.cleanup(pEntity.sprite);
     }
     parallaxEntities.deinit();
-    parallaxEntities = std.ArrayList(ParallaxEntity).init(shared.allocator);
+    parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);
 }
 

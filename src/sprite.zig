@@ -1,15 +1,13 @@
 const std = @import("std");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
-const box2d = @import("box2dnative.zig");
 
 const AutoArrayHashMap = std.AutoArrayHashMap;
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
 const polygon = @import("polygon.zig");
-const box = @import("box.zig");
-const State = box.State;
+const box = @import("box2d.zig");
 
 const PI = std.math.pi;
 

@@ -1,8 +1,7 @@
 const std = @import("std");
-const box2d = @import("box2dnative.zig");
+const box2d = @import("box2d.zig");
 const sdl = @import("zsdl");
 
-const box = @import("box.zig");
 const config = @import("config.zig");
 const delay = @import("delay.zig");
 const camera = @import("camera.zig");
@@ -26,7 +25,7 @@ pub fn handleGameMouseInput() !void {
 
     if (currentMouseState & leftButtonMask == 1) {
         if (!delay.check("boxcreate")) {
-            var shapeDef = box2d.b2DefaultShapeDef();
+            var shapeDef = box2d.c.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
             const position = camera.relativePositionForCreating(.{
                 .x = x,
@@ -46,7 +45,7 @@ pub fn handleGameMouseInput() !void {
                 s.sizeM.x,
                 s.sizeM.y,
             );
-            const bodyDef = box.createDynamicBodyDef(pos);
+            const bodyDef = box2d.createDynamicBodyDef(pos);
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
 
             delay.action("boxcreate", config.boxCreateDelayMs);
@@ -59,7 +58,7 @@ pub fn handleGameKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1) {
         if (!delay.check("reloadLevel")) {
             level.reload() catch |err| {
-                std.debug.print("Error reloading level: {!}\n", .{err});
+                std.debug.print("Error reloading level: {}\n", .{err});
             };
             delay.action("reloadLevel", config.reloadLevelDelayMs);
         }
@@ -97,7 +96,7 @@ pub fn handleGameKeyboardInput() void {
     if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.enter() catch |err| {
-                std.debug.print("Error entering level editor: {!}\n", .{err});
+                std.debug.print("Error entering level editor: {}\n", .{err});
             };
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
@@ -108,7 +107,7 @@ pub fn handleGameKeyboardInput() void {
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.lshift)] == 1) {
         player.shoot() catch |err| {
-            std.debug.print("Error shooting: {!}\n", .{err});
+            std.debug.print("Error shooting: {}\n", .{err});
         };
     }
 
@@ -158,7 +157,7 @@ pub fn handleLevelEditorKeyboardInput() void {
             var y: i32 = 0;
             _ = sdl.getMouseState(&x, &y);
             levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch |err| {
-                std.debug.print("Error pasteing selection: {!}\n", .{err});
+                std.debug.print("Error pasteing selection: {}\n", .{err});
             };
             delay.action("levelEditorClick", config.levelEditorClickDelayMs);
         }

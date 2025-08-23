@@ -65,7 +65,7 @@ fn turnLeft(dir: IVec2) !IVec2 {
 /// Traces a contour using a Pavlidis/Moore neighbor–tracing algorithm.
 /// Returns an array of Vec2 points (in pixel coordinates) that form the contour.
 pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) ![]IVec2 {
-    var contour = std.ArrayList(IVec2).init(allocator);
+    var contour = std.array_list.Managed(IVec2).init(allocator);
 
     // Step 1. Find a starting boundary pixel.
     var start: IVec2 = undefined;

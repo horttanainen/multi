@@ -1,11 +1,10 @@
 const std = @import("std");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
-const box2d = @import("box2dnative.zig");
 
 const config = @import("config.zig");
 const polygon = @import("polygon.zig");
-const box = @import("box.zig");
+const box2d = @import("box2d.zig");
 const shared = @import("shared.zig");
 const player = @import("player.zig");
 const sensor = @import("sensor.zig");
@@ -59,7 +58,7 @@ pub fn findLevels() ![][]const u8 {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
 
-    var fileList = std.ArrayList([]const u8).init(shared.allocator);
+    var fileList = std.array_list.Managed([]const u8).init(shared.allocator);
 
     var dirIterator = dir.iterate();
 
@@ -90,20 +89,20 @@ fn loadByName(levelName: []const u8) !void {
     }
 
     for (levelToDeserialize.entities) |e| {
-        var shapeDef = box2d.b2DefaultShapeDef();
+        var shapeDef = box2d.c.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
         const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
         const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
         if (std.mem.eql(u8, e.type, "dynamic")) {
-            const bodyDef = box.createDynamicBodyDef(pos);
+            const bodyDef = box2d.createDynamicBodyDef(pos);
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
-            const bodyDef = box.createStaticBodyDef(pos);
+            const bodyDef = box2d.createStaticBodyDef(pos);
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "static");
         } else if (std.mem.eql(u8, e.type, "goal")) {
             try sensor.createGoalSensorFromImg(pos, s);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
-            const bodyDef = box.createStaticBodyDef(pos);
+            const bodyDef = box2d.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
             shapeDef.material = config.spawnMaterialId;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "spawn");

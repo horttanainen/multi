@@ -1,5 +1,5 @@
 const sdl = @import("zsdl");
-const box2d = @import("box2dnative.zig");
+const box2d = @import("box2d.zig");
 const std = @import("std");
 
 const config = @import("config.zig");
@@ -22,7 +22,6 @@ const debug = @import("debug.zig");
 
 const player = @import("player.zig");
 
-const box = @import("box.zig");
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
@@ -86,10 +85,10 @@ pub fn main() !void {
     try level.next();
     defer level.cleanup();
     defer levelEditor.cleanup() catch |err| {
-        std.debug.print("Error cleaning up created level folders: {!}\n", .{err});
+        std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
 
-    box2d.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
+    box2d.c.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
 
     while (!shared.quitGame) {
         time.frameBegin();

@@ -6,7 +6,7 @@ const shared = @import("shared.zig");
 pub const TimerCallback = *const fn (
     interval: u32,
     param: ?*anyopaque,
-) callconv(.C) u32;
+) callconv(.c) u32;
 
 pub const addTimer = SDL_AddTimer;
 extern fn SDL_AddTimer(interval: u32, callback: TimerCallback, param: ?*anyopaque) i32;
@@ -29,7 +29,7 @@ pub fn action(name: [:0]const u8, delayMs: u32) void {
     _ = addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
 }
 
-fn shutTimer(interval: u32, param: ?*anyopaque) callconv(.C) u32 {
+fn shutTimer(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     _ = interval;
     const name: *[:0]const u8 = @alignCast(@ptrCast(param));
 

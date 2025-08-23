@@ -15,7 +15,7 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
     var dir = try std.fs.cwd().openDir(pathToAnimationDir, .{});
     defer dir.close();
 
-    var images = std.ArrayList([]const u8).init(shared.allocator);
+    var images = std.array_list.Managed([]const u8).init(shared.allocator);
     defer images.deinit();
     var dirIterator = dir.iterate();
 
@@ -25,7 +25,7 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
         }
     }
 
-    var frames = std.ArrayList(sprite.Sprite).init(shared.allocator);
+    var frames = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
     for (images.items) |image| {
         var textBuf: [100]u8 = undefined;
         const imagePath = try std.fmt.bufPrint(&textBuf, "{s}/{s}", .{ pathToAnimationDir, image });

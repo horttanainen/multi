@@ -3,7 +3,7 @@ const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 const ttf = @import("zsdl_ttf");
 
-const box2d = @import("box2dnative.zig");
+const box2d = @import("box2d.zig");
 
 const time = @import("time.zig");
 const debug = @import("debug.zig");
@@ -25,7 +25,7 @@ const monocraftSrc = "fonts/monocraft.ttf";
 const SharedResourcesError = error{Uninitialized};
 
 pub const SharedResources = struct {
-    worldId: box2d.b2WorldId,
+    worldId: box2d.c.b2WorldId,
     window: *sdl.Window,
     renderer: *sdl.Renderer,
     duffSurface: *sdl.Surface,
@@ -59,12 +59,12 @@ pub fn init() !SharedResources {
 
     const window = try sdl.createWindow("My Super Duper Game Window", 2000, 0, config.window.width, config.window.height, .{ .opengl = true, .shown = true });
 
-    const renderer = try sdl.createRenderer(window, -1, .{ .accelerated = true, .present_vsync = true });
+    const renderer = try sdl.createRenderer(window, null, .{ .accelerated = true, .present_vsync = true });
 
-    const gravity = box2d.b2Vec2{ .x = 0.0, .y = 10 };
-    var worldDef = box2d.b2DefaultWorldDef();
+    const gravity = box2d.c.b2Vec2{ .x = 0.0, .y = 10 };
+    var worldDef = box2d.c.b2DefaultWorldDef();
     worldDef.gravity = gravity;
-    const worldId = box2d.b2CreateWorld(&worldDef);
+    const worldId = box2d.c.b2CreateWorld(&worldDef);
 
     const duffSurface = try image.load(duffImgSrc);
 
@@ -89,7 +89,7 @@ pub fn cleanup() void {
     audio.cleanup();
 
     if (maybeResources) |resources| {
-        box2d.b2DestroyWorld(resources.worldId);
+        box2d.c.b2DestroyWorld(resources.worldId);
         ttf.Font.close(resources.monocraftFont);
         sdl.destroyRenderer(resources.renderer);
         sdl.destroyWindow(resources.window);

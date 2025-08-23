@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdl = @import("zsdl");
-const box2d = @import("box2dnative.zig");
+const box2d = @import("box2d.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
@@ -9,9 +9,9 @@ const camera = @import("camera.zig");
 const SharedResources = @import("shared.zig").SharedResources;
 const m2Pixel = @import("conversion.zig").m2Pixel;
 
-var dDraw: ?box2d.b2DebugDraw = null;
+var dDraw: ?box2d.c.b2DebugDraw = null;
 pub fn init() !void {
-    var debugDraw = box2d.b2DefaultDebugDraw();
+    var debugDraw = box2d.c.b2DefaultDebugDraw();
     debugDraw.context = &shared.maybeResources;
     debugDraw.DrawSolidPolygon = &drawSolidPolygon;
     debugDraw.DrawPolygon = &drawPolygon;
@@ -24,14 +24,14 @@ pub fn init() !void {
     dDraw = debugDraw;
 }
 
-fn b2Mul(rot: box2d.b2Rot, v: box2d.b2Vec2) box2d.b2Vec2 {
-    return box2d.b2Vec2{
+fn b2Mul(rot: box2d.c.b2Rot, v: box2d.c.b2Vec2) box2d.c.b2Vec2 {
+    return box2d.c.b2Vec2{
         .x = rot.c * v.x - rot.s * v.y,
         .y = rot.s * v.x + rot.c * v.y,
     };
 }
 
-pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawSolidPolygon(transform: box2d.c.b2Transform, vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     _ = radius;
     // Retrieve our shared resources from the context pointer.
     const res: *SharedResources = @alignCast(@ptrCast(context));
@@ -53,18 +53,18 @@ pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.
     // Draw each edge of the polygon.
     for (0..@intCast(vertexCount)) |i| {
         // Rotate and translate the current vertex.
-        const v_current: box2d.b2Vec2 = vertices[i];
-        const rotated_current: box2d.b2Vec2 = b2Mul(rot, v_current);
-        const world_current: box2d.b2Vec2 = box2d.b2Vec2{
+        const v_current: box2d.c.b2Vec2 = vertices[i];
+        const rotated_current: box2d.c.b2Vec2 = b2Mul(rot, v_current);
+        const world_current: box2d.c.b2Vec2 = box2d.c.b2Vec2{
             .x = transform.p.x + rotated_current.x,
             .y = transform.p.y + rotated_current.y,
         };
         const current: IVec2 = camera.relativePosition(m2Pixel(world_current));
 
         // Do the same for the next vertex (with wrap-around)
-        const v_next: box2d.b2Vec2 = vertices[(i + 1) % @as(usize, @intCast(vertexCount))];
-        const rotated_next: box2d.b2Vec2 = b2Mul(rot, v_next);
-        const world_next: box2d.b2Vec2 = box2d.b2Vec2{
+        const v_next: box2d.c.b2Vec2 = vertices[(i + 1) % @as(usize, @intCast(vertexCount))];
+        const rotated_next: box2d.c.b2Vec2 = b2Mul(rot, v_next);
+        const world_next: box2d.c.b2Vec2 = box2d.c.b2Vec2{
             .x = transform.p.x + rotated_next.x,
             .y = transform.p.y + rotated_next.y,
         };
@@ -77,7 +77,7 @@ pub fn drawSolidPolygon(transform: box2d.b2Transform, vertices: [*c]const box2d.
     }
 }
 
-pub fn drawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawPolygon(vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
@@ -102,7 +102,7 @@ pub fn drawPolygon(vertices: [*c]const box2d.b2Vec2, vertexCount: c_int, color: 
     }
 }
 
-pub fn drawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawSegment(p1: box2d.c.b2Vec2, p2: box2d.c.b2Vec2, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
@@ -123,7 +123,7 @@ pub fn drawSegment(p1: box2d.b2Vec2, p2: box2d.b2Vec2, color: box2d.b2HexColor, 
     };
 }
 
-pub fn drawPoint(p1: box2d.b2Vec2, size: f32, color: box2d.b2HexColor, context: ?*anyopaque) callconv(.C) void {
+pub fn drawPoint(p1: box2d.c.b2Vec2, size: f32, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     const res: *SharedResources = @alignCast(@ptrCast(context));
 
     const r: u8 = @intCast((color >> 16) & 0xFF);
@@ -149,6 +149,6 @@ pub fn draw() !void {
     const resources = try shared.getResources();
 
     if (dDraw) |*debugDraw| {
-        box2d.b2World_Draw(resources.worldId, debugDraw);
+        box2d.c.b2World_Draw(resources.worldId, debugDraw);
     }
 }

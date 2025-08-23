@@ -1,9 +1,8 @@
 const std = @import("std");
-const box2d = @import("box2dnative.zig");
 const config = @import("config.zig");
 const player = @import("player.zig");
 
-pub fn frictionCallback(frictionA: f32, materialA: c_int, frictionB: f32, materialB: c_int) callconv(.C) f32 {
+pub fn frictionCallback(frictionA: f32, materialA: c_int, frictionB: f32, materialB: c_int) callconv(.c) f32 {
     const playerFriction = if (player.isMoving) config.player.movementFriction else config.player.restingFriction;
 
     var fA = frictionA;
