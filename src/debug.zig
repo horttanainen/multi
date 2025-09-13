@@ -17,6 +17,7 @@ pub fn init() !void {
     debugDraw.DrawPolygon = &drawPolygon;
     debugDraw.DrawSegment = &drawSegment;
     debugDraw.DrawPoint = &drawPoint;
+    debugDraw.DrawSolidCircle = &drawSolidCircle;
     debugDraw.drawShapes = true;
     debugDraw.drawAABBs = false;
     debugDraw.drawContacts = true;
@@ -143,6 +144,18 @@ pub fn drawPoint(p1: box2d.c.b2Vec2, size: f32, color: box2d.c.b2HexColor, conte
         std.debug.print("encountered error in debugDrawPolygon when trying to renderFillRect\n", .{});
         return;
     };
+}
+
+pub fn drawSolidCircle(transform: box2d.c.b2Transform, radius: f32, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
+    const half = radius;
+    const verts = [_]box2d.c.b2Vec2{
+        .{ .x = -half, .y = -half },
+        .{ .x =  half, .y = -half },
+        .{ .x =  half, .y =  half },
+        .{ .x = -half, .y =  half },
+    };
+
+    drawSolidPolygon(transform, &verts, verts.len, radius, color, context);
 }
 
 pub fn draw() !void {
