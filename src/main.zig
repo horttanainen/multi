@@ -29,10 +29,10 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add walking animation
-//TODO: add visualisation for explosion
-//TODO: split projectile into pieces
 //TODO: make explosion push objects around relative to their distance from the center of the explosion
+//TODO: add visualisation for explosion
+//TODO: add walking animation
+//TODO: split projectile into pieces
 //TODO: make explosion break level
 //TODO: allow explosion to break objects
 //TODO: add stupid enemy that only stands still and can be killed
@@ -75,6 +75,9 @@ const Sprite = entity.Sprite;
 
 //Engine:
 //TODO: separate engine code from game logic
+
+//Bugs:
+//TODO: Level json creation broke during 0.15 update
 
 pub fn main() !void {
     const resources = try shared.init();
