@@ -17,6 +17,13 @@ pub fn toBox2d(a: Vec2) box2d.c.b2Vec2 {
     };
 }
 
+pub fn fromBox2d(a: box2d.c.b2Vec2) Vec2 {
+    return .{
+        .x = a.x,
+        .y = a.y,
+    };
+}
+
 pub fn iequals(a: IVec2, b: IVec2) bool {
     return a.x == b.x and a.y == b.y;
 }
