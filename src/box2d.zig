@@ -112,3 +112,7 @@ pub fn subtract(a: c.b2Vec2, b: c.b2Vec2) c.b2Vec2 {
 pub fn add(a: c.b2Vec2, b: c.b2Vec2) c.b2Vec2 {
     return .{ .x = a.x + b.x, .y = a.y + b.y };
 }
+
+pub fn mul(a: c.b2Vec2, b: f32) c.b2Vec2 {
+    return .{ .x = a.x * b, .y = a.y * b };
+}
