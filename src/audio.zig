@@ -78,6 +78,10 @@ fn shutSound(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     return 0;
 }
 
+pub fn cleanupOne(audio: Audio) void {
+    shared.allocator.free(audio.file);
+}
+
 pub fn cleanup() void {
     var it = activeSounds.iterator();
     while (it.next()) |kv| {

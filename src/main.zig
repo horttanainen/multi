@@ -25,6 +25,7 @@ const player = @import("player.zig");
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
+const particle = @import("particle.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
@@ -128,8 +129,6 @@ fn gameLoop() !void {
     try player.checkBulletContacts();
     try player.checkSensors();
     try sensor.checkGoal();
-
-    try entity.cleanupMarkedEntities();
 
     camera.followPlayer();
 }

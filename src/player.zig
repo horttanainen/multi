@@ -12,6 +12,7 @@ const animation = @import("animation.zig");
 const time = @import("time.zig");
 const audio = @import("audio.zig");
 const weapon = @import("weapon.zig");
+const particle = @import("particle.zig");
 
 const config = @import("config.zig");
 
@@ -189,6 +190,17 @@ pub fn spawn(position: vec.IVec2) !void {
         .sound = .{ .file = "sounds/cannon_fire.mp3", .durationMs = config.cannonFireSoundDurationMs },
         .impulse = config.cannonImpulse,
         .material = config.cannonMaterial,
+        .explosion = .{
+            .sound = .{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs },
+            .blastPower = 50,
+            .particleCount = 100,
+            .particleDensity = 0.6,
+            .particleFriction = 0,
+            .particleRestitution = 0.99,
+            .particleRadius = 0.05,
+            .particleLinearDamping = 10,
+            .particleGravityScale = 0,
+        },
     };
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
@@ -311,60 +323,19 @@ pub fn checkBulletContacts() !void {
 
         if (aMaterial == config.cannonMaterial) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
-            const maybeE = entity.entities.fetchSwapRemove(bodyId);
-            if (maybeE) |e| {
-                try explodeCannonBall(e.value);
+            const maybeParticle = particle.particles.get(bodyId);
+            if (maybeParticle) |p| {
+                try particle.explode(p);
             }
         }
         if (bMaterial == config.cannonMaterial) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
-            const maybeE = entity.entities.fetchSwapRemove(bodyId);
-            if (maybeE) |e| {
-                try explodeCannonBall(e.value);
+            const maybeParticle = particle.particles.get(bodyId);
+            if (maybeParticle) |p| {
+                try particle.explode(p);
             }
         }
     }
-}
-
-fn explodeCannonBall(e: entity.Entity) !void {
-    try audio.playFor(.{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs });
-
-    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
-
-    const blastPower = 50;
-
-    for (0..100) |i| {
-        const angle = std.math.degreesToRadians(@as(f32, @floatFromInt(i)) / 100 * 360);
-        const dir = box2d.c.b2Vec2{ .x = std.math.sin(angle), .y = std.math.cos(angle) };
-
-        const pos = if (e.state) |state| vec.fromBox2d(state.pos) else vec.zero;
-        var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
-        bodyDef.isBullet = true;
-        bodyDef.linearDamping = 10;
-        bodyDef.gravityScale = 0;
-        bodyDef.linearVelocity = box2d.mul(dir, blastPower);
-
-        const bodyId = try box2d.createBody(bodyDef);
-
-        var circleShapeDef = box2d.c.b2DefaultShapeDef();
-        circleShapeDef.density = 60 / 100;
-        circleShapeDef.friction = 0;
-        circleShapeDef.restitution = 0.99;
-        circleShapeDef.filter.groupIndex = -1;
-
-        const circleShape: box2d.c.b2Circle = .{
-            .center = .{
-                .x = 0,
-                .y = 0,
-            },
-            .radius = 0.05,
-        };
-
-        _ = box2d.c.b2CreateCircleShape(bodyId, &circleShapeDef, &circleShape);
-
-        try bodyIds.append(bodyId);
-    }
-    try entity.cleanupLater(e, try bodyIds.toOwnedSlice());
 }
 
 pub fn checkSensors() !void {
@@ -456,7 +427,6 @@ pub fn shoot() !void {
         box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
     }
 }
-
 
 pub fn cleanup() void {
     if (maybePlayer) |player| {

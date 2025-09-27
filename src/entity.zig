@@ -44,14 +44,6 @@ pub var entities: AutoArrayHashMap(
     Entity,
 ) = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 
-pub const MarkedEntity = struct {
-    entity: Entity,
-    counter: i32,
-    linkedBodies: []box2d.c.b2BodyId
-};
-
-pub var markedEntities = std.array_list.Managed(MarkedEntity).init(allocator);
-
 pub fn updateStates() void {
     for (entities.values()) |*e| {
         e.state = box2d.getState(e.bodyId);
@@ -122,52 +114,11 @@ pub fn cleanupOne(entity: Entity) void {
     sprite.cleanup(entity.sprite);
 }
 
-pub fn cleanupLater(entity: Entity, linkedBodies: []box2d.c.b2BodyId) !void {
-    _ = entities.swapRemove(entity.bodyId);
-    box2d.c.b2Body_SetAwake(entity.bodyId, false);
-    try markedEntities.append(.{
-        .entity = entity,
-        .counter = 0,
-        .linkedBodies = linkedBodies,
-    });
-}
-
-pub fn cleanupMarkedEntities() !void {
-    var toBeDestroyedEntities = std.array_list.Managed(MarkedEntity).init(allocator);
-    defer toBeDestroyedEntities.deinit();
-    var entitiesToKeep = std.array_list.Managed(MarkedEntity).init(allocator);
-    for (markedEntities.items) |*markedEntity| {
-        if (markedEntity.counter > 10) {
-            try toBeDestroyedEntities.append(.{
-                .entity = markedEntity.entity,
-                .counter = markedEntity.counter,
-                .linkedBodies = markedEntity.linkedBodies
-            });
-        } else {
-            try entitiesToKeep.append(.{
-                .entity = markedEntity.entity,
-                .counter = markedEntity.counter + 1,
-                .linkedBodies = markedEntity.linkedBodies
-            });
-        }
-    }
-    markedEntities.deinit();
-    markedEntities = entitiesToKeep;
-
-    for (toBeDestroyedEntities.items) |de| {
-        cleanupOne(de.entity);
-        for (de.linkedBodies) |bodyId| {
-            box2d.c.b2DestroyBody(bodyId);
-        }
-    }
-}
-
 pub fn cleanup() void {
     for (entities.values()) |entity| {
         cleanupOne(entity);
     }
     entities.deinit();
-    markedEntities.deinit();
     entities = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 }
 
