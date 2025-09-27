@@ -100,6 +100,10 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
 
 pub fn cleanup() void {
     particles.clearAndFree();
+
+    for (markedParticles.items) |*marked| {
+        shared.allocator.free(marked.linkedBodies);
+    }
     markedParticles.deinit();
 }
 
