@@ -64,6 +64,7 @@ const Sprite = entity.Sprite;
 //TODO: create about 10 different physics and gravity based levels
 //TODO: create levels with enemies
 
+
 //Multiplayer todos:
 //TODO: add splitscreen multiplayer
 //TODO: investigate how to sync games when running on different machines
@@ -73,6 +74,11 @@ const Sprite = entity.Sprite;
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
+
+// game idea: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch. 
+// winner is decided based on the tournament
+// level changes upon 5 deaths
+// main weapon is the cannon
 
 //Engine:
 //TODO: separate engine code from game logic
