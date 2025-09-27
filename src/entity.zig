@@ -2,6 +2,8 @@ const std = @import("std");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
+const timer = @import("sdl_timer.zig");
+
 const AutoArrayHashMap = std.AutoArrayHashMap;
 
 const camera = @import("camera.zig");
@@ -38,6 +40,8 @@ pub const SerializableEntity = struct {
     scale: vec.Vec2,
     pos: vec.IVec2,
 };
+
+pub var entitiesToCleanup = std.array_list.Managed(Entity).init(shared.allocator);
 
 pub var entities: AutoArrayHashMap(
     box2d.c.b2BodyId,
@@ -105,6 +109,40 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .highlighted = false,
     };
     return entity;
+}
+
+pub fn cleanupLater(entity: Entity) void {
+    box2d.c.b2Body_Disable(entity.bodyId);
+
+    const id_int: usize = @bitCast(entity.bodyId);
+    const ptr: ?*anyopaque = @ptrFromInt(id_int);
+
+    std.debug.print("bodyid before passing it: {}\n", .{entity.bodyId});
+    _ = timer.addTimer(10, markEntityForCleanup, ptr);
+}
+
+fn markEntityForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
+    _ = interval;
+
+    const id_int: usize = @intFromPtr(param.?);
+    const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
+
+    std.debug.print("bodyid on the other side: {}\n", .{bodyId});
+
+    const maybeE = entities.fetchSwapRemove(bodyId);
+
+    if (maybeE) |entity| {
+        entitiesToCleanup.append(entity.value) catch {};
+    }
+    return 0;
+}
+
+pub fn cleanupEntities() void {
+    for (entitiesToCleanup.items) |entity| {
+        cleanupOne(entity);
+    }
+    entitiesToCleanup.deinit();
+    entitiesToCleanup = std.array_list.Managed(Entity).init(shared.allocator);
 }
 
 pub fn cleanupOne(entity: Entity) void {

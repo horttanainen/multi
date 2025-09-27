@@ -2,8 +2,6 @@ const std = @import("std");
 const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
-const AutoArrayHashMap = std.AutoArrayHashMap;
-
 const camera = @import("camera.zig");
 const time = @import("time.zig");
 const polygon = @import("polygon.zig");

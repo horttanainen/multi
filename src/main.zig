@@ -30,7 +30,7 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: make explosion push objects around relative to their distance from the center of the explosion
+//TODO: add mutexes to particles and entities because of the delayed deletion in sdl thread
 //TODO: add visualisation for explosion
 //TODO: add walking animation
 //TODO: split projectile into pieces
@@ -127,6 +127,8 @@ fn gameLoop() !void {
     player.clampSpeed();
 
     try player.checkBulletContacts();
+    try particle.cleanupShrapnel();
+    entity.cleanupEntities();
     try player.checkSensors();
     try sensor.checkGoal();
 
