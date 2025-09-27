@@ -11,6 +11,7 @@ const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
 const time = @import("time.zig");
 const audio = @import("audio.zig");
+const weapon = @import("weapon.zig");
 
 const config = @import("config.zig");
 
@@ -26,6 +27,8 @@ pub const Player = struct {
     leftWallSensorId: box2d.c.b2ShapeId,
     rightWallSensorId: box2d.c.b2ShapeId,
     currentAnimation: animation.Animation,
+    weapons: []weapon.Weapon,
+    selectedWeaponIndex: usize,
 };
 
 pub var maybeCrosshair: ?sprite.Sprite = null;
@@ -178,6 +181,19 @@ pub fn spawn(position: vec.IVec2) !void {
         .{ .x = 0, .y = -30 },
     );
 
+    const cannon: weapon.Weapon = .{
+        .name = "cannon",
+        .projectileImgSrc = shared.cannonBallmgSrc,
+        .scale = .{ .x = 0.5, .y = 0.5 },
+        .delay = config.shootDelayMs,
+        .sound = .{ .file = "sounds/cannon_fire.mp3", .durationMs = config.cannonFireSoundDurationMs },
+        .impulse = config.cannonImpulse,
+        .material = config.cannonMaterial,
+    };
+
+    var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
+    try weapons.append(cannon);
+
     maybePlayer = Player{
         .entity = entity.Entity{
             .type = "dynamic",
@@ -194,6 +210,8 @@ pub fn spawn(position: vec.IVec2) !void {
         .leftWallSensorId = leftWallSensorId,
         .rightWallSensorId = rightWallSensorId,
         .currentAnimation = anim,
+        .weapons = try weapons.toOwnedSlice(),
+        .selectedWeaponIndex = 0,
     };
 
     maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
@@ -295,19 +313,58 @@ pub fn checkBulletContacts() !void {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
-                try entity.cleanupLater(e.value);
-                try audio.playFor("sounds/cannon_hit.mp3", config.cannonHitSoundDurationMs);
+                try explodeCannonBall(e.value);
             }
         }
         if (bMaterial == config.cannonMaterial) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
             const maybeE = entity.entities.fetchSwapRemove(bodyId);
             if (maybeE) |e| {
-                try entity.cleanupLater(e.value);
-                try audio.playFor("sounds/cannon_hit.mp3", config.cannonHitSoundDurationMs);
+                try explodeCannonBall(e.value);
             }
         }
     }
+}
+
+fn explodeCannonBall(e: entity.Entity) !void {
+    try audio.playFor(.{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs });
+
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
+
+    const blastPower = 50;
+
+    for (0..100) |i| {
+        const angle = std.math.degreesToRadians(@as(f32, @floatFromInt(i)) / 100 * 360);
+        const dir = box2d.c.b2Vec2{ .x = std.math.sin(angle), .y = std.math.cos(angle) };
+
+        const pos = if (e.state) |state| vec.fromBox2d(state.pos) else vec.zero;
+        var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
+        bodyDef.isBullet = true;
+        bodyDef.linearDamping = 10;
+        bodyDef.gravityScale = 0;
+        bodyDef.linearVelocity = box2d.mul(dir, blastPower);
+
+        const bodyId = try box2d.createBody(bodyDef);
+
+        var circleShapeDef = box2d.c.b2DefaultShapeDef();
+        circleShapeDef.density = 60 / 100;
+        circleShapeDef.friction = 0;
+        circleShapeDef.restitution = 0.99;
+        circleShapeDef.filter.groupIndex = -1;
+
+        const circleShape: box2d.c.b2Circle = .{
+            .center = .{
+                .x = 0,
+                .y = 0,
+            },
+            .radius = 0.05,
+        };
+
+        _ = box2d.c.b2CreateCircleShape(bodyId, &circleShapeDef, &circleShape);
+
+        try bodyIds.append(bodyId);
+    }
+    try entity.cleanupLater(e, try bodyIds.toOwnedSlice());
 }
 
 pub fn checkSensors() !void {
@@ -382,41 +439,24 @@ pub fn aim(direction: vec.Vec2) void {
 }
 
 pub fn shoot() !void {
-    if (!delay.check("shoot")) {
-        if (maybePlayer) |*player| {
-            var shapeDef = box2d.c.b2DefaultShapeDef();
-            shapeDef.friction = 0.5;
-            shapeDef.material = config.cannonMaterial;
-            shapeDef.enableHitEvents = true;
+    if (maybePlayer) |*player| {
+        if (player.weapons.len == 0) return;
 
-            const s = try sprite.createFromImg(
-                shared.cannonBallmgSrc,
-                .{
-                    .x = 0.5,
-                    .y = 0.5,
-                },
-                vec.izero,
-            );
-            const crosshairPos = calcCrosshairPosition(player.*);
-            const position = camera.relativePositionForCreating(crosshairPos);
-            const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
-            var bodyDef = box2d.createDynamicBodyDef(pos);
-            bodyDef.isBullet = true;
-            const cannonBall = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
+        const selectedWeapon = player.weapons[player.selectedWeaponIndex];
+        const crosshairPos = calcCrosshairPosition(player.*);
+        const position = camera.relativePositionForCreating(crosshairPos);
 
-            const cannonImpulse = vec.mul(vec.normalize(.{
-                .x = aimDirection.x,
-                .y = -aimDirection.y,
-            }), config.cannonImpulse);
+        try weapon.shoot(selectedWeapon, position, aimDirection);
 
-            box2d.c.b2Body_ApplyLinearImpulseToCenter(cannonBall.bodyId, vec.toBox2d(cannonImpulse), true);
-            box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(vec.mul(cannonImpulse, -0.1)), true);
-        }
+        const recoilImpulse = vec.mul(vec.normalize(.{
+            .x = aimDirection.x,
+            .y = -aimDirection.y,
+        }), selectedWeapon.impulse * -0.1);
 
-        try audio.playFor("sounds/cannon_fire.mp3", config.cannonFireSoundDurationMs);
-        delay.action("shoot", config.shootDelayMs);
+        box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
     }
 }
+
 
 pub fn cleanup() void {
     if (maybePlayer) |player| {
@@ -424,6 +464,7 @@ pub fn cleanup() void {
             sprite.cleanup(frame);
         }
         shared.allocator.free(player.currentAnimation.frames);
+        shared.allocator.free(player.weapons);
         box2d.c.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
     }

@@ -13,6 +13,11 @@ pub const AudioError = error{
     SoundInitFailed,
 };
 
+pub const Audio = struct {
+    file: []const u8,
+    durationMs: u32
+};
+
 var engine: c.ma_engine = undefined;
 
 const SoundEntry = struct {
@@ -29,9 +34,9 @@ pub fn init() !void {
         return AudioError.FailedToInitialize;
 }
 
-pub fn playFor(path: []const u8, delayMs: u32) !void {
+pub fn playFor(audio: Audio) !void {
     const entry = try shared.allocator.create(SoundEntry);
-    entry.data = try std.fs.cwd().readFileAlloc(shared.allocator, path, config.maxAudioSizeInBytes);
+    entry.data = try std.fs.cwd().readFileAlloc(shared.allocator, audio.file, config.maxAudioSizeInBytes);
 
     if (c.ma_decoder_init_memory(entry.data.ptr, entry.data.len, null, &entry.decoder) != c.MA_SUCCESS) {
         shared.allocator.destroy(entry);
@@ -53,7 +58,7 @@ pub fn playFor(path: []const u8, delayMs: u32) !void {
     nextId += 1;
     try activeSounds.put(id, entry);
 
-    _ = timer.addTimer(delayMs, shutSound, @ptrFromInt(id));
+    _ = timer.addTimer(audio.durationMs, shutSound, @ptrFromInt(id));
 }
 
 fn shutSound(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
