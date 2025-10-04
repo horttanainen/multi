@@ -81,7 +81,7 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
 
 pub fn explode(p: Projectile) !void {
     _ = projectiles.fetchSwapRemove(p.bodyId);
-    const maybeE = entity.entities.get(p.bodyId);
+    const maybeE = entity.entities.getLocking(p.bodyId);
 
     var pos = vec.zero;
     if (maybeE) |e| {

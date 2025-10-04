@@ -3,6 +3,7 @@ const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
 const timer = @import("sdl_timer.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
 
 const AutoArrayHashMap = std.AutoArrayHashMap;
 
@@ -41,21 +42,22 @@ pub const SerializableEntity = struct {
     pos: vec.IVec2,
 };
 
-pub var entitiesToCleanup = std.array_list.Managed(Entity).init(shared.allocator);
+pub var entitiesToCleanup = thread_safe.ThreadSafeArrayList(Entity).init(shared.allocator);
 
-pub var entities: AutoArrayHashMap(
-    box2d.c.b2BodyId,
-    Entity,
-) = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
+pub var entities = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 
 pub fn updateStates() void {
-    for (entities.values()) |*e| {
+    entities.mutex.lock();
+    defer entities.mutex.unlock();
+    for (entities.map.values()) |*e| {
         e.state = box2d.getState(e.bodyId);
     }
 }
 
 pub fn drawAll() !void {
-    for (entities.values()) |*e| {
+    entities.mutex.lock();
+    defer entities.mutex.unlock();
+    for (entities.map.values()) |*e| {
         try draw(e);
     }
 }
@@ -87,7 +89,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
 pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
     const entity = try createEntityForBody(bodyId, s, shapeDef, entityType);
-    try entities.put(bodyId, entity);
+    try entities.putLocking(bodyId, entity);
     return entity;
 }
 
@@ -126,21 +128,21 @@ fn markEntityForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
 
-
-    const maybeE = entities.fetchSwapRemove(bodyId);
+    const maybeE = entities.fetchSwapRemoveLocking(bodyId);
 
     if (maybeE) |entity| {
-        entitiesToCleanup.append(entity.value) catch {};
+        entitiesToCleanup.appendLocking(entity.value) catch {};
     }
     return 0;
 }
 
 pub fn cleanupEntities() void {
-    for (entitiesToCleanup.items) |entity| {
+    entitiesToCleanup.mutex.lock();
+    for (entitiesToCleanup.list.items) |entity| {
         cleanupOne(entity);
     }
-    entitiesToCleanup.deinit();
-    entitiesToCleanup = std.array_list.Managed(Entity).init(shared.allocator);
+    entitiesToCleanup.mutex.unlock();
+    entitiesToCleanup.replaceLocking(std.array_list.Managed(Entity).init(shared.allocator));
 }
 
 pub fn cleanupOne(entity: Entity) void {
@@ -151,11 +153,12 @@ pub fn cleanupOne(entity: Entity) void {
 }
 
 pub fn cleanup() void {
-    for (entities.values()) |entity| {
+    entities.mutex.lock();
+    for (entities.map.values()) |entity| {
         cleanupOne(entity);
     }
-    entities.deinit();
-    entities = AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
+    entities.mutex.unlock();
+    entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator));
 }
 
 pub fn getPosition(entity: Entity) vec.IVec2 {
@@ -171,7 +174,7 @@ pub fn getPosition(entity: Entity) vec.IVec2 {
 }
 
 pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
-    return entities.getPtr(bodyId);
+    return entities.getPtrLocking(bodyId);
 }
 
 pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
