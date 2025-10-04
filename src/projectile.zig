@@ -169,6 +169,10 @@ pub fn checkContacts() !void {
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
 
+        if (!box2d.c.b2Shape_IsValid(event.shapeIdA) or !box2d.c.b2Shape_IsValid(event.shapeIdB)) {
+            continue;
+        }
+
         const aMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdA);
         const bMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdB);
 
