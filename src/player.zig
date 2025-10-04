@@ -311,32 +311,6 @@ pub fn clampSpeed() void {
     }
 }
 
-pub fn checkBulletContacts() !void {
-    const resources = try shared.getResources();
-    const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
-
-    for (0..@intCast(contactEvents.hitCount)) |i| {
-        const event = contactEvents.hitEvents[i];
-
-        const aMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdA);
-        const bMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdB);
-
-        if (aMaterial == config.cannonMaterial) {
-            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
-            const maybeProjectile = projectile.projectiles.get(bodyId);
-            if (maybeProjectile) |p| {
-                try projectile.explode(p);
-            }
-        }
-        if (bMaterial == config.cannonMaterial) {
-            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
-            const maybeProjectile = projectile.projectiles.get(bodyId);
-            if (maybeProjectile) |p| {
-                try projectile.explode(p);
-            }
-        }
-    }
-}
 
 pub fn checkSensors() !void {
     const resources = try shared.getResources();

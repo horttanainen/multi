@@ -132,7 +132,7 @@ fn gameLoop() !void {
 
     player.clampSpeed();
 
-    try player.checkBulletContacts();
+    try projectile.checkContacts();
     try projectile.cleanupShrapnel();
     entity.cleanupEntities();
     try player.checkSensors();
