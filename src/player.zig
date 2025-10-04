@@ -12,7 +12,7 @@ const animation = @import("animation.zig");
 const time = @import("time.zig");
 const audio = @import("audio.zig");
 const weapon = @import("weapon.zig");
-const particle = @import("particle.zig");
+const projectile = @import("projectile.zig");
 
 const config = @import("config.zig");
 
@@ -323,16 +323,16 @@ pub fn checkBulletContacts() !void {
 
         if (aMaterial == config.cannonMaterial) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
-            const maybeParticle = particle.particles.get(bodyId);
-            if (maybeParticle) |p| {
-                try particle.explode(p);
+            const maybeProjectile = projectile.projectiles.get(bodyId);
+            if (maybeProjectile) |p| {
+                try projectile.explode(p);
             }
         }
         if (bMaterial == config.cannonMaterial) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
-            const maybeParticle = particle.particles.get(bodyId);
-            if (maybeParticle) |p| {
-                try particle.explode(p);
+            const maybeProjectile = projectile.projectiles.get(bodyId);
+            if (maybeProjectile) |p| {
+                try projectile.explode(p);
             }
         }
     }

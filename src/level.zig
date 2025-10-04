@@ -16,7 +16,7 @@ const conv = @import("conversion.zig");
 
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
-const particle = @import("particle.zig");
+const projectile = @import("projectile.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
@@ -124,7 +124,7 @@ pub fn reload() !void {
 pub fn cleanup() void {
     player.cleanup();
     sensor.cleanup();
-    particle.cleanup();
+    projectile.cleanup();
     entity.cleanup();
     background.cleanup();
 }

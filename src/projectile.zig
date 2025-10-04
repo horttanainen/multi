@@ -19,12 +19,12 @@ pub const Explosion = struct {
     particleGravityScale: f32,
 };
 
-pub const Particle = struct {
+pub const Projectile = struct {
     bodyId: box2d.c.b2BodyId,
     explosion: ?Explosion,
 };
 
-pub var particles = std.AutoArrayHashMap(box2d.c.b2BodyId, Particle).init(shared.allocator);
+pub var projectiles = std.AutoArrayHashMap(box2d.c.b2BodyId, Projectile).init(shared.allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -76,8 +76,8 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     return try bodyIds.toOwnedSlice();
 }
 
-pub fn explode(p: Particle) !void {
-    _ = particles.fetchSwapRemove(p.bodyId);
+pub fn explode(p: Projectile) !void {
+    _ = projectiles.fetchSwapRemove(p.bodyId);
     const maybeE = entity.entities.get(p.bodyId);
 
     var pos = vec.zero;
@@ -145,14 +145,14 @@ pub fn cleanupShrapnel() !void {
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
-    try particles.put(bodyId, Particle{
+    try projectiles.put(bodyId, Projectile{
         .bodyId = bodyId,
         .explosion = ex,
     });
 }
 
 pub fn cleanup() void {
-    particles.clearAndFree();
+    projectiles.clearAndFree();
 
     for (shrapnel.items) |item| {
         shared.allocator.free(item.bodies);

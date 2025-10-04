@@ -25,12 +25,12 @@ const player = @import("player.zig");
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
-const particle = @import("particle.zig");
+const projectile = @import("projectile.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add mutexes to particles and entities because of the delayed deletion in sdl thread
+//TODO: add mutexes to projectiles and entities because of the delayed deletion in sdl thread
 //TODO: add visualisation for explosion
 //TODO: add walking animation
 //TODO: split projectile into pieces
@@ -133,7 +133,7 @@ fn gameLoop() !void {
     player.clampSpeed();
 
     try player.checkBulletContacts();
-    try particle.cleanupShrapnel();
+    try projectile.cleanupShrapnel();
     entity.cleanupEntities();
     try player.checkSensors();
     try sensor.checkGoal();

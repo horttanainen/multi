@@ -5,7 +5,7 @@ const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
-const particle = @import("particle.zig");
+const projectile = @import("projectile.zig");
 
 pub const Weapon = struct {
     name: [:0]const u8,
@@ -15,7 +15,7 @@ pub const Weapon = struct {
     sound: audio.Audio,
     impulse: f32,
     material: i32,
-    explosion: ?particle.Explosion,
+    explosion: ?projectile.Explosion,
 };
 
 pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
@@ -42,7 +42,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
 
         box2d.c.b2Body_ApplyLinearImpulseToCenter(projectileEntity.bodyId, vec.toBox2d(impulse), true);
 
-        try particle.create(projectileEntity.bodyId, weapon.explosion);
+        try projectile.create(projectileEntity.bodyId, weapon.explosion);
 
         try audio.playFor(weapon.sound);
         delay.action(weapon.name, weapon.delay);
