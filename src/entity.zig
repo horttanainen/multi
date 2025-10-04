@@ -86,6 +86,31 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip, 0);
 }
 
+pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
+    const bodyId = try box2d.createBody(bodyDef);
+    const entityType = try shared.allocator.dupe(u8, eType);
+
+    const shapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &shape);
+
+    const shapeIds = try shared.allocator.alloc(box2d.c.b2ShapeId, 1);
+    shapeIds[0] = shapeId;
+
+    const entity = Entity{
+        .type = entityType,
+        .friction = shapeDef.friction,
+        .state = null,
+        .bodyId = bodyId,
+        .sprite = s,
+        .shapeIds = shapeIds,
+        .highlighted = false,
+    };
+
+    try entities.putLocking(bodyId, entity);
+    return entity;
+}
+
+
+
 pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
     const entity = try createEntityForBody(bodyId, s, shapeDef, entityType);
