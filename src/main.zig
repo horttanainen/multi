@@ -30,7 +30,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add mutexes to projectiles and entities because of the delayed deletion in sdl thread
 //TODO: add visualisation for explosion
 //TODO: add walking animation
 //TODO: split projectile into pieces
