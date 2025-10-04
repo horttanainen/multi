@@ -16,26 +16,33 @@ pub const Animation = struct {
 };
 
 pub const AnimationInstance = struct {
-    bodyId: box2d.c.b2BodyId,
     animation: Animation,
     loop: bool,
 };
 
-var animationInstances = thread_safe.ThreadSafeArrayList(AnimationInstance).init(shared.allocator);
+var animationInstances = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationInstance).init(shared.allocator);
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
-    try animationInstances.appendLocking(.{
-        .bodyId = bodyId,
+    try animationInstances.putLocking(bodyId, .{
         .animation = anim,
         .loop = loop,
     });
+
+    const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
+    if (maybeEntityPtr) |entPtr| {
+        entPtr.animated = true;
+    }
 }
 
 pub fn animate() void {
     animationInstances.mutex.lock();
     defer animationInstances.mutex.unlock();
 
-    for (animationInstances.list.items) |*instance| {
+    var iter = animationInstances.map.iterator();
+    while (iter.next()) |entry| {
+        const bodyId = entry.key_ptr.*;
+        const instance = entry.value_ptr;
+
         const timeNowS = time.now();
         const timePassedS = timeNowS - instance.animation.lastTime;
         const fpsSeconds = 1.0 / @as(f64, @floatFromInt(instance.animation.fps));
@@ -54,7 +61,7 @@ pub fn animate() void {
             }
 
             // Update entity sprite
-            const maybeEntity = entity.entities.getPtrLocking(instance.bodyId);
+            const maybeEntity = entity.entities.getPtrLocking(bodyId);
             if (maybeEntity) |ent| {
                 ent.sprite = instance.animation.frames[instance.animation.current];
             }
@@ -64,17 +71,32 @@ pub fn animate() void {
     }
 }
 
-pub fn cleanup() void {
+pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
     animationInstances.mutex.lock();
-    for (animationInstances.list.items) |instance| {
-        for (instance.animation.frames) |frame| {
+    defer animationInstances.mutex.unlock();
+
+    const maybeInstance = animationInstances.map.fetchSwapRemove(bodyId);
+    if (maybeInstance) |instance| {
+        for (instance.value.animation.frames) |frame| {
             sprite.cleanup(frame);
         }
-        shared.allocator.free(instance.animation.frames);
+        shared.allocator.free(instance.value.animation.frames);
     }
-    animationInstances.mutex.unlock();
+}
 
-    animationInstances.replaceLocking(std.array_list.Managed(AnimationInstance).init(shared.allocator));
+pub fn cleanup() void {
+    animationInstances.mutex.lock();
+    defer animationInstances.mutex.unlock();
+
+    var iter = animationInstances.map.iterator();
+    while (iter.next()) |entry| {
+        for (entry.value_ptr.animation.frames) |frame| {
+            sprite.cleanup(frame);
+        }
+        shared.allocator.free(entry.value_ptr.animation.frames);
+    }
+
+    animationInstances.map.clearAndFree();
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {

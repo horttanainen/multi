@@ -23,6 +23,7 @@ const sprite = @import("sprite.zig");
 const Sprite = sprite.Sprite;
 
 const conv = @import("conversion.zig");
+const animation = @import("animation.zig");
 
 pub const Entity = struct {
     type: []const u8,
@@ -32,6 +33,7 @@ pub const Entity = struct {
     sprite: Sprite,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
+    animated: bool,
 };
 
 pub const SerializableEntity = struct {
@@ -103,13 +105,12 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .sprite = s,
         .shapeIds = shapeIds,
         .highlighted = false,
+        .animated = false,
     };
 
     try entities.putLocking(bodyId, entity);
     return entity;
 }
-
-
 
 pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
@@ -134,6 +135,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .sprite = s,
         .shapeIds = shapeIds,
         .highlighted = false,
+        .animated = false,
     };
     return entity;
 }
@@ -174,7 +176,12 @@ pub fn cleanupOne(entity: Entity) void {
     box2d.c.b2DestroyBody(entity.bodyId);
     shared.allocator.free(entity.shapeIds);
     shared.allocator.free(entity.type);
-    sprite.cleanup(entity.sprite);
+
+    if (entity.animated) {
+        animation.cleanupAnimationFrames(entity.bodyId);
+    } else {
+        sprite.cleanup(entity.sprite);
+    }
 }
 
 pub fn cleanup() void {

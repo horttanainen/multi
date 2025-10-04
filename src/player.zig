@@ -215,6 +215,7 @@ pub fn spawn(position: vec.IVec2) !void {
             .shapeIds = try shapeIds.toOwnedSlice(),
             .state = null,
             .highlighted = false,
+            .animated = false,
         },
         .bodyShapeId = bodyShapeId,
         .lowerBodyShapeId = lowerBodyShapeId,
