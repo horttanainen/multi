@@ -117,7 +117,6 @@ pub fn cleanupLater(entity: Entity) void {
     const id_int: usize = @bitCast(entity.bodyId);
     const ptr: ?*anyopaque = @ptrFromInt(id_int);
 
-    std.debug.print("bodyid before passing it: {}\n", .{entity.bodyId});
     _ = timer.addTimer(10, markEntityForCleanup, ptr);
 }
 
@@ -127,7 +126,6 @@ fn markEntityForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
 
-    std.debug.print("bodyid on the other side: {}\n", .{bodyId});
 
     const maybeE = entities.fetchSwapRemove(bodyId);
 

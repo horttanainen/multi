@@ -33,6 +33,7 @@ pub const Shrapnel = struct {
     id: usize,
     cleaned: bool,
     bodies: []box2d.c.b2BodyId,
+    timerId: i32,
 };
 
 pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocator);
@@ -93,20 +94,20 @@ pub fn explode(p: Projectile) !void {
     if (p.explosion) |explosion| {
         const explosionBodies = try createExplosion(pos, explosion);
 
+        const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
         try shrapnel.appendLocking(.{
             .id = id,
             .cleaned = false,
             .bodies = explosionBodies,
+            .timerId = timerId,
         });
-        _ = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
         id = id + 1;
     }
 }
 
 fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     _ = interval;
-    const maybeId = param.?;
-    const shrapnelId: usize = @intFromPtr(maybeId);
+    const shrapnelId: usize = @intFromPtr(param.?);
 
     shrapnel.mutex.lock();
     defer shrapnel.mutex.unlock();
@@ -115,8 +116,10 @@ fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
         if (item.id == shrapnelId) {
             shrapnelToCleanup.appendSliceLocking(item.bodies) catch {};
             item.cleaned = true;
+            break;
         }
     }
+
     return 0;
 }
 
@@ -190,17 +193,21 @@ pub fn cleanup() void {
     projectiles.clearAndFree();
 
     shrapnel.mutex.lock();
-    defer shrapnel.mutex.unlock();
     for (shrapnel.list.items) |item| {
+        _ = timer.removeTimer(item.timerId);
+        for (item.bodies) |toClean| {
+            box2d.c.b2DestroyBody(toClean);
+        }
         shared.allocator.free(item.bodies);
     }
+    shrapnel.mutex.unlock();
+
+    shrapnel.replaceLocking(std.array_list.Managed(Shrapnel).init(shared.allocator));
 
     shrapnelToCleanup.mutex.lock();
     defer shrapnelToCleanup.mutex.unlock();
     for (shrapnelToCleanup.list.items) |toClean| {
         box2d.c.b2DestroyBody(toClean);
     }
-
     shrapnelToCleanup.list.deinit();
-    shrapnel.list.deinit();
 }
