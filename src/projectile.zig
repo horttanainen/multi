@@ -9,9 +9,7 @@ const box2d = @import("box2d.zig");
 const config = @import("config.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
-const time = @import("time.zig");
 const conv = @import("conversion.zig");
-const sprite = @import("sprite.zig");
 
 pub const Explosion = struct {
     sound: audio.Audio,
@@ -40,18 +38,9 @@ pub const Shrapnel = struct {
     timerId: i32,
 };
 
-pub const ExplosionAnimation = struct {
-    entity: entity.Entity,
-    animation: animation.Animation,
-    startTime: f64,
-    duration: f64,
-};
-
 pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocator);
 
 var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
-
-var explosionAnimations = thread_safe.ThreadSafeArrayList(ExplosionAnimation).init(shared.allocator);
 
 fn createExplosionAnimation(pos: vec.Vec2) !void {
     // Load animation
@@ -74,15 +63,7 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
     const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
 
-    // Calculate duration: frames / fps
-    const duration = @as(f64, @floatFromInt(anim.frames.len)) / @as(f64, @floatFromInt(anim.fps));
-
-    try explosionAnimations.appendLocking(.{
-        .entity = explosionEntity,
-        .animation = anim,
-        .startTime = time.now(),
-        .duration = duration,
-    });
+    try animation.register(explosionEntity.bodyId, anim, true);
 }
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
@@ -210,30 +191,6 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     });
 }
 
-pub fn animateExplosions() !void {
-    explosionAnimations.mutex.lock();
-    defer explosionAnimations.mutex.unlock();
-
-    for (explosionAnimations.list.items) |*expAnim| {
-        const timeNowS = time.now();
-        const timePassedS = timeNowS - expAnim.animation.lastTime;
-        const fpsSeconds = 1.0 / @as(f64, @floatFromInt(expAnim.animation.fps));
-
-        if (timePassedS > fpsSeconds) {
-            // Advance to next frame, looping back to 0 after last frame
-            const nextFrame = (expAnim.animation.current + 1) % expAnim.animation.frames.len;
-            expAnim.animation.current = nextFrame;
-
-            // Update entity sprite to current frame
-            const maybeEntity = entity.entities.getPtrLocking(expAnim.entity.bodyId);
-            if (maybeEntity) |ent| {
-                ent.sprite = expAnim.animation.frames[expAnim.animation.current];
-            }
-
-            expAnim.animation.lastTime = timeNowS;
-        }
-    }
-}
 
 pub fn checkContacts() !void {
     const resources = try shared.getResources();
@@ -287,15 +244,4 @@ pub fn cleanup() void {
         box2d.c.b2DestroyBody(toClean);
     }
     shrapnelToCleanup.list.deinit();
-
-    // Cleanup explosion animations (frames only, entities handled by entity.cleanup())
-    explosionAnimations.mutex.lock();
-    for (explosionAnimations.list.items) |expAnim| {
-        for (expAnim.animation.frames) |frame| {
-            sprite.cleanup(frame);
-        }
-        shared.allocator.free(expAnim.animation.frames);
-    }
-    explosionAnimations.list.deinit();
-    explosionAnimations.mutex.unlock();
 }

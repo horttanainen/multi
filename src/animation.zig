@@ -3,6 +3,10 @@ const std = @import("std");
 const vec = @import("vector.zig");
 const shared = @import("shared.zig");
 const sprite = @import("sprite.zig");
+const box2d = @import("box2d.zig");
+const entity = @import("entity.zig");
+const time = @import("time.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
 
 pub const Animation = struct {
     fps: i32,
@@ -10,6 +14,68 @@ pub const Animation = struct {
     lastTime: f64,
     frames: []sprite.Sprite,
 };
+
+pub const AnimationInstance = struct {
+    bodyId: box2d.c.b2BodyId,
+    animation: Animation,
+    loop: bool,
+};
+
+var animationInstances = thread_safe.ThreadSafeArrayList(AnimationInstance).init(shared.allocator);
+
+pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
+    try animationInstances.appendLocking(.{
+        .bodyId = bodyId,
+        .animation = anim,
+        .loop = loop,
+    });
+}
+
+pub fn animate() void {
+    animationInstances.mutex.lock();
+    defer animationInstances.mutex.unlock();
+
+    for (animationInstances.list.items) |*instance| {
+        const timeNowS = time.now();
+        const timePassedS = timeNowS - instance.animation.lastTime;
+        const fpsSeconds = 1.0 / @as(f64, @floatFromInt(instance.animation.fps));
+
+        if (timePassedS > fpsSeconds) {
+            if (instance.loop) {
+                // Loop animation
+                const nextFrame = (instance.animation.current + 1) % instance.animation.frames.len;
+                instance.animation.current = nextFrame;
+            } else {
+                // Play once, stop at last frame
+                const nextFrame = instance.animation.current + 1;
+                if (nextFrame < instance.animation.frames.len) {
+                    instance.animation.current = nextFrame;
+                }
+            }
+
+            // Update entity sprite
+            const maybeEntity = entity.entities.getPtrLocking(instance.bodyId);
+            if (maybeEntity) |ent| {
+                ent.sprite = instance.animation.frames[instance.animation.current];
+            }
+
+            instance.animation.lastTime = timeNowS;
+        }
+    }
+}
+
+pub fn cleanup() void {
+    animationInstances.mutex.lock();
+    for (animationInstances.list.items) |instance| {
+        for (instance.animation.frames) |frame| {
+            sprite.cleanup(frame);
+        }
+        shared.allocator.free(instance.animation.frames);
+    }
+    animationInstances.mutex.unlock();
+
+    animationInstances.replaceLocking(std.array_list.Managed(AnimationInstance).init(shared.allocator));
+}
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {
     var dir = try std.fs.cwd().openDir(pathToAnimationDir, .{});

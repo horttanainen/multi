@@ -11,6 +11,7 @@ const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
 const sprite = @import("sprite.zig");
 const background = @import("background.zig");
+const animation = @import("animation.zig");
 
 const conv = @import("conversion.zig");
 
@@ -127,6 +128,7 @@ pub fn cleanup() void {
     projectile.cleanup();
     entity.cleanup();
     background.cleanup();
+    animation.cleanup();
 }
 
 pub fn reset() void {
