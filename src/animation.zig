@@ -57,6 +57,11 @@ pub fn animate() void {
                 const nextFrame = instance.animation.current + 1;
                 if (nextFrame < instance.animation.frames.len) {
                     instance.animation.current = nextFrame;
+                } else {
+                    const maybeE = entity.entities.fetchSwapRemoveLocking(bodyId);
+                    if (maybeE) |e| {
+                        entity.cleanupLater(e.value);
+                    }
                 }
             }
 
