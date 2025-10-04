@@ -7,6 +7,7 @@ const entity = @import("entity.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const config = @import("config.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
 
 pub const Explosion = struct {
     sound: audio.Audio,
@@ -34,9 +35,9 @@ pub const Shrapnel = struct {
     bodies: []box2d.c.b2BodyId,
 };
 
-pub var shrapnel = std.array_list.Managed(Shrapnel).init(shared.allocator);
+pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocator);
 
-var shrapnelToCleanup = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
+var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     try audio.playFor(explosion.sound);
@@ -92,7 +93,7 @@ pub fn explode(p: Projectile) !void {
     if (p.explosion) |explosion| {
         const explosionBodies = try createExplosion(pos, explosion);
 
-        try shrapnel.append(.{
+        try shrapnel.appendLocking(.{
             .id = id,
             .cleaned = false,
             .bodies = explosionBodies,
@@ -107,9 +108,12 @@ fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     const maybeId = param.?;
     const shrapnelId: usize = @intFromPtr(maybeId);
 
-    for (shrapnel.items) |*item| {
+    shrapnel.mutex.lock();
+    defer shrapnel.mutex.unlock();
+
+    for (shrapnel.list.items) |*item| {
         if (item.id == shrapnelId) {
-            shrapnelToCleanup.appendSlice(item.bodies) catch {};
+            shrapnelToCleanup.appendSliceLocking(item.bodies) catch {};
             item.cleaned = true;
         }
     }
@@ -121,22 +125,25 @@ pub fn cleanupShrapnel() !void {
     var shrapnelToDiscard = std.array_list.Managed(Shrapnel).init(shared.allocator);
     defer shrapnelToDiscard.deinit();
 
-    for (shrapnel.items) |item| {
+    shrapnel.mutex.lock();
+    for (shrapnel.list.items) |item| {
         if (item.cleaned) {
             try shrapnelToDiscard.append(item);
             continue;
         }
         try shrapnelToKeep.append(item);
     }
+    shrapnel.mutex.unlock();
 
-    shrapnel.deinit();
-    shrapnel = shrapnelToKeep;
+    shrapnel.replaceLocking(shrapnelToKeep);
 
-    for (shrapnelToCleanup.items) |toClean| {
+    shrapnelToCleanup.mutex.lock();
+    for (shrapnelToCleanup.list.items) |toClean| {
         box2d.c.b2DestroyBody(toClean);
     }
-    shrapnelToCleanup.deinit();
-    shrapnelToCleanup = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
+    shrapnelToCleanup.mutex.unlock();
+
+    shrapnelToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator));
 
     for (shrapnelToDiscard.items) |item| {
         if (item.cleaned) {
@@ -182,10 +189,18 @@ pub fn checkContacts() !void {
 pub fn cleanup() void {
     projectiles.clearAndFree();
 
-    for (shrapnel.items) |item| {
+    shrapnel.mutex.lock();
+    defer shrapnel.mutex.unlock();
+    for (shrapnel.list.items) |item| {
         shared.allocator.free(item.bodies);
     }
 
-    shrapnelToCleanup.deinit();
-    shrapnel.deinit();
+    shrapnelToCleanup.mutex.lock();
+    defer shrapnelToCleanup.mutex.unlock();
+    for (shrapnelToCleanup.list.items) |toClean| {
+        box2d.c.b2DestroyBody(toClean);
+    }
+
+    shrapnelToCleanup.list.deinit();
+    shrapnel.list.deinit();
 }
