@@ -63,7 +63,7 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
     const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
 
-    try animation.register(explosionEntity.bodyId, anim, true);
+    try animation.register(explosionEntity.bodyId, anim, false);
 }
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {

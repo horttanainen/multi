@@ -113,6 +113,12 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
         }
     }
 
+    std.mem.sort([]const u8, images.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+
     var frames = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
     for (images.items) |image| {
         var textBuf: [100]u8 = undefined;
