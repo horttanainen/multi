@@ -242,7 +242,7 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     shapeDef.friction = entity.friction;
     //TODO: instead of doing this store categoryBits and maskBits in entity and copy them from there
     shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
 
     const newShapeIds = try box2d.createPolygonShape(
         entity.bodyId,
