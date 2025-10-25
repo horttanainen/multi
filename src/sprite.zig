@@ -6,6 +6,7 @@ const camera = @import("camera.zig");
 const time = @import("time.zig");
 const polygon = @import("polygon.zig");
 const box = @import("box2d.zig");
+const config = @import("config.zig");
 
 const PI = std.math.pi;
 
@@ -101,7 +102,6 @@ pub fn cleanup(sprite: Sprite) void {
 }
 
 pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !void {
-    const config = @import("config.zig");
     const surface = sprite.surface.*;
     const pixels: [*]u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
@@ -110,13 +110,13 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
     const bytesPerPixel: usize = 4; // Assume RGBA format
 
     // Transform explosion center from world space (meters) to sprite local space (pixels)
-    // 1. Translate to entity-relative coordinates (still in meters)
+    // 1. Translate to entity-relative coordinates (meters)
     const relativeWorld = vec.Vec2{
         .x = centerWorld.x - entityPos.x,
         .y = centerWorld.y - entityPos.y,
     };
 
-    // 2. Rotate by inverse of entity rotation (still in meters)
+    // 2. Rotate by inverse of entity rotation (meters)
     const cosA = @cos(-rotation);
     const sinA = @sin(-rotation);
     const rotatedLocal = vec.Vec2{
@@ -124,24 +124,22 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
         .y = relativeWorld.x * sinA + relativeWorld.y * cosA,
     };
 
-    // 3. Convert from meters to pixels using conversion utility
+    // 3. Convert to sprite pixel coordinates (entity center is at sprite center)
     const rotatedLocalPixels = conv.m2Pixel(.{ .x = rotatedLocal.x, .y = rotatedLocal.y });
-
-    // 4. Convert to sprite pixel coordinates (entity center is at sprite center)
     const centerPixelF = vec.Vec2{
         .x = @as(f32, @floatFromInt(rotatedLocalPixels.x)) / sprite.scale.x + @as(f32, @floatFromInt(width)) / 2.0,
         .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
     };
 
-    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x; // Convert radius from meters to pixels
+    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x; 
 
-    // Calculate bounding box for iteration efficiency
+    // 4. Calculate bounding box for iteration efficiency
     const minX: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.x - radiusPixels))));
     const maxX: usize = @min(width - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.x + radiusPixels))));
     const minY: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.y - radiusPixels))));
     const maxY: usize = @min(height - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.y + radiusPixels))));
 
-    // Remove pixels within the circle
+    // 5. Remove pixels within the circle
     var y = minY;
     while (y <= maxY) : (y += 1) {
         var x = minX;
@@ -152,7 +150,7 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
 
             if (distSq <= radiusPixels * radiusPixels) {
                 const pixelIndex = y * pitch + x * bytesPerPixel;
-                // Set alpha to 0 (assuming RGBA or similar format with alpha as last byte)
+                // Set alpha to 0 (assuming RGBA)
                 if (bytesPerPixel == 4) {
                     pixels[pixelIndex + 3] = 0;
                 }
