@@ -124,16 +124,13 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
         .y = relativeWorld.x * sinA + relativeWorld.y * cosA,
     };
 
-    // 3. Convert from meters to pixels using met2pix conversion factor
-    const rotatedLocalPixels = vec.Vec2{
-        .x = rotatedLocal.x * config.met2pix,
-        .y = rotatedLocal.y * config.met2pix,
-    };
+    // 3. Convert from meters to pixels using conversion utility
+    const rotatedLocalPixels = conv.m2Pixel(.{ .x = rotatedLocal.x, .y = rotatedLocal.y });
 
     // 4. Convert to sprite pixel coordinates (entity center is at sprite center)
     const centerPixelF = vec.Vec2{
-        .x = rotatedLocalPixels.x / sprite.scale.x + @as(f32, @floatFromInt(width)) / 2.0,
-        .y = rotatedLocalPixels.y / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
+        .x = @as(f32, @floatFromInt(rotatedLocalPixels.x)) / sprite.scale.x + @as(f32, @floatFromInt(width)) / 2.0,
+        .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
     };
 
     const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x; // Convert radius from meters to pixels
