@@ -101,10 +101,30 @@ fn loadByName(levelName: []const u8) !void {
             shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
-            const bodyDef = box2d.createStaticBodyDef(pos);
-            shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
-            _ = try entity.createFromImg(s, shapeDef, bodyDef, "static");
+            // Split large static terrain into tiles for better performance
+            const tiles = try sprite.splitIntoTiles(s, 256);
+            defer shared.allocator.free(tiles);
+
+            for (tiles) |tile| {
+                // Calculate position for this tile (original position + tile offset)
+                const tilePos = vec.Vec2{
+                    .x = pos.x + tile.offsetPos.x,
+                    .y = pos.y + tile.offsetPos.y,
+                };
+                const bodyDef = box2d.createStaticBodyDef(tilePos);
+                shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
+                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
+                _ = entity.createFromImg(tile.sprite, shapeDef, bodyDef, "static") catch |err| {
+                    if (err == polygon.PolygonError.CouldNotCreateTriangle) {} else {
+                        return err;
+                    }
+                };
+            }
+
+            // Clean up the original sprite if it was split
+            if (tiles.len > 1) {
+                sprite.cleanup(s);
+            }
         } else if (std.mem.eql(u8, e.type, "goal")) {
             try sensor.createGoalSensorFromImg(pos, s);
         } else if (std.mem.eql(u8, e.type, "spawn")) {

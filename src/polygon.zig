@@ -15,6 +15,10 @@ const vec = @import("vector.zig");
 const allocator = @import("shared.zig").allocator;
 const PI = std.math.pi;
 
+pub const PolygonError = error{
+    CouldNotCreateTriangle
+};
+
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
 
@@ -30,6 +34,10 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
     defer allocator.free(vertices);
     // std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
+    
+    if (vertices.len < 3) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
 
     // 2. simplify the polygon.
     const epsilonArea: f32 = 0.001 * @as(f32, @floatFromInt(width * height));
@@ -37,11 +45,19 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
     // std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
+    
+    if (simplified.len < 3) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
 
     // 3. remove duplicates
     const withoutDuplicates = try removeDuplicateVertices(simplified);
     defer allocator.free(withoutDuplicates);
     // std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
+    
+    if (withoutDuplicates.len < 3) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
 
     // 4. ensure counter clockwise
     const ccw = try ensureCounterClockwise(withoutDuplicates);

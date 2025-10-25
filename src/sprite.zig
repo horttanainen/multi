@@ -168,3 +168,116 @@ pub fn updateTextureFromSurface(sprite: *Sprite) !void {
     // Create new texture from modified surface
     sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
 }
+
+pub const SpriteTile = struct {
+    sprite: Sprite,
+    offsetPos: vec.Vec2, // Offset position in meters relative to original sprite center
+};
+
+// SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
+const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
+    flags: c_int,
+    width: c_int,
+    height: c_int,
+    depth: c_int,
+    format: u32,
+) callconv(.c) ?*sdl.Surface, .{ .name = "SDL_CreateRGBSurfaceWithFormat" });
+
+pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
+    const width: u32 = @intCast(originalSprite.surface.w);
+    const height: u32 = @intCast(originalSprite.surface.h);
+
+    var tiles = std.array_list.Managed(SpriteTile).init(allocator);
+    defer tiles.deinit();
+
+    // If sprite is already small enough, return single tile
+    if (width <= maxTileSize and height <= maxTileSize) {
+        try tiles.append(SpriteTile{
+            .sprite = originalSprite,
+            .offsetPos = vec.zero,
+        });
+        return tiles.toOwnedSlice();
+    }
+
+    // Calculate number of tiles needed
+    const tilesX = (width + maxTileSize - 1) / maxTileSize;
+    const tilesY = (height + maxTileSize - 1) / maxTileSize;
+
+    const resources = try shared.getResources();
+
+    // Create tiles
+    var tileY: u32 = 0;
+    while (tileY < tilesY) : (tileY += 1) {
+        var tileX: u32 = 0;
+        while (tileX < tilesX) : (tileX += 1) {
+            const startX = tileX * maxTileSize;
+            const startY = tileY * maxTileSize;
+            const tileWidth = @min(maxTileSize, width - startX);
+            const tileHeight = @min(maxTileSize, height - startY);
+
+            // Create new surface for this tile using the same format as the original
+            const format: u32 = if (originalSprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
+            const tileSurface = SDL_CreateRGBSurfaceWithFormat(
+                0,
+                @intCast(tileWidth),
+                @intCast(tileHeight),
+                32,
+                format,
+            ) orelse {
+                std.debug.print("Could not SDL_CreateRGBSurfaceWithFormat. Continuing to next tile", .{});
+                continue;
+            };
+
+            // Copy pixels from original surface to tile surface
+            const srcRect = sdl.Rect{
+                .x = @intCast(startX),
+                .y = @intCast(startY),
+                .w = @intCast(tileWidth),
+                .h = @intCast(tileHeight),
+            };
+            try sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null);
+
+            // Create texture from tile surface
+            const tileTexture = try sdl.createTextureFromSurface(resources.renderer, tileSurface);
+
+            // Calculate tile offset in meters from original sprite center
+            const tileCenterPixelX = @as(f32, @floatFromInt(startX)) + @as(f32, @floatFromInt(tileWidth)) / 2.0;
+            const tileCenterPixelY = @as(f32, @floatFromInt(startY)) + @as(f32, @floatFromInt(tileHeight)) / 2.0;
+            const spriteCenterX = @as(f32, @floatFromInt(width)) / 2.0;
+            const spriteCenterY = @as(f32, @floatFromInt(height)) / 2.0;
+
+            const offsetPixelX = @as(i32, @intFromFloat((tileCenterPixelX - spriteCenterX) * originalSprite.scale.x));
+            const offsetPixelY = @as(i32, @intFromFloat((tileCenterPixelY - spriteCenterY) * originalSprite.scale.y));
+            const offsetMetersB2d = conv.p2m(.{ .x = offsetPixelX, .y = offsetPixelY });
+            const offsetMeters = vec.Vec2{ .x = offsetMetersB2d.x, .y = offsetMetersB2d.y };
+
+            // Calculate tile size in meters
+            const tileSizeP = vec.IVec2{
+                .x = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileWidth)) * originalSprite.scale.x)),
+                .y = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileHeight)) * originalSprite.scale.y)),
+            };
+            const tileSizeMB2d = conv.p2m(tileSizeP);
+            const tileSizeM = vec.Vec2{ .x = tileSizeMB2d.x, .y = tileSizeMB2d.y };
+
+            // Duplicate imgPath for this tile
+            const imgPath = try allocator.dupe(u8, originalSprite.imgPath);
+
+            const tileSprite = Sprite{
+                .surface = tileSurface,
+                .imgPath = imgPath,
+                .texture = tileTexture,
+                .scale = originalSprite.scale,
+                .offset = originalSprite.offset,
+                .sizeM = tileSizeM,
+                .sizeP = tileSizeP,
+            };
+
+            try tiles.append(SpriteTile{
+                .sprite = tileSprite,
+                .offsetPos = offsetMeters,
+            });
+        }
+    }
+
+    return tiles.toOwnedSlice();
+}

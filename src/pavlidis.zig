@@ -91,7 +91,7 @@ pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: 
         if (foundStart) break;
     }
     if (!foundStart) {
-        std.debug.print("Did not find countour!\n", .{});
+        std.debug.print("Did not find contour!\n", .{});
         return contour.toOwnedSlice();
     }
 
