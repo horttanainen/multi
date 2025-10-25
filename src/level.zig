@@ -115,7 +115,10 @@ fn loadByName(levelName: []const u8) !void {
                 shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
                 shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
                 _ = entity.createFromImg(tile.sprite, shapeDef, bodyDef, "static") catch |err| {
-                    if (err == polygon.PolygonError.CouldNotCreateTriangle) {} else {
+                    if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                        // Clean up the tile sprite since entity creation failed
+                        sprite.cleanup(tile.sprite);
+                    } else {
                         return err;
                     }
                 };

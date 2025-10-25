@@ -119,13 +119,18 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
 
 pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
-    const entity = try createEntityForBody(bodyId, s, shapeDef, entityType);
+    const entity = createEntityForBody(bodyId, s, shapeDef, entityType) catch |err| {
+        // Clean up bodyId if entity creation fails
+        box2d.c.b2DestroyBody(bodyId);
+        return err;
+    };
     try entities.putLocking(bodyId, entity);
     return entity;
 }
 
 pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try shared.allocator.dupe(u8, eType);
+    errdefer shared.allocator.free(entityType);
 
     const triangles = try polygon.triangulate(s);
     defer shared.allocator.free(triangles);

@@ -241,17 +241,21 @@ pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
             const tileTexture = try sdl.createTextureFromSurface(resources.renderer, tileSurface);
 
             // Calculate tile offset in meters from original sprite center
-            const tileCenterPixelX = @as(f32, @floatFromInt(startX)) + @as(f32, @floatFromInt(tileWidth)) / 2.0;
-            const tileCenterPixelY = @as(f32, @floatFromInt(startY)) + @as(f32, @floatFromInt(tileHeight)) / 2.0;
+            // Tile center in unscaled pixels
+            const tileCenterX = @as(f32, @floatFromInt(startX)) + @as(f32, @floatFromInt(tileWidth)) / 2.0;
+            const tileCenterY = @as(f32, @floatFromInt(startY)) + @as(f32, @floatFromInt(tileHeight)) / 2.0;
             const spriteCenterX = @as(f32, @floatFromInt(width)) / 2.0;
             const spriteCenterY = @as(f32, @floatFromInt(height)) / 2.0;
 
-            const offsetPixelX = @as(i32, @intFromFloat((tileCenterPixelX - spriteCenterX) * originalSprite.scale.x));
-            const offsetPixelY = @as(i32, @intFromFloat((tileCenterPixelY - spriteCenterY) * originalSprite.scale.y));
-            const offsetMetersB2d = conv.p2m(.{ .x = offsetPixelX, .y = offsetPixelY });
+            // Offset in scaled pixels, then convert to meters
+            const offsetPixels = vec.IVec2{
+                .x = @as(i32, @intFromFloat((tileCenterX - spriteCenterX) * originalSprite.scale.x)),
+                .y = @as(i32, @intFromFloat((tileCenterY - spriteCenterY) * originalSprite.scale.y)),
+            };
+            const offsetMetersB2d = conv.p2m(offsetPixels);
             const offsetMeters = vec.Vec2{ .x = offsetMetersB2d.x, .y = offsetMetersB2d.y };
 
-            // Calculate tile size in meters
+            // Calculate tile size in pixels and meters
             const tileSizeP = vec.IVec2{
                 .x = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileWidth)) * originalSprite.scale.x)),
                 .y = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileHeight)) * originalSprite.scale.y)),
