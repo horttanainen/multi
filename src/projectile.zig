@@ -46,13 +46,17 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
     // Load animation
     const anim = try animation.load(
         "animations/explosion/cannon",
-        10, // 10 fps
+        10,
         .{ .x = 1.0, .y = 1.0 }, // scale
         .{ .x = 0, .y = 0 }, // offset
     );
 
     // Create static body with sensor at explosion position
-    const bodyDef = box2d.createStaticBodyDef(pos);
+    var bodyDef = box2d.createStaticBodyDef(pos);
+
+    const randomAngle = std.crypto.random.float(f32) * 2.0 * std.math.pi;
+    bodyDef.rotation = box2d.c.b2MakeRot(randomAngle);
+
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.isSensor = true;
 

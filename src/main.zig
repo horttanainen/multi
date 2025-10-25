@@ -30,7 +30,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: add random rotation to explosion animation
 //TODO: make explosion break level
 //TODO: allow explosion to break objects
 //TODO: split projectile into pieces
