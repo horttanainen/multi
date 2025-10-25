@@ -226,6 +226,8 @@ pub fn spawn(position: vec.IVec2) !void {
             .state = null,
             .highlighted = false,
             .animated = false,
+            .categoryBits = config.CATEGORY_PLAYER,
+            .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
         },
         .bodyShapeId = bodyShapeId,
         .lowerBodyShapeId = lowerBodyShapeId,

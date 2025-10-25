@@ -35,6 +35,8 @@ pub const Entity = struct {
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
     animated: bool,
+    categoryBits: u64,
+    maskBits: u64,
 };
 
 pub const SerializableEntity = struct {
@@ -107,6 +109,8 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
+        .categoryBits = shapeDef.filter.categoryBits,
+        .maskBits = shapeDef.filter.maskBits,
     };
 
     try entities.putLocking(bodyId, entity);
@@ -137,6 +141,8 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
+        .categoryBits = shapeDef.filter.categoryBits,
+        .maskBits = shapeDef.filter.maskBits,
     };
     return entity;
 }
@@ -240,9 +246,8 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     // Create new shapes with same collision filter as original
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = entity.friction;
-    //TODO: instead of doing this store categoryBits and maskBits in entity and copy them from there
-    shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
+    shapeDef.filter.categoryBits = entity.categoryBits;
+    shapeDef.filter.maskBits = entity.maskBits;
 
     const newShapeIds = try box2d.createPolygonShape(
         entity.bodyId,
