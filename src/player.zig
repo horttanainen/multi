@@ -193,6 +193,7 @@ pub fn spawn(position: vec.IVec2) !void {
         .explosion = .{
             .sound = .{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs },
             .blastPower = 50,
+            .blastRadius = 2.0,
             .particleCount = 100,
             .particleDensity = 0.6,
             .particleFriction = 0,

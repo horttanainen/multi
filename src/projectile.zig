@@ -4,6 +4,7 @@ const timer = @import("sdl_timer.zig");
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
+const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const config = @import("config.zig");
@@ -14,6 +15,7 @@ const conv = @import("conversion.zig");
 pub const Explosion = struct {
     sound: audio.Audio,
     blastPower: f32,
+    blastRadius: f32,
     particleCount: u32,
     particleDensity: f32,
     particleFriction: f32,
@@ -68,6 +70,102 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
 
     try animation.register(explosionEntity.bodyId, anim, false);
+}
+
+const OverlapContext = struct {
+    bodies: [100]box2d.c.b2BodyId,
+    count: usize,
+};
+
+fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
+    const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
+
+    // Get the body from the shape
+    const bodyId = box2d.c.b2Shape_GetBody(shapeId);
+
+    // Check if we already have this body (shapes can belong to same body)
+    for (ctx.bodies[0..ctx.count]) |existingBody| {
+        if (box2d.c.b2Body_IsValid(existingBody) and
+            box2d.c.B2_ID_EQUALS(existingBody, bodyId))
+        {
+            return true;
+        }
+    }
+
+    // Add body if we have space
+    if (ctx.count < 100) {
+        ctx.bodies[ctx.count] = bodyId;
+        ctx.count += 1;
+    }
+
+    return true; // Continue the query
+}
+
+fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
+    const resources = try shared.getResources();
+
+    // Setup overlap query
+    var context = OverlapContext{
+        .bodies = undefined,
+        .count = 0,
+    };
+
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = radius,
+    };
+
+    const transform = box2d.c.b2Transform{
+        .p = vec.toBox2d(pos),
+        .q = box2d.c.b2Rot_identity,
+    };
+
+    //TODO: only match level for better performance
+    const filter = box2d.c.b2DefaultQueryFilter();
+
+    // Query for overlapping bodies
+    _ = box2d.c.b2World_OverlapCircle(
+        resources.worldId,
+        &circle,
+        transform,
+        filter,
+        overlapCallback,
+        &context,
+    );
+
+    std.debug.print("Overlapping bodies: {d}\n", .{context.count});
+
+    // Process each overlapping body
+    for (context.bodies[0..context.count]) |bodyId| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+
+        // Get the entity
+        const maybeEntity = entity.entities.getPtrLocking(bodyId);
+        if (maybeEntity) |ent| {
+            if (!std.mem.eql(u8, ent.type, "static")) {
+                continue;
+            }
+            std.debug.print("Found static entity!!\n", .{});
+            // Get entity position and rotation
+            const state = box2d.getState(bodyId);
+            const entityPos = vec.fromBox2d(state.pos);
+            const rotation = state.rotAngle;
+
+            // Remove pixels from sprite
+            try sprite.removeCircleFromSurface(ent.sprite, pos, radius, entityPos, rotation);
+
+            // Update texture
+            try sprite.updateTextureFromSurface(&ent.sprite);
+
+            // Regenerate colliders
+            const stillExists = try entity.regenerateColliders(ent);
+
+            // If entity is completely destroyed, mark for cleanup
+            if (!stillExists) {
+                entity.cleanupLater(ent.*);
+            }
+        }
+    }
 }
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
@@ -135,6 +233,9 @@ pub fn explode(p: Projectile) !void {
 
         // Create explosion animation
         try createExplosionAnimation(pos);
+
+        // Damage terrain
+        try damageTerrainInRadius(pos, explosion.blastRadius);
     }
 }
 
@@ -194,7 +295,6 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
         .explosion = ex,
     });
 }
-
 
 pub fn checkContacts() !void {
     const resources = try shared.getResources();

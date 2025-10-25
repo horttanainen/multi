@@ -218,3 +218,38 @@ pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
         .imgPath = entity.sprite.imgPath,
     };
 }
+
+pub fn regenerateColliders(entity: *Entity) !bool {
+    // Generate new triangles from modified sprite
+    const triangles = polygon.triangulate(entity.sprite) catch |err| {
+        // If triangulation fails (e.g., no pixels left), return false to signal entity should be destroyed
+        if (err == error.OutOfMemory) return err;
+        return false;
+    };
+    defer shared.allocator.free(triangles);
+
+    // If no triangles, the sprite is completely destroyed
+    if (triangles.len == 0) {
+        return false;
+    }
+
+    // Destroy old shapes
+    for (entity.shapeIds) |shapeId| {
+        box2d.c.b2DestroyShape(shapeId, true);
+    }
+    shared.allocator.free(entity.shapeIds);
+
+    // Create new shapes
+    var shapeDef = box2d.c.b2DefaultShapeDef();
+    shapeDef.friction = entity.friction;
+
+    const newShapeIds = try box2d.createPolygonShape(
+        entity.bodyId,
+        triangles,
+        .{ .x = entity.sprite.sizeP.x, .y = entity.sprite.sizeP.y },
+        shapeDef,
+    );
+
+    entity.shapeIds = newShapeIds;
+    return true;
+}

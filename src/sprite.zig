@@ -99,3 +99,77 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
 pub fn cleanup(sprite: Sprite) void {
     shared.allocator.free(sprite.imgPath);
 }
+
+pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !void {
+    const config = @import("config.zig");
+    const surface = sprite.surface.*;
+    const pixels: [*]u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const bytesPerPixel: usize = 4; // Assume RGBA format
+
+    // Transform explosion center from world space (meters) to sprite local space (pixels)
+    // 1. Translate to entity-relative coordinates (still in meters)
+    const relativeWorld = vec.Vec2{
+        .x = centerWorld.x - entityPos.x,
+        .y = centerWorld.y - entityPos.y,
+    };
+
+    // 2. Rotate by inverse of entity rotation (still in meters)
+    const cosA = @cos(-rotation);
+    const sinA = @sin(-rotation);
+    const rotatedLocal = vec.Vec2{
+        .x = relativeWorld.x * cosA - relativeWorld.y * sinA,
+        .y = relativeWorld.x * sinA + relativeWorld.y * cosA,
+    };
+
+    // 3. Convert from meters to pixels using met2pix conversion factor
+    const rotatedLocalPixels = vec.Vec2{
+        .x = rotatedLocal.x * config.met2pix,
+        .y = rotatedLocal.y * config.met2pix,
+    };
+
+    // 4. Convert to sprite pixel coordinates (entity center is at sprite center)
+    const centerPixelF = vec.Vec2{
+        .x = rotatedLocalPixels.x / sprite.scale.x + @as(f32, @floatFromInt(width)) / 2.0,
+        .y = rotatedLocalPixels.y / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
+    };
+
+    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x; // Convert radius from meters to pixels
+
+    // Calculate bounding box for iteration efficiency
+    const minX: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.x - radiusPixels))));
+    const maxX: usize = @min(width - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.x + radiusPixels))));
+    const minY: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.y - radiusPixels))));
+    const maxY: usize = @min(height - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.y + radiusPixels))));
+
+    // Remove pixels within the circle
+    var y = minY;
+    while (y <= maxY) : (y += 1) {
+        var x = minX;
+        while (x <= maxX) : (x += 1) {
+            const dx = @as(f32, @floatFromInt(x)) - centerPixelF.x;
+            const dy = @as(f32, @floatFromInt(y)) - centerPixelF.y;
+            const distSq = dx * dx + dy * dy;
+
+            if (distSq <= radiusPixels * radiusPixels) {
+                const pixelIndex = y * pitch + x * bytesPerPixel;
+                // Set alpha to 0 (assuming RGBA or similar format with alpha as last byte)
+                if (bytesPerPixel == 4) {
+                    pixels[pixelIndex + 3] = 0;
+                }
+            }
+        }
+    }
+}
+
+pub fn updateTextureFromSurface(sprite: *Sprite) !void {
+    const resources = try shared.getResources();
+
+    // Destroy old texture
+    sdl.destroyTexture(sprite.texture);
+
+    // Create new texture from modified surface
+    sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
+}
