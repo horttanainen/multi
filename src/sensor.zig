@@ -42,7 +42,6 @@ pub fn createGoalSensorFromImg(position: vec.Vec2, s: sprite.Sprite) !void {
     maybeGoalSensor = e;
 }
 
-//TODO: instead of polling this function maybe we should register a collision listener
 pub fn checkGoal() !void {
     const resources = try shared.getResources();
     if (maybeGoalSensor) |goalSensor| {

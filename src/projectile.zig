@@ -295,7 +295,6 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     });
 }
 
-//TODO: could we register a collision listener with a mask instead of polling this?
 pub fn checkContacts() !void {
     const resources = try shared.getResources();
     const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
