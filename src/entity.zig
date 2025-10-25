@@ -222,15 +222,12 @@ pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
 pub fn regenerateColliders(entity: *Entity) !bool {
     // Generate new triangles from modified sprite
     const triangles = polygon.triangulate(entity.sprite) catch |err| {
-        // If triangulation fails (e.g., no pixels left), return false to signal entity should be destroyed
-        if (err == error.OutOfMemory) return err;
-        return false;
+        return false; // destroy entity
     };
     defer shared.allocator.free(triangles);
 
-    // If no triangles, the sprite is completely destroyed
     if (triangles.len == 0) {
-        return false;
+        return false; // destroy entity
     }
 
     // Destroy old shapes
