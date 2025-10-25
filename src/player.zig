@@ -119,6 +119,8 @@ pub fn spawn(position: vec.IVec2) !void {
     shapeDef.density = 1.0;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = config.player.materialId;
+    shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -132,21 +134,29 @@ pub fn spawn(position: vec.IVec2) !void {
     lowerBodyShapeDef.density = 1.0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = config.player.materialId;
+    lowerBodyShapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
+    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
+    footShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
+    footShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC;
     const footSensorShapeId = box2d.c.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
 
     const leftWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
     var leftWallShapeDef = box2d.c.b2DefaultShapeDef();
     leftWallShapeDef.isSensor = true;
+    leftWallShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
+    leftWallShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC;
     const leftWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &leftWallShapeDef, &leftWallBox);
 
     const rightWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0.1, .y = 0 }, .{ .c = 1, .s = 0 });
     var rightWallShapeDef = box2d.c.b2DefaultShapeDef();
     rightWallShapeDef.isSensor = true;
+    rightWallShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
+    rightWallShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC;
     const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
     const s = sprite.Sprite{
@@ -189,7 +199,6 @@ pub fn spawn(position: vec.IVec2) !void {
         .delay = config.shootDelayMs,
         .sound = .{ .file = "sounds/cannon_fire.mp3", .durationMs = config.cannonFireSoundDurationMs },
         .impulse = config.cannonImpulse,
-        .material = config.cannonMaterial,
         .explosion = .{
             .sound = .{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs },
             .blastPower = 50,

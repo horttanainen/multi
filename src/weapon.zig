@@ -6,6 +6,7 @@ const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
+const config = @import("config.zig");
 
 pub const Weapon = struct {
     name: [:0]const u8,
@@ -14,7 +15,6 @@ pub const Weapon = struct {
     delay: u32,
     sound: audio.Audio,
     impulse: f32,
-    material: i32,
     explosion: ?projectile.Explosion,
 };
 
@@ -22,8 +22,9 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     if (!delay.check(weapon.name)) {
         var shapeDef = box2d.c.b2DefaultShapeDef();
         shapeDef.friction = 0.5;
-        shapeDef.material = weapon.material;
         shapeDef.enableHitEvents = true;
+        shapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
+        shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_DYNAMIC;
 
         const s = try sprite.createFromImg(
             weapon.projectileImgSrc,

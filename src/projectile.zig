@@ -61,6 +61,8 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.isSensor = true;
+    shapeDef.filter.categoryBits = 0; // Don't collide with anything
+    shapeDef.filter.maskBits = 0;
 
     // Use first frame as the sprite
     const firstFrame = anim.frames[0];
@@ -83,12 +85,12 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     // Get the body from the shape
     const bodyId = box2d.c.b2Shape_GetBody(shapeId);
 
-    // Check if we already have this body (shapes can belong to same body)
+    // Check if we already have this body (multiple shapes can belong to same body)
     for (ctx.bodies[0..ctx.count]) |existingBody| {
         if (box2d.c.b2Body_IsValid(existingBody) and
             box2d.c.B2_ID_EQUALS(existingBody, bodyId))
         {
-            return true;
+            return true; // Already added, skip
         }
     }
 
@@ -120,8 +122,10 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
         .q = box2d.c.b2Rot_identity,
     };
 
-    //TODO: only match level for better performance
-    const filter = box2d.c.b2DefaultQueryFilter();
+    // Query filter: only match terrain
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = config.CATEGORY_TERRAIN; // What we're looking for
+    filter.maskBits = config.CATEGORY_TERRAIN; // What we collide with
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(
@@ -133,19 +137,12 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
         &context,
     );
 
-    std.debug.print("Overlapping bodies: {d}\n", .{context.count});
-
-    // Process each overlapping body
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
 
         // Get the entity
         const maybeEntity = entity.entities.getPtrLocking(bodyId);
         if (maybeEntity) |ent| {
-            if (!std.mem.eql(u8, ent.type, "static")) {
-                continue;
-            }
-            std.debug.print("Found static entity!!\n", .{});
             // Get entity position and rotation
             const state = box2d.getState(bodyId);
             const entityPos = vec.fromBox2d(state.pos);
@@ -189,7 +186,9 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
         circleShapeDef.density = explosion.particleDensity;
         circleShapeDef.friction = explosion.particleFriction;
         circleShapeDef.restitution = explosion.particleRestitution;
-        circleShapeDef.filter.groupIndex = -1;
+        circleShapeDef.filter.groupIndex = -1; // Don't collide with each other
+        circleShapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
+        circleShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PLAYER;
 
         const circleShape: box2d.c.b2Circle = .{
             .center = .{
@@ -296,6 +295,7 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     });
 }
 
+//TODO: could we register a collision listener with a mask instead of polling this?
 pub fn checkContacts() !void {
     const resources = try shared.getResources();
     const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
@@ -307,17 +307,19 @@ pub fn checkContacts() !void {
             continue;
         }
 
-        const aMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdA);
-        const bMaterial = box2d.c.b2Shape_GetMaterial(event.shapeIdB);
+        const aFilter = box2d.c.b2Shape_GetFilter(event.shapeIdA);
+        const bFilter = box2d.c.b2Shape_GetFilter(event.shapeIdB);
 
-        if (aMaterial == config.cannonMaterial) {
+        // Check if shape A is a projectile
+        if ((aFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
             const maybeProjectile = projectiles.get(bodyId);
             if (maybeProjectile) |p| {
                 try explode(p);
             }
         }
-        if (bMaterial == config.cannonMaterial) {
+        // Check if shape B is a projectile
+        if ((bFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
             const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
             const maybeProjectile = projectiles.get(bodyId);
             if (maybeProjectile) |p| {

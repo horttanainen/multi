@@ -24,6 +24,7 @@ const Sprite = sprite.Sprite;
 
 const conv = @import("conversion.zig");
 const animation = @import("animation.zig");
+const config = @import("config.zig");
 
 pub const Entity = struct {
     type: []const u8,
@@ -221,7 +222,7 @@ pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
 
 pub fn regenerateColliders(entity: *Entity) !bool {
     // Generate new triangles from modified sprite
-    const triangles = polygon.triangulate(entity.sprite) catch |err| {
+    const triangles = polygon.triangulate(entity.sprite) catch {
         return false; // destroy entity
     };
     defer shared.allocator.free(triangles);
@@ -236,9 +237,12 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     }
     shared.allocator.free(entity.shapeIds);
 
-    // Create new shapes
+    // Create new shapes with same collision filter as original
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = entity.friction;
+    //TODO: instead of doing this store categoryBits and maskBits in entity and copy them from there
+    shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC;
 
     const newShapeIds = try box2d.createPolygonShape(
         entity.bodyId,

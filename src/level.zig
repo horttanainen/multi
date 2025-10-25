@@ -97,16 +97,21 @@ fn loadByName(levelName: []const u8) !void {
         const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);
+            shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
+            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             const bodyDef = box2d.createStaticBodyDef(pos);
+            shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
+            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "static");
         } else if (std.mem.eql(u8, e.type, "goal")) {
             try sensor.createGoalSensorFromImg(pos, s);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
             const bodyDef = box2d.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
-            shapeDef.material = config.spawnMaterialId;
+            shapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
+            shapeDef.filter.maskBits = config.CATEGORY_PLAYER;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
         }

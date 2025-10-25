@@ -34,13 +34,15 @@ pub fn drawGoal() !void {
 pub fn createGoalSensorFromImg(position: vec.Vec2, s: sprite.Sprite) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.isSensor = true;
-    shapeDef.material = config.goalMaterialId;
+    shapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
+    shapeDef.filter.maskBits = config.CATEGORY_PLAYER;
     const bodyDef = box2d.createStaticBodyDef(position);
     const bodyId = try box2d.createBody(bodyDef);
     const e = try entity.createEntityForBody(bodyId, s, shapeDef, "goal");
     maybeGoalSensor = e;
 }
 
+//TODO: instead of polling this function maybe we should register a collision listener
 pub fn checkGoal() !void {
     const resources = try shared.getResources();
     if (maybeGoalSensor) |goalSensor| {

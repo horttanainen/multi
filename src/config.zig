@@ -10,9 +10,12 @@ pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
 pub const met2pix = 80;
 
-pub const cannonMaterial = 666;
-pub const goalMaterialId = 420;
-pub const spawnMaterialId = 69;
+// Collision categories (bit flags)
+pub const CATEGORY_TERRAIN: u64 = 1 << 0;      // 0x01
+pub const CATEGORY_PLAYER: u64 = 1 << 1;       // 0x02
+pub const CATEGORY_PROJECTILE: u64 = 1 << 2;   // 0x04
+pub const CATEGORY_SENSOR: u64 = 1 << 3;       // 0x08
+pub const CATEGORY_DYNAMIC: u64 = 1 << 4;      // 0x10
 
 pub const physics = .{
     .dt = 1.0 / 60.0,
