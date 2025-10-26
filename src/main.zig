@@ -29,20 +29,36 @@ const projectile = @import("projectile.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//Single player game todos:
-//TODO: add walking animation
-//TODO: add stupid enemy that only stands still and can be killed
-//TODO: make killing of enemy very gibby and bloody
+//Look and feel
+//TODO: make an actual level that looks nice and could be fun to play with 4
+//TODO: create interesting character
+//TODO: create idle animation
+//TODO: create running animation
+//TODO: Create jumping animation
+//TODO: Create sliding animation
+//TODO: Create idle crouching animation
+
+//Controls
 //TODO: support controller
 //TODO: add crouch
 //TODO: add sliding
 //TODO: add slope sliding
-//TODO: add sounds
-//TODO: add jetpack
-//TODO: add liero/worms grappling hook
-//TODO: add enemies to shoot
+//TODO: try if movement vector should be to the direction of slope character is standing on
 
-//level editor todos:
+//Items to pick up
+//TODO: jetpack
+//TODO: liero/worms grappling hook
+//TODO: short teleport
+//TODO: health
+//TODO: piercing bazooka ammo
+//TODO: shrapnel bazooka ammo
+//TODO: mine bazooka ammo
+
+//Music
+//TODO: There should be basic music fitting the deathmatch theme of the game
+//TODO: music can be turned off
+
+//level editor:
 //TODO: Pressing r in level editor reloads the level from latest version
 //TODO: pressing ctrl z in level editor loads the previous version of the json.
 //TODO: pressing ctrl r in level editor loads the next version of the json.
@@ -55,28 +71,24 @@ const Sprite = entity.Sprite;
 //TODO: user can create goal for player
 //TODO: user can create level that is bigger than screen
 
-//level oriented physics demo game todos:
-//TODO: create about 10 different physics and gravity based levels
-//TODO: create levels with enemies
+//E2E demo:
+//TODO: 3 levels. Each level has some physics puzzle
+//TODO: There is Main menu: start game, settings, level editor, exit game
+//TODO: Music plays in the background
+//TODO: end credits
 
-
-//Multiplayer todos:
+//Multiplayer:
 //TODO: add splitscreen multiplayer
 //TODO: investigate how to sync games when running on different machines
 //TODO: add localhost multiplayer
 //TODO: add real multiplayer
-//TODO: instagib mode
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
 
-// game idea: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch. 
-// winner is decided based on the tournament
-// level changes upon 5 deaths
-// main weapon is the cannon
-
-//Engine:
-//TODO: separate engine code from game logic
+//Game content:
+//TODO: instagib
+//TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
