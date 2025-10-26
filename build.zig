@@ -75,6 +75,9 @@ pub fn build(b: *std.Build) !void {
             "wheel_joint.c",
             "world.c",
         },
+        .flags = &[_][]const u8{
+            "-DNDEBUG",
+        },
     });
     exe.addIncludePath(b.path("./box2d/include/"));
 
