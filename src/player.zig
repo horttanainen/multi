@@ -120,7 +120,7 @@ pub fn spawn(position: vec.IVec2) !void {
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = config.player.materialId;
     shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -135,7 +135,7 @@ pub fn spawn(position: vec.IVec2) !void {
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = config.player.materialId;
     lowerBodyShapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE;
+    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });

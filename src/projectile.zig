@@ -122,10 +122,9 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
         .q = box2d.c.b2Rot_identity,
     };
 
-    // Query filter: only match terrain
     var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = config.CATEGORY_TERRAIN; // What we're looking for
-    filter.maskBits = config.CATEGORY_TERRAIN; // What we collide with
+    filter.categoryBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC;
+    filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC;
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(

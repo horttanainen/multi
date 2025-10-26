@@ -254,12 +254,15 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     shapeDef.filter.categoryBits = entity.categoryBits;
     shapeDef.filter.maskBits = entity.maskBits;
 
-    const newShapeIds = try box2d.createPolygonShape(
+    const newShapeIds = box2d.createPolygonShape(
         entity.bodyId,
         triangles,
         .{ .x = entity.sprite.sizeP.x, .y = entity.sprite.sizeP.y },
         shapeDef,
-    );
+    ) catch {
+        std.debug.print("Could not create box2d object from regenerated triangles\n", .{});
+        return false;
+    };
 
     entity.shapeIds = newShapeIds;
     return true;
