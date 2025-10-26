@@ -30,8 +30,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Single player game todos:
-//TODO: allow explosion to break objects
-//TODO: split projectile into pieces
 //TODO: add walking animation
 //TODO: add stupid enemy that only stands still and can be killed
 //TODO: make killing of enemy very gibby and bloody
