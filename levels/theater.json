@@ -60,6 +60,7 @@
     "entities": [
         {
             "type": "static",
+            "breakable": true,
             "friction": 0.5,
             "imgPath": "images/theater_breakable.png",
             "scale": {
@@ -72,7 +73,22 @@
             }
         },
         {
+            "type": "static",
+            "breakable": false,
+            "friction": 0.5,
+            "imgPath": "images/theater_unbreakable.png",
+            "scale": {
+              "x": 2.0,
+              "y": 2.0
+            },
+            "pos": {
+                "x": -2048,
+                "y": -2048
+            }
+        },
+        {
             "type": "goal",
+            "breakable": false,
             "friction": 0,
             "imgPath": "images/duff.png",
             "scale": {
@@ -86,6 +102,7 @@
         },
         {
             "type": "spawn",
+            "breakable": false,
             "friction": 0,
             "imgPath": "images/spawn.png",
             "scale": {

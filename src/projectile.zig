@@ -187,7 +187,7 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
         circleShapeDef.restitution = explosion.particleRestitution;
         circleShapeDef.filter.groupIndex = -1; // Don't collide with each other
         circleShapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
-        circleShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PLAYER;
+        circleShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PLAYER | config.CATEGORY_UNBREAKABLE;
 
         const circleShape: box2d.c.b2Circle = .{
             .center = .{

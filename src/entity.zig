@@ -45,6 +45,7 @@ pub const SerializableEntity = struct {
     imgPath: []const u8,
     scale: vec.Vec2,
     pos: vec.IVec2,
+    breakable: bool = true,
 };
 
 pub var entitiesToCleanup = thread_safe.ThreadSafeArrayList(Entity).init(shared.allocator);
@@ -222,12 +223,14 @@ pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
 }
 
 pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
+    const breakable = entity.categoryBits == config.CATEGORY_TERRAIN;
     return SerializableEntity{
         .type = entity.type,
         .scale = entity.sprite.scale,
         .pos = pos,
         .friction = entity.friction,
         .imgPath = entity.sprite.imgPath,
+        .breakable = breakable,
     };
 }
 

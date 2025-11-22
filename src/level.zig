@@ -98,12 +98,14 @@ fn loadByName(levelName: []const u8) !void {
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);
             shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
+            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
             const tiles = try sprite.splitIntoTiles(s, 256);
             defer shared.allocator.free(tiles);
+
+            const categoryBits = if (e.breakable) config.CATEGORY_TERRAIN else config.CATEGORY_UNBREAKABLE;
 
             for (tiles) |tile| {
                 // Calculate position for this tile (original position + tile offset)
@@ -112,8 +114,8 @@ fn loadByName(levelName: []const u8) !void {
                     .y = pos.y + tile.offsetPos.y,
                 };
                 const bodyDef = box2d.createStaticBodyDef(tilePos);
-                shapeDef.filter.categoryBits = config.CATEGORY_TERRAIN;
-                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR;
+                shapeDef.filter.categoryBits = categoryBits;
+                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
                 _ = entity.createFromImg(tile.sprite, shapeDef, bodyDef, "static") catch |err| {
                     if (err == polygon.PolygonError.CouldNotCreateTriangle) {
                         // Clean up the tile sprite since entity creation failed
