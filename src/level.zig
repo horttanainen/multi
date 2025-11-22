@@ -102,7 +102,7 @@ fn loadByName(levelName: []const u8) !void {
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
-            const tiles = try sprite.splitIntoTiles(s, 256);
+            const tiles = try sprite.splitIntoTiles(s, 64);
             defer shared.allocator.free(tiles);
 
             const categoryBits = if (e.breakable) config.CATEGORY_TERRAIN else config.CATEGORY_UNBREAKABLE;
