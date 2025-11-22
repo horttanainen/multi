@@ -60,9 +60,9 @@
     "entities": [
         {
             "type": "static",
-            "breakable": true,
+            "breakable": false,
             "friction": 0.5,
-            "imgPath": "images/theater_breakable.png",
+            "imgPath": "images/theater_unbreakable.png",
             "scale": {
               "x": 2.0,
               "y": 2.0
@@ -74,9 +74,9 @@
         },
         {
             "type": "static",
-            "breakable": false,
+            "breakable": true,
             "friction": 0.5,
-            "imgPath": "images/theater_unbreakable.png",
+            "imgPath": "images/theater_breakable.png",
             "scale": {
               "x": 2.0,
               "y": 2.0
