@@ -26,14 +26,12 @@ pub fn render() !void {
     try sensor.drawGoal();
     try entity.drawAll();
     try player.draw();
-    try debug.draw();
+
+    if (config.debug) {
+        try debug.draw();
+    }
 
     try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 255, .a = 255 });
-
-    for (0..9) |y| {
-        try drawHorizontalLine(@as(i32, @intCast(y)) * 100);
-        try drawVerticalLine(@as(i32, @intCast(y)) * 100);
-    }
 
     try ui.drawMode();
     try ui.drawFps();

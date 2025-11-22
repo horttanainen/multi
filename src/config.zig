@@ -5,6 +5,8 @@ pub const window = .{
     .height = 1200,
 };
 
+pub const debug = false;
+
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
