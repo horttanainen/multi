@@ -1,0 +1,101 @@
+{
+    "size": {
+        "x": 4096,
+        "y": 4096
+    },
+    "parallaxEntities": [
+        {
+            "parallaxDistance": 2,
+            "fog": 0.6,
+            "imgPath": "images/pillars_bg.png",
+            "scale": {
+              "x": 1.5,
+              "y": 1.5
+            },
+            "pos": {
+                "x": -1024,
+                "y": -1024
+            }
+        },
+        {
+            "parallaxDistance": 4,
+            "fog": 0.65,
+            "imgPath": "images/lights_bg.png",
+            "scale": {
+              "x": 1.5,
+              "y": 1.5
+            },
+            "pos": {
+                "x": -1024,
+                "y": -1024
+            }
+        },
+        {
+            "parallaxDistance": 6,
+            "fog": 0.7,
+            "imgPath": "images/seats_bg.png",
+            "scale": {
+              "x": 1.5,
+              "y": 1.5
+            },
+            "pos": {
+                "x": -1024,
+                "y": -1024
+            }
+        },
+        {
+            "parallaxDistance": 8,
+            "fog": 0.75,
+            "imgPath": "images/doors_bg.png",
+            "scale": {
+              "x": 1.5,
+              "y": 1.5
+            },
+            "pos": {
+                "x": -1024,
+                "y": -1024
+            }
+        }
+    ],
+    "entities": [
+        {
+            "type": "static",
+            "friction": 0.5,
+            "imgPath": "images/teater_breakable.png",
+            "scale": {
+              "x": 2.0,
+              "y": 2.0
+            },
+            "pos": {
+                "x": -2048,
+                "y": -2048
+            }
+        },
+        {
+            "type": "goal",
+            "friction": 0,
+            "imgPath": "images/duff.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": 300,
+                "y": 200
+            }
+        },
+        {
+            "type": "spawn",
+            "friction": 0,
+            "imgPath": "images/spawn.png",
+            "scale": {
+              "x": 1.0,
+              "y": 1.0
+            },
+            "pos": {
+                "x": -150,
+                "y": 150
+            }
+        }
+    ]
+}
