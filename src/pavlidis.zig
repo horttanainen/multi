@@ -2,6 +2,7 @@ const std = @import("std");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 const allocator = @import("shared.zig").allocator;
+const config = @import("config.zig");
 
 //Pavlidis
 fn getPixelAlpha(pixels: [*]const u8, pitch: usize, x: usize, y: usize) u8 {
@@ -62,38 +63,13 @@ fn turnLeft(dir: IVec2) !IVec2 {
     const leftInd = @mod(@as(i32, @intCast(curDirInd)) - 2, 8);
     return neighbors[@intCast(leftInd)];
 }
+
 /// Traces a contour using a Pavlidis/Moore neighbor–tracing algorithm.
 /// Returns an array of Vec2 points (in pixel coordinates) that form the contour.
-pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) ![]IVec2 {
+pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8, start_point: IVec2) ![]IVec2 {
     var contour = std.array_list.Managed(IVec2).init(allocator);
 
-    // Step 1. Find a starting boundary pixel.
-    var start: IVec2 = undefined;
-    var foundStart = false;
-    for (0..width) |x| {
-        for (0..height) |yk| {
-            const y = (height - 1) - yk;
-            if (isInside(@intCast(x), @intCast(y), pixels, width, height, pitch, threshold)) {
-                if (isInside(@as(i32, @intCast(x)) - 1, @intCast(y), pixels, width, height, pitch, threshold)) {
-                    break;
-                }
-                if (isInside(@as(i32, @intCast(x)) - 1, @intCast(y + 1), pixels, width, height, pitch, threshold)) {
-                    break;
-                }
-                if (isInside(@intCast(x + 1), @intCast(y + 1), pixels, width, height, pitch, threshold)) {
-                    break;
-                }
-                start = IVec2{ .x = @intCast(x), .y = @intCast(y) };
-                foundStart = true;
-                break;
-            }
-        }
-        if (foundStart) break;
-    }
-    if (!foundStart) {
-        std.debug.print("Did not find contour!\n", .{});
-        return contour.toOwnedSlice();
-    }
+    const start = start_point;
 
     var encounteredStart: i32 = 0;
     // Step 2. Initialize the tracing.
@@ -126,7 +102,7 @@ pub fn pavlidisContour(pixels: [*]const u8, width: usize, height: usize, pitch: 
             current = p3;
             rotations = 0;
         } else if (rotations > 2) {
-            std.debug.print("Isolated pixel!!!\n", .{});
+            if (config.debugLog) std.debug.print("Isolated pixel!!!\n", .{});
             return contour.toOwnedSlice();
         } else {
             curDir = try turnRight(curDir);

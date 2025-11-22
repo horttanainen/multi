@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("zsdl");
 
 const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
+const connected_components = @import("connected_components.zig");
 const visvalingam = @import("visvalingam.zig").visvalingam;
 const douglasPeucker = @import("douglas.zig").douglasPeucker;
 const triangle = @import("triangle.zig");
@@ -29,17 +30,23 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     const width: usize = @intCast(surface.w);
     const height: usize = @intCast(surface.h);
 
-    // 1. use marching squares algorithm to calculate shape edges. Output list of points in ccw order. -> complex polygon
+    // 1. Find the largest connected component and get its starting point
     const threshold: u8 = 150; // Isovalue threshold for alpha
-    const vertices = try pavlidisContour(pixels, width, height, pitch, threshold);
+    const start_point = try connected_components.findLargestComponentStart(pixels, width, height, pitch, threshold);
+    if (start_point == null) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    // 2. Use pavlidis algorithm to calculate shape edges. Output list of points in ccw order. -> complex polygon
+    const vertices = try pavlidisContour(pixels, width, height, pitch, threshold, start_point.?);
     defer allocator.free(vertices);
     // std.debug.print("Original polygon vertices: {}\n", .{vertices.len});
-    
+
     if (vertices.len < 3) {
         return PolygonError.CouldNotCreateTriangle;
     }
 
-    // 2. simplify the polygon.
+    // 3. simplify the polygon.
     const epsilonArea: f32 = 0.01 * @as(f32, @floatFromInt(width * height));
     // std.debug.print("epsilonArea: {d}\n", .{epsilonArea});
     const simplified = try visvalingam(vertices, epsilonArea);

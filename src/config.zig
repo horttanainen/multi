@@ -6,6 +6,7 @@ pub const window = .{
 };
 
 pub const debug = false;
+pub const debugLog = false;
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
