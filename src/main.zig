@@ -30,7 +30,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Look and feel
-//TODO: make an actual level that looks nice and could be fun to play with 4
 //TODO: create interesting character
 //TODO: create idle animation
 //TODO: create running animation
