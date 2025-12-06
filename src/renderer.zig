@@ -25,7 +25,7 @@ pub fn render() !void {
     try background.draw();
     try sensor.drawGoal();
     try entity.drawAll();
-    try player.draw();
+    try player.drawCrosshair();
 
     if (config.debug) {
         try debug.draw();

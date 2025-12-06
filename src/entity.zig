@@ -35,6 +35,7 @@ pub const Entity = struct {
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
     animated: bool,
+    flipEntityHorizontally: bool,
     categoryBits: u64,
     maskBits: u64,
 };
@@ -64,7 +65,7 @@ pub fn drawAll() !void {
     entities.mutex.lock();
     defer entities.mutex.unlock();
     for (entities.map.values()) |*e| {
-        try draw(e);
+        try drawWithOptions(e, e.flipEntityHorizontally);
     }
 }
 
@@ -110,6 +111,7 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
+        .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
     };
@@ -147,6 +149,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
+        .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
     };

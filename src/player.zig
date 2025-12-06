@@ -27,9 +27,6 @@ pub const Player = struct {
     footSensorShapeId: box2d.c.b2ShapeId,
     leftWallSensorId: box2d.c.b2ShapeId,
     rightWallSensorId: box2d.c.b2ShapeId,
-    animations: std.StringHashMap(animation.Animation),
-    currentAnimationKey: []const u8,
-    currentAnimation: *animation.Animation,
     weapons: []weapon.Weapon,
     selectedWeaponIndex: usize,
 };
@@ -60,13 +57,8 @@ pub fn getPlayer() !Player {
     return PlayerError.PlayerUnspawned;
 }
 
-pub fn draw() !void {
+pub fn drawCrosshair() !void {
     if (maybePlayer) |*player| {
-        if (aimDirection.x > 0) {
-            try entity.drawFlipped(&player.entity);
-        } else {
-            try entity.draw(&player.entity);
-        }
         if (maybeCrosshair) |crosshair| {
             const pos = calcCrosshairPosition(player.*);
             try sprite.drawWithOptions(crosshair, pos, 0, false, false, 0);
@@ -232,30 +224,36 @@ pub fn spawn(position: vec.IVec2) !void {
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(cannon);
 
+    const playerEntity = entity.Entity{
+        .type = "dynamic",
+        .friction = config.player.movementFriction,
+        .bodyId = bodyId,
+        .sprite = s,
+        .shapeIds = try shapeIds.toOwnedSlice(),
+        .state = null,
+        .highlighted = false,
+        .animated = false,
+        .flipEntityHorizontally = false,
+        .categoryBits = config.CATEGORY_PLAYER,
+        .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
+    };
+
     maybePlayer = Player{
-        .entity = entity.Entity{
-            .type = "dynamic",
-            .friction = config.player.movementFriction,
-            .bodyId = bodyId,
-            .sprite = s,
-            .shapeIds = try shapeIds.toOwnedSlice(),
-            .state = null,
-            .highlighted = false,
-            .animated = false,
-            .categoryBits = config.CATEGORY_PLAYER,
-            .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
-        },
+        .entity = playerEntity,
         .bodyShapeId = bodyShapeId,
         .lowerBodyShapeId = lowerBodyShapeId,
         .footSensorShapeId = footSensorShapeId,
         .leftWallSensorId = leftWallSensorId,
         .rightWallSensorId = rightWallSensorId,
-        .animations = animations,
-        .currentAnimationKey = "idle",
-        .currentAnimation = animations.getPtr("idle").?,
         .weapons = try weapons.toOwnedSlice(),
         .selectedWeaponIndex = 0,
     };
+
+    // Register player entity with entity system (needed for animation sprite updates)
+    try entity.entities.putLocking(bodyId, playerEntity);
+
+    // Register player with central animation system
+    try animation.registerAnimationSet(bodyId, animations, "idle", true);
 
     maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
         .x = 1,
@@ -263,31 +261,13 @@ pub fn spawn(position: vec.IVec2) !void {
     }, vec.izero);
 }
 
-pub fn animate() void {
-    if (maybePlayer) |*p| {
+pub fn updateAnimationState() void {
+    if (maybePlayer) |p| {
         const shouldRun = touchesGround and isMoving;
         const targetAnimationKey = if (shouldRun) "run" else "idle";
 
-        // Check if we need to switch animations
-        if (!std.mem.eql(u8, p.currentAnimationKey, targetAnimationKey)) {
-            // Switch to new animation
-            p.currentAnimationKey = targetAnimationKey;
-            p.currentAnimation = p.animations.getPtr(targetAnimationKey).?;
-
-            // Reset animation to first frame
-            p.currentAnimation.current = 0;
-            p.currentAnimation.lastTime = time.now();
-        }
-
-        // Animate the current animation
-        const timeNowS = time.now();
-        const timePassedS = timeNowS - p.currentAnimation.lastTime;
-        const fpsSeconds = 1 / @as(f64, @floatFromInt(p.currentAnimation.fps));
-        if (timePassedS > fpsSeconds) {
-            p.currentAnimation.current = @mod(p.currentAnimation.current + 1, p.currentAnimation.frames.len);
-            p.entity.sprite = p.currentAnimation.frames[p.currentAnimation.current];
-            p.currentAnimation.lastTime = timeNowS;
-        }
+        // Request animation switch from central system
+        animation.switchAnimation(p.entity.bodyId, targetAnimationKey) catch {};
     }
 }
 
@@ -427,6 +407,14 @@ pub fn aim(direction: vec.Vec2) void {
         dir = vec.add(dir, if (movingRight) vec.east else vec.west);
     }
     aimDirection = dir;
+
+    // Update entity flip based on aim direction
+    if (maybePlayer) |p| {
+        const maybeEntity = entity.entities.getPtrLocking(p.entity.bodyId);
+        if (maybeEntity) |ent| {
+            ent.flipEntityHorizontally = dir.x > 0;
+        }
+    }
 }
 
 pub fn shoot() !void {
@@ -450,16 +438,10 @@ pub fn shoot() !void {
 
 pub fn cleanup() void {
     if (maybePlayer) |*player| {
-        // Clean up all animations
-        var animIter = player.animations.valueIterator();
-        while (animIter.next()) |anim| {
-            for (anim.frames) |frame| {
-                sprite.cleanup(frame);
-            }
-            shared.allocator.free(anim.frames);
-        }
-        player.animations.deinit();
+        // Remove player entity from entity system
+        _ = entity.entities.fetchSwapRemoveLocking(player.entity.bodyId);
 
+        // Animation cleanup is handled by central system via cleanupAnimationFrames
         shared.allocator.free(player.weapons);
         box2d.c.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);

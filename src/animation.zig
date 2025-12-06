@@ -15,17 +15,29 @@ pub const Animation = struct {
     frames: []sprite.Sprite,
 };
 
-pub const AnimationInstance = struct {
-    animation: Animation,
+pub const AnimationSet = struct {
+    animations: std.StringHashMap(Animation),
+    currentKey: []const u8,
+    currentAnimation: *Animation,
     loop: bool,
+    autoDestroy: bool, // Destroy entity when animation completes (for one-off effects)
 };
 
-var animationInstances = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationInstance).init(shared.allocator);
+var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(shared.allocator);
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
-    try animationInstances.putLocking(bodyId, .{
-        .animation = anim,
+    // Create a single-animation AnimationSet for one-off effects
+    var animations = std.StringHashMap(Animation).init(shared.allocator);
+    try animations.put("default", anim);
+
+    const currentAnim = animations.getPtr("default").?;
+
+    try animationSets.putLocking(bodyId, .{
+        .animations = animations,
+        .currentKey = "default",
+        .currentAnimation = currentAnim,
         .loop = loop,
+        .autoDestroy = true, // One-off animations auto-destroy when finished
     });
 
     const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
@@ -34,74 +46,134 @@ pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
     }
 }
 
-pub fn animate() void {
-    animationInstances.mutex.lock();
-    defer animationInstances.mutex.unlock();
+pub fn registerAnimationSet(
+    bodyId: box2d.c.b2BodyId,
+    animations: std.StringHashMap(Animation),
+    startKey: []const u8,
+    loop: bool,
+) !void {
+    const currentAnim = animations.getPtr(startKey) orelse return error.AnimationNotFound;
 
-    var iter = animationInstances.map.iterator();
+    try animationSets.putLocking(bodyId, .{
+        .animations = animations,
+        .currentKey = startKey,
+        .currentAnimation = currentAnim,
+        .loop = loop,
+        .autoDestroy = false, // Multi-animation entities don't auto-destroy
+    });
+
+    const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
+    if (maybeEntityPtr) |entPtr| {
+        entPtr.animated = true;
+    }
+}
+
+pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void {
+    animationSets.mutex.lock();
+    defer animationSets.mutex.unlock();
+
+    const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
+
+    // Don't switch if already playing this animation
+    if (std.mem.eql(u8, animSet.currentKey, animationKey)) {
+        return;
+    }
+
+    // Get new animation
+    const newAnim = animSet.animations.getPtr(animationKey) orelse return error.AnimationNotFound;
+
+    // Switch and reset
+    animSet.currentKey = animationKey;
+    animSet.currentAnimation = newAnim;
+    animSet.currentAnimation.current = 0;
+    animSet.currentAnimation.lastTime = time.now();
+}
+
+pub fn animate() void {
+    animationSets.mutex.lock();
+    defer animationSets.mutex.unlock();
+
+    var iter = animationSets.map.iterator();
     while (iter.next()) |entry| {
         const bodyId = entry.key_ptr.*;
-        const instance = entry.value_ptr;
+        const animSet = entry.value_ptr;
 
-        const timeNowS = time.now();
-        const timePassedS = timeNowS - instance.animation.lastTime;
-        const fpsSeconds = 1.0 / @as(f64, @floatFromInt(instance.animation.fps));
+        // Advance current animation
+        const finished = advanceAnimation(animSet.currentAnimation);
+        updateEntitySprite(bodyId, animSet.currentAnimation);
 
-        if (timePassedS > fpsSeconds) {
-            if (instance.loop) {
-                // Loop animation
-                const nextFrame = (instance.animation.current + 1) % instance.animation.frames.len;
-                instance.animation.current = nextFrame;
-            } else {
-                // Play once, stop at last frame
-                const nextFrame = instance.animation.current + 1;
-                if (nextFrame < instance.animation.frames.len) {
-                    instance.animation.current = nextFrame;
-                } else {
-                    const maybeE = entity.entities.fetchSwapRemoveLocking(bodyId);
-                    if (maybeE) |e| {
-                        entity.cleanupLater(e.value);
-                    }
-                }
+        // Destroy entity if it's marked for auto-destroy and animation finished without looping
+        if (animSet.autoDestroy and finished and !animSet.loop) {
+            const maybeE = entity.entities.fetchSwapRemoveLocking(bodyId);
+            if (maybeE) |e| {
+                entity.cleanupLater(e.value);
             }
-
-            // Update entity sprite
-            const maybeEntity = entity.entities.getPtrLocking(bodyId);
-            if (maybeEntity) |ent| {
-                ent.sprite = instance.animation.frames[instance.animation.current];
-            }
-
-            instance.animation.lastTime = timeNowS;
         }
+    }
+}
+
+// returns true if animation finished (looped)
+fn advanceAnimation(anim: *Animation) bool {
+    const timeNowS = time.now();
+    const timePassedS = timeNowS - anim.lastTime;
+    const fpsSeconds = 1.0 / @as(f64, @floatFromInt(anim.fps));
+
+    if (timePassedS > fpsSeconds) {
+        const nextFrame = anim.current + 1;
+        if (nextFrame >= anim.frames.len) {
+            anim.current = 0; // Loop
+            anim.lastTime = timeNowS;
+            return true; // Reached end
+        } else {
+            anim.current = nextFrame;
+            anim.lastTime = timeNowS;
+            return false; // Still playing
+        }
+    }
+    return false;
+}
+
+fn updateEntitySprite(bodyId: box2d.c.b2BodyId, anim: *Animation) void {
+    const maybeEntity = entity.entities.getPtrLocking(bodyId);
+    if (maybeEntity) |ent| {
+        ent.sprite = anim.frames[anim.current];
     }
 }
 
 pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
-    animationInstances.mutex.lock();
-    defer animationInstances.mutex.unlock();
+    animationSets.mutex.lock();
+    defer animationSets.mutex.unlock();
 
-    const maybeInstance = animationInstances.map.fetchSwapRemove(bodyId);
-    if (maybeInstance) |instance| {
-        for (instance.value.animation.frames) |frame| {
-            sprite.cleanup(frame);
+    const maybeAnimSet = animationSets.map.fetchSwapRemove(bodyId);
+    if (maybeAnimSet) |animSet| {
+        var animations = animSet.value.animations;
+        var animIter = animations.valueIterator();
+        while (animIter.next()) |anim| {
+            for (anim.frames) |frame| {
+                sprite.cleanup(frame);
+            }
+            shared.allocator.free(anim.frames);
         }
-        shared.allocator.free(instance.value.animation.frames);
+        animations.deinit();
     }
 }
 
 pub fn cleanup() void {
-    animationInstances.mutex.lock();
-    defer animationInstances.mutex.unlock();
+    animationSets.mutex.lock();
+    defer animationSets.mutex.unlock();
 
-    var iter = animationInstances.map.iterator();
-    while (iter.next()) |entry| {
-        for (entry.value_ptr.animation.frames) |frame| {
-            sprite.cleanup(frame);
+    var animSetIter = animationSets.map.iterator();
+    while (animSetIter.next()) |entry| {
+        var animIter = entry.value_ptr.animations.valueIterator();
+        while (animIter.next()) |anim| {
+            for (anim.frames) |frame| {
+                sprite.cleanup(frame);
+            }
+            shared.allocator.free(anim.frames);
         }
-        shared.allocator.free(entry.value_ptr.animation.frames);
+        entry.value_ptr.animations.deinit();
     }
-
-    animationInstances.map.clearAndFree();
+    animationSets.map.clearAndFree();
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {

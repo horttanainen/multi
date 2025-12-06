@@ -118,8 +118,6 @@ pub fn main() !void {
             try gameLoop();
         }
 
-        player.animate();
-
         try renderer.render();
 
         // keep track of time spent per frame
@@ -140,7 +138,11 @@ fn gameLoop() !void {
 
     try projectile.checkContacts();
     try projectile.cleanupShrapnel();
+
+    // Update player animation state, then animate all animations
+    player.updateAnimationState();
     animation.animate();
+
     entity.cleanupEntities();
     try player.checkSensors();
     try sensor.checkGoal();
