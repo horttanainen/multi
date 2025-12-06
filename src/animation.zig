@@ -114,7 +114,10 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
 
     while (try dirIterator.next()) |dirContent| {
         if (dirContent.kind == std.fs.File.Kind.file) {
-            try images.append(dirContent.name);
+            // Skip .DS_Store files
+            if (!std.mem.eql(u8, dirContent.name, ".DS_Store")) {
+                try images.append(dirContent.name);
+            }
         }
     }
 
