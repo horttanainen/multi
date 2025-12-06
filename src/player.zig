@@ -27,7 +27,9 @@ pub const Player = struct {
     footSensorShapeId: box2d.c.b2ShapeId,
     leftWallSensorId: box2d.c.b2ShapeId,
     rightWallSensorId: box2d.c.b2ShapeId,
-    currentAnimation: animation.Animation,
+    animations: std.StringHashMap(animation.Animation),
+    currentAnimationKey: []const u8,
+    currentAnimation: *animation.Animation,
     weapons: []weapon.Weapon,
     selectedWeaponIndex: usize,
 };
@@ -185,12 +187,26 @@ pub fn spawn(position: vec.IVec2) !void {
     try shapeIds.append(leftWallSensorId);
     try shapeIds.append(rightWallSensorId);
 
-    const anim = try animation.load(
+    // Create animations hash map
+    var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
+
+    // Load idle animation
+    const idleAnim = try animation.load(
         "animations/red/idle",
         2,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
     );
+    try animations.put("idle", idleAnim);
+
+    // Load run animation
+    const runAnim = try animation.load(
+        "animations/red/run",
+        12,
+        .{ .x = 0.2, .y = 0.2 },
+        .{ .x = 0, .y = -30 },
+    );
+    try animations.put("run", runAnim);
 
     const cannon: weapon.Weapon = .{
         .name = "cannon",
@@ -234,7 +250,9 @@ pub fn spawn(position: vec.IVec2) !void {
         .footSensorShapeId = footSensorShapeId,
         .leftWallSensorId = leftWallSensorId,
         .rightWallSensorId = rightWallSensorId,
-        .currentAnimation = anim,
+        .animations = animations,
+        .currentAnimationKey = "idle",
+        .currentAnimation = animations.getPtr("idle").?,
         .weapons = try weapons.toOwnedSlice(),
         .selectedWeaponIndex = 0,
     };
@@ -247,6 +265,21 @@ pub fn spawn(position: vec.IVec2) !void {
 
 pub fn animate() void {
     if (maybePlayer) |*p| {
+        const shouldRun = touchesGround and isMoving;
+        const targetAnimationKey = if (shouldRun) "run" else "idle";
+
+        // Check if we need to switch animations
+        if (!std.mem.eql(u8, p.currentAnimationKey, targetAnimationKey)) {
+            // Switch to new animation
+            p.currentAnimationKey = targetAnimationKey;
+            p.currentAnimation = p.animations.getPtr(targetAnimationKey).?;
+
+            // Reset animation to first frame
+            p.currentAnimation.current = 0;
+            p.currentAnimation.lastTime = time.now();
+        }
+
+        // Animate the current animation
         const timeNowS = time.now();
         const timePassedS = timeNowS - p.currentAnimation.lastTime;
         const fpsSeconds = 1 / @as(f64, @floatFromInt(p.currentAnimation.fps));
@@ -416,11 +449,17 @@ pub fn shoot() !void {
 }
 
 pub fn cleanup() void {
-    if (maybePlayer) |player| {
-        for (player.currentAnimation.frames) |frame| {
-            sprite.cleanup(frame);
+    if (maybePlayer) |*player| {
+        // Clean up all animations
+        var animIter = player.animations.valueIterator();
+        while (animIter.next()) |anim| {
+            for (anim.frames) |frame| {
+                sprite.cleanup(frame);
+            }
+            shared.allocator.free(anim.frames);
         }
-        shared.allocator.free(player.currentAnimation.frames);
+        player.animations.deinit();
+
         shared.allocator.free(player.weapons);
         box2d.c.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
