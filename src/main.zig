@@ -30,12 +30,10 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Look and feel
-//TODO: create interesting character
-//TODO: create idle animation
-//TODO: create running animation
-//TODO: Create jumping animation
+//TODO: Create after jump up animation that is iniially just first frame of running animation. Played after jump and if player is moving upwards
+//TODO: Create fall animation that is initially just "crouching" frame of running animation. Player if player is not touching ground and is moving downwards
+//TODO: Create jumping animation 
 //TODO: Create sliding animation
-//TODO: Create idle crouching animation
 
 //Controls
 //TODO: support controller
@@ -91,6 +89,9 @@ const Sprite = entity.Sprite;
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
+
+//QA:
+//TODO: register and registerAnimatonSet should share same code
 
 pub fn main() !void {
     const resources = try shared.init();
