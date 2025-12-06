@@ -186,9 +186,9 @@ pub fn spawn(position: vec.IVec2) !void {
     try shapeIds.append(rightWallSensorId);
 
     const anim = try animation.load(
-        "animations/devil/idle",
-        1,
-        .{ .x = 1, .y = 1 },
+        "animations/red/idle",
+        2,
+        .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
     );
 
