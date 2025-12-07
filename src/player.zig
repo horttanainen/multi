@@ -200,6 +200,15 @@ pub fn spawn(position: vec.IVec2) !void {
     );
     try animations.put("run", runAnim);
 
+    // Load fall animation
+    const fallAnim = try animation.load(
+        "animations/red/fall",
+        4,
+        .{ .x = 0.2, .y = 0.2 },
+        .{ .x = 0, .y = -30 },
+    );
+    try animations.put("fall", fallAnim);
+
     const cannon: weapon.Weapon = .{
         .name = "cannon",
         .projectileImgSrc = shared.cannonBallmgSrc,
@@ -263,10 +272,13 @@ pub fn spawn(position: vec.IVec2) !void {
 
 pub fn updateAnimationState() void {
     if (maybePlayer) |p| {
-        const shouldRun = touchesGround and isMoving;
-        const targetAnimationKey = if (shouldRun) "run" else "idle";
+        const targetAnimationKey = if (!touchesGround)
+            "fall"
+        else if (isMoving)
+            "run"
+        else
+            "idle";
 
-        // Request animation switch from central system
         animation.switchAnimation(p.entity.bodyId, targetAnimationKey) catch {};
     }
 }
@@ -441,7 +453,6 @@ pub fn cleanup() void {
         // Remove player entity from entity system
         _ = entity.entities.fetchSwapRemoveLocking(player.entity.bodyId);
 
-        // Animation cleanup is handled by central system via cleanupAnimationFrames
         shared.allocator.free(player.weapons);
         box2d.c.b2DestroyBody(player.entity.bodyId);
         shared.allocator.free(player.entity.shapeIds);
