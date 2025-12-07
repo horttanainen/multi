@@ -280,9 +280,9 @@ pub fn updateAnimationState() void {
         const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
         const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
 
-        const targetAnimationKey = if (!touchesGround and movingUpward)
+        const targetAnimationKey = if (!touchesGround  and movingUpward)
             "afterjump"
-        else if (!touchesGround and movingDownward)
+        else if (!touchesGround  and movingDownward)
             "fall"
         else if (isMoving)
             "run"
