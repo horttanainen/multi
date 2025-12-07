@@ -104,9 +104,9 @@ pub fn animate() void {
 
         // Destroy entity if it's marked for auto-destroy and animation finished without looping
         if (animSet.autoDestroy and finished and !animSet.loop) {
-            const maybeE = entity.entities.fetchSwapRemoveLocking(bodyId);
+            const maybeE = entity.entities.getLocking(bodyId);
             if (maybeE) |e| {
-                entity.cleanupLater(e.value);
+                entity.cleanupLater(e);
             }
         }
     }
