@@ -31,12 +31,12 @@ const Sprite = entity.Sprite;
 
 //Look and feel
 //TODO: Create jumping animation 
+//TODO: Create landing animation
 //TODO: Create sliding animation
 //TODO: Create wall slide animation that is played when player touches wall 
 
 //Controls
 //TODO: support controller
-//TODO: add crouch
 //TODO: add sliding
 //TODO: add slope sliding
 //TODO: try if movement vector should be to the direction of slope character is standing on
