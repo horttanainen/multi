@@ -88,11 +88,9 @@ const Sprite = entity.Sprite;
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
-//TODO: remove explosion animation box2d objects after explosion
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
-//TODO: cleanup remaining audio clips when exiting game
 
 pub fn main() !void {
     const resources = try shared.init();
