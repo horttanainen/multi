@@ -179,10 +179,8 @@ pub fn spawn(position: vec.IVec2) !void {
     try shapeIds.append(leftWallSensorId);
     try shapeIds.append(rightWallSensorId);
 
-    // Create animations hash map
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
 
-    // Load idle animation
     const idleAnim = try animation.load(
         "animations/red/idle",
         2,
@@ -191,7 +189,6 @@ pub fn spawn(position: vec.IVec2) !void {
     );
     try animations.put("idle", idleAnim);
 
-    // Load run animation
     const runAnim = try animation.load(
         "animations/red/run",
         12,
@@ -200,7 +197,6 @@ pub fn spawn(position: vec.IVec2) !void {
     );
     try animations.put("run", runAnim);
 
-    // Load fall animation
     const fallAnim = try animation.load(
         "animations/red/fall",
         4,
@@ -208,6 +204,14 @@ pub fn spawn(position: vec.IVec2) !void {
         .{ .x = 0, .y = -30 },
     );
     try animations.put("fall", fallAnim);
+
+    const afterJumpAnim = try animation.load(
+        "animations/red/after_jump",
+        8,
+        .{ .x = 0.2, .y = 0.2 },
+        .{ .x = 0, .y = -30 },
+    );
+    try animations.put("afterjump", afterJumpAnim);
 
     const cannon: weapon.Weapon = .{
         .name = "cannon",
@@ -272,7 +276,13 @@ pub fn spawn(position: vec.IVec2) !void {
 
 pub fn updateAnimationState() void {
     if (maybePlayer) |p| {
-        const targetAnimationKey = if (!touchesGround)
+        const velocity = box2d.c.b2Body_GetLinearVelocity(p.entity.bodyId);
+        const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
+        const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
+
+        const targetAnimationKey = if (!touchesGround and movingUpward)
+            "afterjump"
+        else if (!touchesGround and movingDownward)
             "fall"
         else if (isMoving)
             "run"

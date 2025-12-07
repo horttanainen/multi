@@ -30,10 +30,9 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Look and feel
-//TODO: Create after jump up animation that is iniially just first frame of running animation. Played after jump and if player is moving upwards
-//TODO: Create fall animation that is initially just "crouching" frame of running animation. Player if player is not touching ground and is moving downwards
 //TODO: Create jumping animation 
 //TODO: Create sliding animation
+//TODO: Create wall slide animation that is played when player touches wall 
 
 //Controls
 //TODO: support controller
@@ -89,9 +88,11 @@ const Sprite = entity.Sprite;
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
+//TODO: remove explosion animation box2d objects after explosion
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
+//TODO: cleanup remaining audio clips when exiting game
 
 pub fn main() !void {
     const resources = try shared.init();
