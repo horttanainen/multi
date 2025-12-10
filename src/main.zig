@@ -46,8 +46,8 @@ const Sprite = entity.Sprite;
 //TODO: liero/worms grappling hook
 //TODO: short teleport
 //TODO: health
-//TODO: piercing bazooka ammo
-//TODO: shrapnel bazooka ammo
+//TODO: piercing rocket launcher ammo
+//TODO: shrapnel rocket launcher ammo
 //TODO: mine bazooka ammo
 
 //Music
@@ -88,6 +88,7 @@ const Sprite = entity.Sprite;
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
+//TODO: reapply physics to recreated objects that have been broken 
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
