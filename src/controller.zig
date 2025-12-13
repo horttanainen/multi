@@ -79,7 +79,6 @@ pub fn init() !void {
 
 pub fn cleanupController(ctrl: *Controller) void {
     ctrl.keyBindings.deinit(shared.allocator);
-    shared.allocator.destroy(ctrl);
 }
 
 pub fn cleanup() void {
