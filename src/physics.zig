@@ -12,7 +12,7 @@ pub fn step() !void {
     // Step box2d.c physics world
     while (time.accumulator >= config.physics.dt) {
         entity.updateStates();
-        player.updateState();
+        player.updateAllStates();
         camera.updateState();
         box2d.c.b2World_Step(resources.worldId, config.physics.dt, config.physics.subStepCount);
         time.accumulator -= config.physics.dt;

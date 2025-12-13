@@ -13,6 +13,7 @@ const level = @import("level.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
+const controller = @import("controller.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -57,7 +58,11 @@ pub fn handleGameMouseInput() !void {
 
 pub fn handleGameKeyboardInput() void {
     const currentKeyStates = sdl.getKeyboardState();
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1) {
+
+    // Global controls
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and
+        currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1)
+    {
         if (!delay.check("reloadLevel")) {
             level.reload() catch |err| {
                 std.debug.print("Error reloading level: {}\n", .{err});
@@ -66,36 +71,15 @@ pub fn handleGameKeyboardInput() void {
         }
     }
 
-    var aimDirection = vec.zero;
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.left)] == 1) {
-        aimDirection = vec.add(aimDirection, vec.west);
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.right)] == 1) {
-        aimDirection = vec.add(aimDirection, vec.east);
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.up)] == 1) {
-        aimDirection = vec.add(aimDirection, vec.north);
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.down)] == 1) {
-        aimDirection = vec.add(aimDirection, vec.south);
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
-        player.moveLeft();
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 1) {
-        player.moveRight();
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.space)] == 1) {
-        player.jump();
-    }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
         if (!delay.check("quitGame")) {
             shared.quitGame = true;
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
+
+    // NOTE: Level editor toggle moved from 'L' to 'E' to avoid conflict with Player 1 controls
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.enter() catch |err| {
                 std.debug.print("Error entering level editor: {}\n", .{err});
@@ -104,16 +88,54 @@ pub fn handleGameKeyboardInput() void {
         }
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 0 and currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 0) {
-        player.brake();
+    // Per-player controls using controller abstraction
+    for (player.players.items, controller.controllers[0..player.players.items.len]) |*p, *ctrl| {
+        handlePlayerInput(p, ctrl, currentKeyStates);
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lshift)] == 1) {
-        player.shoot() catch |err| {
+}
+
+fn handlePlayerInput(p: *player.Player, ctrl: *const controller.Controller, keyStates: []const u8) void {
+    // Movement
+    const movingLeft = controller.isActionActive(ctrl, keyStates, .move_left);
+    const movingRight = controller.isActionActive(ctrl, keyStates, .move_right);
+
+    if (movingLeft) {
+        player.moveLeft(p);
+    }
+    if (movingRight) {
+        player.moveRight(p);
+    }
+    if (!movingLeft and !movingRight) {
+        player.brake(p);
+    }
+
+    // Jump
+    if (controller.isActionActive(ctrl, keyStates, .jump)) {
+        player.jump(p);
+    }
+
+    // Aiming
+    var aimDirection = vec.zero;
+    if (controller.isActionActive(ctrl, keyStates, .aim_left)) {
+        aimDirection = vec.add(aimDirection, vec.west);
+    }
+    if (controller.isActionActive(ctrl, keyStates, .aim_right)) {
+        aimDirection = vec.add(aimDirection, vec.east);
+    }
+    if (controller.isActionActive(ctrl, keyStates, .aim_up)) {
+        aimDirection = vec.add(aimDirection, vec.north);
+    }
+    if (controller.isActionActive(ctrl, keyStates, .aim_down)) {
+        aimDirection = vec.add(aimDirection, vec.south);
+    }
+    player.aim(p, aimDirection);
+
+    // Shoot
+    if (controller.isActionActive(ctrl, keyStates, .shoot)) {
+        player.shoot(p) catch |err| {
             std.debug.print("Error shooting: {}\n", .{err});
         };
     }
-
-    player.aim(aimDirection);
 }
 
 pub fn handleLevelEditorMouseInput() void {
@@ -172,7 +194,8 @@ pub fn handleLevelEditorKeyboardInput() void {
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.l)] == 1) {
+    // NOTE: Changed from 'L' to 'E' to avoid conflict with Player 1 controls
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.exit();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);

@@ -21,6 +21,7 @@ const conv = @import("conversion.zig");
 const vec = @import("vector.zig");
 
 pub const Player = struct {
+    id: usize,
     entity: entity.Entity,
     bodyShapeId: box2d.c.b2ShapeId,
     lowerBodyShapeId: box2d.c.b2ShapeId,
@@ -29,41 +30,27 @@ pub const Player = struct {
     rightWallSensorId: box2d.c.b2ShapeId,
     weapons: []weapon.Weapon,
     selectedWeaponIndex: usize,
+
+    groundContactCount: usize,
+    leftWallContactCount: usize,
+    rightWallContactCount: usize,
+    isMoving: bool,
+    touchesGround: bool,
+    touchesWallOnLeft: bool,
+    touchesWallOnRight: bool,
+    aimDirection: vec.Vec2,
+    airJumpCounter: i32,
+    movingRight: bool,
+    crosshair: sprite.Sprite,
 };
 
-pub var maybeCrosshair: ?sprite.Sprite = null;
-
-pub var maybePlayer: ?Player = null;
-
-var groundContactCount: usize = 0;
-var leftWallContactCount: usize = 0;
-var rightWallContactCount: usize = 0;
-
-pub var isMoving: bool = false;
-pub var touchesGround: bool = false;
-pub var touchesWallOnLeft: bool = false;
-pub var touchesWallOnRight: bool = false;
-pub var aimDirection = vec.west;
-
-var airJumpCounter: i32 = 0;
-var movingRight: bool = false;
+pub var players: std.ArrayList(Player) = .{};
 
 const PlayerError = error{PlayerUnspawned};
 
-pub fn getPlayer() !Player {
-    if (maybePlayer) |p| {
-        return p;
-    }
-    return PlayerError.PlayerUnspawned;
-}
-
-pub fn drawCrosshair() !void {
-    if (maybePlayer) |*player| {
-        if (maybeCrosshair) |crosshair| {
-            const pos = calcCrosshairPosition(player.*);
-            try sprite.drawWithOptions(crosshair, pos, 0, false, false, 0);
-        }
-    }
+pub fn drawCrosshair(player: *Player) !void {
+    const pos = calcCrosshairPosition(player.*);
+    try sprite.drawWithOptions(player.crosshair, pos, 0, false, false, 0);
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
@@ -78,7 +65,7 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
         ),
     );
 
-    const crosshairDisplacement = vec.mul(vec.normalize(aimDirection), 100);
+    const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), 100);
     const crosshairDisplacementI: vec.IVec2 = .{
         .x = @intFromFloat(crosshairDisplacement.x),
         .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
@@ -86,12 +73,6 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
 
     const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
     return vec.iadd(crosshairPos, player.entity.sprite.offset);
-}
-
-pub fn updateState() void {
-    if (maybePlayer) |*player| {
-        player.entity.state = box2d.getState(player.entity.bodyId);
-    }
 }
 
 pub fn spawn(position: vec.IVec2) !void {
@@ -108,11 +89,14 @@ pub fn spawn(position: vec.IVec2) !void {
     const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
     const bodyId = try box2d.createBody(bodyDef);
 
+    const playerId = players.items.len;
+    const playerMaterialId: i32 = @intCast(playerId);
+
     const dynamicBox = box2d.c.b2MakeBox(0.1, 0.25);
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.density = 1.0;
     shapeDef.friction = config.player.movementFriction;
-    shapeDef.material = config.player.materialId;
+    shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
     shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
@@ -127,7 +111,7 @@ pub fn spawn(position: vec.IVec2) !void {
     var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
     lowerBodyShapeDef.density = 1.0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
-    lowerBodyShapeDef.material = config.player.materialId;
+    lowerBodyShapeDef.material = playerMaterialId;
     lowerBodyShapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
     lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
@@ -251,7 +235,13 @@ pub fn spawn(position: vec.IVec2) !void {
         .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
     };
 
-    maybePlayer = Player{
+    const crosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
+        .x = 1,
+        .y = 1,
+    }, vec.izero);
+
+    try players.append(shared.allocator, Player{
+        .id = playerId,
         .entity = playerEntity,
         .bodyShapeId = bodyShapeId,
         .lowerBodyShapeId = lowerBodyShapeId,
@@ -260,216 +250,252 @@ pub fn spawn(position: vec.IVec2) !void {
         .rightWallSensorId = rightWallSensorId,
         .weapons = try weapons.toOwnedSlice(),
         .selectedWeaponIndex = 0,
-    };
+        // Initialize per-player state
+        .groundContactCount = 0,
+        .leftWallContactCount = 0,
+        .rightWallContactCount = 0,
+        .isMoving = false,
+        .touchesGround = false,
+        .touchesWallOnLeft = false,
+        .touchesWallOnRight = false,
+        .aimDirection = vec.west,
+        .airJumpCounter = 0,
+        .movingRight = false,
+        .crosshair = crosshair,
+    });
 
     // Register player entity with entity system (needed for animation sprite updates)
     try entity.entities.putLocking(bodyId, playerEntity);
 
     // Register player with central animation system
     try animation.registerAnimationSet(bodyId, animations, "idle", true);
-
-    maybeCrosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
-        .x = 1,
-        .y = 1,
-    }, vec.izero);
 }
 
-pub fn updateAnimationState() void {
-    if (maybePlayer) |p| {
-        const velocity = box2d.c.b2Body_GetLinearVelocity(p.entity.bodyId);
-        const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
-        const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
+pub fn updateAnimationState(player: *Player) void {
+    const velocity = box2d.c.b2Body_GetLinearVelocity(player.entity.bodyId);
+    const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
+    const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
 
-        const targetAnimationKey = if (!touchesGround  and movingUpward)
-            "afterjump"
-        else if (!touchesGround  and movingDownward)
-            "fall"
-        else if (isMoving)
-            "run"
-        else
-            "idle";
+    const targetAnimationKey = if (!player.touchesGround and movingUpward)
+        "afterjump"
+    else if (!player.touchesGround and movingDownward)
+        "fall"
+    else if (player.isMoving)
+        "run"
+    else
+        "idle";
 
-        animation.switchAnimation(p.entity.bodyId, targetAnimationKey) catch {};
-    }
+    animation.switchAnimation(player.entity.bodyId, targetAnimationKey) catch {};
 }
 
-pub fn jump() void {
-    if (delay.check("jump")) {
+pub fn jump(player: *Player) void {
+    const delayKey = if (player.id == 0) "p0_jump" else "p1_jump";
+
+    if (delay.check(delayKey)) {
         return;
     }
 
-    if (maybePlayer) |p| {
-        groundContactCount = 0;
+    player.groundContactCount = 0;
 
-        if (!touchesGround and airJumpCounter < config.player.maxAirJumps) {
-            airJumpCounter += 1;
-        } else if (!touchesGround and airJumpCounter >= config.player.maxAirJumps) {
-            return;
-        }
+    if (!player.touchesGround and player.airJumpCounter < config.player.maxAirJumps) {
+        player.airJumpCounter += 1;
+    } else if (!player.touchesGround and player.airJumpCounter >= config.player.maxAirJumps) {
+        return;
+    }
 
-        var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -config.player.jumpImpulse };
-        if (touchesWallOnRight or touchesWallOnLeft) {
-            jumpImpulse = if (touchesWallOnLeft) box2d.c.b2Vec2{
-                .x = config.player.jumpImpulse / 2,
-                .y = -config.player.jumpImpulse,
-            } else box2d.c.b2Vec2{
-                .x = -config.player.jumpImpulse / 2,
-                .y = -config.player.jumpImpulse,
-            };
-            leftWallContactCount = 0;
-            rightWallContactCount = 0;
-        }
+    var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -config.player.jumpImpulse };
+    if (player.touchesWallOnRight or player.touchesWallOnLeft) {
+        jumpImpulse = if (player.touchesWallOnLeft) box2d.c.b2Vec2{
+            .x = config.player.jumpImpulse / 2,
+            .y = -config.player.jumpImpulse,
+        } else box2d.c.b2Vec2{
+            .x = -config.player.jumpImpulse / 2,
+            .y = -config.player.jumpImpulse,
+        };
+        player.leftWallContactCount = 0;
+        player.rightWallContactCount = 0;
+    }
 
-        box2d.c.b2Body_ApplyLinearImpulseToCenter(p.entity.bodyId, jumpImpulse, true);
-        delay.action("jump", config.jumpDelayMs);
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, jumpImpulse, true);
+    delay.action(delayKey, config.jumpDelayMs);
+}
+
+pub fn brake(player: *Player) void {
+    player.isMoving = false;
+}
+
+pub fn moveLeft(player: *Player) void {
+    player.movingRight = false;
+    applyForce(player, box2d.c.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
+}
+
+pub fn moveRight(player: *Player) void {
+    player.movingRight = true;
+    applyForce(player, box2d.c.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
+}
+
+fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
+    player.isMoving = true;
+    box2d.c.b2Body_ApplyForceToCenter(player.entity.bodyId, force, true);
+}
+
+pub fn clampSpeed(player: *Player) void {
+    var velocity = box2d.c.b2Body_GetLinearVelocity(player.entity.bodyId);
+    if (velocity.x > config.player.maxMovementSpeed) {
+        velocity.x = config.player.maxMovementSpeed;
+        box2d.c.b2Body_SetLinearVelocity(player.entity.bodyId, velocity);
+    } else if (velocity.x < -config.player.maxMovementSpeed) {
+        velocity.x = -config.player.maxMovementSpeed;
+        box2d.c.b2Body_SetLinearVelocity(player.entity.bodyId, velocity);
     }
 }
 
-pub fn brake() void {
-    isMoving = false;
-}
+/// Get friction for a player based on their material ID and movement state
+pub fn getFrictionForMaterial(materialId: c_int) f32 {
+    const id: usize = @intCast(materialId);
 
-pub fn moveLeft() void {
-    movingRight = false;
-    applyForce(box2d.c.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
-}
-
-pub fn moveRight() void {
-    movingRight = true;
-    applyForce(box2d.c.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
-}
-
-fn applyForce(force: box2d.c.b2Vec2) void {
-    isMoving = true;
-    if (maybePlayer) |p| {
-        box2d.c.b2Body_ApplyForceToCenter(p.entity.bodyId, force, true);
+    if  (id < 0 or id >= players.items.len) {
+        // Not a player material, return default
+        return 0.5;
     }
+    const p = &players.items[id];
+    return if (p.isMoving) config.player.movementFriction else config.player.restingFriction;
 }
 
-pub fn clampSpeed() void {
-    if (maybePlayer) |p| {
-        var velocity = box2d.c.b2Body_GetLinearVelocity(p.entity.bodyId);
-        if (velocity.x > config.player.maxMovementSpeed) {
-            velocity.x = config.player.maxMovementSpeed;
-            box2d.c.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
-        } else if (velocity.x < -config.player.maxMovementSpeed) {
-            velocity.x = -config.player.maxMovementSpeed;
-            box2d.c.b2Body_SetLinearVelocity(p.entity.bodyId, velocity);
-        }
-    }
-}
-
-
-pub fn checkSensors() !void {
+pub fn checkSensors(player: *Player) !void {
     const resources = try shared.getResources();
-    if (maybePlayer) |p| {
-        const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
+    const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
 
-        for (0..@intCast(sensorEvents.beginCount)) |i| {
-            const e = sensorEvents.beginEvents[i];
+    for (0..@intCast(sensorEvents.beginCount)) |i| {
+        const e = sensorEvents.beginEvents[i];
 
-            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
-                continue;
-            }
-            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
-                continue;
-            }
-
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                airJumpCounter = 0;
-                groundContactCount += 1;
-            }
-
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
-                airJumpCounter = 0;
-                leftWallContactCount += 1;
-            }
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
-                airJumpCounter = 0;
-                rightWallContactCount += 1;
-            }
+        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.bodyShapeId)) {
+            continue;
+        }
+        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.lowerBodyShapeId)) {
+            continue;
         }
 
-        for (0..@intCast(sensorEvents.endCount)) |i| {
-            const e = sensorEvents.endEvents[i];
-
-            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
-                continue;
-            }
-            if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.lowerBodyShapeId)) {
-                continue;
-            }
-
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.footSensorShapeId)) {
-                if (groundContactCount > 0) {
-                    groundContactCount -= 1;
-                }
-            }
-
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.leftWallSensorId)) {
-                if (leftWallContactCount > 0) {
-                    leftWallContactCount -= 1;
-                }
-            }
-            if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, p.rightWallSensorId)) {
-                if (rightWallContactCount > 0) {
-                    rightWallContactCount -= 1;
-                }
-            }
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
+            player.airJumpCounter = 0;
+            player.groundContactCount += 1;
         }
-        touchesGround = groundContactCount > 0;
-        touchesWallOnRight = rightWallContactCount > 0;
-        touchesWallOnLeft = leftWallContactCount > 0;
+
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.leftWallSensorId)) {
+            player.airJumpCounter = 0;
+            player.leftWallContactCount += 1;
+        }
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.rightWallSensorId)) {
+            player.airJumpCounter = 0;
+            player.rightWallContactCount += 1;
+        }
     }
+
+    for (0..@intCast(sensorEvents.endCount)) |i| {
+        const e = sensorEvents.endEvents[i];
+
+        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.bodyShapeId)) {
+            continue;
+        }
+        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.lowerBodyShapeId)) {
+            continue;
+        }
+
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
+            if (player.groundContactCount > 0) {
+                player.groundContactCount -= 1;
+            }
+        }
+
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.leftWallSensorId)) {
+            if (player.leftWallContactCount > 0) {
+                player.leftWallContactCount -= 1;
+            }
+        }
+        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.rightWallSensorId)) {
+            if (player.rightWallContactCount > 0) {
+                player.rightWallContactCount -= 1;
+            }
+        }
+    }
+    player.touchesGround = player.groundContactCount > 0;
+    player.touchesWallOnRight = player.rightWallContactCount > 0;
+    player.touchesWallOnLeft = player.leftWallContactCount > 0;
 }
 
-pub fn aim(direction: vec.Vec2) void {
+pub fn aim(player: *Player, direction: vec.Vec2) void {
     var dir = direction;
     if (vec.equals(dir, vec.zero)) {
-        dir = vec.add(dir, if (movingRight) vec.east else vec.west);
+        dir = vec.add(dir, if (player.movingRight) vec.east else vec.west);
     }
-    aimDirection = dir;
+    player.aimDirection = dir;
 
     // Update entity flip based on aim direction
-    if (maybePlayer) |p| {
-        const maybeEntity = entity.entities.getPtrLocking(p.entity.bodyId);
-        if (maybeEntity) |ent| {
-            ent.flipEntityHorizontally = dir.x > 0;
-        }
+    const maybeEntity = entity.entities.getPtrLocking(player.entity.bodyId);
+    if (maybeEntity) |ent| {
+        ent.flipEntityHorizontally = dir.x > 0;
     }
 }
 
-pub fn shoot() !void {
-    if (maybePlayer) |*player| {
-        if (player.weapons.len == 0) return;
+pub fn shoot(player: *Player) !void {
+    if (player.weapons.len == 0) return;
 
-        const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-        const crosshairPos = calcCrosshairPosition(player.*);
-        const position = camera.relativePositionForCreating(crosshairPos);
+    const selectedWeapon = player.weapons[player.selectedWeaponIndex];
+    const crosshairPos = calcCrosshairPosition(player.*);
+    const position = camera.relativePositionForCreating(crosshairPos);
 
-        try weapon.shoot(selectedWeapon, position, aimDirection);
+    try weapon.shoot(selectedWeapon, position, player.aimDirection);
 
-        const recoilImpulse = vec.mul(vec.normalize(.{
-            .x = aimDirection.x,
-            .y = -aimDirection.y,
-        }), selectedWeapon.impulse * -0.1);
+    const recoilImpulse = vec.mul(vec.normalize(.{
+        .x = player.aimDirection.x,
+        .y = -player.aimDirection.y,
+    }), selectedWeapon.impulse * -0.1);
 
-        box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
+}
+
+// Iteration helpers for operating on all players
+pub fn updateAllStates() void {
+    for (players.items) |*p| {
+        p.entity.state = box2d.getState(p.entity.bodyId);
+    }
+}
+
+pub fn updateAllAnimationStates() void {
+    for (players.items) |*p| {
+        updateAnimationState(p);
+    }
+}
+
+pub fn checkAllSensors() !void {
+    for (players.items) |*p| {
+        try checkSensors(p);
+    }
+}
+
+pub fn clampAllSpeeds() void {
+    for (players.items) |*p| {
+        clampSpeed(p);
+    }
+}
+
+pub fn drawAllCrosshairs() !void {
+    for (players.items) |*p| {
+        try drawCrosshair(p);
     }
 }
 
 pub fn cleanup() void {
-    if (maybePlayer) |*player| {
+    for (players.items) |*p| {
         // Remove player entity from entity system
-        _ = entity.entities.fetchSwapRemoveLocking(player.entity.bodyId);
+        _ = entity.entities.fetchSwapRemoveLocking(p.entity.bodyId);
 
-        shared.allocator.free(player.weapons);
-        box2d.c.b2DestroyBody(player.entity.bodyId);
-        shared.allocator.free(player.entity.shapeIds);
+        // Cleanup player resources
+        shared.allocator.free(p.weapons);
+        box2d.c.b2DestroyBody(p.entity.bodyId);
+        shared.allocator.free(p.entity.shapeIds);
+        sprite.cleanup(p.crosshair);
     }
-    if (maybeCrosshair) |crosshair| {
-        sprite.cleanup(crosshair);
-    }
-    maybeCrosshair = null;
-    maybePlayer = null;
+
+    players.clearAndFree(shared.allocator);
 }

@@ -66,7 +66,9 @@ pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
 }
 
 pub fn followPlayer() void {
-    if (player.maybePlayer) |p| {
+    // Follow the first player
+    if (player.players.items.len > 0) {
+        const p = &player.players.items[0];
         move(entity.getPosition(p.entity));
     }
 }

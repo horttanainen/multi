@@ -144,7 +144,15 @@ fn loadByName(levelName: []const u8) !void {
 
     size = levelToDeserialize.size;
 
+    // Spawn Player 1 at spawn point
     try player.spawn(spawnLocation);
+
+    // Spawn Player 2 at offset position
+    const p2Position = vec.IVec2{
+        .x = spawnLocation.x + 10,
+        .y = spawnLocation.y,
+    };
+    try player.spawn(p2Position);
 }
 
 pub fn reload() !void {

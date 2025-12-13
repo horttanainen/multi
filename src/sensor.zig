@@ -45,9 +45,10 @@ pub fn createGoalSensorFromImg(position: vec.Vec2, s: sprite.Sprite) !void {
 pub fn checkGoal() !void {
     const resources = try shared.getResources();
     if (maybeGoalSensor) |goalSensor| {
-        if (player.maybePlayer) |p| {
-            const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
+        const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
 
+        // Check if any player touches the goal
+        for (player.players.items) |p| {
             for (0..@intCast(sensorEvents.beginCount)) |i| {
                 const e = sensorEvents.beginEvents[i];
 

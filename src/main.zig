@@ -21,6 +21,7 @@ const frictionCallback = @import("friction.zig").frictionCallback;
 const debug = @import("debug.zig");
 
 const player = @import("player.zig");
+const controller = @import("controller.zig");
 
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
@@ -97,6 +98,9 @@ pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
 
+    try controller.init();
+    defer controller.cleanup();
+
     try camera.spawn(.{ .x = 0, .y = 0 });
     try level.next();
     defer level.cleanup();
@@ -135,17 +139,17 @@ fn gameLoop() !void {
         try level.next();
     }
 
-    player.clampSpeed();
+    player.clampAllSpeeds();
 
     try projectile.checkContacts();
     try projectile.cleanupShrapnel();
 
     // Update player animation state, then animate all animations
-    player.updateAnimationState();
+    player.updateAllAnimationStates();
     animation.animate();
 
     entity.cleanupEntities();
-    try player.checkSensors();
+    try player.checkAllSensors();
     try sensor.checkGoal();
 
     camera.followPlayer();
