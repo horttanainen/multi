@@ -12,6 +12,7 @@ const camera = @import("camera.zig");
 const sprite = @import("sprite.zig");
 const background = @import("background.zig");
 const animation = @import("animation.zig");
+const controller = @import("controller.zig");
 
 const conv = @import("conversion.zig");
 
@@ -145,14 +146,17 @@ fn loadByName(levelName: []const u8) !void {
     size = levelToDeserialize.size;
 
     // Spawn Player 1 at spawn point
-    try player.spawn(spawnLocation);
+    const playerId1 = try player.spawn(spawnLocation);
+
+    try controller.createControllerForPlayer(playerId1);
 
     // Spawn Player 2 at offset position
     const p2Position = vec.IVec2{
         .x = spawnLocation.x + 10,
         .y = spawnLocation.y,
     };
-    try player.spawn(p2Position);
+    const playerId2 = try player.spawn(p2Position);
+    try controller.createControllerForPlayer(playerId2);
 }
 
 pub fn reload() !void {

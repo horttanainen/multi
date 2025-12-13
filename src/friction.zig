@@ -6,14 +6,15 @@ pub fn frictionCallback(frictionA: f32, materialA: c_int, frictionB: f32, materi
     var fA = frictionA;
     var fB = frictionB;
 
-    // Check if material A is a player (material IDs 0, 1, 2, ... correspond to player IDs)
-    if (materialA >= 0 and materialA < player.players.items.len) {
-        fA = player.getFrictionForMaterial(materialA);
+    const maybePlayerA = player.players.getPtr(@intCast(materialA));
+    const maybePlayerB = player.players.getPtr(@intCast(materialB));
+
+    if (maybePlayerA) |p| {
+        fA = player.getFrictionForPlayer(p);
     }
 
-    // Check if material B is a player
-    if (materialB >= 0 and materialB < player.players.items.len) {
-        fB = player.getFrictionForMaterial(materialB);
+    if (maybePlayerB) |p| {
+        fB = player.getFrictionForPlayer(p);
     }
 
     return @sqrt(fA * fB);

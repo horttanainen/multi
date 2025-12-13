@@ -5,7 +5,7 @@ pub const window = .{
     .height = 1200,
 };
 
-pub const debug = false;
+pub const debug = true;
 pub const debugLog = false;
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
@@ -31,7 +31,6 @@ pub const cannonFireSoundDurationMs = 10000;
 pub const cannonHitSoundDurationMs = 10000;
 
 pub const Player = struct {
-    materialId: i32,
     restingFriction: f32,
     movementFriction: f32,
     sidewaysMovementForce: f32,
@@ -41,7 +40,6 @@ pub const Player = struct {
 };
 
 pub const player: Player = .{
-    .materialId = 666,
     .restingFriction = 100,
     .movementFriction = 0.1,
     .sidewaysMovementForce = 5,

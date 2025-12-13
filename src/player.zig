@@ -44,8 +44,7 @@ pub const Player = struct {
     crosshair: sprite.Sprite,
 };
 
-pub var players: std.ArrayList(Player) = .{};
-
+pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
 const PlayerError = error{PlayerUnspawned};
 
 pub fn drawCrosshair(player: *Player) !void {
@@ -75,7 +74,7 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
     return vec.iadd(crosshairPos, player.entity.sprite.offset);
 }
 
-pub fn spawn(position: vec.IVec2) !void {
+pub fn spawn(position: vec.IVec2) !usize {
     const resources = try shared.getResources();
     const surface = try image.load(shared.lieroImgSrc);
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
@@ -89,7 +88,7 @@ pub fn spawn(position: vec.IVec2) !void {
     const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
     const bodyId = try box2d.createBody(bodyDef);
 
-    const playerId = players.items.len;
+    const playerId = players.values().len;
     const playerMaterialId: i32 = @intCast(playerId);
 
     const dynamicBox = box2d.c.b2MakeBox(0.1, 0.25);
@@ -240,7 +239,7 @@ pub fn spawn(position: vec.IVec2) !void {
         .y = 1,
     }, vec.izero);
 
-    try players.append(shared.allocator, Player{
+    try players.put(shared.allocator, playerId, Player{
         .id = playerId,
         .entity = playerEntity,
         .bodyShapeId = bodyShapeId,
@@ -269,6 +268,7 @@ pub fn spawn(position: vec.IVec2) !void {
 
     // Register player with central animation system
     try animation.registerAnimationSet(bodyId, animations, "idle", true);
+    return playerId;
 }
 
 pub fn updateAnimationState(player: *Player) void {
@@ -350,16 +350,8 @@ pub fn clampSpeed(player: *Player) void {
     }
 }
 
-/// Get friction for a player based on their material ID and movement state
-pub fn getFrictionForMaterial(materialId: c_int) f32 {
-    const id: usize = @intCast(materialId);
-
-    if  (id < 0 or id >= players.items.len) {
-        // Not a player material, return default
-        return 0.5;
-    }
-    const p = &players.items[id];
-    return if (p.isMoving) config.player.movementFriction else config.player.restingFriction;
+pub fn getFrictionForPlayer(player: *Player) f32 {
+    return if (player.isMoving) config.player.movementFriction else config.player.restingFriction;
 }
 
 pub fn checkSensors(player: *Player) !void {
@@ -456,37 +448,37 @@ pub fn shoot(player: *Player) !void {
 
 // Iteration helpers for operating on all players
 pub fn updateAllStates() void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         p.entity.state = box2d.getState(p.entity.bodyId);
     }
 }
 
 pub fn updateAllAnimationStates() void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         updateAnimationState(p);
     }
 }
 
 pub fn checkAllSensors() !void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         try checkSensors(p);
     }
 }
 
 pub fn clampAllSpeeds() void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         clampSpeed(p);
     }
 }
 
 pub fn drawAllCrosshairs() !void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         try drawCrosshair(p);
     }
 }
 
 pub fn cleanup() void {
-    for (players.items) |*p| {
+    for (players.values()) |*p| {
         // Remove player entity from entity system
         _ = entity.entities.fetchSwapRemoveLocking(p.entity.bodyId);
 

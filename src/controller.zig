@@ -15,26 +15,28 @@ pub const GameAction = enum {
     shoot,
 };
 
+pub var keyBindingSets: std.ArrayList(std.AutoHashMapUnmanaged(sdl.Scancode, GameAction)) = .{};
+
 /// Controller maps keys to game actions for a specific player (data only)
 pub const Controller = struct {
     playerId: usize,
-    keyBindings: std.AutoHashMap(sdl.Scancode, GameAction),
+    keyBindings: std.AutoHashMapUnmanaged(sdl.Scancode, GameAction),
 };
 
 /// Global controller registry
-pub var controllers: [2]Controller = undefined;
+pub var controllers: std.ArrayList(Controller) = .{};
 
-/// Create a new controller for a player
-pub fn createController(playerId: usize) !Controller {
-    return Controller{
-        .playerId = playerId,
-        .keyBindings = std.AutoHashMap(sdl.Scancode, GameAction).init(shared.allocator),
-    };
-}
+pub fn createControllerForPlayer(playerId: usize) !void {
+    const maybeKeyBindingSet = keyBindingSets.pop();
 
-/// Clean up a controller's resources
-pub fn destroyController(ctrl: *Controller) void {
-    ctrl.keyBindings.deinit();
+    if (maybeKeyBindingSet) |keyBindingSet| {
+        const controller: Controller = .{
+            .playerId = playerId,
+            .keyBindings = keyBindingSet,
+        };
+
+        try controllers.append(shared.allocator, controller);
+    }
 }
 
 /// Check if an action is currently active on a controller
@@ -50,33 +52,40 @@ pub fn isActionActive(ctrl: *const Controller, keyStates: []const u8, action: Ga
     return false;
 }
 
-/// Initialize default controller bindings
 pub fn init() !void {
-    // Player 0 (WASD + Arrow keys for aim + LShift for shoot)
-    controllers[0] = try createController(0);
-    try controllers[0].keyBindings.put(.a, .move_left);
-    try controllers[0].keyBindings.put(.d, .move_right);
-    try controllers[0].keyBindings.put(.space, .jump);
-    try controllers[0].keyBindings.put(.left, .aim_left);
-    try controllers[0].keyBindings.put(.right, .aim_right);
-    try controllers[0].keyBindings.put(.up, .aim_up);
-    try controllers[0].keyBindings.put(.down, .aim_down);
-    try controllers[0].keyBindings.put(.lshift, .shoot);
+    var keyBindings1: std.AutoHashMapUnmanaged(sdl.Scancode, GameAction) = .{};
+    try keyBindings1.put(shared.allocator, .a, .move_left);
+    try keyBindings1.put(shared.allocator, .d, .move_right);
+    try keyBindings1.put(shared.allocator, .space, .jump);
+    try keyBindings1.put(shared.allocator, .left, .aim_left);
+    try keyBindings1.put(shared.allocator, .right, .aim_right);
+    try keyBindings1.put(shared.allocator, .up, .aim_up);
+    try keyBindings1.put(shared.allocator, .down, .aim_down);
+    try keyBindings1.put(shared.allocator, .lshift, .shoot);
 
-    // Player 1 (IJKL for move + TFGH for aim + RShift for shoot)
-    controllers[1] = try createController(1);
-    try controllers[1].keyBindings.put(.j, .move_left);
-    try controllers[1].keyBindings.put(.l, .move_right);
-    try controllers[1].keyBindings.put(.i, .jump);
-    try controllers[1].keyBindings.put(.f, .aim_left);
-    try controllers[1].keyBindings.put(.h, .aim_right);
-    try controllers[1].keyBindings.put(.t, .aim_up);
-    try controllers[1].keyBindings.put(.g, .aim_down);
-    try controllers[1].keyBindings.put(.rshift, .shoot);
+    var keyBindings2: std.AutoHashMapUnmanaged(sdl.Scancode, GameAction) = .{};
+    try keyBindings2.put(shared.allocator, .j, .move_left);
+    try keyBindings2.put(shared.allocator, .l, .move_right);
+    try keyBindings2.put(shared.allocator, .i, .jump);
+    try keyBindings2.put(shared.allocator, .f, .aim_left);
+    try keyBindings2.put(shared.allocator, .h, .aim_right);
+    try keyBindings2.put(shared.allocator, .t, .aim_up);
+    try keyBindings2.put(shared.allocator, .g, .aim_down);
+    try keyBindings2.put(shared.allocator, .rshift, .shoot);
+
+    try keyBindingSets.append(shared.allocator, keyBindings2);
+    try keyBindingSets.append(shared.allocator, keyBindings1);
+}
+
+pub fn cleanupController(ctrl: *Controller) void {
+    ctrl.keyBindings.deinit(shared.allocator);
+    shared.allocator.destroy(ctrl);
 }
 
 pub fn cleanup() void {
-    for (&controllers) |*ctrl| {
-        destroyController(ctrl);
+    for (controllers.items) |*ctrl| {
+        cleanupController(ctrl);
     }
+    controllers.deinit(shared.allocator);
+    keyBindingSets.deinit(shared.allocator);
 }

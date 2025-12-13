@@ -48,7 +48,7 @@ pub fn checkGoal() !void {
         const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
 
         // Check if any player touches the goal
-        for (player.players.items) |p| {
+        for (player.players.values()) |p| {
             for (0..@intCast(sensorEvents.beginCount)) |i| {
                 const e = sensorEvents.beginEvents[i];
 

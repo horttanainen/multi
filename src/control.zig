@@ -89,8 +89,12 @@ pub fn handleGameKeyboardInput() void {
     }
 
     // Per-player controls using controller abstraction
-    for (player.players.items, controller.controllers[0..player.players.items.len]) |*p, *ctrl| {
-        handlePlayerInput(p, ctrl, currentKeyStates);
+    for (controller.controllers.items) |*ctrl| {
+        const maybePlayer = player.players.getPtr(ctrl.playerId);
+
+        if (maybePlayer) |p| {
+            handlePlayerInput(p, ctrl, currentKeyStates);
+        }
     }
 }
 
