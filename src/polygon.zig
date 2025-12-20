@@ -47,7 +47,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     }
 
     // 3. simplify the polygon.
-    const epsilonArea: f32 = 0.01 * @as(f32, @floatFromInt(width * height));
+    const epsilonArea: f32 = 0.04 * @as(f32, @floatFromInt(width * height));
     // std.debug.print("epsilonArea: {d}\n", .{epsilonArea});
     const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
