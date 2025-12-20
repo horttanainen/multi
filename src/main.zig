@@ -35,7 +35,6 @@ const Sprite = entity.Sprite;
 //TODO: Create landing animation
 //TODO: Create sliding animation
 //TODO: Create wall slide animation that is played when player touches wall 
-//TODO: make players different colour
 
 //Controls
 //TODO: support controller
