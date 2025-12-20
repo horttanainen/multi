@@ -208,7 +208,6 @@ pub fn cleanup() void {
     for (entities.map.values()) |entity| {
         cleanupOne(entity);
     }
-    cleanupEntities();
     entities.mutex.unlock();
     entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator));
 }

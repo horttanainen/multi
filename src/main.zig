@@ -75,8 +75,8 @@ const Sprite = entity.Sprite;
 //TODO: end credits
 
 //Multiplayer:
-//TODO: investigate how to sync games when running on different machines
 //TODO: add localhost multiplayer
+//TODO: investigate how to sync games when running on different machines
 //TODO: add real multiplayer
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
@@ -87,10 +87,11 @@ const Sprite = entity.Sprite;
 //TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
 
 //Bugs:
+//TODO: investigate how to fix halved fps due to having split screen
 //TODO: Level json creation broke during 0.15 update
 //TODO: reapply physics to recreated objects that have been broken 
-//TODO: investigate how to fix halved fps due to having split screen
-//TODO: box2d objects seem to not get destroyed properly after split screen
+
+//NOTE: probably the fps issue goes away when we move to real client server model due to having multiple processes or threads
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
@@ -149,6 +150,7 @@ fn gameLoop() !void {
     player.updateAllAnimationStates();
     animation.animate();
 
+    entity.cleanupEntities();
     try player.checkAllSensors();
     try sensor.checkGoal();
 
