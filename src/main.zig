@@ -75,7 +75,6 @@ const Sprite = entity.Sprite;
 //TODO: end credits
 
 //Multiplayer:
-//TODO: add splitscreen multiplayer
 //TODO: investigate how to sync games when running on different machines
 //TODO: add localhost multiplayer
 //TODO: add real multiplayer
@@ -90,6 +89,7 @@ const Sprite = entity.Sprite;
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
 //TODO: reapply physics to recreated objects that have been broken 
+//TODO: investigate how to fix halved fps due to having split screen
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
