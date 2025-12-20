@@ -69,7 +69,10 @@ pub fn followPlayer() void {
     const maybeP = player.players.get(0);
     // Follow the first player for now
     if (maybeP) |p| {
-        move(entity.getPosition(p.entity));
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            move(entity.getPosition(ent.*));
+        }
     }
 }
 

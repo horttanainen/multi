@@ -22,7 +22,7 @@ const vec = @import("vector.zig");
 
 pub const Player = struct {
     id: usize,
-    entity: entity.Entity,
+    bodyId: box2d.c.b2BodyId,
     bodyShapeId: box2d.c.b2ShapeId,
     lowerBodyShapeId: box2d.c.b2ShapeId,
     footSensorShapeId: box2d.c.b2ShapeId,
@@ -53,25 +53,29 @@ pub fn drawCrosshair(player: *Player) !void {
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
-    const currentState = box2d.getState(player.entity.bodyId);
-    const state = box2d.getInterpolatedState(player.entity.state, currentState);
-    const playerPos = camera.relativePosition(
-        conv.m2PixelPos(
-            state.pos.x,
-            state.pos.y,
-            player.entity.sprite.sizeM.x / player.entity.sprite.scale.x,
-            player.entity.sprite.sizeM.y / player.entity.sprite.scale.y,
-        ),
-    );
+    const maybeEntity = entity.getEntity(player.bodyId);
+    if (maybeEntity) |ent| {
+        const currentState = box2d.getState(player.bodyId);
+        const state = box2d.getInterpolatedState(ent.state, currentState);
+        const playerPos = camera.relativePosition(
+            conv.m2PixelPos(
+                state.pos.x,
+                state.pos.y,
+                player.crosshair.sizeM.x / player.crosshair.scale.x,
+                player.crosshair.sizeM.y / player.crosshair.scale.y,
+            ),
+        );
 
-    const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), 100);
-    const crosshairDisplacementI: vec.IVec2 = .{
-        .x = @intFromFloat(crosshairDisplacement.x),
-        .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
-    };
+        const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), 100);
+        const crosshairDisplacementI: vec.IVec2 = .{
+            .x = @intFromFloat(crosshairDisplacement.x),
+            .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
+        };
 
-    const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
-    return vec.iadd(crosshairPos, player.entity.sprite.offset);
+        const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
+        return vec.iadd(crosshairPos, ent.sprite.offset);
+    }
+    return vec.izero; // Fallback if entity not found
 }
 
 pub fn spawn(position: vec.IVec2) !usize {
@@ -242,7 +246,7 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     try players.put(shared.allocator, playerId, Player{
         .id = playerId,
-        .entity = playerEntity,
+        .bodyId = bodyId,
         .bodyShapeId = bodyShapeId,
         .lowerBodyShapeId = lowerBodyShapeId,
         .footSensorShapeId = footSensorShapeId,
@@ -273,7 +277,7 @@ pub fn spawn(position: vec.IVec2) !usize {
 }
 
 pub fn updateAnimationState(player: *Player) void {
-    const velocity = box2d.c.b2Body_GetLinearVelocity(player.entity.bodyId);
+    const velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
     const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
     const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
 
@@ -286,7 +290,7 @@ pub fn updateAnimationState(player: *Player) void {
     else
         "idle";
 
-    animation.switchAnimation(player.entity.bodyId, targetAnimationKey) catch {};
+    animation.switchAnimation(player.bodyId, targetAnimationKey) catch {};
 }
 
 pub fn jump(player: *Player) void {
@@ -317,7 +321,7 @@ pub fn jump(player: *Player) void {
         player.rightWallContactCount = 0;
     }
 
-    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, jumpImpulse, true);
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, jumpImpulse, true);
     delay.action(delayKey, config.jumpDelayMs);
 }
 
@@ -337,17 +341,17 @@ pub fn moveRight(player: *Player) void {
 
 fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
     player.isMoving = true;
-    box2d.c.b2Body_ApplyForceToCenter(player.entity.bodyId, force, true);
+    box2d.c.b2Body_ApplyForceToCenter(player.bodyId, force, true);
 }
 
 pub fn clampSpeed(player: *Player) void {
-    var velocity = box2d.c.b2Body_GetLinearVelocity(player.entity.bodyId);
+    var velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
     if (velocity.x > config.player.maxMovementSpeed) {
         velocity.x = config.player.maxMovementSpeed;
-        box2d.c.b2Body_SetLinearVelocity(player.entity.bodyId, velocity);
+        box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
     } else if (velocity.x < -config.player.maxMovementSpeed) {
         velocity.x = -config.player.maxMovementSpeed;
-        box2d.c.b2Body_SetLinearVelocity(player.entity.bodyId, velocity);
+        box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
     }
 }
 
@@ -424,7 +428,7 @@ pub fn aim(player: *Player, direction: vec.Vec2) void {
     player.aimDirection = dir;
 
     // Update entity flip based on aim direction
-    const maybeEntity = entity.entities.getPtrLocking(player.entity.bodyId);
+    const maybeEntity = entity.entities.getPtrLocking(player.bodyId);
     if (maybeEntity) |ent| {
         ent.flipEntityHorizontally = dir.x > 0;
     }
@@ -444,13 +448,13 @@ pub fn shoot(player: *Player) !void {
         .y = -player.aimDirection.y,
     }), selectedWeapon.impulse * -0.1);
 
-    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, vec.toBox2d(recoilImpulse), true);
 }
 
 pub fn setColor(playerId: usize, color: sprite.Color) void {
     const maybePlayer = players.getPtr(playerId);
     if (maybePlayer) |player| {
-        const maybeE = entity.getEntity(player.entity.bodyId);
+        const maybeE = entity.getEntity(player.bodyId);
         if (maybeE) |e| {
             e.color = color;
         }
@@ -460,7 +464,10 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
 // Iteration helpers for operating on all players
 pub fn updateAllStates() void {
     for (players.values()) |*p| {
-        p.entity.state = box2d.getState(p.entity.bodyId);
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            ent.state = box2d.getState(p.bodyId);
+        }
     }
 }
 
@@ -491,12 +498,14 @@ pub fn drawAllCrosshairs() !void {
 pub fn cleanup() void {
     for (players.values()) |*p| {
         // Remove player entity from entity system
-        _ = entity.entities.fetchSwapRemoveLocking(p.entity.bodyId);
+        const maybeEntity = entity.entities.fetchSwapRemoveLocking(p.bodyId);
 
         // Cleanup player resources
         shared.allocator.free(p.weapons);
-        box2d.c.b2DestroyBody(p.entity.bodyId);
-        shared.allocator.free(p.entity.shapeIds);
+        box2d.c.b2DestroyBody(p.bodyId);
+        if (maybeEntity) |ent| {
+            shared.allocator.free(ent.value.shapeIds);
+        }
         sprite.cleanup(p.crosshair);
     }
 
