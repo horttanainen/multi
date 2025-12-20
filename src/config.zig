@@ -37,6 +37,7 @@ pub const Player = struct {
     jumpImpulse: f32,
     maxAirJumps: i32,
     maxMovementSpeed: f32,
+    materialOffset: i32,
 };
 
 pub const player: Player = .{
@@ -46,6 +47,7 @@ pub const player: Player = .{
     .jumpImpulse = 1.7,
     .maxAirJumps = 1,
     .maxMovementSpeed = 6,
+    .materialOffset = 600,
 };
 
 pub const levelEditorCameraMovementForce = 10;

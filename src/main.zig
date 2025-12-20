@@ -16,7 +16,7 @@ const input = @import("input.zig");
 const camera = @import("camera.zig");
 const animation = @import("animation.zig");
 
-const frictionCallback = @import("friction.zig").frictionCallback;
+const friction = @import("friction.zig");
 
 const debug = @import("debug.zig");
 
@@ -108,7 +108,7 @@ pub fn main() !void {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
 
-    box2d.c.b2World_SetFrictionCallback(resources.worldId, &frictionCallback);
+    box2d.c.b2World_SetFrictionCallback(resources.worldId, &friction.callback);
 
     while (!shared.quitGame) {
         time.frameBegin();

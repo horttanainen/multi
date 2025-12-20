@@ -89,7 +89,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const bodyId = try box2d.createBody(bodyDef);
 
     const playerId = players.values().len;
-    const playerMaterialId: i32 = @intCast(playerId);
+    const playerMaterialId: i32 = @intCast(playerId + config.player.materialOffset);
 
     const dynamicBox = box2d.c.b2MakeBox(0.1, 0.25);
     var shapeDef = box2d.c.b2DefaultShapeDef();
