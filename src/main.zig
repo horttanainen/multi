@@ -90,6 +90,7 @@ const Sprite = entity.Sprite;
 //TODO: Level json creation broke during 0.15 update
 //TODO: reapply physics to recreated objects that have been broken 
 //TODO: investigate how to fix halved fps due to having split screen
+//TODO: box2d objects seem to not get destroyed properly after split screen
 
 //QA:
 //TODO: register and registerAnimatonSet should share same code
