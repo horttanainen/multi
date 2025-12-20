@@ -5,11 +5,15 @@ const shared = @import("shared.zig");
 const config = @import("config.zig");
 const time = @import("time.zig");
 const text = @import("text.zig");
+const viewport = @import("viewport.zig");
 
 pub fn drawMode() !void {
     const mode = if (shared.editingLevel) "LEVEL EDITOR" else "PLAY";
 
-    try text.writeAt(mode, .{ .x = config.window.width / 2, .y = 2 });
+    const vp = viewport.activeViewport;
+
+    const xPos = @divFloor(vp.width, 2);
+    try text.writeAt(mode, .{ .x = xPos, .y = 2 });
 }
 
 pub fn drawFps() !void {
@@ -17,6 +21,9 @@ pub fn drawFps() !void {
 
     const fps = time.calculateFps();
 
+    const vp = viewport.activeViewport;
+
     const fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{fps});
-    try text.writeAt(fpsText, .{ .x = config.window.width - 90, .y = 2 });
+    const xPos = vp.width - 90;
+    try text.writeAt(fpsText, .{ .x = xPos, .y = 2 });
 }

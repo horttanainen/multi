@@ -13,6 +13,7 @@ const time = @import("time.zig");
 const audio = @import("audio.zig");
 const weapon = @import("weapon.zig");
 const projectile = @import("projectile.zig");
+const viewport = @import("viewport.zig");
 
 const config = @import("config.zig");
 
@@ -23,6 +24,7 @@ const vec = @import("vector.zig");
 pub const Player = struct {
     id: usize,
     bodyId: box2d.c.b2BodyId,
+    cameraId: usize,
     bodyShapeId: box2d.c.b2ShapeId,
     lowerBodyShapeId: box2d.c.b2ShapeId,
     footSensorShapeId: box2d.c.b2ShapeId,
@@ -244,6 +246,10 @@ pub fn spawn(position: vec.IVec2) !usize {
         .y = 1,
     }, vec.izero);
 
+    // Create camera for this player
+    const cameraId = try camera.spawnForPlayer(playerId, position);
+    try viewport.addViewportForCamera(cameraId);
+
     try players.put(shared.allocator, playerId, Player{
         .id = playerId,
         .bodyId = bodyId,
@@ -266,6 +272,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .airJumpCounter = 0,
         .movingRight = false,
         .crosshair = crosshair,
+        .cameraId = cameraId,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -499,6 +506,8 @@ pub fn cleanup() void {
     for (players.values()) |*p| {
         // Remove player entity from entity system
         const maybeEntity = entity.entities.fetchSwapRemoveLocking(p.bodyId);
+
+        camera.destroyCamera(p.cameraId);
 
         // Cleanup player resources
         shared.allocator.free(p.weapons);

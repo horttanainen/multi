@@ -11,6 +11,7 @@ const player = @import("player.zig");
 const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
 const level = @import("level.zig");
+const viewport = @import("viewport.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -18,9 +19,21 @@ pub fn render() !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
-    //draw
+    // Clear entire window once
     try sdl.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
     try sdl.renderClear(renderer);
+
+    for (camera.cameras.keys()) |cameraId| {
+        try renderCamera(cameraId);
+    }
+
+    sdl.renderPresent(renderer);
+}
+
+fn renderCamera(cameraId: usize) !void {
+    const resources = try shared.getResources();
+
+    try camera.setActiveCamera(cameraId);
 
     try background.draw();
     try sensor.drawGoal();
@@ -31,12 +44,10 @@ pub fn render() !void {
         try debug.draw();
     }
 
-    try sdl.setRenderDrawColor(renderer, .{ .r = 0, .g = 255, .b = 255, .a = 255 });
+    try sdl.setRenderDrawColor(resources.renderer, .{ .r = 0, .g = 255, .b = 255, .a = 255 });
 
     try ui.drawMode();
     try ui.drawFps();
-
-    sdl.renderPresent(renderer);
 }
 
 fn drawHorizontalLine(height: i32) !void {

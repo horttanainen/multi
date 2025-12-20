@@ -7,14 +7,27 @@ const config = @import("config.zig");
 const shared = @import("shared.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
+const viewport = @import("viewport.zig");
 
 const conv = @import("conversion.zig");
 
-pub const Camera = struct { posPx: vec.IVec2, bodyId: box2d.c.b2BodyId, state: ?box2d.State };
+pub const Camera = struct {
+    id: usize,
+    playerId: usize,
+    posPx: vec.IVec2,
+    bodyId: box2d.c.b2BodyId,
+    state: ?box2d.State,
+};
 
-var maybeCamera: ?Camera = null;
+pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .{};
+var nextCameraId: usize = 0;
+pub var activeCameraId: usize = 0;
 
 pub fn spawn(position: vec.IVec2) !void {
+    _ = try spawnForPlayer(0, position);
+}
+
+pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
     const bodyDef = box2d.createDynamicBodyDef(.{
         .x = @floatFromInt(position.x),
         .y = @floatFromInt(position.y),
@@ -31,16 +44,42 @@ pub fn spawn(position: vec.IVec2) !void {
 
     _ = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
 
-    maybeCamera = .{
+    const cameraId = nextCameraId;
+    nextCameraId += 1;
+
+    const camera = Camera{
+        .id = cameraId,
+        .playerId = playerId,
         .posPx = position,
         .bodyId = bodyId,
         .state = null,
     };
+
+    try cameras.put(shared.allocator, cameraId, camera);
+    return cameraId;
+}
+
+pub fn destroyCamera(cameraId: usize) void {
+    if (cameras.fetchSwapRemove(cameraId)) |entry| {
+        box2d.c.b2DestroyBody(entry.value.bodyId);
+    }
+}
+
+pub fn setActiveCamera(cameraId: usize) !void {
+    const resources = try shared.getResources();
+
+    activeCameraId = cameraId;
+
+    try viewport.setActiveViewport(resources.renderer, cameraId);
+}
+
+fn getActiveCamera() ?*Camera {
+    return cameras.getPtr(activeCameraId);
 }
 
 pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
     var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (maybeCamera) |camera| {
+    if (getActiveCamera()) |camera| {
         camPos = camera.posPx;
     }
 
@@ -49,7 +88,7 @@ pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
 
 pub fn parallaxAdjustedRelativePosition(pos: vec.IVec2, parallaxDistance: f32) vec.IVec2 {
     var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (maybeCamera) |camera| {
+    if (getActiveCamera()) |camera| {
         camPos = camera.posPx;
     }
     camPos.x = @intFromFloat(@as(f32, @floatFromInt(camPos.x)) / parallaxDistance);
@@ -59,28 +98,28 @@ pub fn parallaxAdjustedRelativePosition(pos: vec.IVec2, parallaxDistance: f32) v
 
 pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
     var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (maybeCamera) |camera| {
+    if (getActiveCamera()) |camera| {
         camPos = camera.posPx;
     }
     return vec.isubtract(pos, camPos);
 }
 
-pub fn followPlayer() void {
-    const maybeP = player.players.get(0);
-    // Follow the first player for now
-    if (maybeP) |p| {
-        const maybeEntity = entity.getEntity(p.bodyId);
-        if (maybeEntity) |ent| {
-            move(entity.getPosition(ent.*));
+pub fn followAllPlayers() void {
+    for (player.players.values()) |*p| {
+        if (cameras.getPtr(p.cameraId)) |cam| {
+            const maybeEntity = entity.getEntity(p.bodyId);
+            if (maybeEntity) |ent| {
+                moveCamera(cam, entity.getPosition(ent.*));
+            }
         }
     }
 }
 
 pub fn followKeyboard() void {
-    if (maybeCamera) |camera| {
+    if (getActiveCamera()) |camera| {
         const currentState = box2d.getState(camera.bodyId);
         const state = box2d.getInterpolatedState(camera.state, currentState);
-        move(conv.m2Pixel(state.pos));
+        moveCamera(camera, conv.m2Pixel(state.pos));
     }
 }
 
@@ -101,45 +140,55 @@ pub fn moveDown() void {
 }
 
 fn applyForce(force: box2d.c.b2Vec2) void {
-    if (maybeCamera) |camera| {
+    if (getActiveCamera()) |camera| {
         box2d.c.b2Body_ApplyForceToCenter(camera.bodyId, force, true);
     }
 }
 
 pub fn updateState() void {
-    if (maybeCamera) |*camera| {
-        camera.state = box2d.getState(camera.bodyId);
+    for (cameras.values()) |*cam| {
+        cam.state = box2d.getState(cam.bodyId);
     }
 }
 
-fn move(pos: vec.IVec2) void {
-    if (maybeCamera) |*camera| {
-        camera.posPx.x = pos.x - config.window.width / 2;
-        camera.posPx.y = pos.y - config.window.height / 2;
+fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
+    // Get viewport dimensions, or fall back to full window
+    const vp = viewport.getViewportForCamera(cam.id) orelse viewport.Viewport{
+        .x = 0,
+        .y = 0,
+        .width = config.window.width,
+        .height = config.window.height,
+    };
 
-        const levelSize = level.size;
-        const levelPos = level.position;
+    cam.posPx.x = pos.x - @divFloor(vp.width, 2);
+    cam.posPx.y = pos.y - @divFloor(vp.height, 2);
 
-        const levelWidthHalf = @divFloor(levelSize.x, 2);
-        const levelHeightHalf = @divFloor(levelSize.y, 2);
+    const levelSize = level.size;
+    const levelPos = level.position;
 
-        if (config.window.width < levelSize.x) {
-            if (camera.posPx.x < levelPos.x - levelWidthHalf) {
-                camera.posPx.x = levelPos.x - levelWidthHalf;
-            } else if (camera.posPx.x >= levelPos.x + levelWidthHalf - config.window.width) {
-                camera.posPx.x = levelPos.x + levelWidthHalf - config.window.width;
-            }
-        } else {
-            camera.posPx.x = -config.window.width / 2;
+    const levelWidthHalf = @divFloor(levelSize.x, 2);
+    const levelHeightHalf = @divFloor(levelSize.y, 2);
+
+    if (vp.width < levelSize.x) {
+        if (cam.posPx.x < levelPos.x - levelWidthHalf) {
+            cam.posPx.x = levelPos.x - levelWidthHalf;
+        } else if (cam.posPx.x >= levelPos.x + levelWidthHalf - vp.width) {
+            cam.posPx.x = levelPos.x + levelWidthHalf - vp.width;
         }
-        if (config.window.height < levelSize.y) {
-            if (camera.posPx.y < levelPos.y - levelHeightHalf) {
-                camera.posPx.y = levelPos.y - levelHeightHalf;
-            } else if (camera.posPx.y >= levelPos.y + levelHeightHalf - config.window.height) {
-                camera.posPx.y = levelPos.y + levelHeightHalf - config.window.height;
-            }
-        } else {
-            camera.posPx.y = -config.window.height / 2;
-        }
+    } else {
+        cam.posPx.x = -@divFloor(vp.width, 2);
     }
+    if (vp.height < levelSize.y) {
+        if (cam.posPx.y < levelPos.y - levelHeightHalf) {
+            cam.posPx.y = levelPos.y - levelHeightHalf;
+        } else if (cam.posPx.y >= levelPos.y + levelHeightHalf - vp.height) {
+            cam.posPx.y = levelPos.y + levelHeightHalf - vp.height;
+        }
+    } else {
+        cam.posPx.y = -@divFloor(vp.height, 2);
+    }
+}
+
+pub fn cleanup() void {
+    cameras.deinit(shared.allocator);
 }

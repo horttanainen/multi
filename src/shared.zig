@@ -11,6 +11,8 @@ const config = @import("config.zig");
 const entity = @import("entity.zig");
 const delay = @import("delay.zig");
 const audio = @import("audio.zig");
+const camera = @import("camera.zig");
+const viewport = @import("viewport.zig");
 
 pub const crosshairImgSrc = "images/crosshair.png";
 pub const lieroImgSrc = "images/liero.png";
@@ -87,6 +89,8 @@ pub fn init() !SharedResources {
 pub fn cleanup() void {
     delay.cleanup();
     audio.cleanup();
+    camera.cleanup();
+    viewport.cleanup();
 
     if (maybeResources) |resources| {
         box2d.c.b2DestroyWorld(resources.worldId);

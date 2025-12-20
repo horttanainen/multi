@@ -151,5 +151,5 @@ fn gameLoop() !void {
     try player.checkAllSensors();
     try sensor.checkGoal();
 
-    camera.followPlayer();
+    camera.followAllPlayers();
 }

@@ -145,12 +145,10 @@ fn loadByName(levelName: []const u8) !void {
 
     size = levelToDeserialize.size;
 
-    // Spawn Player 1 at spawn point
     const playerId1 = try player.spawn(spawnLocation);
     const color1 = try controller.createControllerForPlayer(playerId1);
     player.setColor(playerId1, color1);
-    
-    // Spawn Player 2 at offset position
+
     const p2Position = vec.IVec2{
         .x = spawnLocation.x + 10,
         .y = spawnLocation.y,
