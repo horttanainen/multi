@@ -49,7 +49,7 @@ const PlayerError = error{PlayerUnspawned};
 
 pub fn drawCrosshair(player: *Player) !void {
     const pos = calcCrosshairPosition(player.*);
-    try sprite.drawWithOptions(player.crosshair, pos, 0, false, false, 0);
+    try sprite.drawWithOptions(player.crosshair, pos, 0, false, false, 0, null);
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
@@ -232,6 +232,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .flipEntityHorizontally = false,
         .categoryBits = config.CATEGORY_PLAYER,
         .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
+        .color = null,
     };
 
     const crosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
@@ -444,6 +445,16 @@ pub fn shoot(player: *Player) !void {
     }), selectedWeapon.impulse * -0.1);
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.entity.bodyId, vec.toBox2d(recoilImpulse), true);
+}
+
+pub fn setColor(playerId: usize, color: sprite.Color) void {
+    const maybePlayer = players.getPtr(playerId);
+    if (maybePlayer) |player| {
+        const maybeE = entity.getEntity(player.entity.bodyId);
+        if (maybeE) |e| {
+            e.color = color;
+        }
+    }
 }
 
 // Iteration helpers for operating on all players

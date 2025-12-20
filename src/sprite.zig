@@ -17,6 +17,12 @@ const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
 
+pub const Color = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+};
+
 pub const Sprite = struct {
     texture: *sdl.Texture,
     surface: *sdl.Surface,
@@ -34,7 +40,7 @@ pub const SerializableEntity = struct {
     pos: vec.IVec2,
 };
 
-pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32) !void {
+pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
@@ -58,6 +64,16 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     if (highlight) {
         try sdl.setTextureColorMod(sprite.texture, 100, 100, 100);
     }
+
+    if (maybeColor) |color| {
+        try sdl.setTextureColorMod(
+            sprite.texture,
+            color.r,
+            color.g,
+            color.b,
+        );
+    }
+
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
@@ -131,7 +147,7 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
         .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
     };
 
-    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x; 
+    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x;
 
     // 4. Calculate bounding box for iteration efficiency
     const minX: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.x - radiusPixels))));

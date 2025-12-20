@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("zsdl");
 
 const shared = @import("shared.zig");
+const sprite = @import("sprite.zig");
 
 /// Game actions that can be performed
 pub const GameAction = enum {
@@ -16,27 +17,36 @@ pub const GameAction = enum {
 };
 
 pub var keyBindingSets: std.ArrayList(std.AutoHashMapUnmanaged(sdl.Scancode, GameAction)) = .{};
+pub var availableColors: std.ArrayList(sprite.Color) = .{};
 
 /// Controller maps keys to game actions for a specific player (data only)
 pub const Controller = struct {
     playerId: usize,
+    color: sprite.Color,
     keyBindings: std.AutoHashMapUnmanaged(sdl.Scancode, GameAction),
 };
 
 /// Global controller registry
 pub var controllers: std.ArrayList(Controller) = .{};
 
-pub fn createControllerForPlayer(playerId: usize) !void {
+pub fn createControllerForPlayer(playerId: usize) !sprite.Color {
     const maybeKeyBindingSet = keyBindingSets.pop();
+    const maybeColor = availableColors.pop();
+
+    const defaultColor: sprite.Color = .{.r = 150, .g = 150, .b = 150};
+    const color = if (maybeColor) |color| color else defaultColor;
 
     if (maybeKeyBindingSet) |keyBindingSet| {
         const controller: Controller = .{
             .playerId = playerId,
+            .color = color,
             .keyBindings = keyBindingSet,
         };
 
         try controllers.append(shared.allocator, controller);
     }
+
+    return color;
 }
 
 /// Check if an action is currently active on a controller
@@ -53,6 +63,9 @@ pub fn isActionActive(ctrl: *const Controller, keyStates: []const u8, action: Ga
 }
 
 pub fn init() !void {
+    try availableColors.append(shared.allocator, .{.r = 255, .g = 1, .b = 1});
+    try availableColors.append(shared.allocator, .{.r = 1, .g = 1, .b = 255});
+
     var keyBindings1: std.AutoHashMapUnmanaged(sdl.Scancode, GameAction) = .{};
     try keyBindings1.put(shared.allocator, .a, .move_left);
     try keyBindings1.put(shared.allocator, .d, .move_right);
@@ -87,4 +100,5 @@ pub fn cleanup() void {
     }
     controllers.deinit(shared.allocator);
     keyBindingSets.deinit(shared.allocator);
+    availableColors.deinit(shared.allocator);
 }

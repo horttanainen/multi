@@ -149,7 +149,6 @@ fn gameLoop() !void {
     player.updateAllAnimationStates();
     animation.animate();
 
-    entity.cleanupEntities();
     try player.checkAllSensors();
     try sensor.checkGoal();
 

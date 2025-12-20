@@ -32,6 +32,7 @@ pub const Entity = struct {
     bodyId: box2d.c.b2BodyId,
     state: ?box2d.State,
     sprite: Sprite,
+    color: ?sprite.Color,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
     animated: bool,
@@ -90,7 +91,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
         ),
     );
 
-    try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip, 0);
+    try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color);
 }
 
 pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
@@ -114,6 +115,7 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
+        .color = null,
     };
 
     try entities.putLocking(bodyId, entity);
@@ -152,6 +154,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
+        .color = null,
     };
     return entity;
 }
@@ -205,6 +208,7 @@ pub fn cleanup() void {
     for (entities.map.values()) |entity| {
         cleanupOne(entity);
     }
+    cleanupEntities();
     entities.mutex.unlock();
     entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator));
 }
