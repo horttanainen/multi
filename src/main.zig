@@ -158,6 +158,7 @@ fn gameLoop() !void {
 
     try projectile.checkContacts();
     try projectile.cleanupShrapnel();
+    try projectile.cleanupBlood();
 
     // Update player animation state, then animate all animations
     player.updateAllAnimationStates();

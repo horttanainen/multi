@@ -117,7 +117,16 @@ pub fn cleanup(sprite: Sprite) void {
     shared.allocator.free(sprite.imgPath);
 }
 
-pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !void {
+fn iterateCircleOnSurface(
+    sprite: Sprite,
+    centerWorld: vec.Vec2,
+    radiusWorld: f32,
+    entityPos: vec.Vec2,
+    rotation: f32,
+    comptime Context: type,
+    context: Context,
+    comptime pixelOp: fn (ctx: Context, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void,
+) void {
     const surface = sprite.surface.*;
     const pixels: [*]u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
@@ -125,7 +134,7 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
     const height: usize = @intCast(surface.h);
     const bytesPerPixel: usize = 4; // Assume RGBA format
 
-    // Transform explosion center from world space (meters) to sprite local space (pixels)
+    // Transform from world space (meters) to sprite local space (pixels)
     // 1. Translate to entity-relative coordinates (meters)
     const relativeWorld = vec.Vec2{
         .x = centerWorld.x - entityPos.x,
@@ -155,7 +164,7 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
     const minY: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.y - radiusPixels))));
     const maxY: usize = @min(height - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.y + radiusPixels))));
 
-    // 5. Remove pixels within the circle
+    // 5. Iterate over pixels within the circle
     var y = minY;
     while (y <= maxY) : (y += 1) {
         var x = minX;
@@ -166,13 +175,38 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
 
             if (distSq <= radiusPixels * radiusPixels) {
                 const pixelIndex = y * pitch + x * bytesPerPixel;
-                // Set alpha to 0 (assuming RGBA)
-                if (bytesPerPixel == 4) {
-                    pixels[pixelIndex + 3] = 0;
-                }
+                pixelOp(context, pixels, pixelIndex, bytesPerPixel);
             }
         }
     }
+}
+
+pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !void {
+    const removePixel = struct {
+        fn op(_: void, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
+            if (bytesPerPixel == 4) {
+                pixels[pixelIndex + 3] = 0; // Set alpha to 0
+            }
+        }
+    }.op;
+
+    iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, void, {}, removePixel);
+}
+
+pub fn colorCircleOnSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
+    const colorPixel = struct {
+        fn op(col: Color, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
+            // Only color pixels that are not fully transparent
+            if (bytesPerPixel == 4 and pixels[pixelIndex + 3] > 0) {
+                pixels[pixelIndex + 0] = col.b; // B (SDL uses BGRA format)
+                pixels[pixelIndex + 1] = col.g; // G
+                pixels[pixelIndex + 2] = col.r; // R
+                // Keep the original alpha
+            }
+        }
+    }.op;
+
+    iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, Color, color, colorPixel);
 }
 
 pub fn updateTextureFromSurface(sprite: *Sprite) !void {

@@ -20,6 +20,7 @@ pub const CATEGORY_PROJECTILE: u64 = 1 << 2;   // 0x04
 pub const CATEGORY_SENSOR: u64 = 1 << 3;       // 0x08
 pub const CATEGORY_DYNAMIC: u64 = 1 << 4;      // 0x10
 pub const CATEGORY_UNBREAKABLE: u64 = 1 << 5;  // 0x20
+pub const CATEGORY_BLOOD: u64 = 1 << 6;        // 0x40
 
 pub const physics = .{
     .dt = 1.0 / 60.0,

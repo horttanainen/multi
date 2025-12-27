@@ -29,7 +29,7 @@ pub fn handleGameMouseInput() !void {
             var shapeDef = box2d.c.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
             shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
             const position = camera.relativePositionForCreating(.{
                 .x = x,
                 .y = y,

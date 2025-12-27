@@ -45,6 +45,13 @@ pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocat
 
 var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
 
+pub const BloodParticle = struct {
+    timerId: i32,
+};
+
+pub var bloodParticles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, BloodParticle).init(shared.allocator);
+var bloodToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
+
 fn createExplosionAnimation(pos: vec.Vec2) !void {
     // Load animation
     const anim = try animation.load(
@@ -179,8 +186,68 @@ fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) void {
         if (distance <= radius) {
             const damage = 100.0 - (99.0 * distance / radius);
             p.health -= damage;
+
+            // Generate blood if player took damage
+            if (damage > 0) {
+                createBloodParticles(playerVec, damage) catch {};
+            }
         }
     }
+}
+
+fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
+    // More damage = more blood particles (up to 30)
+    const particleCount: u32 = @min(30, @as(u32, @intFromFloat(damage / 4.0)));
+    if (particleCount == 0) return;
+
+    for (0..particleCount) |i| {
+        const angle = std.math.degreesToRadians(@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(particleCount)) * 360);
+        const dir = box2d.c.b2Vec2{ .x = std.math.sin(angle), .y = std.math.cos(angle) };
+
+        var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
+        bodyDef.isBullet = true;
+        bodyDef.linearDamping = 5.0;
+        bodyDef.gravityScale = 1.0;
+
+        // Random velocity variation
+        const speedVariation = 0.5 + std.crypto.random.float(f32) * 0.5;
+        bodyDef.linearVelocity = box2d.mul(dir, 10.0 * speedVariation);
+
+        const bodyId = try box2d.createBody(bodyDef);
+
+        var boxShapeDef = box2d.c.b2DefaultShapeDef();
+        boxShapeDef.density = 0.3;
+        boxShapeDef.friction = 0.5;
+        boxShapeDef.restitution = 0.3;
+        boxShapeDef.filter.groupIndex = -3; // Unique group for blood particles
+        boxShapeDef.filter.categoryBits = config.CATEGORY_BLOOD;
+        boxShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+        boxShapeDef.enableHitEvents = true;
+        boxShapeDef.enableContactEvents = true;
+
+        // Small red box
+        const boxSize = 0.02;
+        const boxShape = box2d.c.b2MakeBox(boxSize, boxSize);
+        _ = box2d.c.b2CreatePolygonShape(bodyId, &boxShapeDef, &boxShape);
+
+        // Schedule cleanup after 5 seconds
+        const id_int: usize = @bitCast(bodyId);
+        const ptr: ?*anyopaque = @ptrFromInt(id_int);
+        const timerId = timer.addTimer(5000, markBloodForCleanup, ptr);
+
+        // Add to blood particles map
+        try bloodParticles.putLocking(bodyId, .{ .timerId = timerId });
+    }
+}
+
+fn markBloodForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
+    _ = interval;
+    const id_int: usize = @intFromPtr(param.?);
+    const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
+
+    bloodToCleanup.appendLocking(bodyId) catch {};
+
+    return 0;
 }
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
@@ -306,6 +373,19 @@ pub fn cleanupShrapnel() !void {
     }
 }
 
+pub fn cleanupBlood() !void {
+    bloodToCleanup.mutex.lock();
+    for (bloodToCleanup.list.items) |bodyId| {
+        _ = bloodParticles.fetchSwapRemoveLocking(bodyId);
+        if (box2d.c.b2Body_IsValid(bodyId)) {
+            box2d.c.b2DestroyBody(bodyId);
+        }
+    }
+    bloodToCleanup.mutex.unlock();
+
+    bloodToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator));
+}
+
 pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     try projectiles.put(bodyId, Projectile{
         .bodyId = bodyId,
@@ -313,9 +393,62 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     });
 }
 
+fn stainSurface(bloodBodyId: box2d.c.b2BodyId, surfaceBodyId: box2d.c.b2BodyId) !void {
+    // Get blood particle position
+    const bloodPos = box2d.c.b2Body_GetPosition(bloodBodyId);
+    const bloodVec = vec.fromBox2d(bloodPos);
+
+    // Get the entity hit by blood
+    const maybeEntity = entity.entities.getPtrLocking(surfaceBodyId);
+    if (maybeEntity) |ent| {
+        // Get entity position and rotation
+        const state = box2d.getState(surfaceBodyId);
+        const entityPos = vec.fromBox2d(state.pos);
+        const rotation = state.rotAngle;
+
+        // Stain the surface with red color in a small circle
+        const bloodStainRadius = std.crypto.random.float(f32) ;
+        const bloodColor = sprite.Color{ .r = 180, .g = 0, .b = 0 };
+
+        try sprite.colorCircleOnSurface(ent.sprite, bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
+
+        // Update texture
+        try sprite.updateTextureFromSurface(&ent.sprite);
+    }
+
+    // Mark blood particle for cleanup
+    const maybeBlood = bloodParticles.fetchSwapRemoveLocking(bloodBodyId);
+    if (maybeBlood) |blood| {
+        _ = timer.removeTimer(blood.value.timerId);
+        try bloodToCleanup.appendLocking(bloodBodyId);
+    }
+}
+
 pub fn checkContacts() !void {
     const resources = try shared.getResources();
     const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
+
+    // Check begin contact events for blood particles
+    for (0..@intCast(contactEvents.beginCount)) |i| {
+        const event = contactEvents.beginEvents[i];
+
+        if (!box2d.c.b2Shape_IsValid(event.shapeIdA) or !box2d.c.b2Shape_IsValid(event.shapeIdB)) {
+            continue;
+        }
+
+        const bodyIdA = box2d.c.b2Shape_GetBody(event.shapeIdA);
+        const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
+
+        // Check for blood particle collisions (mask already ensures only valid surfaces)
+        if (bloodParticles.getLocking(bodyIdA) != null) {
+            try stainSurface(bodyIdA, bodyIdB);
+            continue;
+        }
+        if (bloodParticles.getLocking(bodyIdB) != null) {
+            try stainSurface(bodyIdB, bodyIdA);
+            continue;
+        }
+    }
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
@@ -327,18 +460,29 @@ pub fn checkContacts() !void {
         const aFilter = box2d.c.b2Shape_GetFilter(event.shapeIdA);
         const bFilter = box2d.c.b2Shape_GetFilter(event.shapeIdB);
 
+        const bodyIdA = box2d.c.b2Shape_GetBody(event.shapeIdA);
+        const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
+
+        // Check for blood particle collisions (mask already ensures only valid surfaces)
+        if (bloodParticles.getLocking(bodyIdA) != null) {
+            try stainSurface(bodyIdA, bodyIdB);
+            continue;
+        }
+        if (bloodParticles.getLocking(bodyIdB) != null) {
+            try stainSurface(bodyIdB, bodyIdA);
+            continue;
+        }
+
         // Check if shape A is a projectile
         if ((aFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
-            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdA);
-            const maybeProjectile = projectiles.get(bodyId);
+            const maybeProjectile = projectiles.get(bodyIdA);
             if (maybeProjectile) |p| {
                 try explode(p);
             }
         }
         // Check if shape B is a projectile
         if ((bFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
-            const bodyId = box2d.c.b2Shape_GetBody(event.shapeIdB);
-            const maybeProjectile = projectiles.get(bodyId);
+            const maybeProjectile = projectiles.get(bodyIdB);
             if (maybeProjectile) |p| {
                 try explode(p);
             }
@@ -367,4 +511,26 @@ pub fn cleanup() void {
         box2d.c.b2DestroyBody(toClean);
     }
     shrapnelToCleanup.list.deinit();
+
+    // Cleanup blood particles
+    bloodParticles.mutex.lock();
+    for (bloodParticles.map.keys()) |bodyId| {
+        const maybeBlood = bloodParticles.map.get(bodyId);
+        if (maybeBlood) |blood| {
+            _ = timer.removeTimer(blood.timerId);
+        }
+        if (box2d.c.b2Body_IsValid(bodyId)) {
+            box2d.c.b2DestroyBody(bodyId);
+        }
+    }
+    bloodParticles.mutex.unlock();
+
+    bloodParticles.replaceLocking(std.AutoArrayHashMap(box2d.c.b2BodyId, BloodParticle).init(shared.allocator));
+
+    bloodToCleanup.mutex.lock();
+    defer bloodToCleanup.mutex.unlock();
+    for (bloodToCleanup.list.items) |toClean| {
+        box2d.c.b2DestroyBody(toClean);
+    }
+    bloodToCleanup.list.deinit();
 }

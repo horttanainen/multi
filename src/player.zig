@@ -104,7 +104,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -238,7 +238,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = config.CATEGORY_PLAYER,
-        .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE,
+        .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD,
         .color = null,
     };
 
