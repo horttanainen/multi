@@ -206,7 +206,7 @@ fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
 
         var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
         bodyDef.isBullet = true;
-        bodyDef.linearDamping = 5.0;
+        bodyDef.linearDamping = 1.0;
         bodyDef.gravityScale = 1.0;
 
         // Random velocity variation
@@ -216,7 +216,7 @@ fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
         const bodyId = try box2d.createBody(bodyDef);
 
         var boxShapeDef = box2d.c.b2DefaultShapeDef();
-        boxShapeDef.density = 0.3;
+        boxShapeDef.density = 1;
         boxShapeDef.friction = 0.5;
         boxShapeDef.restitution = 0.3;
         boxShapeDef.filter.groupIndex = -3; // Unique group for blood particles
@@ -393,27 +393,64 @@ pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
     });
 }
 
-fn stainSurface(bloodBodyId: box2d.c.b2BodyId, surfaceBodyId: box2d.c.b2BodyId) !void {
+fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
+    const resources = try shared.getResources();
+
     // Get blood particle position
     const bloodPos = box2d.c.b2Body_GetPosition(bloodBodyId);
     const bloodVec = vec.fromBox2d(bloodPos);
 
-    // Get the entity hit by blood
-    const maybeEntity = entity.entities.getPtrLocking(surfaceBodyId);
-    if (maybeEntity) |ent| {
-        // Get entity position and rotation
-        const state = box2d.getState(surfaceBodyId);
-        const entityPos = vec.fromBox2d(state.pos);
-        const rotation = state.rotAngle;
+    // Random blood stain radius
+    const bloodStainRadius = std.crypto.random.float(f32);
+    const bloodColor = sprite.Color{ .r = 138, .g = 3, .b = 3 };
 
-        // Stain the surface with red color in a small circle
-        const bloodStainRadius = std.crypto.random.float(f32) ;
-        const bloodColor = sprite.Color{ .r = 180, .g = 0, .b = 0 };
+    // Setup overlap query to find all entities within blood stain radius
+    var context = OverlapContext{
+        .bodies = undefined,
+        .count = 0,
+    };
 
-        try sprite.colorCircleOnSurface(ent.sprite, bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = bloodStainRadius,
+    };
 
-        // Update texture
-        try sprite.updateTextureFromSurface(&ent.sprite);
+    const transform = box2d.c.b2Transform{
+        .p = vec.toBox2d(bloodVec),
+        .q = box2d.c.b2Rot_identity,
+    };
+
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+    filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+
+    // Query for overlapping bodies
+    _ = box2d.c.b2World_OverlapCircle(
+        resources.worldId,
+        &circle,
+        transform,
+        filter,
+        overlapCallback,
+        &context,
+    );
+
+    // Stain all overlapping entities
+    for (context.bodies[0..context.count]) |bodyId| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+
+        const maybeEntity = entity.entities.getPtrLocking(bodyId);
+        if (maybeEntity) |ent| {
+            // Get entity position and rotation
+            const state = box2d.getState(bodyId);
+            const entityPos = vec.fromBox2d(state.pos);
+            const rotation = state.rotAngle;
+
+            // Stain the surface with red color
+            try sprite.colorCircleOnSurface(ent.sprite, bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
+
+            // Update texture
+            try sprite.updateTextureFromSurface(&ent.sprite);
+        }
     }
 
     // Mark blood particle for cleanup
@@ -441,11 +478,11 @@ pub fn checkContacts() !void {
 
         // Check for blood particle collisions (mask already ensures only valid surfaces)
         if (bloodParticles.getLocking(bodyIdA) != null) {
-            try stainSurface(bodyIdA, bodyIdB);
+            try stainSurface(bodyIdA);
             continue;
         }
         if (bloodParticles.getLocking(bodyIdB) != null) {
-            try stainSurface(bodyIdB, bodyIdA);
+            try stainSurface(bodyIdB);
             continue;
         }
     }
@@ -465,11 +502,11 @@ pub fn checkContacts() !void {
 
         // Check for blood particle collisions (mask already ensures only valid surfaces)
         if (bloodParticles.getLocking(bodyIdA) != null) {
-            try stainSurface(bodyIdA, bodyIdB);
+            try stainSurface(bodyIdA);
             continue;
         }
         if (bloodParticles.getLocking(bodyIdB) != null) {
-            try stainSurface(bodyIdB, bodyIdA);
+            try stainSurface(bodyIdB);
             continue;
         }
 
