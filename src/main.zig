@@ -33,9 +33,8 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Saturday todo:
-//TODO: support controller
-//TODO: convert cannon into rocket launcher
 //TODO: gibbing 
+//TODO: convert cannon into rocket launcher
 //TODO: instagib
 
 //extras:
