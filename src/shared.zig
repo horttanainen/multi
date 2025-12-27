@@ -51,7 +51,7 @@ pub fn getResources() !SharedResources {
 }
 
 pub fn init() !SharedResources {
-    try sdl.init(.{ .audio = true, .video = true, .timer = true });
+    try sdl.init(.{ .audio = true, .video = true, .timer = true, .gamecontroller = true });
     time.init();
     try audio.init();
 

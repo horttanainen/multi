@@ -56,10 +56,9 @@ pub fn handleGameMouseInput() !void {
     }
 }
 
-pub fn handleGameKeyboardInput() void {
+pub fn handleGlobalHotkeys() void {
     const currentKeyStates = sdl.getKeyboardState();
 
-    // Global controls
     if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and
         currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1)
     {
@@ -78,7 +77,6 @@ pub fn handleGameKeyboardInput() void {
         }
     }
 
-    // NOTE: Level editor toggle moved from 'L' to 'E' to avoid conflict with Player 1 controls
     if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.enter() catch |err| {
@@ -87,58 +85,27 @@ pub fn handleGameKeyboardInput() void {
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
+}
 
-    // Per-player controls using controller abstraction
-    for (controller.controllers.items) |*ctrl| {
-        const maybePlayer = player.players.getPtr(ctrl.playerId);
-
-        if (maybePlayer) |p| {
-            handlePlayerInput(p, ctrl, currentKeyStates);
+pub fn executeAction(playerId: usize, action: controller.GameAction) void {
+    const maybePlayer = player.players.getPtr(playerId);
+    if (maybePlayer) |p| {
+        switch (action) {
+            .move_left => player.moveLeft(p),
+            .move_right => player.moveRight(p),
+            .jump => player.jump(p),
+            .shoot => player.shoot(p) catch |err| {
+                std.debug.print("Error shooting: {}\n", .{err});
+            },
+            .aim_left, .aim_right, .aim_up, .aim_down => {},
         }
     }
 }
 
-fn handlePlayerInput(p: *player.Player, ctrl: *const controller.Controller, keyStates: []const u8) void {
-    // Movement
-    const movingLeft = controller.isActionActive(ctrl, keyStates, .move_left);
-    const movingRight = controller.isActionActive(ctrl, keyStates, .move_right);
-
-    if (movingLeft) {
-        player.moveLeft(p);
-    }
-    if (movingRight) {
-        player.moveRight(p);
-    }
-    if (!movingLeft and !movingRight) {
-        player.brake(p);
-    }
-
-    // Jump
-    if (controller.isActionActive(ctrl, keyStates, .jump)) {
-        player.jump(p);
-    }
-
-    // Aiming
-    var aimDirection = vec.zero;
-    if (controller.isActionActive(ctrl, keyStates, .aim_left)) {
-        aimDirection = vec.add(aimDirection, vec.west);
-    }
-    if (controller.isActionActive(ctrl, keyStates, .aim_right)) {
-        aimDirection = vec.add(aimDirection, vec.east);
-    }
-    if (controller.isActionActive(ctrl, keyStates, .aim_up)) {
-        aimDirection = vec.add(aimDirection, vec.north);
-    }
-    if (controller.isActionActive(ctrl, keyStates, .aim_down)) {
-        aimDirection = vec.add(aimDirection, vec.south);
-    }
-    player.aim(p, aimDirection);
-
-    // Shoot
-    if (controller.isActionActive(ctrl, keyStates, .shoot)) {
-        player.shoot(p) catch |err| {
-            std.debug.print("Error shooting: {}\n", .{err});
-        };
+pub fn executeAim(playerId: usize, direction: vec.Vec2) void {
+    const maybePlayer = player.players.getPtr(playerId);
+    if (maybePlayer) |p| {
+        player.aim(p, direction);
     }
 }
 
@@ -198,7 +165,6 @@ pub fn handleLevelEditorKeyboardInput() void {
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
-    // NOTE: Changed from 'L' to 'E' to avoid conflict with Player 1 controls
     if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.exit();

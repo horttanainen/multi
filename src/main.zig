@@ -22,6 +22,8 @@ const debug = @import("debug.zig");
 
 const player = @import("player.zig");
 const controller = @import("controller.zig");
+const keyboard = @import("keyboard.zig");
+const gamepad = @import("gamepad.zig");
 
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
@@ -30,6 +32,15 @@ const projectile = @import("projectile.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Saturday todo:
+//TODO: support controller
+//TODO: convert cannon into rocket launcher
+//TODO: gibbing 
+//TODO: instagib
+
+//extras:
+//TODO: refactor sensor stuff into regular entities
+
 //Look and feel
 //TODO: Create jumping animation 
 //TODO: Create landing animation
@@ -37,7 +48,6 @@ const Sprite = entity.Sprite;
 //TODO: Create wall slide animation that is played when player touches wall 
 
 //Controls
-//TODO: support controller
 //TODO: add sliding
 //TODO: add slope sliding
 //TODO: try if movement vector should be to the direction of slope character is standing on
@@ -83,7 +93,6 @@ const Sprite = entity.Sprite;
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
 
 //Game content:
-//TODO: instagib
 //TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
 
 //Bugs:
@@ -102,6 +111,11 @@ pub fn main() !void {
 
     try controller.init();
     defer controller.cleanup();
+
+    try keyboard.init();
+    defer keyboard.cleanup();
+
+    defer gamepad.cleanup();
 
     try camera.spawn(.{ .x = 0, .y = 0 });
     try level.next();
