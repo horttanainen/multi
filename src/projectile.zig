@@ -11,6 +11,7 @@ const config = @import("config.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
+const player = @import("player.zig");
 
 pub const Explosion = struct {
     sound: audio.Audio,
@@ -164,6 +165,24 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     }
 }
 
+fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) void {
+    for (player.players.values()) |*p| {
+        if (!box2d.c.b2Body_IsValid(p.bodyId)) continue;
+
+        const playerPos = box2d.c.b2Body_GetPosition(p.bodyId);
+        const playerVec = vec.fromBox2d(playerPos);
+
+        const dx = playerVec.x - pos.x;
+        const dy = playerVec.y - pos.y;
+        const distance = @sqrt(dx * dx + dy * dy);
+
+        if (distance <= radius) {
+            const damage = 100.0 - (99.0 * distance / radius);
+            p.health -= damage;
+        }
+    }
+}
+
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     try audio.playFor(explosion.sound);
 
@@ -229,11 +248,11 @@ pub fn explode(p: Projectile) !void {
         });
         id = id + 1;
 
-        // Create explosion animation
         try createExplosionAnimation(pos);
 
-        // Damage terrain
         try damageTerrainInRadius(pos, explosion.blastRadius);
+
+        damagePlayersInRadius(pos, explosion.blastRadius);
     }
 }
 

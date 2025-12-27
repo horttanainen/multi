@@ -48,6 +48,7 @@ fn renderCamera(cameraId: usize) !void {
 
     try ui.drawMode();
     try ui.drawFps();
+    try ui.drawPlayerHealth();
 }
 
 fn drawHorizontalLine(height: i32) !void {

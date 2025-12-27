@@ -44,6 +44,7 @@ pub const Player = struct {
     airJumpCounter: i32,
     movingRight: bool,
     crosshair: sprite.Sprite,
+    health: f32,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -273,6 +274,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .movingRight = false,
         .crosshair = crosshair,
         .cameraId = cameraId,
+        .health = 100,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
