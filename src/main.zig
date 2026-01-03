@@ -29,6 +29,7 @@ const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
+const particle = @import("particle.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
@@ -119,6 +120,7 @@ pub fn main() !void {
     try camera.spawn(.{ .x = 0, .y = 0 });
     try level.next();
     defer level.cleanup();
+    defer particle.cleanup();
     defer levelEditor.cleanup() catch |err| {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
@@ -156,9 +158,10 @@ fn gameLoop() !void {
 
     player.clampAllSpeeds();
 
+    try particle.checkContacts();
     try projectile.checkContacts();
     try projectile.cleanupShrapnel();
-    try projectile.cleanupBlood();
+    try particle.cleanupParticles();
 
     // Update player animation state, then animate all animations
     player.updateAllAnimationStates();

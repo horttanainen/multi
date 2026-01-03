@@ -51,6 +51,54 @@ pub const player: Player = .{
     .materialOffset = 600,
 };
 
+pub const BloodParticle = struct {
+    particlesPerDamage: f32,
+    maxParticles: u32,
+    minSpeedVariation: f32,
+    maxSpeedVariation: f32,
+    minScale: f32,
+    maxScale: f32,
+    minStainRadius: f32,
+    maxStainRadius: f32,
+
+    lifetimeMs: u32,
+    colorR: u8,
+    colorG: u8,
+    colorB: u8,
+
+    linearDamping: f32,
+    gravityScale: f32,
+    density: f32,
+    friction: f32,
+    restitution: f32,
+    boxSize: f32,
+    groupIndex: i32,
+};
+
+pub const bloodParticle: BloodParticle = .{
+    .particlesPerDamage = 0.5,
+    .maxParticles = 30,
+    .minSpeedVariation = 5,
+    .maxSpeedVariation = 10,
+    .minScale = 0.1,
+    .maxScale = 1.0,
+    .minStainRadius = 0.0,
+    .maxStainRadius = 0.5,
+
+    .lifetimeMs = 5000,
+    .colorR = 138,
+    .colorG = 3,
+    .colorB = 3,
+
+    .linearDamping = 1.0,
+    .gravityScale = 1.0,
+    .density = 1.0,
+    .friction = 0.5,
+    .restitution = 0.3,
+    .boxSize = 0.1,
+    .groupIndex = -3, // Don't collide with each other
+};
+
 pub const levelEditorCameraMovementForce = 10;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;

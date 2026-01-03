@@ -12,6 +12,7 @@ const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
 const level = @import("level.zig");
 const viewport = @import("viewport.zig");
+const particle = @import("particle.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -38,6 +39,7 @@ fn renderCamera(cameraId: usize) !void {
     try background.draw();
     try sensor.drawGoal();
     try entity.drawAll();
+    try particle.drawAll();
     try player.drawAllCrosshairs();
 
     if (config.debug) {
