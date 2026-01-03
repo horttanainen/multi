@@ -34,9 +34,9 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Saturday todo:
-//TODO: gibbing 
+//TODO: add death and respawning
+//TODO: gibbing if health goes below certain threshold
 //TODO: convert cannon into rocket launcher
-//TODO: instagib
 
 //extras:
 //TODO: refactor sensor stuff into regular entities
