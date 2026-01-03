@@ -39,6 +39,7 @@ pub const Entity = struct {
     flipEntityHorizontally: bool,
     categoryBits: u64,
     maskBits: u64,
+    enabled: bool,
 };
 
 pub const SerializableEntity = struct {
@@ -66,6 +67,9 @@ pub fn drawAll() !void {
     entities.mutex.lock();
     defer entities.mutex.unlock();
     for (entities.map.values()) |*e| {
+        // Skip drawing disabled entities
+        if (!e.enabled) continue;
+
         try drawWithOptions(e, e.flipEntityHorizontally);
     }
 }
@@ -116,6 +120,7 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
         .color = null,
+        .enabled = true,
     };
 
     try entities.putLocking(bodyId, entity);
@@ -155,6 +160,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
         .color = null,
+        .enabled = true,
     };
     return entity;
 }

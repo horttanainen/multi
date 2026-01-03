@@ -108,3 +108,4 @@ pub const shootDelayMs = 500;
 pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
+pub const respawnDelayMs = 2000;

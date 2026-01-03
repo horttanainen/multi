@@ -34,9 +34,11 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Saturday todo:
-//TODO: add death and respawning
 //TODO: gibbing if health goes below certain threshold
 //TODO: convert cannon into rocket launcher
+
+//TODO: instead of all the silly playerId indexing start using real uids for players and a map.
+//TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
 
 //extras:
 //TODO: refactor sensor stuff into regular entities
@@ -157,7 +159,8 @@ fn gameLoop() !void {
     try projectile.cleanupShrapnel();
     try particle.cleanupParticles();
 
-    // Update player animation state, then animate all animations
+    try player.processRespawns();
+
     player.updateAllAnimationStates();
     animation.animate();
 

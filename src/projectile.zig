@@ -166,25 +166,22 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     }
 }
 
-fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) void {
+fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) !void {
     for (player.players.values()) |*p| {
-        if (!box2d.c.b2Body_IsValid(p.bodyId)) continue;
+        if (!box2d.c.b2Body_IsValid(p.bodyId)) {
+            continue;
+        }
 
-        const playerPos = box2d.c.b2Body_GetPosition(p.bodyId);
-        const playerVec = vec.fromBox2d(playerPos);
+        const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
 
-        const dx = playerVec.x - pos.x;
-        const dy = playerVec.y - pos.y;
+        const dx = playerPosM.x - pos.x;
+        const dy = playerPosM.y - pos.y;
         const distance = @sqrt(dx * dx + dy * dy);
 
         if (distance <= radius) {
             const damage = 100.0 - (99.0 * distance / radius);
-            p.health -= damage;
 
-            // Generate blood if player took damage
-            if (damage > 0) {
-                particle.createBloodParticles(playerVec, damage) catch {};
-            }
+            try player.damage(p, damage);
         }
     }
 }
@@ -259,7 +256,7 @@ pub fn explode(p: Projectile) !void {
 
         try damageTerrainInRadius(pos, explosion.blastRadius);
 
-        damagePlayersInRadius(pos, explosion.blastRadius);
+        try damagePlayersInRadius(pos, explosion.blastRadius);
     }
 }
 

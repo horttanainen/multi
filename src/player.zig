@@ -14,6 +14,10 @@ const audio = @import("audio.zig");
 const weapon = @import("weapon.zig");
 const projectile = @import("projectile.zig");
 const viewport = @import("viewport.zig");
+const level = @import("level.zig");
+const particle = @import("particle.zig");
+const timer = @import("sdl_timer.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
 
 const config = @import("config.zig");
 
@@ -45,10 +49,24 @@ pub const Player = struct {
     movingRight: bool,
     crosshair: sprite.Sprite,
     health: f32,
+    isDead: bool,
+    respawnTimerId: i32,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
 const PlayerError = error{PlayerUnspawned};
+
+var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(shared.allocator);
+
+fn markPlayerForRespawn(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
+    _ = interval;
+    if (param) |p| {
+        // Subtract 1 because we added 1 to avoid null pointer (player ID 0 would be null)
+        const playerId: usize = @intFromPtr(p) - 1;
+        playersToRespawn.appendLocking(playerId) catch {};
+    }
+    return 0;
+}
 
 pub fn drawCrosshair(player: *Player) !void {
     const pos = calcCrosshairPosition(player.*);
@@ -240,6 +258,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .categoryBits = config.CATEGORY_PLAYER,
         .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD,
         .color = null,
+        .enabled = true,
     };
 
     const crosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
@@ -275,6 +294,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .crosshair = crosshair,
         .cameraId = cameraId,
         .health = 100,
+        .isDead = false,
+        .respawnTimerId = -1,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -500,12 +521,92 @@ pub fn clampAllSpeeds() void {
 
 pub fn drawAllCrosshairs() !void {
     for (players.values()) |*p| {
+        if (p.isDead) {
+            continue;
+        }
         try drawCrosshair(p);
     }
 }
 
+pub fn damage(p: *Player, d: f32) !void {
+    p.health -= d;
+
+    const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+
+    // Generate blood if player took damage
+    if (d > 0) {
+        try particle.createBloodParticles(playerPosM, d);
+    }
+
+    if (p.health <= 0 and !p.isDead) {
+        try kill(p);
+    }
+
+    if (p.health <= -50)  {
+        try gib(p);
+    }
+}
+
+pub fn kill(p: *Player) !void {
+    if (p.health <= 0 and !p.isDead) {
+        box2d.c.b2Body_Disable(p.bodyId);
+
+        const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
+        if (maybeEntity) |ent| {
+            ent.enabled = false;
+        }
+
+        p.isDead = true;
+
+        //TODO: remove this silly stuff when we have a proper map of players and uuids for IDs
+        // Add 1 to player ID to avoid null pointer (player ID 0 would become null)
+        p.respawnTimerId = timer.addTimer(config.respawnDelayMs, markPlayerForRespawn, @ptrFromInt(p.id + 1));
+    }
+}
+
+fn gib(p: *Player) !void {
+    std.debug.print("Gibbing player!", .{});
+    const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+    //TODO: Gib player here instead of blood particles
+    try particle.createBloodParticles(playerPosM, 100);
+}
+
+pub fn processRespawns() !void {
+    playersToRespawn.mutex.lock();
+    defer playersToRespawn.mutex.unlock();
+
+    for (playersToRespawn.list.items) |playerId| {
+        const maybePlayer = players.getPtr(playerId);
+        if (maybePlayer) |p| {
+            p.health = 100;
+
+            const spawnPosM = conv.p2m(level.spawnLocation);
+            box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);
+
+            box2d.c.b2Body_SetLinearVelocity(p.bodyId, box2d.c.b2Vec2_zero);
+            box2d.c.b2Body_SetAngularVelocity(p.bodyId, 0);
+
+            box2d.c.b2Body_Enable(p.bodyId);
+
+            const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
+            if (maybeEntity) |ent| {
+                ent.enabled = true;
+            }
+
+            p.isDead = false;
+            p.respawnTimerId = -1;
+        }
+    }
+
+    playersToRespawn.list.clearAndFree();
+}
+
 pub fn cleanup() void {
     for (players.values()) |*p| {
+        if (p.respawnTimerId != -1) {
+            _ = timer.removeTimer(p.respawnTimerId);
+        }
+
         // Remove player entity from entity system
         const maybeEntity = entity.entities.fetchSwapRemoveLocking(p.bodyId);
 
@@ -521,4 +622,8 @@ pub fn cleanup() void {
     }
 
     players.clearAndFree(shared.allocator);
+
+    playersToRespawn.mutex.lock();
+    defer playersToRespawn.mutex.unlock();
+    playersToRespawn.list.clearAndFree();
 }

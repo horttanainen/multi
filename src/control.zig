@@ -90,6 +90,9 @@ pub fn handleGlobalHotkeys() void {
 pub fn executeAction(playerId: usize, action: controller.GameAction) void {
     const maybePlayer = player.players.getPtr(playerId);
     if (maybePlayer) |p| {
+        // Ignore input for dead players
+        if (p.isDead) return;
+
         switch (action) {
             .move_left => player.moveLeft(p),
             .move_right => player.moveRight(p),
@@ -105,6 +108,9 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
 pub fn executeAim(playerId: usize, direction: vec.Vec2) void {
     const maybePlayer = player.players.getPtr(playerId);
     if (maybePlayer) |p| {
+        // Ignore input for dead players
+        if (p.isDead) return;
+
         player.aim(p, direction);
     }
 }

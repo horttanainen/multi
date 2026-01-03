@@ -35,6 +35,10 @@ pub var size: vec.IVec2 = .{
     .x = 100,
     .y = 100,
 };
+pub var spawnLocation: vec.IVec2 = .{
+    .x = 0,
+    .y = 0,
+};
 
 const LevelError = error{
     Uninitialized,
@@ -83,7 +87,7 @@ fn loadByName(levelName: []const u8) !void {
     defer parsed.deinit();
     const levelToDeserialize = parsed.value;
 
-    var spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
 
     for (levelToDeserialize.parallaxEntities) |e| {
         const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
