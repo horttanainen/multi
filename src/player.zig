@@ -281,7 +281,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     try entity.entities.putLocking(bodyId, playerEntity);
 
     // Register player with central animation system
-    try animation.registerAnimationSet(bodyId, animations, "idle", true);
+    try animation.registerAnimationSet(bodyId, animations, "idle", true, false);
     return playerId;
 }
 

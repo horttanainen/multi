@@ -96,14 +96,8 @@ const Sprite = entity.Sprite;
 //TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
 
 //Bugs:
-//TODO: investigate how to fix halved fps due to having split screen
 //TODO: Level json creation broke during 0.15 update
-//TODO: reapply physics to recreated objects that have been broken 
-
-//NOTE: probably the fps issue goes away when we move to real client server model due to having multiple processes or threads
-
-//QA:
-//TODO: register and registerAnimatonSet should share same code
+//TODO: reapply physics to recreated objects that have been broken
 
 pub fn main() !void {
     const resources = try shared.init();

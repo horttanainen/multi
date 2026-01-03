@@ -30,20 +30,7 @@ pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
     var animations = std.StringHashMap(Animation).init(shared.allocator);
     try animations.put("default", anim);
 
-    const currentAnim = animations.getPtr("default").?;
-
-    try animationSets.putLocking(bodyId, .{
-        .animations = animations,
-        .currentKey = "default",
-        .currentAnimation = currentAnim,
-        .loop = loop,
-        .autoDestroy = true, // One-off animations auto-destroy when finished
-    });
-
-    const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
-    if (maybeEntityPtr) |entPtr| {
-        entPtr.animated = true;
-    }
+    try registerAnimationSet(bodyId, animations, "default", loop, true);
 }
 
 pub fn registerAnimationSet(
@@ -51,6 +38,7 @@ pub fn registerAnimationSet(
     animations: std.StringHashMap(Animation),
     startKey: []const u8,
     loop: bool,
+    autoDestroy: bool,
 ) !void {
     const currentAnim = animations.getPtr(startKey) orelse return error.AnimationNotFound;
 
@@ -59,7 +47,7 @@ pub fn registerAnimationSet(
         .currentKey = startKey,
         .currentAnimation = currentAnim,
         .loop = loop,
-        .autoDestroy = false, // Multi-animation entities don't auto-destroy
+        .autoDestroy = autoDestroy,
     });
 
     const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
