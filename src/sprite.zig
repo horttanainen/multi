@@ -17,6 +17,15 @@ const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
 
+// SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
+const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
+    flags: c_int,
+    width: c_int,
+    height: c_int,
+    depth: c_int,
+    format: u32,
+) callconv(.c) ?*sdl.Surface, .{ .name = "SDL_CreateRGBSurfaceWithFormat" });
+
 pub const Color = struct {
     r: u8,
     g: u8,
@@ -115,6 +124,37 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
 
 pub fn cleanup(sprite: Sprite) void {
     shared.allocator.free(sprite.imgPath);
+}
+
+pub fn createCopy(sprite: Sprite) !Sprite {
+    const resources = try shared.getResources();
+
+    const format: u32 = if (sprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
+    const copiedSurface = SDL_CreateRGBSurfaceWithFormat(
+        0,
+        sprite.surface.w,
+        sprite.surface.h,
+        32,
+        format,
+    ) orelse {
+        return error.SurfaceCopyFailed;
+    };
+
+    try sdl.blitSurface(sprite.surface, null, copiedSurface, null);
+
+    const copiedTexture = try sdl.createTextureFromSurface(resources.renderer, copiedSurface);
+
+    const imgPathCopy = try shared.allocator.dupe(u8, sprite.imgPath);
+
+    return Sprite{
+        .surface = copiedSurface,
+        .texture = copiedTexture,
+        .imgPath = imgPathCopy,
+        .scale = sprite.scale,
+        .sizeM = sprite.sizeM,
+        .sizeP = sprite.sizeP,
+        .offset = sprite.offset,
+    };
 }
 
 fn iterateCircleOnSurface(
@@ -223,15 +263,6 @@ pub const SpriteTile = struct {
     sprite: Sprite,
     offsetPos: vec.Vec2, // Offset position in meters relative to original sprite center
 };
-
-// SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
-const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
-    flags: c_int,
-    width: c_int,
-    height: c_int,
-    depth: c_int,
-    format: u32,
-) callconv(.c) ?*sdl.Surface, .{ .name = "SDL_CreateRGBSurfaceWithFormat" });
 
 pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
     const width: u32 = @intCast(originalSprite.surface.w);

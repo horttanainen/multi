@@ -9,15 +9,6 @@ const config = @import("config.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 
-// SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
-const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
-    flags: c_int,
-    width: c_int,
-    height: c_int,
-    depth: c_int,
-    format: u32,
-) callconv(.c) ?*sdl.Surface, .{ .name = "SDL_CreateRGBSurfaceWithFormat" });
-
 // SDL_LockSurface/SDL_UnlockSurface are not exposed by zsdl
 const SDL_LockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) c_int, .{ .name = "SDL_LockSurface" });
 const SDL_UnlockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) void, .{ .name = "SDL_UnlockSurface" });
@@ -126,20 +117,8 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
 }
 
 fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
-    const imgPathCopy = try shared.allocator.dupe(u8, gibletSprite.imgPath);
-    errdefer shared.allocator.free(imgPathCopy);
+    const spriteCopy = try sprite.createCopy(gibletSprite);
 
-    const spriteCopy = sprite.Sprite{
-        .surface = gibletSprite.surface,
-        .texture = gibletSprite.texture,
-        .imgPath = imgPathCopy,
-        .scale = gibletSprite.scale,
-        .sizeM = gibletSprite.sizeM,
-        .sizeP = gibletSprite.sizeP,
-        .offset = gibletSprite.offset,
-    };
-
-    // Create dynamic body at position
     const bodyDef = box2d.createDynamicBodyDef(posM);
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
@@ -160,38 +139,16 @@ fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
 }
 
 fn createColoredSprite(gibletSprite: sprite.Sprite, playerColor: sprite.Color) !sprite.Sprite {
-    const resources = try shared.getResources();
-
-    const format: u32 = if (gibletSprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // RGBA8888
-    const copiedSurface = SDL_CreateRGBSurfaceWithFormat(
-        0,
-        gibletSprite.surface.w,
-        gibletSprite.surface.h,
-        32,
-        format,
-    ) orelse {
-        std.debug.print("Failed to create surface copy\n", .{});
-        return error.SurfaceCopyFailed;
-    };
-    try sdl.blitSurface(gibletSprite.surface, null, copiedSurface, null);
+    var coloredSprite = try sprite.createCopy(gibletSprite);
+    errdefer sprite.cleanup(coloredSprite);
 
     const bloodColor = sprite.Color{ .r = config.bloodParticle.colorR, .g = config.bloodParticle.colorG, .b = config.bloodParticle.colorB };
 
-    try replaceColorsOnSurface(copiedSurface, playerColor, bloodColor);
+    try replaceColorsOnSurface(coloredSprite.surface, playerColor, bloodColor);
 
-    const texture = try sdl.createTextureFromSurface(resources.renderer, copiedSurface);
+    try sprite.updateTextureFromSurface(&coloredSprite);
 
-    const imgPathCopy = try shared.allocator.dupe(u8, gibletSprite.imgPath);
-
-    return sprite.Sprite{
-        .surface = copiedSurface,
-        .texture = texture,
-        .imgPath = imgPathCopy,
-        .scale = gibletSprite.scale,
-        .sizeM = gibletSprite.sizeM,
-        .sizeP = gibletSprite.sizeP,
-        .offset = gibletSprite.offset,
-    };
+    return coloredSprite;
 }
 
 
