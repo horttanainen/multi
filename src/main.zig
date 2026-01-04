@@ -30,11 +30,11 @@ const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const gibbing = @import("gibbing.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Saturday todo:
-//TODO: gibbing if health goes below certain threshold
 //TODO: convert cannon into rocket launcher
 
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
@@ -114,6 +114,8 @@ pub fn main() !void {
     defer gamepad.cleanup();
 
     try camera.spawn(.{ .x = 0, .y = 0 });
+    try gibbing.init();
+    defer gibbing.cleanup();
     try level.next();
     defer level.cleanup();
     defer particle.cleanup();

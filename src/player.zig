@@ -18,6 +18,7 @@ const level = @import("level.zig");
 const particle = @import("particle.zig");
 const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
+const gibbing = @import("gibbing.zig");
 
 const config = @import("config.zig");
 
@@ -542,7 +543,7 @@ pub fn damage(p: *Player, d: f32) !void {
         try kill(p);
     }
 
-    if (p.health <= -50)  {
+    if (p.health <= -5)  {
         try gib(p);
     }
 }
@@ -565,9 +566,16 @@ pub fn kill(p: *Player) !void {
 }
 
 fn gib(p: *Player) !void {
-    std.debug.print("Gibbing player!", .{});
     const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-    //TODO: Gib player here instead of blood particles
+
+    // Get player color
+    const maybeEntity = entity.entities.getLocking(p.bodyId);
+    const playerColor = if (maybeEntity) |ent| ent.color orelse sprite.Color{ .r = 255, .g = 255, .b = 255 } else sprite.Color{ .r = 255, .g = 255, .b = 255};
+
+    // Spawn giblets with player color
+    try gibbing.gib(playerPosM, playerColor);
+
+    // Also spawn blood particles for extra effect
     try particle.createBloodParticles(playerPosM, 100);
 }
 
