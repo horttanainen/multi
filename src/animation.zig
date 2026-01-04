@@ -7,6 +7,7 @@ const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
 const time = @import("time.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
+const fs = @import("fs.zig");
 
 pub const Animation = struct {
     fps: i32,
@@ -165,40 +166,12 @@ pub fn cleanup() void {
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {
-    var dir = try std.fs.cwd().openDir(pathToAnimationDir, .{});
-    defer dir.close();
-
-    var images = std.array_list.Managed([]const u8).init(shared.allocator);
-    defer images.deinit();
-    var dirIterator = dir.iterate();
-
-    while (try dirIterator.next()) |dirContent| {
-        if (dirContent.kind == std.fs.File.Kind.file) {
-            // Skip .DS_Store files
-            if (!std.mem.eql(u8, dirContent.name, ".DS_Store")) {
-                try images.append(dirContent.name);
-            }
-        }
-    }
-
-    std.mem.sort([]const u8, images.items, {}, struct {
-        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-            return std.mem.order(u8, a, b) == .lt;
-        }
-    }.lessThan);
-
-    var frames = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
-    for (images.items) |image| {
-        var textBuf: [100]u8 = undefined;
-        const imagePath = try std.fmt.bufPrint(&textBuf, "{s}/{s}", .{ pathToAnimationDir, image });
-        const s = try sprite.createFromImg(imagePath, scale, offset);
-        try frames.append(s);
-    }
+    const frames = try fs.loadSpritesFromFolder(pathToAnimationDir, scale, offset);
 
     return .{
         .fps = fps,
         .lastTime = 0,
         .current = 0,
-        .frames = try frames.toOwnedSlice(),
+        .frames = frames,
     };
 }
