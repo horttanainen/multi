@@ -489,6 +489,9 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
         if (maybeE) |e| {
             e.color = color;
         }
+        gibbing.prepareGibletsForPlayer(playerId, color) catch |err| {
+            std.debug.print("Warning: Failed to prepare giblets for player {}: {}\n", .{ playerId, err });
+        };
     }
 }
 
@@ -567,16 +570,7 @@ pub fn kill(p: *Player) !void {
 
 fn gib(p: *Player) !void {
     const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-
-    // Get player color
-    const maybeEntity = entity.entities.getLocking(p.bodyId);
-    const playerColor = if (maybeEntity) |ent| ent.color orelse sprite.Color{ .r = 255, .g = 255, .b = 255 } else sprite.Color{ .r = 255, .g = 255, .b = 255};
-
-    // Spawn giblets with player color
-    try gibbing.gib(playerPosM, playerColor);
-
-    // Also spawn blood particles for extra effect
-    try particle.createBloodParticles(playerPosM, 100);
+    gibbing.gib(playerPosM, p.id);
 }
 
 pub fn processRespawns() !void {
