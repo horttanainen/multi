@@ -78,7 +78,6 @@ pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void
     std.debug.print("Pre-colored giblets for player {}: {} heads, {} legs, {} meat\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len });
 }
 
-
 pub fn gib(posM: vec.Vec2, playerId: usize) void {
     const gibletSet = playerGiblets.get(playerId) orelse {
         std.debug.print("Warning: No pre-colored giblets found for player {}\n", .{playerId});
@@ -119,7 +118,12 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
 fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
     const spriteCopy = try sprite.createCopy(gibletSprite);
 
-    const bodyDef = box2d.createDynamicBodyDef(posM);
+    const variedPosM: vec.Vec2 = .{
+        .x = posM.x + std.crypto.random.float(f32) * 2 - 1,
+        .y = posM.y - std.crypto.random.float(f32) * 2,
+    };
+
+    const bodyDef = box2d.createDynamicBodyDef(variedPosM);
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
     shapeDef.density = 1.0;
@@ -151,7 +155,6 @@ fn createColoredSprite(gibletSprite: sprite.Sprite, playerColor: sprite.Color) !
     return coloredSprite;
 }
 
-
 fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloodColor: sprite.Color) !void {
     // Lock surface for pixel access
     if (SDL_LockSurface(surface) != 0) {
@@ -182,7 +185,7 @@ fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloo
             const g = pixels[pixelIndex + 1];
             const r = pixels[pixelIndex + 2];
 
-            // white pixels become players color 
+            // white pixels become players color
             if (r > 150 and g > 150 and b > 150) {
                 pixels[pixelIndex + 0] = playerColor.b;
                 pixels[pixelIndex + 1] = playerColor.g;
@@ -197,7 +200,6 @@ fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloo
         }
     }
 }
-
 
 pub fn cleanup() void {
     // Clean up template giblets
