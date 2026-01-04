@@ -103,7 +103,7 @@ fn loadByName(levelName: []const u8) !void {
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);
             shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
             _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
@@ -120,7 +120,7 @@ fn loadByName(levelName: []const u8) !void {
                 };
                 const bodyDef = box2d.createStaticBodyDef(tilePos);
                 shapeDef.filter.categoryBits = categoryBits;
-                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
                 _ = entity.createFromImg(tile.sprite, shapeDef, bodyDef, "static") catch |err| {
                     if (err == polygon.PolygonError.CouldNotCreateTriangle) {
                         // Clean up the tile sprite since entity creation failed

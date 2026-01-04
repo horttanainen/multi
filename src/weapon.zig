@@ -24,7 +24,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
         shapeDef.friction = 0.5;
         shapeDef.enableHitEvents = true;
         shapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
-        shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+        shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_UNBREAKABLE;
 
         const s = try sprite.createFromImg(
             weapon.projectileImgSrc,

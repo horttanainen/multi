@@ -123,7 +123,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -138,14 +138,14 @@ pub fn spawn(position: vec.IVec2) !usize {
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = playerMaterialId;
     lowerBodyShapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
     footShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
-    footShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+    footShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_UNBREAKABLE;
     const footSensorShapeId = box2d.c.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
 
     const leftWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
