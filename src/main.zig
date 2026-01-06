@@ -34,7 +34,6 @@ const gibbing = @import("gibbing.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//Saturday todo:
 //TODO: convert cannon into rocket launcher
 
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
@@ -100,6 +99,7 @@ const Sprite = entity.Sprite;
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
 //TODO: reapply physics to recreated objects that have been broken
+//TODO: if both players shoot at the same time it seems only one bullet is created
 
 pub fn main() !void {
     const resources = try shared.init();
