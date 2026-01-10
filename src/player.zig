@@ -639,6 +639,12 @@ pub fn cleanup() void {
 
         camera.destroyCamera(p.cameraId);
 
+        // Cleanup weapon animations
+        for (p.weapons) |w| {
+            animation.cleanupOne(w.projectile.animation);
+            animation.cleanupOne(w.projectile.explosion.animation);
+        }
+
         // Cleanup player resources
         shared.allocator.free(p.weapons);
         box2d.c.b2DestroyBody(p.bodyId);

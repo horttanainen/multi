@@ -138,10 +138,7 @@ pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
         var animations = animSet.value.animations;
         var animIter = animations.valueIterator();
         while (animIter.next()) |anim| {
-            for (anim.frames) |frame| {
-                sprite.cleanup(frame);
-            }
-            shared.allocator.free(anim.frames);
+            cleanupOne(anim.*);
         }
         animations.deinit();
     }
@@ -155,14 +152,18 @@ pub fn cleanup() void {
     while (animSetIter.next()) |entry| {
         var animIter = entry.value_ptr.animations.valueIterator();
         while (animIter.next()) |anim| {
-            for (anim.frames) |frame| {
-                sprite.cleanup(frame);
-            }
-            shared.allocator.free(anim.frames);
+            cleanupOne(anim.*);
         }
         entry.value_ptr.animations.deinit();
     }
     animationSets.map.clearAndFree();
+}
+
+pub fn cleanupOne(anim: Animation) void {
+    for (anim.frames) |frame| {
+        sprite.cleanup(frame);
+    }
+    shared.allocator.free(anim.frames);
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {
