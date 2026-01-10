@@ -100,7 +100,6 @@ const Sprite = entity.Sprite;
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
 //TODO: reapply physics to recreated objects that have been broken
-//TODO: if both players shoot at the same time it seems only one bullet is created
 
 pub fn main() !void {
     const resources = try shared.init();

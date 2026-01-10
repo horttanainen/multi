@@ -10,23 +10,34 @@ pub fn check(name: [:0]const u8) bool {
 }
 
 pub fn action(name: [:0]const u8, delayMs: u32) void {
-    delayedActions.put(name, true) catch {
+    const nameCopy = shared.allocator.dupe(u8, name) catch {
         return;
     };
-    const keyPtr = delayedActions.getKeyPtr(name);
+
+    delayedActions.put(nameCopy, true) catch {
+        shared.allocator.free(nameCopy);
+        return;
+    };
+    const keyPtr = delayedActions.getKeyPtr(nameCopy);
 
     _ = timer.addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
 }
 
 fn shutTimer(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     _ = interval;
-    const name: *[:0]const u8 = @alignCast(@ptrCast(param));
+    const name: *[]const u8 = @alignCast(@ptrCast(param));
 
-    _ = delayedActions.remove(name.*);
+    if (delayedActions.fetchRemove(name.*)) |entry| {
+        shared.allocator.free(entry.key);
+    }
 
     return 0;
 }
 
 pub fn cleanup() void {
+    var iter = delayedActions.keyIterator();
+    while (iter.next()) |key| {
+        shared.allocator.free(key.*);
+    }
     delayedActions.deinit();
 }

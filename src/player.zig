@@ -247,7 +247,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .impulse = 1,
         .projectile = .{
             .gravityScale = 0,
-            .propulsion = 1,
+            .propulsion = 2,
             .animation = missileAnimation,
             .explosion = .{
                 .sound = .{
@@ -255,10 +255,10 @@ pub fn spawn(position: vec.IVec2) !usize {
                     .durationMs = config.cannonHitSoundDurationMs,
                 },
                 .animation = missileExplosionAnimation,
-                .blastPower = 50,
+                .blastPower = 100,
                 .blastRadius = 2.0,
                 .particleCount = 100,
-                .particleDensity = 0.6,
+                .particleDensity = 1.5,
                 .particleFriction = 0,
                 .particleRestitution = 0.99,
                 .particleRadius = 0.05,
@@ -350,7 +350,8 @@ pub fn updateAnimationState(player: *Player) void {
 }
 
 pub fn jump(player: *Player) void {
-    const delayKey = if (player.id == 0) "p0_jump" else "p1_jump";
+    var buf: [32:0]u8 = undefined;
+    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_jump", .{player.id}) catch unreachable;
 
     if (delay.check(delayKey)) {
         return;
@@ -493,6 +494,13 @@ pub fn aim(player: *Player, direction: vec.Vec2) void {
 pub fn shoot(player: *Player) !void {
     if (player.weapons.len == 0) return;
 
+    var buf: [64:0]u8 = undefined;
+    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_{s}", .{ player.id, "shoot" }) catch unreachable;
+
+    if (delay.check(delayKey)) {
+        return;
+    }
+
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
     const crosshairPos = calcCrosshairPosition(player.*);
     const position = camera.relativePositionForCreating(crosshairPos);
@@ -505,6 +513,7 @@ pub fn shoot(player: *Player) !void {
     }), selectedWeapon.impulse * -0.1);
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, vec.toBox2d(recoilImpulse), true);
+    delay.action(delayKey, selectedWeapon.delay);
 }
 
 pub fn setColor(playerId: usize, color: sprite.Color) void {
