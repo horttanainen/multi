@@ -28,7 +28,6 @@ pub const physics = .{
     .subStepCount = 4,
 };
 
-pub const cannonImpulse = 10;
 pub const cannonFireSoundDurationMs = 10000;
 pub const cannonHitSoundDurationMs = 10000;
 
