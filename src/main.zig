@@ -34,8 +34,6 @@ const gibbing = @import("gibbing.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: convert cannon into rocket launcher
-
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
 
@@ -155,6 +153,7 @@ fn gameLoop() !void {
     }
 
     player.clampAllSpeeds();
+    projectile.applyPropulsion();
 
     try particle.checkContacts();
     try projectile.checkContacts();

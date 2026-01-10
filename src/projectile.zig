@@ -16,6 +16,7 @@ const particle = @import("particle.zig");
 
 pub const Explosion = struct {
     sound: audio.Audio,
+    animation: animation.Animation,
     blastPower: f32,
     blastRadius: f32,
     particleCount: u32,
@@ -27,12 +28,8 @@ pub const Explosion = struct {
     particleGravityScale: f32,
 };
 
-pub const Projectile = struct {
-    bodyId: box2d.c.b2BodyId,
-    explosion: ?Explosion,
-};
-
-pub var projectiles = std.AutoArrayHashMap(box2d.c.b2BodyId, Projectile).init(shared.allocator);
+pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
+pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, vec.Vec2).init(shared.allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -46,14 +43,8 @@ pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocat
 
 var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
 
-fn createExplosionAnimation(pos: vec.Vec2) !void {
-    // Load animation
-    const anim = try animation.load(
-        "animations/explosion/cannon",
-        10,
-        .{ .x = 1.0, .y = 1.0 }, // scale
-        .{ .x = 0, .y = 0 }, // offset
-    );
+fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
+    const animCopy = try animation.copyAnimation(anim);
 
     // Create static body with sensor at explosion position
     var bodyDef = box2d.createStaticBodyDef(pos);
@@ -67,13 +58,13 @@ fn createExplosionAnimation(pos: vec.Vec2) !void {
     shapeDef.filter.maskBits = 0;
 
     // Use first frame as the sprite
-    const firstFrame = anim.frames[0];
+    const firstFrame = animCopy.frames[0];
 
     // Create a simple box shape for the explosion entity
     const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
 
-    try animation.register(explosionEntity.bodyId, anim, false);
+    try animation.register(explosionEntity.bodyId, animCopy, false);
 }
 
 const OverlapContext = struct {
@@ -228,9 +219,15 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     return try bodyIds.toOwnedSlice();
 }
 
-pub fn explode(p: Projectile) !void {
-    _ = projectiles.fetchSwapRemove(p.bodyId);
-    const maybeE = entity.entities.getLocking(p.bodyId);
+pub fn explode(bodyId: box2d.c.b2BodyId) !void {
+    const maybeExplosion = explosions.fetchSwapRemove(bodyId);
+    if (maybeExplosion == null) return;
+
+    // Remove propulsion config if it exists
+    _ = propulsions.swapRemove(bodyId);
+
+    const explosion = maybeExplosion.?.value;
+    const maybeE = entity.entities.getLocking(bodyId);
 
     var pos = vec.zero;
     if (maybeE) |e| {
@@ -240,24 +237,22 @@ pub fn explode(p: Projectile) !void {
         entity.cleanupLater(e);
     }
 
-    if (p.explosion) |explosion| {
-        const explosionBodies = try createExplosion(pos, explosion);
+    const explosionBodies = try createExplosion(pos, explosion);
 
-        const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
-        try shrapnel.appendLocking(.{
-            .id = id,
-            .cleaned = false,
-            .bodies = explosionBodies,
-            .timerId = timerId,
-        });
-        id = id + 1;
+    const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
+    try shrapnel.appendLocking(.{
+        .id = id,
+        .cleaned = false,
+        .bodies = explosionBodies,
+        .timerId = timerId,
+    });
+    id = id + 1;
 
-        try createExplosionAnimation(pos);
+    try createExplosionAnimation(pos, explosion.animation);
 
-        try damageTerrainInRadius(pos, explosion.blastRadius);
+    try damageTerrainInRadius(pos, explosion.blastRadius);
 
-        try damagePlayersInRadius(pos, explosion.blastRadius);
-    }
+    try damagePlayersInRadius(pos, explosion.blastRadius);
 }
 
 fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
@@ -311,13 +306,24 @@ pub fn cleanupShrapnel() !void {
 }
 
 
-pub fn create(bodyId: box2d.c.b2BodyId, ex: ?Explosion) !void {
-    try projectiles.put(bodyId, Projectile{
-        .bodyId = bodyId,
-        .explosion = ex,
-    });
+pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
+    try explosions.put(bodyId, explosion);
 }
 
+pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionVector: vec.Vec2) !void {
+    try propulsions.put(bodyId, propulsionVector);
+}
+
+pub fn applyPropulsion() void {
+    for (propulsions.keys(), propulsions.values()) |bodyId, propulsionVector| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            continue;
+        }
+
+        // Apply the stored propulsion vector as force
+        box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(propulsionVector), true);
+    }
+}
 
 pub fn checkContacts() !void {
 
@@ -339,23 +345,22 @@ pub fn checkContacts() !void {
 
         // Check if shape A is a projectile
         if ((aFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
-            const maybeProjectile = projectiles.get(bodyIdA);
-            if (maybeProjectile) |p| {
-                try explode(p);
+            if (explosions.contains(bodyIdA)) {
+                try explode(bodyIdA);
             }
         }
         // Check if shape B is a projectile
         if ((bFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
-            const maybeProjectile = projectiles.get(bodyIdB);
-            if (maybeProjectile) |p| {
-                try explode(p);
+            if (explosions.contains(bodyIdB)) {
+                try explode(bodyIdB);
             }
         }
     }
 }
 
 pub fn cleanup() void {
-    projectiles.clearAndFree();
+    explosions.clearAndFree();
+    propulsions.clearAndFree();
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {

@@ -175,3 +175,21 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
         .frames = frames,
     };
 }
+
+pub fn copyAnimation(anim: Animation) !Animation {
+    // Allocate new frames array
+    const framesCopy = try shared.allocator.alloc(sprite.Sprite, anim.frames.len);
+
+    // Deep copy each sprite frame
+    for (anim.frames, 0..) |frame, i| {
+        framesCopy[i] = try sprite.createCopy(frame);
+    }
+
+    // Return new Animation with copied frames
+    return Animation{
+        .fps = anim.fps,
+        .current = 0,
+        .lastTime = 0.0,
+        .frames = framesCopy,
+    };
+}

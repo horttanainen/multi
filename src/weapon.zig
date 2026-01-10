@@ -1,3 +1,4 @@
+const std = @import("std");
 const audio = @import("audio.zig");
 const delay = @import("delay.zig");
 const sprite = @import("sprite.zig");
@@ -7,15 +8,22 @@ const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const config = @import("config.zig");
+const animation = @import("animation.zig");
+
+pub const Projectile = struct {
+    gravityScale: f32,
+    propulsion: f32,
+    animation: animation.Animation,
+    explosion: projectile.Explosion,
+};
 
 pub const Weapon = struct {
     name: [:0]const u8,
-    projectileImgSrc: []const u8,
     scale: vec.Vec2,
     delay: u32,
     sound: audio.Audio,
     impulse: f32,
-    explosion: ?projectile.Explosion,
+    projectile: Projectile,
 };
 
 pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
@@ -26,15 +34,20 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
         shapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
         shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_UNBREAKABLE;
 
-        const s = try sprite.createFromImg(
-            weapon.projectileImgSrc,
-            weapon.scale,
-            vec.izero,
-        );
-        const pos = conv.pixel2MPos(position.x, position.y, s.sizeM.x, s.sizeM.y);
+        const animCopy = try animation.copyAnimation(weapon.projectile.animation);
+
+        // Use first frame of animation as the sprite
+        const firstFrame = animCopy.frames[0];
+        const pos = conv.pixel2MPos(position.x, position.y, firstFrame.sizeM.x, firstFrame.sizeM.y);
         var bodyDef = box2d.createDynamicBodyDef(pos);
         bodyDef.isBullet = true;
-        const projectileEntity = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
+
+        const angle = std.math.atan2(-direction.y, direction.x);
+        bodyDef.rotation = box2d.c.b2MakeRot(angle + std.math.pi * 0.5);
+
+        const projectileEntity = try entity.createFromImg(firstFrame, shapeDef, bodyDef, "projectile");
+
+        box2d.c.b2Body_SetGravityScale(projectileEntity.bodyId, weapon.projectile.gravityScale);
 
         const impulse = vec.mul(vec.normalize(.{
             .x = direction.x,
@@ -43,7 +56,15 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
 
         box2d.c.b2Body_ApplyLinearImpulseToCenter(projectileEntity.bodyId, vec.toBox2d(impulse), true);
 
-        try projectile.create(projectileEntity.bodyId, weapon.explosion);
+        const propulsionVector = vec.mul(vec.normalize(.{
+            .x = direction.x,
+            .y = -direction.y,
+        }), weapon.projectile.propulsion);
+
+        try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
+        try projectile.registerPropulsion(projectileEntity.bodyId, propulsionVector);
+
+        try animation.register(projectileEntity.bodyId, animCopy, true);
 
         try audio.playFor(weapon.sound);
         delay.action(weapon.name, weapon.delay);

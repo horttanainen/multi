@@ -222,29 +222,54 @@ pub fn spawn(position: vec.IVec2) !usize {
     );
     try animations.put("afterjump", afterJumpAnim);
 
-    const cannon: weapon.Weapon = .{
-        .name = "cannon",
-        .projectileImgSrc = shared.cannonBallmgSrc,
+    const missileAnimation = try animation.load(
+        "weapons/rocket_launcher/projectile",
+        8,
+        .{ .x = 1, .y = 1 },
+        .{ .x = 0, .y = 0 },
+    );
+
+    const missileExplosionAnimation = try animation.load(
+        "weapons/rocket_launcher/explosion",
+        10,
+        .{ .x = 1.0, .y = 1.0 },
+        .{ .x = 0, .y = 0 },
+    );
+
+    const rocketLauncher: weapon.Weapon = .{
+        .name = "rocket_launcher",
         .scale = .{ .x = 0.5, .y = 0.5 },
         .delay = config.shootDelayMs,
-        .sound = .{ .file = "sounds/cannon_fire.mp3", .durationMs = config.cannonFireSoundDurationMs },
-        .impulse = config.cannonImpulse,
-        .explosion = .{
-            .sound = .{ .file = "sounds/cannon_hit.mp3", .durationMs = config.cannonHitSoundDurationMs },
-            .blastPower = 50,
-            .blastRadius = 2.0,
-            .particleCount = 100,
-            .particleDensity = 0.6,
-            .particleFriction = 0,
-            .particleRestitution = 0.99,
-            .particleRadius = 0.05,
-            .particleLinearDamping = 10,
-            .particleGravityScale = 0,
+        .sound = .{
+            .file = "sounds/cannon_fire.mp3",
+            .durationMs = config.cannonFireSoundDurationMs,
+        },
+        .impulse = 1,
+        .projectile = .{
+            .gravityScale = 0,
+            .propulsion = 1,
+            .animation = missileAnimation,
+            .explosion = .{
+                .sound = .{
+                    .file = "sounds/cannon_hit.mp3",
+                    .durationMs = config.cannonHitSoundDurationMs,
+                },
+                .animation = missileExplosionAnimation,
+                .blastPower = 50,
+                .blastRadius = 2.0,
+                .particleCount = 100,
+                .particleDensity = 0.6,
+                .particleFriction = 0,
+                .particleRestitution = 0.99,
+                .particleRadius = 0.05,
+                .particleLinearDamping = 10,
+                .particleGravityScale = 0,
+            },
         },
     };
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
-    try weapons.append(cannon);
+    try weapons.append(rocketLauncher);
 
     const playerEntity = entity.Entity{
         .type = "dynamic",
@@ -546,7 +571,7 @@ pub fn damage(p: *Player, d: f32) !void {
         try kill(p);
     }
 
-    if (p.health <= -5)  {
+    if (p.health <= -5) {
         try gib(p);
     }
 }
