@@ -53,9 +53,16 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
+    const cosAngle = @cos(angle);
+    const sinAngle = @sin(angle);
+    const offsetX = @as(f32, @floatFromInt(sprite.offset.x));
+    const offsetY = @as(f32, @floatFromInt(sprite.offset.y));
+    const rotatedOffsetX = offsetX * cosAngle - offsetY * sinAngle;
+    const rotatedOffsetY = offsetX * sinAngle + offsetY * cosAngle;
+
     const rect = sdl.Rect{
-        .x = pos.x + sprite.offset.x,
-        .y = pos.y + sprite.offset.y,
+        .x = pos.x + @as(i32, @intFromFloat(rotatedOffsetX)),
+        .y = pos.y + @as(i32, @intFromFloat(rotatedOffsetY)),
         .w = sprite.sizeP.x,
         .h = sprite.sizeP.y,
     };
