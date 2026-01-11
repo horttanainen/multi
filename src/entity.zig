@@ -32,6 +32,7 @@ pub const Entity = struct {
     bodyId: box2d.c.b2BodyId,
     state: ?box2d.State,
     sprite: Sprite,
+    additionalSprites: []Sprite,
     color: ?sprite.Color,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
@@ -96,6 +97,19 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     );
 
     try sprite.drawWithOptions(entity.sprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color);
+
+    for (entity.additionalSprites) |additionalSprite| {
+        const additionalPos = camera.relativePosition(
+            conv.m2PixelPos(
+                state.pos.x,
+                state.pos.y,
+                additionalSprite.sizeM.x,
+                additionalSprite.sizeM.y,
+            ),
+        );
+
+        try sprite.drawWithOptions(additionalSprite, additionalPos, state.rotAngle, entity.highlighted, flip, 0, entity.color);
+    }
 }
 
 pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
@@ -113,6 +127,7 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
         .state = null,
         .bodyId = bodyId,
         .sprite = s,
+        .additionalSprites = &.{},
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
@@ -153,6 +168,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.
         .state = null,
         .bodyId = bodyId,
         .sprite = s,
+        .additionalSprites = &.{},
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
