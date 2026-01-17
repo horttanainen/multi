@@ -34,9 +34,14 @@ const gibbing = @import("gibbing.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: add animated flame for the rockets
-//TODO: add transparent smoke trail for the rocket
+//TODO: character remains running after initial movement
 //TODO: add ninja rope
+//TODO: add dash to side
+//TODO: allow resizing the window and start the game with the players monitor size in mind
+//TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
+//TODO: add transparent smoke trail for the rocket
+//TODO: does it make sense to refactor sprite out of entity and refer to sprites with bodyIds?
+//TODO: if so we could get rid of animation spriteindex and just store the pointer to the sprite
 
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
