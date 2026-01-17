@@ -77,11 +77,18 @@ pub fn handle(ctrl: *const controller.Controller) void {
     var aimDirection = vec.zero;
 
     // Movement
-    if (keyStates[@intFromEnum(bindings.moveLeft)] == 1) {
+    const movingLeft = keyStates[@intFromEnum(bindings.moveLeft)] == 1;
+    const movingRight = keyStates[@intFromEnum(bindings.moveRight)] == 1;
+
+    if (movingLeft) {
         control.executeAction(ctrl.playerId, .move_left);
     }
-    if (keyStates[@intFromEnum(bindings.moveRight)] == 1) {
+    if (movingRight) {
         control.executeAction(ctrl.playerId, .move_right);
+    }
+
+    if (!movingLeft and !movingRight) {
+        control.executeAction(ctrl.playerId, .brake);
     }
 
     // Jump

@@ -96,6 +96,7 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
         switch (action) {
             .move_left => player.moveLeft(p),
             .move_right => player.moveRight(p),
+            .brake => player.brake(p),
             .jump => player.jump(p),
             .shoot => player.shoot(p) catch |err| {
                 std.debug.print("Error shooting: {}\n", .{err});

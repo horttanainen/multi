@@ -154,6 +154,8 @@ pub fn handle(ctrl: *const controller.Controller) void {
         control.executeAction(ctrl.playerId, .move_left);
     } else if (moveAxis > bindings.moveThreshold) {
         control.executeAction(ctrl.playerId, .move_right);
+    } else {
+        control.executeAction(ctrl.playerId, .brake);
     }
 
     if (sdl.gameControllerGetButton(sdlCtrl, bindings.jumpButton)) {

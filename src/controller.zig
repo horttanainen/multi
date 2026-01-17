@@ -14,6 +14,7 @@ pub const InputType = enum {
 pub const GameAction = enum {
     move_left,
     move_right,
+    brake,
     jump,
     aim_left,
     aim_right,
