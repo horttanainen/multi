@@ -34,7 +34,6 @@ const gibbing = @import("gibbing.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: character remains running after initial movement
 //TODO: add ninja rope
 //TODO: add dash to side
 //TODO: allow resizing the window and start the game with the players monitor size in mind
