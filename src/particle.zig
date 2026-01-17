@@ -215,10 +215,10 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
             const rotation = state.rotAngle;
 
             // Stain the surface with red color
-            try sprite.colorCircleOnSurface(ent.sprite, bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
+            try sprite.colorCircleOnSurface(ent.sprites[0], bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
 
             // Update texture
-            try sprite.updateTextureFromSurface(&ent.sprite);
+            try sprite.updateTextureFromSurface(&ent.sprites[0]);
         }
     }
 

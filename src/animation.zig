@@ -14,46 +14,54 @@ pub const Animation = struct {
     current: usize,
     lastTime: f64,
     frames: []sprite.Sprite,
+    spriteIndex: usize, // Index into entity.sprites array
+    loop: bool,
 };
 
 pub const AnimationSet = struct {
     animations: std.StringHashMap(Animation),
-    currentKey: []const u8,
-    currentAnimation: *Animation,
-    loop: bool,
+    currentAnimations: []?*Animation,
     autoDestroy: bool, // Destroy entity when animation completes (for one-off effects)
 };
 
 var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(shared.allocator);
 
-pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation, loop: bool) !void {
+pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
     var animations = std.StringHashMap(Animation).init(shared.allocator);
     try animations.put("default", anim);
 
-    try registerAnimationSet(bodyId, animations, "default", loop, true);
+    try registerAnimationSet(bodyId, animations, "default", true);
 }
 
 pub fn registerAnimationSet(
     bodyId: box2d.c.b2BodyId,
     animations: std.StringHashMap(Animation),
     startKey: []const u8,
-    loop: bool,
     autoDestroy: bool,
 ) !void {
-    const currentAnim = animations.getPtr(startKey) orelse return error.AnimationNotFound;
-
-    try animationSets.putLocking(bodyId, .{
-        .animations = animations,
-        .currentKey = startKey,
-        .currentAnimation = currentAnim,
-        .loop = loop,
-        .autoDestroy = autoDestroy,
-    });
-
     const maybeEntityPtr = entity.entities.getPtrLocking(bodyId);
     if (maybeEntityPtr) |entPtr| {
         entPtr.animated = true;
+
+        const currentAnimations = try shared.allocator.alloc(?*Animation, entPtr.sprites.len);
+        for (currentAnimations) |*slot| {
+            slot.* = null;
+        }
+
+        try animationSets.putLocking(bodyId, .{
+            .animations = animations,
+            .currentAnimations = currentAnimations,
+            .autoDestroy = autoDestroy,
+        });
+
+        var animIter = animations.iterator();
+        while (animIter.next()) |entry| {
+            const key = entry.key_ptr.*;
+            try switchAnimation(bodyId, key);
+        }
+
+        try switchAnimation(bodyId, startKey);
     }
 }
 
@@ -63,19 +71,11 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
 
     const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
 
-    // Don't switch if already playing this animation
-    if (std.mem.eql(u8, animSet.currentKey, animationKey)) {
-        return;
+    const anim = animSet.animations.getPtr(animationKey) orelse return error.AnimationNotFound;
+
+    if (anim.spriteIndex < animSet.currentAnimations.len) {
+        animSet.currentAnimations[anim.spriteIndex] = anim;
     }
-
-    // Get new animation
-    const newAnim = animSet.animations.getPtr(animationKey) orelse return error.AnimationNotFound;
-
-    // Switch and reset
-    animSet.currentKey = animationKey;
-    animSet.currentAnimation = newAnim;
-    animSet.currentAnimation.current = 0;
-    animSet.currentAnimation.lastTime = time.now();
 }
 
 pub fn animate() void {
@@ -87,12 +87,22 @@ pub fn animate() void {
         const bodyId = entry.key_ptr.*;
         const animSet = entry.value_ptr;
 
-        // Advance current animation
-        const finished = advanceAnimation(animSet.currentAnimation);
-        updateEntitySprite(bodyId, animSet.currentAnimation);
+        var anyFinished = false;
 
-        // Destroy entity if it's marked for auto-destroy and animation finished without looping
-        if (animSet.autoDestroy and finished and !animSet.loop) {
+        for (animSet.currentAnimations) |maybeAnim| {
+            if (maybeAnim) |anim| {
+                const finished = advanceAnimation(anim);
+                updateEntitySprite(bodyId, anim);
+
+                // Track if any animation finished without looping
+                if (finished and !anim.loop) {
+                    anyFinished = true;
+                }
+            }
+        }
+
+        // Destroy entity if it's marked for auto-destroy and any animation finished without looping
+        if (animSet.autoDestroy and anyFinished) {
             const maybeE = entity.entities.getLocking(bodyId);
             if (maybeE) |e| {
                 entity.cleanupLater(e);
@@ -125,7 +135,9 @@ fn advanceAnimation(anim: *Animation) bool {
 fn updateEntitySprite(bodyId: box2d.c.b2BodyId, anim: *Animation) void {
     const maybeEntity = entity.entities.getPtrLocking(bodyId);
     if (maybeEntity) |ent| {
-        ent.sprite = anim.frames[anim.current];
+        if (anim.spriteIndex < ent.sprites.len) {
+            ent.sprites[anim.spriteIndex] = anim.frames[anim.current];
+        }
     }
 }
 
@@ -141,6 +153,7 @@ pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
             cleanupOne(anim.*);
         }
         animations.deinit();
+        shared.allocator.free(animSet.value.currentAnimations);
     }
 }
 
@@ -155,6 +168,7 @@ pub fn cleanup() void {
             cleanupOne(anim.*);
         }
         entry.value_ptr.animations.deinit();
+        shared.allocator.free(entry.value_ptr.currentAnimations);
     }
     animationSets.map.clearAndFree();
 }
@@ -166,7 +180,7 @@ pub fn cleanupOne(anim: Animation) void {
     shared.allocator.free(anim.frames);
 }
 
-pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2) !Animation {
+pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize) !Animation {
     const frames = try fs.loadSpritesFromFolder(pathToAnimationDir, scale, offset);
 
     return .{
@@ -174,6 +188,8 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
         .lastTime = 0,
         .current = 0,
         .frames = frames,
+        .spriteIndex = spriteIndex,
+        .loop = loop,
     };
 }
 
@@ -192,5 +208,7 @@ pub fn copyAnimation(anim: Animation) !Animation {
         .current = 0,
         .lastTime = 0.0,
         .frames = framesCopy,
+        .spriteIndex = anim.spriteIndex,
+        .loop = anim.loop,
     };
 }

@@ -95,7 +95,7 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
         };
 
         const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
-        return vec.iadd(crosshairPos, ent.sprite.offset);
+        return vec.iadd(crosshairPos, ent.sprites[0].offset);
     }
     return vec.izero; // Fallback if entity not found
 }
@@ -195,6 +195,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         2,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
+        true,
+        0,
     );
     try animations.put("idle", idleAnim);
 
@@ -203,6 +205,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         12,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
+        true,
+        0,
     );
     try animations.put("run", runAnim);
 
@@ -211,6 +215,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         4,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
+        true,
+        0,
     );
     try animations.put("fall", fallAnim);
 
@@ -219,6 +225,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         8,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
+        true,
+        0,
     );
     try animations.put("afterjump", afterJumpAnim);
 
@@ -227,6 +235,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         8,
         .{ .x = 1, .y = 1 },
         .{ .x = 0, .y = 0 },
+        true,
+        0,
     );
 
     const missileExplosionAnimation = try animation.load(
@@ -234,6 +244,17 @@ pub fn spawn(position: vec.IVec2) !usize {
         10,
         .{ .x = 1.0, .y = 1.0 },
         .{ .x = 0, .y = 0 },
+        false,
+        0,
+    );
+
+    const missilePropulsionAnimation = try animation.load(
+        "weapons/rocket_launcher/propulsion_flame",
+        2,
+        .{ .x = 1.0, .y = 1.0 },
+        .{ .x = 0, .y = 50 },
+        false,
+        1,
     );
 
     const rocketLauncher: weapon.Weapon = .{
@@ -249,6 +270,7 @@ pub fn spawn(position: vec.IVec2) !usize {
             .gravityScale = 0,
             .propulsion = 2,
             .animation = missileAnimation,
+            .propulsionAnimation = missilePropulsionAnimation,
             .explosion = .{
                 .sound = .{
                     .file = "sounds/cannon_hit.mp3",
@@ -271,11 +293,14 @@ pub fn spawn(position: vec.IVec2) !usize {
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(rocketLauncher);
 
+    var playerSprites = try shared.allocator.alloc(sprite.Sprite, 1);
+    playerSprites[0] = s;
+
     const playerEntity = entity.Entity{
         .type = "dynamic",
         .friction = config.player.movementFriction,
         .bodyId = bodyId,
-        .sprite = s,
+        .sprites = playerSprites,
         .shapeIds = try shapeIds.toOwnedSlice(),
         .state = null,
         .highlighted = false,
@@ -328,7 +353,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     try entity.entities.putLocking(bodyId, playerEntity);
 
     // Register player with central animation system
-    try animation.registerAnimationSet(bodyId, animations, "idle", true, false);
+    try animation.registerAnimationSet(bodyId, animations, "idle", false);
     return playerId;
 }
 
@@ -652,6 +677,9 @@ pub fn cleanup() void {
         for (p.weapons) |w| {
             animation.cleanupOne(w.projectile.animation);
             animation.cleanupOne(w.projectile.explosion.animation);
+            if (w.projectile.propulsionAnimation) |propAnim| {
+                animation.cleanupOne(propAnim);
+            }
         }
 
         // Cleanup player resources

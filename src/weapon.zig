@@ -9,12 +9,14 @@ const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const config = @import("config.zig");
 const animation = @import("animation.zig");
+const shared = @import("shared.zig");
 
 pub const Projectile = struct {
     gravityScale: f32,
     propulsion: f32,
     animation: animation.Animation,
     explosion: projectile.Explosion,
+    propulsionAnimation: ?animation.Animation = null,
 };
 
 pub const Weapon = struct {
@@ -63,7 +65,18 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
     try projectile.registerPropulsion(projectileEntity.bodyId, propulsionVector);
 
-    try animation.register(projectileEntity.bodyId, animCopy, true);
+    var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
+    try animations.put("main", animCopy);
+
+    if (weapon.projectile.propulsionAnimation) |propAnim| {
+        const propAnimCopy = try animation.copyAnimation(propAnim);
+
+        try entity.addSprite(projectileEntity.bodyId, propAnimCopy.frames[0]);
+
+        try animations.put("propulsion", propAnimCopy);
+    }
+
+    try animation.registerAnimationSet(projectileEntity.bodyId, animations, "main", true);
 
     try audio.playFor(weapon.sound);
 }

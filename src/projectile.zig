@@ -46,7 +46,6 @@ var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(s
 fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
     const animCopy = try animation.copyAnimation(anim);
 
-    // Create static body with sensor at explosion position
     var bodyDef = box2d.createStaticBodyDef(pos);
 
     const randomAngle = std.crypto.random.float(f32) * 2.0 * std.math.pi;
@@ -64,7 +63,7 @@ fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
     const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
 
-    try animation.register(explosionEntity.bodyId, animCopy, false);
+    try animation.register(explosionEntity.bodyId, animCopy);
 }
 
 const OverlapContext = struct {
@@ -141,10 +140,10 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
             const rotation = state.rotAngle;
 
             // Remove pixels from sprite
-            try sprite.removeCircleFromSurface(ent.sprite, pos, radius, entityPos, rotation);
+            try sprite.removeCircleFromSurface(ent.sprites[0], pos, radius, entityPos, rotation);
 
             // Update texture
-            try sprite.updateTextureFromSurface(&ent.sprite);
+            try sprite.updateTextureFromSurface(&ent.sprites[0]);
 
             // Regenerate colliders
             const stillExists = try entity.regenerateColliders(ent);

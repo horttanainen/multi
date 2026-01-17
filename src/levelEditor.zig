@@ -27,9 +27,9 @@ pub fn pasteSelection(position: vec.IVec2) !void {
         const maybeE = entity.getEntity(copiedBodyId);
         if (maybeE) |e| {
             const s = try sprite.createFromImg(
-                e.sprite.imgPath,
-                e.sprite.scale,
-                e.sprite.offset,
+                e.sprites[0].imgPath,
+                e.sprites[0].scale,
+                e.sprites[0].offset,
             );
             const pos = conv.pixel2MPos(
                 position.x,
