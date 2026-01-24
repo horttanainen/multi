@@ -26,11 +26,15 @@ pub fn pasteSelection(position: vec.IVec2) !void {
     if (maybeCopiedBodyId) |copiedBodyId| {
         const maybeE = entity.getEntity(copiedBodyId);
         if (maybeE) |e| {
-            const s = try sprite.createFromImg(
-                e.sprites[0].imgPath,
-                e.sprites[0].scale,
-                e.sprites[0].offset,
+            if (e.spriteUuids.len == 0) return error.NoSpritesToCopy;
+            const firstSprite = sprite.getSprite(e.spriteUuids[0]) orelse return error.SpriteNotFound;
+
+            const spriteUuid = try sprite.createFromImg(
+                firstSprite.imgPath,
+                firstSprite.scale,
+                firstSprite.offset,
             );
+            const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
             const pos = conv.pixel2MPos(
                 position.x,
                 position.y,
@@ -49,9 +53,9 @@ pub fn pasteSelection(position: vec.IVec2) !void {
             shapeDef.material = box2d.c.b2Shape_GetMaterial(shapes[0]);
 
             std.debug.print("about to create\n", .{});
-            const newEntity = try entity.createFromImg(s, shapeDef, bodyDef, e.type);
+            const newEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, e.type);
 
-            const serializedE = entity.serialize(newEntity, position);
+            const serializedE = entity.serialize(newEntity, position) orelse return error.SerializationFailed;
             try createNewVersion();
             try addEntityToLevel(serializedE);
         }

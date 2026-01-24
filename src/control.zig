@@ -34,7 +34,7 @@ pub fn handleGameMouseInput() !void {
                 .x = x,
                 .y = y,
             });
-            const s = try sprite.createFromImg(
+            const spriteUuid = try sprite.createFromImg(
                 shared.boxImgSrc,
                 .{
                     .x = 1,
@@ -42,6 +42,7 @@ pub fn handleGameMouseInput() !void {
                 },
                 vec.izero,
             );
+            const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
             const pos = conv.pixel2MPos(
                 position.x,
                 position.y,
@@ -49,7 +50,7 @@ pub fn handleGameMouseInput() !void {
                 s.sizeM.y,
             );
             const bodyDef = box2d.createDynamicBodyDef(pos);
-            _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
+            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
 
             delay.action("boxcreate", config.boxCreateDelayMs);
         }

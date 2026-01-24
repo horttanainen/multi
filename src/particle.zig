@@ -13,7 +13,7 @@ const entity = @import("entity.zig");
 
 pub const Particle = struct {
     bodyId: box2d.c.b2BodyId,
-    sprite: sprite.Sprite,
+    spriteUuid: u64,
     state: ?box2d.State,
     color: ?sprite.Color,
     timerId: i32,
@@ -24,24 +24,21 @@ pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Par
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
 
 pub fn create(bodyId: box2d.c.b2BodyId, lifetime: u32, color: ?sprite.Color, scale: f32) !void {
-    // Load circle sprite with specified scale
-    const particleSprite = try sprite.createFromImg(
+    const particleSpriteUuid = try sprite.createFromImg(
         "particles/circle.png",
         .{ .x = scale, .y = scale },
         .{ .x = 0, .y = 0 },
     );
-    errdefer sprite.cleanup(particleSprite);
+    errdefer sprite.cleanupLater(particleSpriteUuid);
 
-    // Schedule cleanup timer
     const id_int: usize = @bitCast(bodyId);
     const ptr: ?*anyopaque = @ptrFromInt(id_int);
     const timerId = timer.addTimer(lifetime, markParticleForCleanup, ptr);
     errdefer _ = timer.removeTimer(timerId);
 
-    // Create particle
     const particle = Particle{
         .bodyId = bodyId,
-        .sprite = particleSprite,
+        .spriteUuid = particleSpriteUuid,
         .state = null,
         .color = color,
         .timerId = timerId,
@@ -68,6 +65,8 @@ pub fn drawAll() !void {
 }
 
 fn draw(particle: *Particle) !void {
+    const particleSprite = sprite.getSprite(particle.spriteUuid) orelse return;
+
     const currentState = box2d.getState(particle.bodyId);
     const state = box2d.getInterpolatedState(particle.state, currentState);
 
@@ -75,12 +74,12 @@ fn draw(particle: *Particle) !void {
         conv.m2PixelPos(
             state.pos.x,
             state.pos.y,
-            particle.sprite.sizeM.x,
-            particle.sprite.sizeM.y,
+            particleSprite.sizeM.x,
+            particleSprite.sizeM.y,
         ),
     );
 
-    try sprite.drawWithOptions(particle.sprite, pos, state.rotAngle, false, false, 0, particle.color);
+    try sprite.drawWithOptions(particleSprite, pos, state.rotAngle, false, false, 0, particle.color);
 }
 
 pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
@@ -205,20 +204,23 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 
     // Stain all overlapping entities
     for (context.bodies[0..context.count]) |bodyId| {
-        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            continue;
+        }
 
         const maybeEntity = entity.entities.getPtrLocking(bodyId);
         if (maybeEntity) |ent| {
-            // Get entity position and rotation
+            if (ent.spriteUuids.len == 0) {
+                continue;
+            }
+
             const state = box2d.getState(bodyId);
             const entityPos = vec.fromBox2d(state.pos);
             const rotation = state.rotAngle;
 
-            // Stain the surface with red color
-            try sprite.colorCircleOnSurface(ent.sprites[0], bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
+            try sprite.colorCircleOnSurface(ent.spriteUuids[0], bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
 
-            // Update texture
-            try sprite.updateTextureFromSurface(&ent.sprites[0]);
+            try sprite.updateTextureFromSurface(ent.spriteUuids[0]);
         }
     }
 
@@ -226,7 +228,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
     const maybeParticleToCleanup = particles.fetchSwapRemoveLocking(bloodBodyId);
     if (maybeParticleToCleanup) |p| {
         _ = timer.removeTimer(p.value.timerId);
-        sprite.cleanup(p.value.sprite);
+        sprite.cleanupLater(p.value.spriteUuid);
         try particlesToCleanup.appendLocking(bloodBodyId);
     }
 }
@@ -297,7 +299,7 @@ pub fn cleanupParticles() !void {
     for (particlesToCleanup.list.items) |bodyId| {
         const maybeParticle = particles.fetchSwapRemoveLocking(bodyId);
         if (maybeParticle) |p| {
-            sprite.cleanup(p.value.sprite);
+            sprite.cleanupLater(p.value.spriteUuid);
         }
         if (box2d.c.b2Body_IsValid(bodyId)) {
             box2d.c.b2DestroyBody(bodyId);
@@ -307,7 +309,6 @@ pub fn cleanupParticles() !void {
     particlesToCleanup.list.clearAndFree();
 }
 
-
 pub fn cleanup() void {
     // Cleanup all remaining particles
     particles.mutex.lock();
@@ -315,7 +316,7 @@ pub fn cleanup() void {
         const maybeParticle = particles.map.get(bodyId);
         if (maybeParticle) |p| {
             _ = timer.removeTimer(p.timerId);
-            sprite.cleanup(p.sprite);
+            sprite.cleanupLater(p.spriteUuid);
         }
         if (box2d.c.b2Body_IsValid(bodyId)) {
             box2d.c.b2DestroyBody(bodyId);

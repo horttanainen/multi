@@ -139,16 +139,15 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
             const entityPos = vec.fromBox2d(state.pos);
             const rotation = state.rotAngle;
 
-            // Remove pixels from sprite
-            try sprite.removeCircleFromSurface(ent.sprites[0], pos, radius, entityPos, rotation);
+            if (ent.spriteUuids.len == 0) continue;
+            const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse continue;
 
-            // Update texture
-            try sprite.updateTextureFromSurface(&ent.sprites[0]);
+            try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
 
-            // Regenerate colliders
+            try sprite.updateTextureFromSurface(ent.spriteUuids[0]);
+
             const stillExists = try entity.regenerateColliders(ent);
 
-            // If entity is completely destroyed, mark for cleanup
             if (!stillExists) {
                 entity.cleanupLater(ent.*);
             }

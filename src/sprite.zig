@@ -16,6 +16,9 @@ const allocator = @import("shared.zig").allocator;
 const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
+const uuid = @import("uuid.zig");
+const timer = @import("sdl_timer.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
 
 // SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
 const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
@@ -48,6 +51,9 @@ pub const SerializableEntity = struct {
     imgPath: []const u8,
     pos: vec.IVec2,
 };
+
+pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
+var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 
 pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color) !void {
     const resources = try shared.getResources();
@@ -93,15 +99,20 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
-pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !Sprite {
+pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    const spriteUuid = uuid.generate();
+
     const imgPath = try shared.allocator.dupe(u8, imagePath);
+    errdefer shared.allocator.free(imgPath);
 
     const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
     defer shared.allocator.free(imgPathZ);
     const surface = try image.load(imgPathZ);
+    errdefer sdl.freeSurface(surface);
 
     const resources = try shared.getResources();
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
+    errdefer sdl.destroyTexture(texture);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
@@ -126,42 +137,97 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
         },
     };
 
-    return sprite;
+    try sprites.putLocking(spriteUuid, sprite);
+
+    return spriteUuid;
 }
 
 pub fn cleanup(sprite: Sprite) void {
     shared.allocator.free(sprite.imgPath);
 }
 
-pub fn createCopy(sprite: Sprite) !Sprite {
+pub fn getSprite(spriteUuid: u64) ?Sprite {
+    return sprites.getLocking(spriteUuid);
+}
+
+pub fn cleanupLater(spriteUuid: u64) void {
+    const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
+    _ = timer.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
+}
+
+fn markSpriteForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
+    _ = interval;
+
+    const spriteUuid: u64 = @intFromPtr(param.?);
+
+    const maybeKV = sprites.fetchSwapRemoveLocking(spriteUuid);
+    if (maybeKV) |_| {
+        spritesToCleanup.appendLocking(spriteUuid) catch {};
+    }
+
+    return 0; // Don't repeat timer
+}
+
+pub fn cleanupSprites() void {
+    spritesToCleanup.mutex.lock();
+    defer spritesToCleanup.mutex.unlock();
+
+    for (spritesToCleanup.list.items) |spriteUuid| {
+        const maybeSprite = sprites.getLocking(spriteUuid);
+        if (maybeSprite) |s| {
+            cleanupOne(s);
+        }
+    }
+
+    spritesToCleanup.list.clearAndFree();
+}
+
+fn cleanupOne(sprite: Sprite) void {
+    shared.allocator.free(sprite.imgPath);
+    sdl.destroyTexture(sprite.texture);
+    sdl.freeSurface(sprite.surface);
+}
+
+pub fn createCopy(spriteUuid: u64) !u64 {
+    const originalSprite = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
+
+    const newUuid = uuid.generate();
+
     const resources = try shared.getResources();
 
-    const format: u32 = if (sprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
+    const format: u32 = if (originalSprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
     const copiedSurface = SDL_CreateRGBSurfaceWithFormat(
         0,
-        sprite.surface.w,
-        sprite.surface.h,
+        originalSprite.surface.w,
+        originalSprite.surface.h,
         32,
         format,
     ) orelse {
         return error.SurfaceCopyFailed;
     };
+    errdefer sdl.freeSurface(copiedSurface);
 
-    try sdl.blitSurface(sprite.surface, null, copiedSurface, null);
+    try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
     const copiedTexture = try sdl.createTextureFromSurface(resources.renderer, copiedSurface);
+    errdefer sdl.destroyTexture(copiedTexture);
 
-    const imgPathCopy = try shared.allocator.dupe(u8, sprite.imgPath);
+    const imgPathCopy = try shared.allocator.dupe(u8, originalSprite.imgPath);
+    errdefer shared.allocator.free(imgPathCopy);
 
-    return Sprite{
+    const newSprite = Sprite{
         .surface = copiedSurface,
         .texture = copiedTexture,
         .imgPath = imgPathCopy,
-        .scale = sprite.scale,
-        .sizeM = sprite.sizeM,
-        .sizeP = sprite.sizeP,
-        .offset = sprite.offset,
+        .scale = originalSprite.scale,
+        .sizeM = originalSprite.sizeM,
+        .sizeP = originalSprite.sizeP,
+        .offset = originalSprite.offset,
     };
+
+    try sprites.putLocking(newUuid, newSprite);
+
+    return newUuid;
 }
 
 fn iterateCircleOnSurface(
@@ -240,7 +306,8 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
     iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, void, {}, removePixel);
 }
 
-pub fn colorCircleOnSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
+pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
+    const sprite = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
     const colorPixel = struct {
         fn op(col: Color, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
             // Only color pixels that are not fully transparent
@@ -256,7 +323,9 @@ pub fn colorCircleOnSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: 
     iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, Color, color, colorPixel);
 }
 
-pub fn updateTextureFromSurface(sprite: *Sprite) !void {
+pub fn updateTextureFromSurface(spriteUuid: u64) !void {
+    const sprite = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
+
     const resources = try shared.getResources();
 
     // Destroy old texture
@@ -267,11 +336,13 @@ pub fn updateTextureFromSurface(sprite: *Sprite) !void {
 }
 
 pub const SpriteTile = struct {
-    sprite: Sprite,
+    spriteUuid: u64,
     offsetPos: vec.Vec2, // Offset position in meters relative to original sprite center
 };
 
-pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
+pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
+    const originalSprite = sprites.getLocking(originalSpriteUuid) orelse return error.SpriteNotFound;
+
     const width: u32 = @intCast(originalSprite.surface.w);
     const height: u32 = @intCast(originalSprite.surface.h);
 
@@ -281,7 +352,7 @@ pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
     // If sprite is already small enough, return single tile
     if (width <= maxTileSize and height <= maxTileSize) {
         try tiles.append(SpriteTile{
-            .sprite = originalSprite,
+            .spriteUuid = originalSpriteUuid,
             .offsetPos = vec.zero,
         });
         return tiles.toOwnedSlice();
@@ -364,8 +435,11 @@ pub fn splitIntoTiles(originalSprite: Sprite, maxTileSize: u32) ![]SpriteTile {
                 .sizeP = tileSizeP,
             };
 
+            const tileUuid = uuid.generate();
+            try sprites.putLocking(tileUuid, tileSprite);
+
             try tiles.append(SpriteTile{
-                .sprite = tileSprite,
+                .spriteUuid = tileUuid,
                 .offsetPos = offsetMeters,
             });
         }

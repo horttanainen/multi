@@ -31,7 +31,7 @@ pub const Entity = struct {
     friction: f32,
     bodyId: box2d.c.b2BodyId,
     state: ?box2d.State,
-    sprites: []Sprite,
+    spriteUuids: []u64,
     color: ?sprite.Color,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
@@ -86,7 +86,9 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     const currentState = box2d.getState(entity.bodyId);
     const state = box2d.getInterpolatedState(entity.state, currentState);
 
-    for (entity.sprites) |entitySprite| {
+    for (entity.spriteUuids) |spriteUuid| {
+        const entitySprite = sprite.getSprite(spriteUuid) orelse continue;
+
         const pos = camera.relativePosition(
             conv.m2PixelPos(
                 state.pos.x,
@@ -100,7 +102,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     }
 }
 
-pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
+pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
     const entityType = try shared.allocator.dupe(u8, eType);
 
@@ -109,15 +111,15 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
     const shapeIds = try shared.allocator.alloc(box2d.c.b2ShapeId, 1);
     shapeIds[0] = shapeId;
 
-    var sprites = try shared.allocator.alloc(Sprite, 1);
-    sprites[0] = s;
+    var spriteUuids = try shared.allocator.alloc(u64, 1);
+    spriteUuids[0] = spriteUuid;
 
     const entity = Entity{
         .type = entityType,
         .friction = shapeDef.friction,
         .state = null,
         .bodyId = bodyId,
-        .sprites = sprites,
+        .spriteUuids = spriteUuids,
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
@@ -132,9 +134,9 @@ pub fn createFromShape(s: Sprite, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2
     return entity;
 }
 
-pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
+pub fn createFromImg(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
-    const entity = createEntityForBody(bodyId, s, shapeDef, entityType) catch |err| {
+    const entity = createEntityForBody(bodyId, spriteUuid, shapeDef, entityType) catch |err| {
         // Clean up bodyId if entity creation fails
         box2d.c.b2DestroyBody(bodyId);
         return err;
@@ -143,24 +145,26 @@ pub fn createFromImg(s: Sprite, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b
     return entity;
 }
 
-pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, s: Sprite, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
+pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try shared.allocator.dupe(u8, eType);
     errdefer shared.allocator.free(entityType);
+
+    const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
 
     const triangles = try polygon.triangulate(s);
     defer shared.allocator.free(triangles);
 
     const shapeIds = try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
 
-    var sprites = try shared.allocator.alloc(Sprite, 1);
-    sprites[0] = s;
+    var spriteUuids = try shared.allocator.alloc(u64, 1);
+    spriteUuids[0] = spriteUuid;
 
     const entity = Entity{
         .type = entityType,
         .friction = shapeDef.friction,
         .state = null,
         .bodyId = bodyId,
-        .sprites = sprites,
+        .spriteUuids = spriteUuids,
         .shapeIds = shapeIds,
         .highlighted = false,
         .animated = false,
@@ -182,16 +186,16 @@ pub fn cleanupLater(entity: Entity) void {
     _ = timer.addTimer(10, markEntityForCleanup, ptr);
 }
 
-pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteToAdd: sprite.Sprite) !void {
+pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
     const maybeEnt = entities.getPtrLocking(bodyId);
     if (maybeEnt) |ent| {
-        var sprites: std.ArrayListUnmanaged(sprite.Sprite) = .{};
-        for (ent.sprites) |s| {
-            try sprites.append(shared.allocator, s);
+        var uuids: std.ArrayListUnmanaged(u64) = .{};
+        for (ent.spriteUuids) |uuid| {
+            try uuids.append(shared.allocator, uuid);
         }
-        try sprites.append(shared.allocator, spriteToAdd);
-        shared.allocator.free(ent.sprites);
-        ent.sprites = try sprites.toOwnedSlice(shared.allocator);
+        try uuids.append(shared.allocator, spriteUuid);
+        shared.allocator.free(ent.spriteUuids);
+        ent.spriteUuids = try uuids.toOwnedSlice(shared.allocator);
     }
 }
 
@@ -226,11 +230,11 @@ pub fn cleanupOne(entity: Entity) void {
     if (entity.animated) {
         animation.cleanupAnimationFrames(entity.bodyId);
     } else {
-        for (entity.sprites) |entitySprite| {
-            sprite.cleanup(entitySprite);
+        for (entity.spriteUuids) |spriteUuid| {
+            sprite.cleanupLater(spriteUuid);
         }
     }
-    shared.allocator.free(entity.sprites);
+    shared.allocator.free(entity.spriteUuids);
 }
 
 pub fn cleanup() void {
@@ -243,13 +247,15 @@ pub fn cleanup() void {
 }
 
 pub fn getPosition(entity: Entity) vec.IVec2 {
+    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return vec.izero;
+
     const currentState = box2d.getState(entity.bodyId);
     const state = box2d.getInterpolatedState(entity.state, currentState);
     const pos = conv.m2PixelPos(
         state.pos.x,
         state.pos.y,
-        entity.sprites[0].sizeM.x,
-        entity.sprites[0].sizeM.y,
+        firstSprite.sizeM.x,
+        firstSprite.sizeM.y,
     );
     return pos;
 }
@@ -258,21 +264,24 @@ pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
     return entities.getPtrLocking(bodyId);
 }
 
-pub fn serialize(entity: Entity, pos: vec.IVec2) SerializableEntity {
+pub fn serialize(entity: Entity, pos: vec.IVec2) ?SerializableEntity {
+    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return null;
+
     const breakable = entity.categoryBits == config.CATEGORY_TERRAIN;
     return SerializableEntity{
         .type = entity.type,
-        .scale = entity.sprites[0].scale,
+        .scale = firstSprite.scale,
         .pos = pos,
         .friction = entity.friction,
-        .imgPath = entity.sprites[0].imgPath,
+        .imgPath = firstSprite.imgPath,
         .breakable = breakable,
     };
 }
 
 pub fn regenerateColliders(entity: *Entity) !bool {
-    // Generate new triangles from modified sprite
-    const triangles = polygon.triangulate(entity.sprites[0]) catch {
+    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return false;
+
+    const triangles = polygon.triangulate(firstSprite) catch {
         return false; // destroy entity
     };
     defer shared.allocator.free(triangles);
@@ -296,7 +305,7 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     const newShapeIds = box2d.createPolygonShape(
         entity.bodyId,
         triangles,
-        .{ .x = entity.sprites[0].sizeP.x, .y = entity.sprites[0].sizeP.y },
+        .{ .x = firstSprite.sizeP.x, .y = firstSprite.sizeP.y },
         shapeDef,
     ) catch {
         std.debug.print("Could not create box2d object from regenerated triangles\n", .{});

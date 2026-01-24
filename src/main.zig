@@ -28,6 +28,7 @@ const gamepad = @import("gamepad.zig");
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
+const sprite = @import("sprite.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const gibbing = @import("gibbing.zig");
@@ -173,6 +174,7 @@ fn gameLoop() !void {
     animation.animate();
 
     entity.cleanupEntities();
+    sprite.cleanupSprites();
     try player.checkAllSensors();
     try sensor.checkGoal();
 

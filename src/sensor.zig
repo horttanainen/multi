@@ -31,14 +31,14 @@ pub fn drawGoal() !void {
     try entity.draw(&goalSensor);
 }
 
-pub fn createGoalSensorFromImg(position: vec.Vec2, s: sprite.Sprite) !void {
+pub fn createGoalSensorFromImg(position: vec.Vec2, spriteUuid: u64) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.isSensor = true;
     shapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
     shapeDef.filter.maskBits = config.CATEGORY_PLAYER;
     const bodyDef = box2d.createStaticBodyDef(position);
     const bodyId = try box2d.createBody(bodyDef);
-    const e = try entity.createEntityForBody(bodyId, s, shapeDef, "goal");
+    const e = try entity.createEntityForBody(bodyId, spriteUuid, shapeDef, "goal");
     maybeGoalSensor = e;
 }
 

@@ -17,20 +17,22 @@ pub const ParallaxEntity = struct {
     fog: f32,
     scale: vec.Vec2,
     pos: vec.IVec2,
-    sprite: sprite.Sprite,
+    spriteUuid: u64,
 };
 
 var parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);
 
 pub fn draw() !void {
     for (parallaxEntities.items) |parallaxEntity| {
+        const parallaxSprite = sprite.getSprite(parallaxEntity.spriteUuid) orelse continue;
+
         const relativePos = camera.parallaxAdjustedRelativePosition(
             parallaxEntity.pos,
             parallaxEntity.parallaxDistance,
         );
 
         try sprite.drawWithOptions(
-            parallaxEntity.sprite,
+            parallaxSprite,
             relativePos,
             0,
             false,
@@ -41,9 +43,9 @@ pub fn draw() !void {
     }
 }
 
-pub fn create(s: sprite.Sprite, pos: vec.IVec2, parallaxDistance: f32, scale: vec.Vec2, fog: f32) !void {
+pub fn create(spriteUuid: u64, pos: vec.IVec2, parallaxDistance: f32, scale: vec.Vec2, fog: f32) !void {
     const parallaxEntity = ParallaxEntity{
-        .sprite = s,
+        .spriteUuid = spriteUuid,
         .parallaxDistance = parallaxDistance,
         .pos = pos,
         .scale = scale,
@@ -61,7 +63,7 @@ fn sort(_: void, a: ParallaxEntity, b: ParallaxEntity) bool {
 
 pub fn cleanup() void {
     for (parallaxEntities.items) |pEntity| {
-        sprite.cleanup(pEntity.sprite);
+        sprite.cleanupLater(pEntity.spriteUuid);
     }
     parallaxEntities.deinit();
     parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);

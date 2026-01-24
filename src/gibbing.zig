@@ -14,15 +14,15 @@ const SDL_LockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) c
 const SDL_UnlockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) void, .{ .name = "SDL_UnlockSurface" });
 
 const GibletSet = struct {
-    heads: []sprite.Sprite,
-    legs: []sprite.Sprite,
-    meat: []sprite.Sprite,
+    heads: []u64,
+    legs: []u64,
+    meat: []u64,
 };
 
 // uncolored template giblets
-var templateHeadGiblets: []sprite.Sprite = &[_]sprite.Sprite{};
-var templateLegGiblets: []sprite.Sprite = &[_]sprite.Sprite{};
-var templateMeatGiblets: []sprite.Sprite = &[_]sprite.Sprite{};
+var templateHeadGiblets: []u64 = &[_]u64{};
+var templateLegGiblets: []u64 = &[_]u64{};
+var templateMeatGiblets: []u64 = &[_]u64{};
 
 var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
 
@@ -49,19 +49,19 @@ pub fn init() !void {
 }
 
 pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void {
-    var coloredHeads = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
+    var coloredHeads = std.array_list.Managed(u64).init(shared.allocator);
     for (templateHeadGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredHeads.append(colored);
     }
 
-    var coloredLegs = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
+    var coloredLegs = std.array_list.Managed(u64).init(shared.allocator);
     for (templateLegGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredLegs.append(colored);
     }
 
-    var coloredMeat = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
+    var coloredMeat = std.array_list.Managed(u64).init(shared.allocator);
     for (templateMeatGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredMeat.append(colored);
@@ -115,8 +115,8 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
     }
 }
 
-fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
-    const spriteCopy = try sprite.createCopy(gibletSprite);
+fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
+    const spriteCopyUuid = try sprite.createCopy(gibletSpriteUuid);
 
     const variedPosM: vec.Vec2 = .{
         .x = posM.x + std.crypto.random.float(f32) * 2 - 1,
@@ -130,7 +130,7 @@ fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
     shapeDef.filter.categoryBits = config.CATEGORY_GIBLET;
     shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
 
-    const gibEntity = try entity.createFromImg(spriteCopy, shapeDef, bodyDef, "dynamic");
+    const gibEntity = try entity.createFromImg(spriteCopyUuid, shapeDef, bodyDef, "dynamic");
 
     // Apply random impulse to scatter giblets
     const angle = std.crypto.random.float(f32) * std.math.pi * 2.0;
@@ -142,17 +142,19 @@ fn spawnGiblet(gibletSprite: sprite.Sprite, posM: vec.Vec2) !void {
     box2d.c.b2Body_ApplyLinearImpulseToCenter(gibEntity.bodyId, impulse, true);
 }
 
-fn createColoredSprite(gibletSprite: sprite.Sprite, playerColor: sprite.Color) !sprite.Sprite {
-    var coloredSprite = try sprite.createCopy(gibletSprite);
-    errdefer sprite.cleanup(coloredSprite);
+fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
+    const coloredSpriteUuid = try sprite.createCopy(gibletSpriteUuid);
+    errdefer sprite.cleanupLater(coloredSpriteUuid);
+
+    const coloredSprite = sprite.getSprite(coloredSpriteUuid) orelse return error.SpriteNotFound;
 
     const bloodColor = sprite.Color{ .r = config.bloodParticle.colorR, .g = config.bloodParticle.colorG, .b = config.bloodParticle.colorB };
 
     try replaceColorsOnSurface(coloredSprite.surface, playerColor, bloodColor);
 
-    try sprite.updateTextureFromSurface(&coloredSprite);
+    try sprite.updateTextureFromSurface(coloredSpriteUuid);
 
-    return coloredSprite;
+    return coloredSpriteUuid;
 }
 
 fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloodColor: sprite.Color) !void {
@@ -203,36 +205,36 @@ fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloo
 
 pub fn cleanup() void {
     // Clean up template giblets
-    for (templateHeadGiblets) |s| {
-        sprite.cleanup(s);
+    for (templateHeadGiblets) |spriteUuid| {
+        sprite.cleanupLater(spriteUuid);
     }
     shared.allocator.free(templateHeadGiblets);
 
-    for (templateLegGiblets) |s| {
-        sprite.cleanup(s);
+    for (templateLegGiblets) |spriteUuid| {
+        sprite.cleanupLater(spriteUuid);
     }
     shared.allocator.free(templateLegGiblets);
 
-    for (templateMeatGiblets) |s| {
-        sprite.cleanup(s);
+    for (templateMeatGiblets) |spriteUuid| {
+        sprite.cleanupLater(spriteUuid);
     }
     shared.allocator.free(templateMeatGiblets);
 
     // Clean up all player-specific colored giblets
     var iter = playerGiblets.valueIterator();
     while (iter.next()) |gibletSet| {
-        for (gibletSet.heads) |s| {
-            sprite.cleanup(s);
+        for (gibletSet.heads) |spriteUuid| {
+            sprite.cleanupLater(spriteUuid);
         }
         shared.allocator.free(gibletSet.heads);
 
-        for (gibletSet.legs) |s| {
-            sprite.cleanup(s);
+        for (gibletSet.legs) |spriteUuid| {
+            sprite.cleanupLater(spriteUuid);
         }
         shared.allocator.free(gibletSet.legs);
 
-        for (gibletSet.meat) |s| {
-            sprite.cleanup(s);
+        for (gibletSet.meat) |spriteUuid| {
+            sprite.cleanupLater(spriteUuid);
         }
         shared.allocator.free(gibletSet.meat);
     }

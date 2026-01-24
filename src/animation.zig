@@ -13,8 +13,8 @@ pub const Animation = struct {
     fps: i32,
     current: usize,
     lastTime: f64,
-    frames: []sprite.Sprite,
-    spriteIndex: usize, // Index into entity.sprites array
+    frames: []u64,
+    spriteIndex: usize,  // Which sprite slot this animates (0, 1, 2, etc.)
     loop: bool,
 };
 
@@ -44,7 +44,7 @@ pub fn registerAnimationSet(
     if (maybeEntityPtr) |entPtr| {
         entPtr.animated = true;
 
-        const currentAnimations = try shared.allocator.alloc(?*Animation, entPtr.sprites.len);
+        const currentAnimations = try shared.allocator.alloc(?*Animation, entPtr.spriteUuids.len);
         for (currentAnimations) |*slot| {
             slot.* = null;
         }
@@ -135,8 +135,8 @@ fn advanceAnimation(anim: *Animation) bool {
 fn updateEntitySprite(bodyId: box2d.c.b2BodyId, anim: *Animation) void {
     const maybeEntity = entity.entities.getPtrLocking(bodyId);
     if (maybeEntity) |ent| {
-        if (anim.spriteIndex < ent.sprites.len) {
-            ent.sprites[anim.spriteIndex] = anim.frames[anim.current];
+        if (anim.spriteIndex < ent.spriteUuids.len) {
+            ent.spriteUuids[anim.spriteIndex] = anim.frames[anim.current];
         }
     }
 }
@@ -174,20 +174,20 @@ pub fn cleanup() void {
 }
 
 pub fn cleanupOne(anim: Animation) void {
-    for (anim.frames) |frame| {
-        sprite.cleanup(frame);
+    for (anim.frames) |frameUuid| {
+        sprite.cleanupLater(frameUuid);
     }
     shared.allocator.free(anim.frames);
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize) !Animation {
-    const frames = try fs.loadSpritesFromFolder(pathToAnimationDir, scale, offset);
+    const frameUuids = try fs.loadSpritesFromFolder(pathToAnimationDir, scale, offset);
 
     return .{
         .fps = fps,
         .lastTime = 0,
         .current = 0,
-        .frames = frames,
+        .frames = frameUuids,
         .spriteIndex = spriteIndex,
         .loop = loop,
     };
@@ -195,14 +195,13 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
 
 pub fn copyAnimation(anim: Animation) !Animation {
     // Allocate new frames array
-    const framesCopy = try shared.allocator.alloc(sprite.Sprite, anim.frames.len);
+    const framesCopy = try shared.allocator.alloc(u64, anim.frames.len);
 
     // Deep copy each sprite frame
-    for (anim.frames, 0..) |frame, i| {
-        framesCopy[i] = try sprite.createCopy(frame);
+    for (anim.frames, 0..) |frameUuid, i| {
+        framesCopy[i] = try sprite.createCopy(frameUuid);
     }
 
-    // Return new Animation with copied frames
     return Animation{
         .fps = anim.fps,
         .current = 0,

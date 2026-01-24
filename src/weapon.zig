@@ -38,7 +38,8 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     const animCopy = try animation.copyAnimation(weapon.projectile.animation);
 
     // Use first frame of animation as the sprite
-    const firstFrame = animCopy.frames[0];
+    const firstFrameUuid = animCopy.frames[0];
+    const firstFrame = sprite.getSprite(firstFrameUuid) orelse return error.SpriteNotFound;
     const pos = conv.pixel2MPos(position.x, position.y, firstFrame.sizeM.x, firstFrame.sizeM.y);
     var bodyDef = box2d.createDynamicBodyDef(pos);
     bodyDef.isBullet = true;
@@ -46,7 +47,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     const angle = std.math.atan2(-direction.y, direction.x);
     bodyDef.rotation = box2d.c.b2MakeRot(angle + std.math.pi * 0.5);
 
-    const projectileEntity = try entity.createFromImg(firstFrame, shapeDef, bodyDef, "projectile");
+    const projectileEntity = try entity.createFromImg(firstFrameUuid, shapeDef, bodyDef, "projectile");
 
     box2d.c.b2Body_SetGravityScale(projectileEntity.bodyId, weapon.projectile.gravityScale);
 

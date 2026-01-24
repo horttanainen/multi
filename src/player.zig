@@ -6,6 +6,7 @@ const camera = @import("camera.zig");
 const delay = @import("delay.zig");
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
+const uuid = @import("uuid.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
@@ -48,7 +49,7 @@ pub const Player = struct {
     aimDirection: vec.Vec2,
     airJumpCounter: i32,
     movingRight: bool,
-    crosshair: sprite.Sprite,
+    crosshairUuid: u64,
     health: f32,
     isDead: bool,
     respawnTimerId: i32,
@@ -70,21 +71,24 @@ fn markPlayerForRespawn(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
 }
 
 pub fn drawCrosshair(player: *Player) !void {
+    const crosshairSprite = sprite.getSprite(player.crosshairUuid) orelse return;
     const pos = calcCrosshairPosition(player.*);
-    try sprite.drawWithOptions(player.crosshair, pos, 0, false, false, 0, null);
+    try sprite.drawWithOptions(crosshairSprite, pos, 0, false, false, 0, null);
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
     const maybeEntity = entity.getEntity(player.bodyId);
     if (maybeEntity) |ent| {
+        const crosshairSprite = sprite.getSprite(player.crosshairUuid) orelse return vec.izero;
+
         const currentState = box2d.getState(player.bodyId);
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(
             conv.m2PixelPos(
                 state.pos.x,
                 state.pos.y,
-                player.crosshair.sizeM.x / player.crosshair.scale.x,
-                player.crosshair.sizeM.y / player.crosshair.scale.y,
+                crosshairSprite.sizeM.x / crosshairSprite.scale.x,
+                crosshairSprite.sizeM.y / crosshairSprite.scale.y,
             ),
         );
 
@@ -95,7 +99,12 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
         };
 
         const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
-        return vec.iadd(crosshairPos, ent.sprites[0].offset);
+
+        if (ent.spriteUuids.len > 0) {
+            const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
+            return vec.iadd(crosshairPos, firstSprite.offset);
+        }
+        return crosshairPos;
     }
     return vec.izero; // Fallback if entity not found
 }
@@ -293,14 +302,17 @@ pub fn spawn(position: vec.IVec2) !usize {
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(rocketLauncher);
 
-    var playerSprites = try shared.allocator.alloc(sprite.Sprite, 1);
-    playerSprites[0] = s;
+    const spriteUuid = uuid.generate();
+    try sprite.sprites.putLocking(spriteUuid, s);
+
+    var playerSpriteUuids = try shared.allocator.alloc(u64, 1);
+    playerSpriteUuids[0] = spriteUuid;
 
     const playerEntity = entity.Entity{
         .type = "dynamic",
         .friction = config.player.movementFriction,
         .bodyId = bodyId,
-        .sprites = playerSprites,
+        .spriteUuids = playerSpriteUuids,
         .shapeIds = try shapeIds.toOwnedSlice(),
         .state = null,
         .highlighted = false,
@@ -312,7 +324,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .enabled = true,
     };
 
-    const crosshair = try sprite.createFromImg(shared.crosshairImgSrc, .{
+    const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
         .x = 1,
         .y = 1,
     }, vec.izero);
@@ -342,7 +354,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .aimDirection = vec.west,
         .airJumpCounter = 0,
         .movingRight = false,
-        .crosshair = crosshair,
+        .crosshairUuid = crosshairUuid,
         .cameraId = cameraId,
         .health = 100,
         .isDead = false,
@@ -688,7 +700,7 @@ pub fn cleanup() void {
         if (maybeEntity) |ent| {
             shared.allocator.free(ent.value.shapeIds);
         }
-        sprite.cleanup(p.crosshair);
+        sprite.cleanupLater(p.crosshairUuid);
     }
 
     players.clearAndFree(shared.allocator);

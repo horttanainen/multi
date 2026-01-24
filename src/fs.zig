@@ -3,10 +3,14 @@ const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const vec = @import("vector.zig");
 
-pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]sprite.Sprite {
+const FsError = error{
+    NotFound,
+};
+
+pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]u64 {
     var dir = std.fs.cwd().openDir(folderPath, .{}) catch |err| {
         std.debug.print("Warning: Could not open sprite folder {s}: {}\n", .{ folderPath, err });
-        return &[_]sprite.Sprite{};
+        return err;
     };
     defer dir.close();
 
@@ -26,7 +30,7 @@ pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: ve
 
     if (images.items.len == 0) {
         std.debug.print("Warning: No sprites found in {s}\n", .{folderPath});
-        return &[_]sprite.Sprite{};
+        return FsError.NotFound;
     }
 
     std.mem.sort([]const u8, images.items, {}, struct {
@@ -35,14 +39,14 @@ pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: ve
         }
     }.lessThan);
 
-    var sprites = std.array_list.Managed(sprite.Sprite).init(shared.allocator);
+    var spriteUuids = std.array_list.Managed(u64).init(shared.allocator);
     for (images.items) |imageName| {
         var pathBuf: [256]u8 = undefined;
         const imagePath = try std.fmt.bufPrint(&pathBuf, "{s}/{s}", .{ folderPath, imageName });
 
-        const s = try sprite.createFromImg(imagePath, scale, offset);
-        try sprites.append(s);
+        const uuid = try sprite.createFromImg(imagePath, scale, offset);
+        try spriteUuids.append(uuid);
     }
 
-    return sprites.toOwnedSlice();
+    return spriteUuids.toOwnedSlice();
 }

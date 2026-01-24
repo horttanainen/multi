@@ -98,16 +98,19 @@ fn loadByName(levelName: []const u8) !void {
     for (levelToDeserialize.entities) |e| {
         var shapeDef = box2d.c.b2DefaultShapeDef();
         shapeDef.friction = e.friction;
-        const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+        const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+
+        const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
         const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
+
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);
             shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
             shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
-            _ = try entity.createFromImg(s, shapeDef, bodyDef, "dynamic");
+            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
-            const tiles = try sprite.splitIntoTiles(s, 64);
+            const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
             defer shared.allocator.free(tiles);
 
             const categoryBits = if (e.breakable) config.CATEGORY_TERRAIN else config.CATEGORY_UNBREAKABLE;
@@ -121,10 +124,10 @@ fn loadByName(levelName: []const u8) !void {
                 const bodyDef = box2d.createStaticBodyDef(tilePos);
                 shapeDef.filter.categoryBits = categoryBits;
                 shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
-                _ = entity.createFromImg(tile.sprite, shapeDef, bodyDef, "static") catch |err| {
+                _ = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
                     if (err == polygon.PolygonError.CouldNotCreateTriangle) {
                         // Clean up the tile sprite since entity creation failed
-                        sprite.cleanup(tile.sprite);
+                        sprite.cleanupLater(tile.spriteUuid);
                     } else {
                         return err;
                     }
@@ -133,16 +136,16 @@ fn loadByName(levelName: []const u8) !void {
 
             // Clean up the original sprite if it was split
             if (tiles.len > 1) {
-                sprite.cleanup(s);
+                sprite.cleanupLater(spriteUuid);
             }
         } else if (std.mem.eql(u8, e.type, "goal")) {
-            try sensor.createGoalSensorFromImg(pos, s);
+            try sensor.createGoalSensorFromImg(pos, spriteUuid);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
             const bodyDef = box2d.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
             shapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
             shapeDef.filter.maskBits = config.CATEGORY_PLAYER;
-            _ = try entity.createFromImg(s, shapeDef, bodyDef, "spawn");
+            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
         }
     }
