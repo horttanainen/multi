@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("zsdl");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
+const window = @import("window.zig");
 
 pub const Viewport = struct {
     x: i32,
@@ -13,8 +14,8 @@ pub const Viewport = struct {
 pub var activeViewport: Viewport = .{
     .x = 0,
     .y = 0,
-    .width = config.window.width,
-    .height = config.window.height,
+    .width = config.window.defaultWidth,
+    .height = config.window.defaultHeight,
 };
 
 pub var viewports: std.AutoArrayHashMapUnmanaged(usize, Viewport) = .{};
@@ -23,8 +24,8 @@ pub fn addViewportForCamera(cameraId: usize) !void {
     try viewports.put(shared.allocator, cameraId, .{
         .x = 0,
         .y = 0,
-        .width = config.window.width,
-        .height = config.window.height,
+        .width = window.width,
+        .height = window.height,
     });
     try regenerateViewports();
 }
@@ -43,8 +44,8 @@ pub fn regenerateViewports() !void {
         try viewports.put(shared.allocator, cameraIds[0], .{
             .x = 0,
             .y = 0,
-            .width = config.window.width,
-            .height = config.window.height,
+            .width = window.width,
+            .height = window.height,
         });
         return;
     }
@@ -54,14 +55,14 @@ pub fn regenerateViewports() !void {
         try viewports.put(shared.allocator, cameraIds[0], .{
             .x = 0,
             .y = 0,
-            .width = @divFloor(config.window.width, 2),
-            .height = config.window.height,
+            .width = @divFloor(window.width, 2),
+            .height = window.height,
         });
         try viewports.put(shared.allocator, cameraIds[1], .{
-            .x = @divFloor(config.window.width, 2),
+            .x = @divFloor(window.width, 2),
             .y = 0,
-            .width = @divFloor(config.window.width, 2),
-            .height = config.window.height,
+            .width = @divFloor(window.width, 2),
+            .height = window.height,
         });
     }
     // Could add 3-4 player layouts later

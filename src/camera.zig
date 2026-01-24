@@ -8,6 +8,7 @@ const shared = @import("shared.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const viewport = @import("viewport.zig");
+const window = @import("window.zig");
 
 const conv = @import("conversion.zig");
 
@@ -109,7 +110,10 @@ pub fn followAllPlayers() void {
         if (cameras.getPtr(p.cameraId)) |cam| {
             const maybeEntity = entity.getEntity(p.bodyId);
             if (maybeEntity) |ent| {
-                moveCamera(cam, entity.getPosition(ent.*));
+                const currentState = box2d.getState(ent.bodyId);
+                const state = box2d.getInterpolatedState(ent.state, currentState);
+                const pos = conv.m2Pixel(state.pos);
+                moveCamera(cam, pos);
             }
         }
     }
@@ -156,8 +160,8 @@ fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
     const vp = viewport.getViewportForCamera(cam.id) orelse viewport.Viewport{
         .x = 0,
         .y = 0,
-        .width = config.window.width,
-        .height = config.window.height,
+        .width = window.width,
+        .height = window.height,
     };
 
     cam.posPx.x = pos.x - @divFloor(vp.width, 2);

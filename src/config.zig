@@ -1,8 +1,8 @@
 const std = @import("std");
 
 pub const window = .{
-    .width = 2000,
-    .height = 1200,
+    .defaultWidth = 2000,
+    .defaultHeight = 1200,
 };
 
 pub const debug = false;

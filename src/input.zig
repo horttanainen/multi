@@ -5,6 +5,7 @@ const control = @import("control.zig");
 const controller = @import("controller.zig");
 const keyboard = @import("keyboard.zig");
 const gamepad = @import("gamepad.zig");
+const window = @import("window.zig");
 
 pub fn handle() !void {
     // Event handling
@@ -13,6 +14,11 @@ pub fn handle() !void {
         switch (event.type) {
             sdl.EventType.quit => {
                 shared.quitGame = true;
+            },
+            sdl.EventType.windowevent => {
+                if (event.window.event == .resized or event.window.event == .size_changed) {
+                    try window.handleResize(event.window.data1, event.window.data2);
+                }
             },
             sdl.EventType.controllerdeviceadded => {
                 try gamepad.handleDeviceAdded(event.controllerdevice.which);

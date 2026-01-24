@@ -5,6 +5,7 @@ const background = @import("background.zig");
 const camera = @import("camera.zig");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
+const window = @import("window.zig");
 const ui = @import("ui.zig");
 const debug = @import("debug.zig");
 const player = @import("player.zig");
@@ -56,13 +57,13 @@ fn renderCamera(cameraId: usize) !void {
 fn drawHorizontalLine(height: i32) !void {
     const resources = try shared.getResources();
     const xAxisStart = camera.relativePosition(.{ .x = 0, .y = height });
-    const xAxisEnd = camera.relativePosition(.{ .x = config.window.width, .y = height });
+    const xAxisEnd = camera.relativePosition(.{ .x = window.width, .y = height });
     try sdl.renderDrawLine(resources.renderer, xAxisStart.x, xAxisStart.y, xAxisEnd.x, xAxisEnd.y);
 }
 
 fn drawVerticalLine(height: i32) !void {
     const resources = try shared.getResources();
-    const yAxisStart = camera.relativePosition(.{ .x = height, .y = config.window.height });
+    const yAxisStart = camera.relativePosition(.{ .x = height, .y = window.height });
     const yAxisEnd = camera.relativePosition(.{ .x = height, .y = 0 });
     try sdl.renderDrawLine(resources.renderer, yAxisStart.x, yAxisStart.y, yAxisEnd.x, yAxisEnd.y);
 }

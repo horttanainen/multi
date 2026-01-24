@@ -32,12 +32,12 @@ const sprite = @import("sprite.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const gibbing = @import("gibbing.zig");
+const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //TODO: add ninja rope
 //TODO: add dash to side
-//TODO: allow resizing the window and start the game with the players monitor size in mind
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
 
@@ -106,6 +106,9 @@ const Sprite = entity.Sprite;
 //TODO: reapply physics to recreated objects that have been broken
 
 pub fn main() !void {
+    try window.init();
+    defer window.cleanup();
+
     const resources = try shared.init();
     defer shared.cleanup();
 
