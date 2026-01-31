@@ -20,6 +20,8 @@ pub const RopeState = enum {
 pub const Rope = struct {
     state: RopeState,
     hookBodyId: box2d.c.b2BodyId,
+    attachedToBodyId: box2d.c.b2BodyId,
+    jointId: box2d.c.b2JointId,
 };
 
 pub var ropes: std.AutoArrayHashMapUnmanaged(usize, Rope) = .{};
@@ -68,6 +70,8 @@ pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
     try ropes.put(shared.allocator, playerId, Rope{
         .state = .flying,
         .hookBodyId = hookEntity.bodyId,
+        .attachedToBodyId = undefined,
+        .jointId = undefined,
     });
 }
 
@@ -75,6 +79,12 @@ pub fn releaseRope(playerId: usize) void {
     const maybeRope = ropes.fetchSwapRemove(playerId);
     if (maybeRope) |kv| {
         const ropeState = kv.value;
+
+        // Destroy the joint if attached
+        if (ropeState.state == .attached and box2d.c.b2Joint_IsValid(ropeState.jointId)) {
+            box2d.c.b2DestroyJoint(ropeState.jointId);
+        }
+
         if (!box2d.c.b2Body_IsValid(ropeState.hookBodyId)) {
             return;
         }
@@ -106,7 +116,7 @@ pub fn checkHookContacts() !void {
             const maybeRope = getRopePtrByBodyId(bodyIdA);
             if (maybeRope) |rope| {
                 if (rope.state == .flying) {
-                    attach(rope);
+                    attach(rope, bodyIdB);
                 }
             }
         }
@@ -114,7 +124,7 @@ pub fn checkHookContacts() !void {
             const maybeRope = getRopePtrByBodyId(bodyIdB);
             if (maybeRope) |rope| {
                 if (rope.state == .flying) {
-                    attach(rope);
+                    attach(rope, bodyIdA);
                 }
             }
         }
@@ -131,9 +141,43 @@ fn getRopePtrByBodyId(bodyId: box2d.c.b2BodyId) ?*Rope {
     return null;
 }
 
-fn attach(rope: *Rope) void {
+fn attach(rope: *Rope, targetBodyId: box2d.c.b2BodyId) void {
     rope.state = .attached;
-    box2d.c.b2Body_SetType(rope.hookBodyId, box2d.c.b2_staticBody);
+    rope.attachedToBodyId = targetBodyId;
+
+    const resources = shared.getResources() catch return;
+
+    // Get the hook's current position to use as the anchor point
+    const hookPos = box2d.c.b2Body_GetPosition(rope.hookBodyId);
+
+    // Create a weld joint to attach the hook to the target body
+    var weldDef = box2d.c.b2DefaultWeldJointDef();
+    weldDef.bodyIdA = rope.hookBodyId;
+    weldDef.bodyIdB = targetBodyId;
+
+    // Set local anchors - hook anchor at center, target anchor at the contact point
+    weldDef.localAnchorA = box2d.c.b2Vec2{ .x = 0, .y = 0 };
+
+    // Transform hook world position to target body's local space manually
+    const targetPos = box2d.c.b2Body_GetPosition(targetBodyId);
+    const targetRot = box2d.c.b2Body_GetRotation(targetBodyId);
+    // Translate to target body origin
+    const dx = hookPos.x - targetPos.x;
+    const dy = hookPos.y - targetPos.y;
+    // Rotate by inverse of target rotation (c, s) -> (c, -s)
+    weldDef.localAnchorB = box2d.c.b2Vec2{
+        .x = targetRot.c * dx + targetRot.s * dy,
+        .y = -targetRot.s * dx + targetRot.c * dy,
+    };
+
+    // Reference angle is the difference between hook and target rotation
+    const hookRot = box2d.c.b2Body_GetRotation(rope.hookBodyId);
+    weldDef.referenceAngle = std.math.atan2(
+        hookRot.s * targetRot.c - hookRot.c * targetRot.s,
+        hookRot.c * targetRot.c + hookRot.s * targetRot.s,
+    );
+
+    rope.jointId = box2d.c.b2CreateWeldJoint(resources.worldId, &weldDef);
 }
 
 pub fn applyTension() void {
@@ -233,6 +277,12 @@ pub fn cleanup() void {
     var iter = ropes.iterator();
     while (iter.next()) |entry| {
         const ropeState = entry.value_ptr.*;
+
+        // Destroy the joint if attached
+        if (ropeState.state == .attached and box2d.c.b2Joint_IsValid(ropeState.jointId)) {
+            box2d.c.b2DestroyJoint(ropeState.jointId);
+        }
+
         if (!box2d.c.b2Body_IsValid(ropeState.hookBodyId)) {
             continue;
         }
