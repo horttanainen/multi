@@ -40,6 +40,8 @@ const Sprite = entity.Sprite;
 //TODO: shot rockets should have players velocity added to them
 //TODO: ninja rope should shoot from the same point as rockets
 //TOOD: ninja rope should be allowed to attach to other players
+//TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
+//TODO: add transparent smoke trail for the rocket
 
 //Gun ideas
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
@@ -52,8 +54,6 @@ const Sprite = entity.Sprite;
 //TODO: Dig2000 for melee and quick digging
 
 //TODO: add dash to side
-//TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
-//TODO: add transparent smoke trail for the rocket
 
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
