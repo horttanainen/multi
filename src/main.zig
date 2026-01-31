@@ -37,7 +37,10 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: try if real orientational propulsion for missile would be better
+//TODO: rope rocket gun: shoots a rocket with a box2d rope attached to it. Detachhing causes a rope with a hook to fly behind the rocket
+//TODO: travel rocket: large slow moving rocet on top which player can jump or attach via rope.
+//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
+//TODO: mast breaker: shoot two spike balls with a chain between
 
 //TODO: add dash to side
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
