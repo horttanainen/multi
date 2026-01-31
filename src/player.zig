@@ -118,9 +118,9 @@ pub fn spawn(position: vec.IVec2) !usize {
     const playerId = players.values().len;
     const playerMaterialId: i32 = @intCast(playerId + config.player.materialOffset);
 
-    const dynamicBox = box2d.c.b2MakeBox(0.1, 0.25);
+    const dynamicBox = box2d.c.b2MakeOffsetBox(0.2, 0.6, .{ .x = 0, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.density = 1.0;
+    shapeDef.density = 0.4;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
@@ -130,35 +130,38 @@ pub fn spawn(position: vec.IVec2) !usize {
     const lowerBodyCircle: box2d.c.b2Circle = .{
         .center = .{
             .x = 0,
-            .y = 0.25,
+            .y = 0,
         },
-        .radius = 0.1,
+        .radius = 0.3,
     };
     var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
-    lowerBodyShapeDef.density = 1.0;
+    lowerBodyShapeDef.density = 0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = playerMaterialId;
     lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
     lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
-    const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
+    const footBox = box2d.c.b2MakeOffsetBox(0.2, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
+    footShapeDef.density = 0;
     footShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     footShapeDef.filter.maskBits = collision.MASK_SENSOR_FOOT;
     const footSensorShapeId = box2d.c.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
 
-    const leftWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
+    const leftWallBox = box2d.c.b2MakeOffsetBox(0.15, 0.4, .{ .x = -0.2, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var leftWallShapeDef = box2d.c.b2DefaultShapeDef();
     leftWallShapeDef.isSensor = true;
+    leftWallShapeDef.density = 0;
     leftWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     leftWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const leftWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &leftWallShapeDef, &leftWallBox);
 
-    const rightWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0.1, .y = 0 }, .{ .c = 1, .s = 0 });
+    const rightWallBox = box2d.c.b2MakeOffsetBox(0.15, 0.4, .{ .x = 0.2, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var rightWallShapeDef = box2d.c.b2DefaultShapeDef();
     rightWallShapeDef.isSensor = true;
+    rightWallShapeDef.density = 0;
     rightWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     rightWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
