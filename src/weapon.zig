@@ -77,7 +77,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
         try animations.put("propulsion", propAnimCopy);
     }
 
-    try animation.registerAnimationSet(projectileEntity.bodyId, animations, "main", true);
+    try animation.registerAnimationSet(projectileEntity.bodyId, animations, "main", false);
 
     try audio.playFor(weapon.sound);
 }

@@ -120,7 +120,7 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     const dynamicBox = box2d.c.b2MakeOffsetBox(0.2, 0.6, .{ .x = 0, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.density = 0.4;
+    shapeDef.density = 0.45;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
