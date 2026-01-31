@@ -40,14 +40,7 @@ pub fn drawPlayerHealth() !void {
         if (maybeEntity) |ent| {
             const currentState = box2d.getState(p.bodyId);
             const state = box2d.getInterpolatedState(ent.state, currentState);
-            const playerPos = camera.relativePosition(
-                conv.m2PixelPos(
-                    state.pos.x,
-                    state.pos.y,
-                    0.4,
-                    0.4,
-                ),
-            );
+            const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
             var buf: [32]u8 = undefined;
             const healthText = std.fmt.bufPrintZ(&buf, "{d}", .{@as(i32, @intFromFloat(p.health))}) catch return;

@@ -71,14 +71,7 @@ fn draw(particle: *Particle) !void {
     const currentState = box2d.getState(particle.bodyId);
     const state = box2d.getInterpolatedState(particle.state, currentState);
 
-    const pos = camera.relativePosition(
-        conv.m2PixelPos(
-            state.pos.x,
-            state.pos.y,
-            particleSprite.sizeM.x,
-            particleSprite.sizeM.y,
-        ),
-    );
+    const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
     try sprite.drawWithOptions(particleSprite, pos, state.rotAngle, false, false, 0, particle.color);
 }

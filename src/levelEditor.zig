@@ -34,13 +34,7 @@ pub fn pasteSelection(position: vec.IVec2) !void {
                 firstSprite.scale,
                 firstSprite.offset,
             );
-            const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
-            const pos = conv.pixel2MPos(
-                position.x,
-                position.y,
-                s.sizeM.x,
-                s.sizeM.y,
-            );
+            const pos = conv.pixel2M(position);
 
             var bodyDef = box2d.createDynamicBodyDef(pos);
             bodyDef.type = box2d.c.b2Body_GetType(e.bodyId);

@@ -102,8 +102,7 @@ fn loadByName(levelName: []const u8) !void {
         shapeDef.friction = e.friction;
         const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
 
-        const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
-        const pos = conv.pixel2MPos(e.pos.x, e.pos.y, s.sizeM.x, s.sizeM.y);
+        const pos = conv.pixel2M(e.pos);
 
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);

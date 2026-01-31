@@ -40,10 +40,8 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
 
     const animCopy = try animation.copyAnimation(weapon.projectile.animation);
 
-    // Use first frame of animation as the sprite
     const firstFrameUuid = animCopy.frames[0];
-    const firstFrame = sprite.getSprite(firstFrameUuid) orelse return error.SpriteNotFound;
-    const pos = conv.pixel2MPos(position.x, position.y, firstFrame.sizeM.x, firstFrame.sizeM.y);
+    const pos = conv.pixel2M(position);
     var bodyDef = box2d.createDynamicBodyDef(pos);
     bodyDef.isBullet = true;
     bodyDef.gravityScale = weapon.projectile.gravityScale;

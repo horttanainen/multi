@@ -55,10 +55,15 @@ pub const SerializableEntity = struct {
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 
-pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color) !void {
+pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
+    // Calculate top-left corner from center position
+    const halfW = @divTrunc(sprite.sizeP.x, 2);
+    const halfH = @divTrunc(sprite.sizeP.y, 2);
+
+    // Handle sprite offset (rotated for sub-sprites/tiles)
     const cosAngle = @cos(angle);
     const sinAngle = @sin(angle);
     const offsetX = @as(f32, @floatFromInt(sprite.offset.x));
@@ -67,8 +72,8 @@ pub fn drawWithOptions(sprite: Sprite, pos: vec.IVec2, angle: f32, highlight: bo
     const rotatedOffsetY = offsetX * sinAngle + offsetY * cosAngle;
 
     const rect = sdl.Rect{
-        .x = pos.x + @as(i32, @intFromFloat(rotatedOffsetX)),
-        .y = pos.y + @as(i32, @intFromFloat(rotatedOffsetY)),
+        .x = centerPos.x - halfW + @as(i32, @intFromFloat(rotatedOffsetX)),
+        .y = centerPos.y - halfH + @as(i32, @intFromFloat(rotatedOffsetY)),
         .w = sprite.sizeP.x,
         .h = sprite.sizeP.y,
     };

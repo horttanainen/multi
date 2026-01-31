@@ -81,18 +81,9 @@ pub fn drawCrosshair(player: *Player) !void {
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
     const maybeEntity = entity.getEntity(player.bodyId);
     if (maybeEntity) |ent| {
-        const crosshairSprite = sprite.getSprite(player.crosshairUuid) orelse return vec.izero;
-
         const currentState = box2d.getState(player.bodyId);
         const state = box2d.getInterpolatedState(ent.state, currentState);
-        const playerPos = camera.relativePosition(
-            conv.m2PixelPos(
-                state.pos.x,
-                state.pos.y,
-                crosshairSprite.sizeM.x / crosshairSprite.scale.x,
-                crosshairSprite.sizeM.y / crosshairSprite.scale.y,
-            ),
-        );
+        const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
         const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), 100);
         const crosshairDisplacementI: vec.IVec2 = .{
@@ -118,9 +109,8 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, null, null, &size.x, &size.y);
-    const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
 
-    const pos = conv.pixel2MPos(position.x, position.y, sizeM.x, sizeM.y);
+    const pos = conv.pixel2M(position);
 
     const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
     const bodyId = try box2d.createBody(bodyDef);

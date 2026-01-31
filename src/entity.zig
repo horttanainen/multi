@@ -90,14 +90,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
     for (entity.spriteUuids) |spriteUuid| {
         const entitySprite = sprite.getSprite(spriteUuid) orelse continue;
 
-        const pos = camera.relativePosition(
-            conv.m2PixelPos(
-                state.pos.x,
-                state.pos.y,
-                entitySprite.sizeM.x,
-                entitySprite.sizeM.y,
-            ),
-        );
+        const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
         try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color);
     }
@@ -249,17 +242,9 @@ pub fn cleanup() void {
 }
 
 pub fn getPosition(entity: Entity) vec.IVec2 {
-    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return vec.izero;
-
     const currentState = box2d.getState(entity.bodyId);
     const state = box2d.getInterpolatedState(entity.state, currentState);
-    const pos = conv.m2PixelPos(
-        state.pos.x,
-        state.pos.y,
-        firstSprite.sizeM.x,
-        firstSprite.sizeM.y,
-    );
-    return pos;
+    return conv.m2Pixel(state.pos);
 }
 
 pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {

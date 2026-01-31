@@ -43,13 +43,7 @@ pub fn handleGameMouseInput() !void {
                 },
                 vec.izero,
             );
-            const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
-            const pos = conv.pixel2MPos(
-                position.x,
-                position.y,
-                s.sizeM.x,
-                s.sizeM.y,
-            );
+            const pos = conv.pixel2M(position);
             const bodyDef = box2d.createDynamicBodyDef(pos);
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
 
