@@ -6,6 +6,7 @@ const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 
@@ -127,8 +128,8 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
     shapeDef.density = 1.0;
-    shapeDef.filter.categoryBits = config.CATEGORY_GIBLET;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    shapeDef.filter.categoryBits = collision.CATEGORY_GIBLET;
+    shapeDef.filter.maskBits = collision.MASK_GIBLET;
 
     const gibEntity = try entity.createFromImg(spriteCopyUuid, shapeDef, bodyDef, "dynamic");
 

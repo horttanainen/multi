@@ -3,6 +3,7 @@ const sdl = @import("zsdl");
 const image = @import("zsdl_image");
 
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const polygon = @import("polygon.zig");
 const box2d = @import("box2d.zig");
 const shared = @import("shared.zig");
@@ -13,6 +14,7 @@ const sprite = @import("sprite.zig");
 const background = @import("background.zig");
 const animation = @import("animation.zig");
 const controller = @import("controller.zig");
+const rope = @import("rope.zig");
 
 const conv = @import("conversion.zig");
 
@@ -105,15 +107,16 @@ fn loadByName(levelName: []const u8) !void {
 
         if (std.mem.eql(u8, e.type, "dynamic")) {
             const bodyDef = box2d.createDynamicBodyDef(pos);
-            shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+            shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
+            shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
             const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
             defer shared.allocator.free(tiles);
 
-            const categoryBits = if (e.breakable) config.CATEGORY_TERRAIN else config.CATEGORY_UNBREAKABLE;
+            const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
+            const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
 
             for (tiles) |tile| {
                 // Calculate position for this tile (original position + tile offset)
@@ -123,7 +126,7 @@ fn loadByName(levelName: []const u8) !void {
                 };
                 const bodyDef = box2d.createStaticBodyDef(tilePos);
                 shapeDef.filter.categoryBits = categoryBits;
-                shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+                shapeDef.filter.maskBits = maskBits;
                 _ = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
                     if (err == polygon.PolygonError.CouldNotCreateTriangle) {
                         // Clean up the tile sprite since entity creation failed
@@ -143,8 +146,8 @@ fn loadByName(levelName: []const u8) !void {
         } else if (std.mem.eql(u8, e.type, "spawn")) {
             const bodyDef = box2d.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
-            shapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
-            shapeDef.filter.maskBits = config.CATEGORY_PLAYER;
+            shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+            shapeDef.filter.maskBits = collision.MASK_SENSOR_SPAWN;
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
         }
@@ -171,6 +174,7 @@ pub fn reload() !void {
 }
 
 pub fn cleanup() void {
+    rope.cleanup();
     player.cleanup();
     sensor.cleanup();
     projectile.cleanup();

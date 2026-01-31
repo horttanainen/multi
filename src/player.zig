@@ -20,8 +20,10 @@ const particle = @import("particle.zig");
 const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
+const rope = @import("rope.zig");
 
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 
 const conv = @import("conversion.zig");
 
@@ -131,8 +133,8 @@ pub fn spawn(position: vec.IVec2) !usize {
     shapeDef.density = 1.0;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
-    shapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
+    shapeDef.filter.maskBits = collision.MASK_PLAYER;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -146,29 +148,29 @@ pub fn spawn(position: vec.IVec2) !usize {
     lowerBodyShapeDef.density = 1.0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = playerMaterialId;
-    lowerBodyShapeDef.filter.categoryBits = config.CATEGORY_PLAYER;
-    lowerBodyShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_PROJECTILE | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+    lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
+    lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
-    footShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
-    footShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_UNBREAKABLE;
+    footShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+    footShapeDef.filter.maskBits = collision.MASK_SENSOR_FOOT;
     const footSensorShapeId = box2d.c.b2CreatePolygonShape(bodyId, &footShapeDef, &footBox);
 
     const leftWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = -0.1, .y = 0 }, .{ .c = 1, .s = 0 });
     var leftWallShapeDef = box2d.c.b2DefaultShapeDef();
     leftWallShapeDef.isSensor = true;
-    leftWallShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
-    leftWallShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+    leftWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+    leftWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const leftWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &leftWallShapeDef, &leftWallBox);
 
     const rightWallBox = box2d.c.b2MakeOffsetBox(0.1, 0.1, .{ .x = 0.1, .y = 0 }, .{ .c = 1, .s = 0 });
     var rightWallShapeDef = box2d.c.b2DefaultShapeDef();
     rightWallShapeDef.isSensor = true;
-    rightWallShapeDef.filter.categoryBits = config.CATEGORY_SENSOR;
-    rightWallShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+    rightWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+    rightWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
     const s = sprite.Sprite{
@@ -318,8 +320,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .highlighted = false,
         .animated = false,
         .flipEntityHorizontally = false,
-        .categoryBits = config.CATEGORY_PLAYER,
-        .maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD,
+        .categoryBits = collision.CATEGORY_PLAYER,
+        .maskBits = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_PROJECTILE | collision.CATEGORY_BLOOD,
         .color = null,
         .enabled = true,
     };
@@ -553,6 +555,21 @@ pub fn shoot(player: *Player) !void {
     delay.action(delayKey, selectedWeapon.delay);
 }
 
+pub fn toggleRope(p: *Player) !void {
+    var buf: [32:0]u8 = undefined;
+    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_rope", .{p.id}) catch unreachable;
+    if (delay.check(delayKey)) return;
+
+    const currentRope = rope.ropes.get(p.id);
+    if (currentRope != null and currentRope.?.state != .inactive) {
+        rope.releaseRope(p.id);
+    } else {
+        const playerPos = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+        try rope.shootHook(p.id, playerPos, p.aimDirection);
+    }
+    delay.action(delayKey, config.ropeToggleDelayMs);
+}
+
 pub fn setColor(playerId: usize, color: sprite.Color) void {
     const maybePlayer = players.getPtr(playerId);
     if (maybePlayer) |player| {
@@ -630,6 +647,9 @@ pub fn kill(p: *Player) !void {
         if (maybeEntity) |ent| {
             ent.enabled = false;
         }
+
+        // Release rope on death
+        rope.releaseRope(p.id);
 
         p.isDead = true;
 

@@ -19,6 +19,7 @@ pub const KeyboardBindings = struct {
     aimDown: sdl.Scancode,
 
     shoot: sdl.Scancode,
+    rope: sdl.Scancode,
 };
 
 pub const player1Bindings = KeyboardBindings{
@@ -30,6 +31,7 @@ pub const player1Bindings = KeyboardBindings{
     .aimUp = .t,
     .aimDown = .g,
     .shoot = .lshift,
+    .rope = .q,
 };
 
 pub const player2Bindings = KeyboardBindings{
@@ -41,6 +43,7 @@ pub const player2Bindings = KeyboardBindings{
     .aimUp = .up,
     .aimDown = .down,
     .shoot = .rshift,
+    .rope = .o,
 };
 
 pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .{};
@@ -117,5 +120,9 @@ pub fn handle(ctrl: *const controller.Controller) void {
     // Shooting
     if (keyStates[@intFromEnum(bindings.shoot)] == 1) {
         control.executeAction(ctrl.playerId, .shoot);
+    }
+
+    if (keyStates[@intFromEnum(bindings.rope)] == 1) {
+        control.executeAction(ctrl.playerId, .rope);
     }
 }

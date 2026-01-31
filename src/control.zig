@@ -3,6 +3,7 @@ const box2d = @import("box2d.zig");
 const sdl = @import("zsdl");
 
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const delay = @import("delay.zig");
 const camera = @import("camera.zig");
 const shared = @import("shared.zig");
@@ -28,8 +29,8 @@ pub fn handleGameMouseInput() !void {
         if (!delay.check("boxcreate")) {
             var shapeDef = box2d.c.b2DefaultShapeDef();
             shapeDef.friction = 0.5;
-            shapeDef.filter.categoryBits = config.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_PROJECTILE | config.CATEGORY_BLOOD | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_SENSOR | config.CATEGORY_UNBREAKABLE;
+            shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
+            shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
             const position = camera.relativePositionForCreating(.{
                 .x = x,
                 .y = y,
@@ -101,6 +102,9 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
             .jump => player.jump(p),
             .shoot => player.shoot(p) catch |err| {
                 std.debug.print("Error shooting: {}\n", .{err});
+            },
+            .rope => player.toggleRope(p) catch |err| {
+                std.debug.print("Error toggling rope: {}\n", .{err});
             },
             .aim_left, .aim_right, .aim_up, .aim_down => {},
         }

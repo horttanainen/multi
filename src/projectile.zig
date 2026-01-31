@@ -8,6 +8,7 @@ const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
@@ -115,8 +116,8 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     };
 
     var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET;
-    filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET;
+    filter.categoryBits = collision.MASK_EXPLOSION_QUERY;
+    filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(
@@ -198,8 +199,8 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
         circleShapeDef.friction = explosion.particleFriction;
         circleShapeDef.restitution = explosion.particleRestitution;
         circleShapeDef.filter.groupIndex = -1; // Don't collide with each other
-        circleShapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
-        circleShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_PLAYER | config.CATEGORY_UNBREAKABLE;
+        circleShapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+        circleShapeDef.filter.maskBits = collision.MASK_EXPLOSION_SHRAPNEL;
 
         const circleShape: box2d.c.b2Circle = .{
             .center = .{
@@ -342,13 +343,13 @@ pub fn checkContacts() !void {
         const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
 
         // Check if shape A is a projectile
-        if ((aFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
+        if ((aFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (bFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
             if (explosions.contains(bodyIdA)) {
                 try explode(bodyIdA);
             }
         }
         // Check if shape B is a projectile
-        if ((bFilter.categoryBits & config.CATEGORY_PROJECTILE) != 0) {
+        if ((bFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (aFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
             if (explosions.contains(bodyIdB)) {
                 try explode(bodyIdB);
             }

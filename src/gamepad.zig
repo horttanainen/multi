@@ -34,6 +34,9 @@ pub const GamepadBindings = struct {
     // Shooting
     shootAxis: sdl.GameController.Axis,
     shootThreshold: f32,
+
+    // Rope
+    ropeButton: sdl.GameController.Button,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -49,6 +52,8 @@ pub const defaultBindings = GamepadBindings{
 
     .shootAxis = .triggerright,
     .shootThreshold = TRIGGER_THRESHOLD,
+
+    .ropeButton = .leftshoulder,
 };
 
 pub var availableGamepads: std.ArrayList(GamepadState) = .{};
@@ -173,6 +178,10 @@ pub fn handle(ctrl: *const controller.Controller) void {
     const shootValue = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.shootAxis));
     if (shootValue > bindings.shootThreshold) {
         control.executeAction(ctrl.playerId, .shoot);
+    }
+
+    if (sdl.gameControllerGetButton(sdlCtrl, bindings.ropeButton)) {
+        control.executeAction(ctrl.playerId, .rope);
     }
 }
 

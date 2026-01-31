@@ -13,16 +13,6 @@ pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
 pub const met2pix = 80;
 
-// Collision categories (bit flags)
-pub const CATEGORY_TERRAIN: u64 = 1 << 0;      // 0x01
-pub const CATEGORY_PLAYER: u64 = 1 << 1;       // 0x02
-pub const CATEGORY_PROJECTILE: u64 = 1 << 2;   // 0x04
-pub const CATEGORY_SENSOR: u64 = 1 << 3;       // 0x08
-pub const CATEGORY_DYNAMIC: u64 = 1 << 4;      // 0x10
-pub const CATEGORY_UNBREAKABLE: u64 = 1 << 5;  // 0x20
-pub const CATEGORY_BLOOD: u64 = 1 << 6;        // 0x40
-pub const CATEGORY_GIBLET: u64 = 1 << 7;       // 0x80
-
 pub const physics = .{
     .dt = 1.0 / 60.0,
     .subStepCount = 4,
@@ -109,3 +99,12 @@ pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
 pub const respawnDelayMs = 2000;
+pub const ropeToggleDelayMs = 300;
+
+pub const rope = .{
+    .hookImpulse = 1.0,
+    .hookGravityScale = 1,
+    .minLength = 3.0,
+    .tensionMultiplier = 7.0,
+    .segmentWidth = 4,
+};

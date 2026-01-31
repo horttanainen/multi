@@ -24,6 +24,7 @@ const player = @import("player.zig");
 const controller = @import("controller.zig");
 const keyboard = @import("keyboard.zig");
 const gamepad = @import("gamepad.zig");
+const rope = @import("rope.zig");
 
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
@@ -36,7 +37,14 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: fix memory leak!!
 //TODO: add ninja rope
+//TODO: instead of making hook static, attach it to the entity it hits -> can travel with missiles etc
+//TODO: Hook entity position is already tracked by entity.zig
+//TODO: hook should not explode missile
+//TODO: missiles should shoot from the center of player
+
+
 //TODO: add dash to side
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
@@ -66,6 +74,7 @@ const Sprite = entity.Sprite;
 //TODO: piercing rocket launcher ammo
 //TODO: shrapnel rocket launcher ammo
 //TODO: mine bazooka ammo
+//TODO: blackhole shooting gun
 
 //Music
 //TODO: There should be basic music fitting the deathmatch theme of the game
@@ -111,6 +120,9 @@ pub fn main() !void {
 
     const resources = try shared.init();
     defer shared.cleanup();
+
+    try rope.init();
+    defer rope.cleanup();
 
     try controller.init();
     defer controller.cleanup();
@@ -163,6 +175,9 @@ fn gameLoop() !void {
 
     player.clampAllSpeeds();
     projectile.applyPropulsion();
+
+    try rope.checkHookContacts();
+    rope.applyTension();
 
     try particle.checkContacts();
     try projectile.checkContacts();

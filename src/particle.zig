@@ -6,6 +6,7 @@ const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
@@ -111,8 +112,8 @@ pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
         boxShapeDef.friction = cfg.friction;
         boxShapeDef.restitution = cfg.restitution;
         boxShapeDef.filter.groupIndex = cfg.groupIndex;
-        boxShapeDef.filter.categoryBits = config.CATEGORY_BLOOD;
-        boxShapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+        boxShapeDef.filter.categoryBits = collision.CATEGORY_BLOOD;
+        boxShapeDef.filter.maskBits = collision.MASK_BLOOD;
         boxShapeDef.enableHitEvents = true;
         boxShapeDef.enableContactEvents = true;
 
@@ -189,8 +190,8 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
     };
 
     var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
-    filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_DYNAMIC | config.CATEGORY_UNBREAKABLE;
+    filter.categoryBits = collision.MASK_BLOOD_QUERY;
+    filter.maskBits = collision.MASK_BLOOD_QUERY;
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(

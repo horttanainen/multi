@@ -25,6 +25,7 @@ const Sprite = sprite.Sprite;
 const conv = @import("conversion.zig");
 const animation = @import("animation.zig");
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 
 pub const Entity = struct {
     type: []const u8,
@@ -267,7 +268,7 @@ pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
 pub fn serialize(entity: Entity, pos: vec.IVec2) ?SerializableEntity {
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return null;
 
-    const breakable = entity.categoryBits == config.CATEGORY_TERRAIN;
+    const breakable = entity.categoryBits == collision.CATEGORY_TERRAIN;
     return SerializableEntity{
         .type = entity.type,
         .scale = firstSprite.scale,

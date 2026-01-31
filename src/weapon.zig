@@ -8,6 +8,7 @@ const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const config = @import("config.zig");
+const collision = @import("collision.zig");
 const animation = @import("animation.zig");
 const shared = @import("shared.zig");
 
@@ -32,8 +33,8 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
     shapeDef.enableHitEvents = true;
-    shapeDef.filter.categoryBits = config.CATEGORY_PROJECTILE;
-    shapeDef.filter.maskBits = config.CATEGORY_TERRAIN | config.CATEGORY_PLAYER | config.CATEGORY_DYNAMIC | config.CATEGORY_GIBLET | config.CATEGORY_UNBREAKABLE;
+    shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+    shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
 
     const animCopy = try animation.copyAnimation(weapon.projectile.animation);
 
