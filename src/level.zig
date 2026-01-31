@@ -181,6 +181,7 @@ pub fn cleanup() void {
     entity.cleanup();
     background.cleanup();
     animation.cleanup();
+    sprite.cleanupAll();
 }
 
 pub fn reset() void {

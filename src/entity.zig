@@ -230,10 +230,9 @@ pub fn cleanupOne(entity: Entity) void {
 
     if (entity.animated) {
         animation.cleanupAnimationFrames(entity.bodyId);
-    } else {
-        for (entity.spriteUuids) |spriteUuid| {
-            sprite.cleanupLater(spriteUuid);
-        }
+    } 
+    for (entity.spriteUuids) |spriteUuid| {
+        sprite.cleanupLater(spriteUuid);
     }
     shared.allocator.free(entity.spriteUuids);
 }

@@ -120,6 +120,8 @@ pub fn main() !void {
     const resources = try shared.init();
     defer shared.cleanup();
 
+    defer sprite.deinit();
+
     try rope.init();
     defer rope.cleanup();
 

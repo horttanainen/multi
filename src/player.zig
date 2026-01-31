@@ -173,25 +173,6 @@ pub fn spawn(position: vec.IVec2) !usize {
     rightWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
-    const s = sprite.Sprite{
-        .surface = surface,
-        .texture = texture,
-        .imgPath = shared.lieroImgSrc,
-        .scale = .{
-            .x = 0.5,
-            .y = 0.5,
-        },
-        .sizeM = .{
-            .x = sizeM.x,
-            .y = sizeM.y,
-        },
-        .sizeP = .{
-            .x = size.x,
-            .y = size.y,
-        },
-        .offset = vec.izero,
-    };
-
     var shapeIds = std.array_list.Managed(box2d.c.b2ShapeId).init(shared.allocator);
     try shapeIds.append(bodyShapeId);
     try shapeIds.append(lowerBodyShapeId);
@@ -304,14 +285,11 @@ pub fn spawn(position: vec.IVec2) !usize {
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(rocketLauncher);
 
-    const spriteUuid = uuid.generate();
-    try sprite.sprites.putLocking(spriteUuid, s);
-
     var playerSpriteUuids = try shared.allocator.alloc(u64, 1);
-    playerSpriteUuids[0] = spriteUuid;
+    playerSpriteUuids[0] = try sprite.createCopy(idleAnim.frames[0]);
 
     const playerEntity = entity.Entity{
-        .type = "dynamic",
+        .type = try shared.allocator.dupe(u8, "dynamic"),
         .friction = config.player.movementFriction,
         .bodyId = bodyId,
         .spriteUuids = playerSpriteUuids,
@@ -700,9 +678,6 @@ pub fn cleanup() void {
             _ = timer.removeTimer(p.respawnTimerId);
         }
 
-        // Remove player entity from entity system
-        const maybeEntity = entity.entities.fetchSwapRemoveLocking(p.bodyId);
-
         camera.destroyCamera(p.cameraId);
 
         // Cleanup weapon animations
@@ -716,10 +691,6 @@ pub fn cleanup() void {
 
         // Cleanup player resources
         shared.allocator.free(p.weapons);
-        box2d.c.b2DestroyBody(p.bodyId);
-        if (maybeEntity) |ent| {
-            shared.allocator.free(ent.value.shapeIds);
-        }
         sprite.cleanupLater(p.crosshairUuid);
     }
 

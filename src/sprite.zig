@@ -150,44 +150,6 @@ pub fn getSprite(spriteUuid: u64) ?Sprite {
     return sprites.getLocking(spriteUuid);
 }
 
-pub fn cleanupLater(spriteUuid: u64) void {
-    const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
-    _ = timer.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
-}
-
-fn markSpriteForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
-
-    const spriteUuid: u64 = @intFromPtr(param.?);
-
-    const maybeKV = sprites.fetchSwapRemoveLocking(spriteUuid);
-    if (maybeKV) |_| {
-        spritesToCleanup.appendLocking(spriteUuid) catch {};
-    }
-
-    return 0; // Don't repeat timer
-}
-
-pub fn cleanupSprites() void {
-    spritesToCleanup.mutex.lock();
-    defer spritesToCleanup.mutex.unlock();
-
-    for (spritesToCleanup.list.items) |spriteUuid| {
-        const maybeSprite = sprites.getLocking(spriteUuid);
-        if (maybeSprite) |s| {
-            cleanupOne(s);
-        }
-    }
-
-    spritesToCleanup.list.clearAndFree();
-}
-
-fn cleanupOne(sprite: Sprite) void {
-    shared.allocator.free(sprite.imgPath);
-    sdl.destroyTexture(sprite.texture);
-    sdl.freeSurface(sprite.surface);
-}
-
 pub fn createCopy(spriteUuid: u64) !u64 {
     const originalSprite = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
 
@@ -446,4 +408,68 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
     }
 
     return tiles.toOwnedSlice();
+}
+
+pub fn cleanupLater(spriteUuid: u64) void {
+    if (sprites.getLocking(spriteUuid) == null) {
+        return;
+    }
+    const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
+    _ = timer.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
+}
+
+fn markSpriteForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
+    _ = interval;
+
+    const spriteUuid: u64 = @intFromPtr(param.?);
+
+    spritesToCleanup.appendLocking(spriteUuid) catch {};
+
+    return 0; // Don't repeat timer
+}
+
+pub fn cleanupSprites() void {
+    spritesToCleanup.mutex.lock();
+    defer spritesToCleanup.mutex.unlock();
+
+    for (spritesToCleanup.list.items) |spriteUuid| {
+        const maybeKV = sprites.fetchSwapRemoveLocking(spriteUuid);
+        if (maybeKV) |kv| {
+            cleanupOne(kv.value);
+        }
+    }
+
+    spritesToCleanup.list.clearAndFree();
+}
+
+fn cleanupOne(s: Sprite) void {
+    shared.allocator.free(s.imgPath);
+    sdl.destroyTexture(s.texture);
+    sdl.freeSurface(s.surface);
+}
+
+pub fn cleanupAll() void {
+    spritesToCleanup.mutex.lock();
+    spritesToCleanup.list.clearRetainingCapacity();
+    spritesToCleanup.mutex.unlock();
+
+    sprites.mutex.lock();
+    defer sprites.mutex.unlock();
+
+    for (sprites.map.values()) |s| {
+        cleanupOne(s);
+    }
+    sprites.map.clearRetainingCapacity();
+}
+
+pub fn deinit() void {
+    cleanupAll();
+
+    sprites.mutex.lock();
+    sprites.map.deinit();
+    sprites.mutex.unlock();
+
+    spritesToCleanup.mutex.lock();
+    spritesToCleanup.list.deinit();
+    spritesToCleanup.mutex.unlock();
 }
