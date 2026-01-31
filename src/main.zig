@@ -38,7 +38,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //TODO: fix memory leak!!
-//TODO: add ninja rope
 //TODO: instead of making hook static, attach it to the entity it hits -> can travel with missiles etc
 //TODO: Hook entity position is already tracked by entity.zig
 //TODO: hook should not explode missile
