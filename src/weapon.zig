@@ -14,6 +14,7 @@ const shared = @import("shared.zig");
 
 pub const Projectile = struct {
     gravityScale: f32,
+    density: f32,
     propulsion: f32,
     animation: animation.Animation,
     explosion: projectile.Explosion,
@@ -32,6 +33,7 @@ pub const Weapon = struct {
 pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
+    shapeDef.density = weapon.projectile.density;
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
     shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
@@ -44,13 +46,12 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     const pos = conv.pixel2MPos(position.x, position.y, firstFrame.sizeM.x, firstFrame.sizeM.y);
     var bodyDef = box2d.createDynamicBodyDef(pos);
     bodyDef.isBullet = true;
+    bodyDef.gravityScale = weapon.projectile.gravityScale;
 
     const angle = std.math.atan2(-direction.y, direction.x);
     bodyDef.rotation = box2d.c.b2MakeRot(angle + std.math.pi * 0.5);
 
     const projectileEntity = try entity.createFromImg(firstFrameUuid, shapeDef, bodyDef, "projectile");
-
-    box2d.c.b2Body_SetGravityScale(projectileEntity.bodyId, weapon.projectile.gravityScale);
 
     const impulse = vec.mul(vec.normalize(.{
         .x = direction.x,

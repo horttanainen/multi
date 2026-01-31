@@ -257,10 +257,11 @@ pub fn spawn(position: vec.IVec2) !usize {
             .file = "sounds/cannon_fire.mp3",
             .durationMs = config.cannonFireSoundDurationMs,
         },
-        .impulse = 1,
+        .impulse = 10,
         .projectile = .{
             .gravityScale = 0,
-            .propulsion = 2,
+            .density = 10,
+            .propulsion = 20,
             .animation = missileAnimation,
             .propulsionAnimation = missilePropulsionAnimation,
             .explosion = .{
