@@ -241,12 +241,6 @@ pub fn cleanup() void {
     entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator));
 }
 
-pub fn getPosition(entity: Entity) vec.IVec2 {
-    const currentState = box2d.getState(entity.bodyId);
-    const state = box2d.getInterpolatedState(entity.state, currentState);
-    return conv.m2Pixel(state.pos);
-}
-
 pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
     return entities.getPtrLocking(bodyId);
 }
