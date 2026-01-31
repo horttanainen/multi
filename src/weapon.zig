@@ -58,13 +58,8 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(projectileEntity.bodyId, vec.toBox2d(impulse), true);
 
-    const propulsionVector = vec.mul(vec.normalize(.{
-        .x = direction.x,
-        .y = -direction.y,
-    }), weapon.projectile.propulsion);
-
     try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
-    try projectile.registerPropulsion(projectileEntity.bodyId, propulsionVector);
+    try projectile.registerPropulsion(projectileEntity.bodyId, weapon.projectile.propulsion);
 
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
     try animations.put("main", animCopy);

@@ -30,7 +30,7 @@ pub const Explosion = struct {
 };
 
 pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
-pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, vec.Vec2).init(shared.allocator);
+pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(shared.allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -309,18 +309,27 @@ pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
     try explosions.put(bodyId, explosion);
 }
 
-pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionVector: vec.Vec2) !void {
-    try propulsions.put(bodyId, propulsionVector);
+pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32) !void {
+    try propulsions.put(bodyId, propulsionMagnitude);
 }
 
 pub fn applyPropulsion() void {
-    for (propulsions.keys(), propulsions.values()) |bodyId, propulsionVector| {
+    for (propulsions.keys(), propulsions.values()) |bodyId, propulsionMagnitude| {
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             continue;
         }
 
-        // Apply the stored propulsion vector as force
-        box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(propulsionVector), true);
+        const rot = box2d.c.b2Body_GetRotation(bodyId);
+
+        // The missile sprite points "up" (+Y in sprite space) and is rotated by angle + π/2
+        // To get the forward direction from the rotation:
+        // rotation = angle + π/2, so angle = rotation - π/2
+        // forward = (cos(angle), sin(angle)) = (cos(rot - π/2), sin(rot - π/2))
+        //         = (sin(rot), -cos(rot)) = (rot.s, -rot.c)
+        const forward = vec.Vec2{ .x = rot.s, .y = -rot.c };
+        const force = vec.mul(forward, propulsionMagnitude);
+
+        box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(force), true);
     }
 }
 
