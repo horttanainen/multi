@@ -52,7 +52,7 @@ pub const SerializableEntity = struct {
     breakable: bool = true,
 };
 
-pub var entitiesToCleanup = thread_safe.ThreadSafeArrayList(Entity).init(shared.allocator);
+var entitiesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
 
 pub var entities = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 
@@ -206,21 +206,23 @@ fn markEntityForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
 
-    const maybeE = entities.fetchSwapRemoveLocking(bodyId);
+    entitiesToCleanup.appendLocking(bodyId) catch {};
 
-    if (maybeE) |entity| {
-        entitiesToCleanup.appendLocking(entity.value) catch {};
-    }
     return 0;
 }
 
 pub fn cleanupEntities() void {
     entitiesToCleanup.mutex.lock();
-    for (entitiesToCleanup.list.items) |entity| {
-        cleanupOne(entity);
+    defer entitiesToCleanup.mutex.unlock();
+
+    for (entitiesToCleanup.list.items) |bodyId| {
+        const maybeKV = entities.fetchSwapRemoveLocking(bodyId);
+        if (maybeKV) |kv| {
+            cleanupOne(kv.value);
+        }
     }
-    entitiesToCleanup.mutex.unlock();
-    entitiesToCleanup.replaceLocking(std.array_list.Managed(Entity).init(shared.allocator));
+
+    entitiesToCleanup.list.clearAndFree();
 }
 
 pub fn cleanupOne(entity: Entity) void {
