@@ -37,7 +37,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: missiles should shoot from the center of player
 //TODO: Hook entity position is already tracked by entity.zig
 
 //TODO: add dash to side
