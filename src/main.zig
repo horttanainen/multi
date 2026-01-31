@@ -37,6 +37,8 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: rockets should have players velocity added to them
+//TODO: ninja rope should shoot from the same point as rockets
 //TODO: rope rocket gun: shoots a rocket with a box2d rope attached to it. Detachhing causes a rope with a hook to fly behind the rocket
 //TODO: travel rocket: large slow moving rocet on top which player can jump or attach via rope.
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
