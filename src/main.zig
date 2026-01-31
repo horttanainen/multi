@@ -37,10 +37,9 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: Hook entity position is already tracked by entity.zig
-//TODO: hook should not explode missile
 //TODO: missiles should shoot from the center of player
-
+//TODO: increase missile mass
+//TODO: Hook entity position is already tracked by entity.zig
 
 //TODO: add dash to side
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations

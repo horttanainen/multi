@@ -192,6 +192,9 @@ pub fn applyTension() void {
         }
         const p = maybePlayer.?;
 
+        if (!box2d.c.b2Body_IsValid(ropeState.hookBodyId)) continue;
+        if (!box2d.c.b2Body_IsValid(ropeState.attachedToBodyId)) continue;
+
         const hookPosM: vec.Vec2 = vec.fromBox2d(box2d.c.b2Body_GetPosition(ropeState.hookBodyId));
         const playerPos = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
         const dx = hookPosM.x - playerPos.x;
@@ -199,11 +202,16 @@ pub fn applyTension() void {
         const distance = @sqrt(dx * dx + dy * dy);
 
         if (distance <= config.rope.minLength) {
-            return;
+            continue;
         }
         const direction = vec.Vec2{ .x = dx / distance, .y = dy / distance };
         const force = vec.mul(direction, config.rope.tensionMultiplier);
+
         box2d.c.b2Body_ApplyForceToCenter(p.bodyId, vec.toBox2d(force), true);
+
+        const oppositeForce = vec.Vec2{ .x = -force.x, .y = -force.y };
+        const hookWorldPos = box2d.c.b2Body_GetPosition(ropeState.hookBodyId);
+        box2d.c.b2Body_ApplyForce(ropeState.attachedToBodyId, vec.toBox2d(oppositeForce), hookWorldPos, true);
     }
 }
 
