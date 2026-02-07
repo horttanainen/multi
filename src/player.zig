@@ -242,15 +242,19 @@ pub fn spawn(position: vec.IVec2) !usize {
         1,
     );
 
+    const weaponScale: vec.Vec2 = .{ .x = 0.2, .y = 0.2 };
+    const weaponSpriteUuid = try sprite.createFromImg("weapons/rocket_launcher/weapon_with_arm.png", weaponScale, conv.m2Pixel(.{ .x = -0.1, .y = -0.4}));
+
     const rocketLauncher: weapon.Weapon = .{
         .name = "rocket_launcher",
-        .scale = .{ .x = 0.5, .y = 0.5 },
+        .scale = weaponScale,
         .delay = config.shootDelayMs,
         .sound = .{
             .file = "sounds/cannon_fire.mp3",
             .durationMs = config.cannonFireSoundDurationMs,
         },
         .impulse = 8,
+        .spriteUuid = weaponSpriteUuid,
         .projectile = .{
             .gravityScale = 0,
             .density = 10,
@@ -592,6 +596,33 @@ pub fn drawAllCrosshairs() !void {
     }
 }
 
+pub fn drawWeapon(player: *Player) !void {
+    if (player.weapons.len == 0) return;
+    const selectedWeapon = player.weapons[player.selectedWeaponIndex];
+    if (selectedWeapon.spriteUuid == 0) return;
+    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
+
+    const maybeEntity = entity.getEntity(player.bodyId);
+    if (maybeEntity) |ent| {
+        const currentState = box2d.getState(player.bodyId);
+        const state = box2d.getInterpolatedState(ent.state, currentState);
+        const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+        const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
+
+        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null);
+    }
+}
+
+pub fn drawAllWeapons() !void {
+    for (players.values()) |*p| {
+        if (p.isDead) {
+            continue;
+        }
+        try drawWeapon(p);
+    }
+}
+
 pub fn damage(p: *Player, d: f32) !void {
     p.health -= d;
 
@@ -674,12 +705,15 @@ pub fn cleanup() void {
 
         camera.destroyCamera(p.cameraId);
 
-        // Cleanup weapon animations
+        // Cleanup weapon animations and sprites
         for (p.weapons) |w| {
             animation.cleanupOne(w.projectile.animation);
             animation.cleanupOne(w.projectile.explosion.animation);
             if (w.projectile.propulsionAnimation) |propAnim| {
                 animation.cleanupOne(propAnim);
+            }
+            if (w.spriteUuid != 0) {
+                sprite.cleanupLater(w.spriteUuid);
             }
         }
 

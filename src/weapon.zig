@@ -28,6 +28,7 @@ pub const Weapon = struct {
     sound: audio.Audio,
     impulse: f32,
     projectile: Projectile,
+    spriteUuid: u64 = 0,
 };
 
 pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {

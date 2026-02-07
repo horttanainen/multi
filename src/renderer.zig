@@ -41,6 +41,7 @@ fn renderCamera(cameraId: usize) !void {
     try background.draw();
     try sensor.drawGoal();
     try entity.drawAll();
+    try player.drawAllWeapons();
     try particle.drawAll();
     try rope.drawRopes();
     try player.drawAllCrosshairs();
