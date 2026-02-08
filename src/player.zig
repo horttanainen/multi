@@ -554,7 +554,7 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
 
         const selectedWeapon = player.weapons[player.selectedWeaponIndex];
         if (selectedWeapon.spriteUuid != 0) {
-            sprite.colorWhitePixels(selectedWeapon.spriteUuid, color) catch |err| {
+            sprite.colorMatchingPixels(selectedWeapon.spriteUuid, color, sprite.isWhite) catch |err| {
                 std.debug.print("Warning: Failed to color weapon sprite for player {}: {}\n", .{ playerId, err });
             };
         }

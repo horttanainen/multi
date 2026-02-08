@@ -1,5 +1,4 @@
 const std = @import("std");
-const sdl = @import("zsdl");
 
 const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
@@ -143,61 +142,12 @@ fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
     const coloredSpriteUuid = try sprite.createCopy(gibletSpriteUuid);
     errdefer sprite.cleanupLater(coloredSpriteUuid);
 
-    const coloredSprite = sprite.getSprite(coloredSpriteUuid) orelse return error.SpriteNotFound;
-
     const bloodColor = sprite.Color{ .r = config.bloodParticle.colorR, .g = config.bloodParticle.colorG, .b = config.bloodParticle.colorB };
 
-    try replaceColorsOnSurface(coloredSprite.surface, playerColor, bloodColor);
-
-    try sprite.updateTextureFromSurface(coloredSpriteUuid);
+    try sprite.colorMatchingPixels(coloredSpriteUuid, bloodColor, sprite.isCyan);
+    try sprite.colorMatchingPixels(coloredSpriteUuid, playerColor, sprite.isWhite);
 
     return coloredSpriteUuid;
-}
-
-fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloodColor: sprite.Color) !void {
-    // Lock surface for pixel access
-    if (sprite.SDL_LockSurface(surface) != 0) {
-        return error.SDLLockSurfaceFailed;
-    }
-    defer sprite.SDL_UnlockSurface(surface);
-
-    const pixels: [*]u8 = @ptrCast(surface.pixels);
-    const bytesPerPixel: usize = 4; // RGBA format
-    const width: usize = @intCast(surface.w);
-    const height: usize = @intCast(surface.h);
-
-    var y: usize = 0;
-    while (y < height) : (y += 1) {
-        var x: usize = 0;
-        while (x < width) : (x += 1) {
-            const pixelIndex = (y * width + x) * bytesPerPixel;
-
-            if (bytesPerPixel != 4) {
-                std.debug.print("Could not color sprite. Wrong number of bytes per pixel: {}", .{bytesPerPixel});
-                return;
-            }
-            const alpha = pixels[pixelIndex + 3];
-            if (alpha <= 0) {
-                continue;
-            }
-            const b = pixels[pixelIndex + 0];
-            const g = pixels[pixelIndex + 1];
-            const r = pixels[pixelIndex + 2];
-
-            // white pixels become players color
-            if (r > 150 and g > 150 and b > 150) {
-                pixels[pixelIndex + 0] = playerColor.b;
-                pixels[pixelIndex + 1] = playerColor.g;
-                pixels[pixelIndex + 2] = playerColor.r;
-            }
-            // Cyan pixels become blood color
-            else if (r < 150 and b > 100) {
-                pixels[pixelIndex + 0] = bloodColor.b;
-                pixels[pixelIndex + 1] = bloodColor.g;
-                pixels[pixelIndex + 2] = bloodColor.r;
-            }
-        }
-    }
 }
 
 pub fn cleanup() void {

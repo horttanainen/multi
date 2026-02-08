@@ -150,7 +150,7 @@ pub fn colorAllFrames(bodyId: box2d.c.b2BodyId, color: sprite.Color) !void {
     var animIter = animSet.animations.valueIterator();
     while (animIter.next()) |anim| {
         for (anim.frames) |frameUuid| {
-            try sprite.colorWhitePixels(frameUuid, color);
+            try sprite.colorMatchingPixels(frameUuid, color, sprite.isWhite);
         }
     }
 }

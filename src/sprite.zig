@@ -353,7 +353,15 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
 }
 
-pub fn colorWhitePixels(spriteUuid: u64, color: Color) !void {
+pub fn isWhite(r: u8, g: u8, b: u8) bool {
+    return r > 150 and g > 150 and b > 150;
+}
+
+pub fn isCyan(r: u8, _: u8, b: u8) bool {
+    return r < 150 and b > 100;
+}
+
+pub fn colorMatchingPixels(spriteUuid: u64, color: Color, comptime predicate: fn (u8, u8, u8) bool) !void {
     const s = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
 
     if (SDL_LockSurface(s.surface) != 0) {
@@ -379,7 +387,7 @@ pub fn colorWhitePixels(spriteUuid: u64, color: Color) !void {
             const g = pixels[pixelIndex + 1];
             const r = pixels[pixelIndex + 2];
 
-            if (r > 150 and g > 150 and b > 150) {
+            if (predicate(r, g, b)) {
                 pixels[pixelIndex + 0] = color.b;
                 pixels[pixelIndex + 1] = color.g;
                 pixels[pixelIndex + 2] = color.r;
