@@ -1,4 +1,5 @@
 const std = @import("std");
+const vec = @import("vector.zig");
 
 pub const window = .{
     .defaultWidth = 2000,
@@ -20,6 +21,9 @@ pub const physics = .{
 
 pub const cannonFireSoundDurationMs = 10000;
 pub const cannonHitSoundDurationMs = 10000;
+
+pub const crosshairOffset: vec.IVec2 = .{ .x = 0, .y = -25};
+pub const crosshairDistanceMultiplier = 100;
 
 pub const Player = struct {
     restingFriction: f32,

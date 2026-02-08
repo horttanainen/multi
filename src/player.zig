@@ -85,13 +85,13 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), 100);
+        const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), config.crosshairDistanceMultiplier);
         const crosshairDisplacementI: vec.IVec2 = .{
             .x = @intFromFloat(crosshairDisplacement.x),
             .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
         };
 
-        const crosshairPos = vec.iadd(playerPos, crosshairDisplacementI);
+        const crosshairPos = vec.iadd(vec.iadd(playerPos, crosshairDisplacementI), config.crosshairOffset);
 
         if (ent.spriteUuids.len > 0) {
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
