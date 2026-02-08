@@ -37,7 +37,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: crosshair center should be more chest level
 //TODO: shot rockets should have players velocity added to them
 //TODO: ninja rope should shoot from the same point as rockets
 //TOOD: ninja rope should be allowed to attach to other players
