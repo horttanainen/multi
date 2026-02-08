@@ -37,12 +37,15 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
+//TODO: Add anchorpoints to all animations
 //TODO: shot rockets should have players velocity added to them
 //TODO: ninja rope should shoot from the same point as rockets
 //TOOD: ninja rope should be allowed to attach to other players
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
+//TODO: change ninja rope attach point to not be in the crotch
 
 //Gun ideas
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
