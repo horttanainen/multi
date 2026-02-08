@@ -40,7 +40,6 @@ const Sprite = entity.Sprite;
 //TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
 //TODO: Add anchorpoints to all animations
 //TODO: shot rockets should have players velocity added to them
-//TODO: ninja rope should shoot from the same point as rockets
 //TOOD: ninja rope should be allowed to attach to other players
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
