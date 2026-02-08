@@ -33,7 +33,6 @@ pub const Entity = struct {
     bodyId: box2d.c.b2BodyId,
     state: ?box2d.State,
     spriteUuids: []u64,
-    color: ?sprite.Color,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
     animated: bool,
@@ -92,7 +91,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
 
         const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color);
+        try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, null);
     }
 }
 
@@ -120,7 +119,6 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
-        .color = null,
         .enabled = true,
     };
 
@@ -165,7 +163,6 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
         .maskBits = shapeDef.filter.maskBits,
-        .color = null,
         .enabled = true,
     };
     return entity;

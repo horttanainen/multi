@@ -298,7 +298,6 @@ pub fn spawn(position: vec.IVec2) !usize {
         .flipEntityHorizontally = false,
         .categoryBits = collision.CATEGORY_PLAYER,
         .maskBits = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_PROJECTILE | collision.CATEGORY_BLOOD,
-        .color = null,
         .enabled = true,
     };
 
@@ -549,10 +548,17 @@ pub fn toggleRope(p: *Player) !void {
 pub fn setColor(playerId: usize, color: sprite.Color) void {
     const maybePlayer = players.getPtr(playerId);
     if (maybePlayer) |player| {
-        const maybeE = entity.getEntity(player.bodyId);
-        if (maybeE) |e| {
-            e.color = color;
+        animation.colorAllFrames(player.bodyId, color) catch |err| {
+            std.debug.print("Warning: Failed to color animation frames for player {}: {}\n", .{ playerId, err });
+        };
+
+        const selectedWeapon = player.weapons[player.selectedWeaponIndex];
+        if (selectedWeapon.spriteUuid != 0) {
+            sprite.colorWhitePixels(selectedWeapon.spriteUuid, color) catch |err| {
+                std.debug.print("Warning: Failed to color weapon sprite for player {}: {}\n", .{ playerId, err });
+            };
         }
+
         gibbing.prepareGibletsForPlayer(playerId, color) catch |err| {
             std.debug.print("Warning: Failed to prepare giblets for player {}: {}\n", .{ playerId, err });
         };

@@ -141,6 +141,20 @@ fn updateEntitySprite(bodyId: box2d.c.b2BodyId, anim: *Animation) void {
     }
 }
 
+pub fn colorAllFrames(bodyId: box2d.c.b2BodyId, color: sprite.Color) !void {
+    animationSets.mutex.lock();
+    defer animationSets.mutex.unlock();
+
+    const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
+
+    var animIter = animSet.animations.valueIterator();
+    while (animIter.next()) |anim| {
+        for (anim.frames) |frameUuid| {
+            try sprite.colorWhitePixels(frameUuid, color);
+        }
+    }
+}
+
 pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
     animationSets.mutex.lock();
     defer animationSets.mutex.unlock();

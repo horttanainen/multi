@@ -20,6 +20,10 @@ const uuid = @import("uuid.zig");
 const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 
+// SDL_LockSurface/SDL_UnlockSurface are not exposed by zsdl
+pub const SDL_LockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) c_int, .{ .name = "SDL_LockSurface" });
+pub const SDL_UnlockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) void, .{ .name = "SDL_UnlockSurface" });
+
 // SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
 const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
     flags: c_int,
@@ -347,6 +351,43 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
 
     // Create new texture from modified surface
     sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
+}
+
+pub fn colorWhitePixels(spriteUuid: u64, color: Color) !void {
+    const s = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
+
+    if (SDL_LockSurface(s.surface) != 0) {
+        return error.SDLLockSurfaceFailed;
+    }
+    defer SDL_UnlockSurface(s.surface);
+
+    const pixels: [*]u8 = @ptrCast(s.surface.pixels);
+    const bytesPerPixel: usize = 4;
+    const width: usize = @intCast(s.surface.w);
+    const height: usize = @intCast(s.surface.h);
+
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const pixelIndex = (y * width + x) * bytesPerPixel;
+
+            const alpha = pixels[pixelIndex + 3];
+            if (alpha == 0) continue;
+
+            const b = pixels[pixelIndex + 0];
+            const g = pixels[pixelIndex + 1];
+            const r = pixels[pixelIndex + 2];
+
+            if (r > 150 and g > 150 and b > 150) {
+                pixels[pixelIndex + 0] = color.b;
+                pixels[pixelIndex + 1] = color.g;
+                pixels[pixelIndex + 2] = color.r;
+            }
+        }
+    }
+
+    try updateTextureFromSurface(spriteUuid);
 }
 
 pub const SpriteTile = struct {

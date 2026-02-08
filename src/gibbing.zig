@@ -10,10 +10,6 @@ const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 
-// SDL_LockSurface/SDL_UnlockSurface are not exposed by zsdl
-const SDL_LockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) c_int, .{ .name = "SDL_LockSurface" });
-const SDL_UnlockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) void, .{ .name = "SDL_UnlockSurface" });
-
 const GibletSet = struct {
     heads: []u64,
     legs: []u64,
@@ -160,10 +156,10 @@ fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
 
 fn replaceColorsOnSurface(surface: *sdl.Surface, playerColor: sprite.Color, bloodColor: sprite.Color) !void {
     // Lock surface for pixel access
-    if (SDL_LockSurface(surface) != 0) {
+    if (sprite.SDL_LockSurface(surface) != 0) {
         return error.SDLLockSurfaceFailed;
     }
-    defer SDL_UnlockSurface(surface);
+    defer sprite.SDL_UnlockSurface(surface);
 
     const pixels: [*]u8 = @ptrCast(surface.pixels);
     const bytesPerPixel: usize = 4; // RGBA format
