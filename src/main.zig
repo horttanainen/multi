@@ -37,21 +37,23 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: crosshair center should be more chest level
 //TODO: shot rockets should have players velocity added to them
 //TODO: ninja rope should shoot from the same point as rockets
 //TOOD: ninja rope should be allowed to attach to other players
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
+//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
 
 //Gun ideas
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
-//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
 //TODO: travel rocket: large slow moving rocket on top which player can jump or attach via rope.
 //TODO: mast breaker: shoot two spike balls with a chain between
 //TODO: whale harpoon: giant spike with a chain that you can reel in
 //TODO: hawking space warp: create a shortlived powerful blackhole which starts to break level around it and pull towards it
 //TODO: portal gun
 //TODO: Dig2000 for melee and quick digging
+//TODO: grenade launcher with different kinds of grenades
 
 //TODO: add dash to side
 
