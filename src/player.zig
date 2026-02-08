@@ -539,8 +539,10 @@ pub fn toggleRope(p: *Player) !void {
     if (currentRope != null and currentRope.?.state != .inactive) {
         rope.releaseRope(p.id);
     } else {
-        const playerPos = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-        try rope.shootHook(p.id, playerPos, p.aimDirection);
+        const crosshairPos = calcCrosshairPosition(p.*);
+        const worldPixelPos = camera.relativePositionForCreating(crosshairPos);
+        const originM = conv.p2m(worldPixelPos);
+        try rope.shootHook(p.id, .{ .x = originM.x, .y = originM.y }, p.aimDirection);
     }
     delay.action(delayKey, config.ropeToggleDelayMs);
 }
