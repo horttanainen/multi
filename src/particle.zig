@@ -73,7 +73,7 @@ fn draw(particle: *Particle) !void {
 
     const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-    try sprite.drawWithOptions(particleSprite, pos, state.rotAngle, false, false, 0, particle.color);
+    try sprite.drawWithOptions(particleSprite, pos, state.rotAngle, false, false, 0, particle.color, null);
 }
 
 pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {

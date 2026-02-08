@@ -91,7 +91,7 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
 
         const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, null);
+        try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, null, null);
     }
 }
 

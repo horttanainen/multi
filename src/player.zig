@@ -75,7 +75,7 @@ fn markPlayerForRespawn(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
 pub fn drawCrosshair(player: *Player) !void {
     const crosshairSprite = sprite.getSprite(player.crosshairUuid) orelse return;
     const pos = calcCrosshairPosition(player.*);
-    try sprite.drawWithOptions(crosshairSprite, pos, 0, false, false, 0, null);
+    try sprite.drawWithOptions(crosshairSprite, pos, 0, false, false, 0, null, null);
 }
 
 fn calcCrosshairPosition(player: Player) vec.IVec2 {
@@ -624,7 +624,7 @@ pub fn drawWeapon(player: *Player) !void {
 
     if (playerAnchor == null or weaponAnchor == null or playerSprite == null) {
         const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
-        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null);
+        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null, null);
         return;
     }
     const pAnchor = playerAnchor.?;
@@ -647,19 +647,19 @@ pub fn drawWeapon(player: *Player) !void {
     else
         vec.iadd(playerUpperLeft, pAnchor);
 
-    const weaponUpperLeft = if (weaponFlip)
-        vec.isubtract(shoulderPos, .{ .x = weaponSprite.sizeP.x - wAnchor.x, .y = wAnchor.y })
-    else
-        vec.isubtract(shoulderPos, wAnchor);
-
+    // SDL handles the mirroring around the pivot.
     const weaponHalfW = @divTrunc(weaponSprite.sizeP.x, 2);
     const weaponHalfH = @divTrunc(weaponSprite.sizeP.y, 2);
     const weaponCenterPos = vec.IVec2{
-        .x = weaponUpperLeft.x + weaponHalfW,
-        .y = weaponUpperLeft.y + weaponHalfH,
+        .x = shoulderPos.x - wAnchor.x + weaponHalfW,
+        .y = shoulderPos.y - wAnchor.y + weaponHalfH,
     };
 
-    try sprite.drawWithOptions(weaponSprite, weaponCenterPos, 0, false, weaponFlip, 0, null);
+    const aimAngle = std.math.atan2(-player.aimDirection.y, player.aimDirection.x);
+    const weaponAngle: f32 = if (weaponFlip) std.math.pi + aimAngle else aimAngle;
+
+    const pivotPoint: sdl.Point = .{ .x = wAnchor.x, .y = wAnchor.y };
+    try sprite.drawWithOptions(weaponSprite, weaponCenterPos, weaponAngle, false, weaponFlip, 0, null, pivotPoint);
 }
 
 pub fn drawAllWeapons() !void {

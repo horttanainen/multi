@@ -39,6 +39,7 @@ pub fn draw() !void {
             false,
             parallaxEntity.fog,
             null,
+            null,
         );
     }
 }

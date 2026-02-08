@@ -60,7 +60,7 @@ pub const SerializableEntity = struct {
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 
-pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color) !void {
+pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
 
@@ -106,7 +106,8 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
         );
     }
 
-    try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
+    const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
+    try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
