@@ -43,6 +43,7 @@ pub const Sprite = struct {
     sizeP: vec.IVec2,
     offset: vec.IVec2,
     imgPath: []const u8,
+    anchorPoint: ?vec.IVec2 = null,
 };
 
 pub const SerializableEntity = struct {
@@ -115,6 +116,8 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     const surface = try image.load(imgPathZ);
     errdefer sdl.freeSurface(surface);
 
+    const anchorPoint = findAndProcessAnchorPixel(surface, scale);
+
     const resources = try shared.getResources();
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
     errdefer sdl.destroyTexture(texture);
@@ -132,6 +135,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
         .texture = texture,
         .scale = scale,
         .offset = offset,
+        .anchorPoint = anchorPoint,
         .sizeM = .{
             .x = sizeM.x,
             .y = sizeM.y,
@@ -190,11 +194,45 @@ pub fn createCopy(spriteUuid: u64) !u64 {
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
         .offset = originalSprite.offset,
+        .anchorPoint = originalSprite.anchorPoint,
     };
 
     try sprites.putLocking(newUuid, newSprite);
 
     return newUuid;
+}
+
+fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2) ?vec.IVec2 {
+    const pixels: [*]u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const bytesPerPixel: usize = 4;
+
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const pixelIndex = y * pitch + x * bytesPerPixel;
+            const b0 = pixels[pixelIndex + 0];
+            const b1 = pixels[pixelIndex + 1];
+            const b2 = pixels[pixelIndex + 2];
+            const b3 = pixels[pixelIndex + 3];
+
+            // BGRA: b0=B, b1=G, b2=R, b3=A
+            if (b2 == 255 and b1 == 0 and b0 == 255 and b3 > 0) {
+                pixels[pixelIndex + 0] = 255;
+                pixels[pixelIndex + 1] = 255;
+                pixels[pixelIndex + 2] = 255;
+
+                const anchorX: i32 = @intFromFloat(@as(f32, @floatFromInt(x)) * scale.x);
+                const anchorY: i32 = @intFromFloat(@as(f32, @floatFromInt(y)) * scale.y);
+
+                return vec.IVec2{ .x = anchorX, .y = anchorY };
+            }
+        }
+    }
+    return null;
 }
 
 fn iterateCircleOnSurface(

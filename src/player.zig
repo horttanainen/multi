@@ -243,7 +243,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     );
 
     const weaponScale: vec.Vec2 = .{ .x = 0.2, .y = 0.2 };
-    const weaponSpriteUuid = try sprite.createFromImg("weapons/rocket_launcher/weapon_with_arm.png", weaponScale, conv.m2Pixel(.{ .x = -0.1, .y = -0.4}));
+    const weaponSpriteUuid = try sprite.createFromImg("weapons/rocket_launcher/weapon_with_arm.png", weaponScale, vec.izero);
 
     const rocketLauncher: weapon.Weapon = .{
         .name = "rocket_launcher",
@@ -603,15 +603,57 @@ pub fn drawWeapon(player: *Player) !void {
     const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
 
     const maybeEntity = entity.getEntity(player.bodyId);
-    if (maybeEntity) |ent| {
-        const currentState = box2d.getState(player.bodyId);
-        const state = box2d.getInterpolatedState(ent.state, currentState);
-        const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-        const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
-
-        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null);
+    if (maybeEntity == null) {
+        return;
     }
+    const ent = maybeEntity.?;
+    const currentState = box2d.getState(player.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
+
+    const playerAnchor = if (playerSprite) |ps| ps.anchorPoint else null;
+    const weaponAnchor = weaponSprite.anchorPoint;
+
+    if (playerAnchor == null or weaponAnchor == null or playerSprite == null) {
+        const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
+        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null);
+        return;
+    }
+    const pAnchor = playerAnchor.?;
+    const wAnchor = weaponAnchor.?;
+    const ps = playerSprite.?;
+
+    const playerFlip = ent.flipEntityHorizontally;
+    const weaponFlip = !ent.flipEntityHorizontally;
+
+    const playerHalfW = @divTrunc(ps.sizeP.x, 2);
+    const playerHalfH = @divTrunc(ps.sizeP.y, 2);
+    const playerOffsetX: i32 = if (playerFlip) ps.offset.x else -ps.offset.x;
+    const playerUpperLeft = vec.IVec2{
+        .x = playerPos.x - playerHalfW + playerOffsetX,
+        .y = playerPos.y - playerHalfH + ps.offset.y,
+    };
+
+    const shoulderPos = if (playerFlip)
+        vec.iadd(playerUpperLeft, .{ .x = ps.sizeP.x - pAnchor.x, .y = pAnchor.y })
+    else
+        vec.iadd(playerUpperLeft, pAnchor);
+
+    const weaponUpperLeft = if (weaponFlip)
+        vec.isubtract(shoulderPos, .{ .x = weaponSprite.sizeP.x - wAnchor.x, .y = wAnchor.y })
+    else
+        vec.isubtract(shoulderPos, wAnchor);
+
+    const weaponHalfW = @divTrunc(weaponSprite.sizeP.x, 2);
+    const weaponHalfH = @divTrunc(weaponSprite.sizeP.y, 2);
+    const weaponCenterPos = vec.IVec2{
+        .x = weaponUpperLeft.x + weaponHalfW,
+        .y = weaponUpperLeft.y + weaponHalfH,
+    };
+
+    try sprite.drawWithOptions(weaponSprite, weaponCenterPos, 0, false, weaponFlip, 0, null);
 }
 
 pub fn drawAllWeapons() !void {
