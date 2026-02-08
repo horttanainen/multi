@@ -214,20 +214,29 @@ fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2) ?vec.IVec2 
         var x: usize = 0;
         while (x < width) : (x += 1) {
             const pixelIndex = y * pitch + x * bytesPerPixel;
-            const b0 = pixels[pixelIndex + 0];
-            const b1 = pixels[pixelIndex + 1];
-            const b2 = pixels[pixelIndex + 2];
-            const b3 = pixels[pixelIndex + 3];
 
             // BGRA: b0=B, b1=G, b2=R, b3=A
-            if (b2 == 255 and b1 == 0 and b0 == 255 and b3 > 0) {
-                pixels[pixelIndex + 0] = 255;
-                pixels[pixelIndex + 1] = 255;
-                pixels[pixelIndex + 2] = 255;
+            if (pixels[pixelIndex + 2] == 255 and pixels[pixelIndex + 1] == 0 and pixels[pixelIndex + 0] == 255 and pixels[pixelIndex + 3] > 0) {
+                const minY = if (y >= 5) y - 5 else 0;
+                const maxY = @min(y + 5, height);
+                const minX = if (x >= 5) x - 5 else 0;
+                const maxX = @min(x + 5, width);
+
+                var ny: usize = minY;
+                while (ny < maxY) : (ny += 1) {
+                    var nx: usize = minX;
+                    while (nx < maxX) : (nx += 1) {
+                        const ni = ny * pitch + nx * bytesPerPixel;
+                        if (pixels[ni + 2] == 255 and pixels[ni + 1] == 0 and pixels[ni + 0] == 255 and pixels[ni + 3] > 0) {
+                            pixels[ni + 0] = 255;
+                            pixels[ni + 1] = 255;
+                            pixels[ni + 2] = 255;
+                        }
+                    }
+                }
 
                 const anchorX: i32 = @intFromFloat(@as(f32, @floatFromInt(x)) * scale.x);
                 const anchorY: i32 = @intFromFloat(@as(f32, @floatFromInt(y)) * scale.y);
-
                 return vec.IVec2{ .x = anchorX, .y = anchorY };
             }
         }
