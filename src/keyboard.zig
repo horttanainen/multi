@@ -115,6 +115,8 @@ pub fn handle(ctrl: *const controller.Controller) void {
 
     if (aimDirection.x != 0 or aimDirection.y != 0) {
         control.executeAim(ctrl.playerId, aimDirection);
+    } else {
+        control.executeAimRelease(ctrl.playerId);
     }
 
     // Shooting

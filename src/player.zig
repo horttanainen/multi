@@ -49,6 +49,8 @@ pub const Player = struct {
     touchesWallOnLeft: bool,
     touchesWallOnRight: bool,
     aimDirection: vec.Vec2,
+    isAiming: bool,
+    aimMagnitude: f32,
     airJumpCounter: i32,
     movingRight: bool,
     crosshairUuid: u64,
@@ -78,20 +80,21 @@ pub fn drawCrosshair(player: *Player) !void {
     try sprite.drawWithOptions(crosshairSprite, pos, 0, false, false, 0, null, null);
 }
 
-fn calcCrosshairPosition(player: Player) vec.IVec2 {
-    const maybeEntity = entity.getEntity(player.bodyId);
+fn calcCrosshairPosition(p: Player) vec.IVec2 {
+    const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity) |ent| {
-        const currentState = box2d.getState(player.bodyId);
+        const currentState = box2d.getState(p.bodyId);
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        const crosshairDisplacement = vec.mul(vec.normalize(player.aimDirection), config.crosshairDistanceMultiplier);
+        const distance: f32 = if (p.isAiming) p.aimMagnitude * config.aimCircleRadius else config.aimRestingDistance;
+        const crosshairDisplacement = vec.mul(vec.normalize(p.aimDirection), distance);
         const crosshairDisplacementI: vec.IVec2 = .{
             .x = @intFromFloat(crosshairDisplacement.x),
             .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
         };
 
-        const crosshairPos = vec.iadd(vec.iadd(playerPos, crosshairDisplacementI), config.crosshairOffset);
+        const crosshairPos = vec.iadd(vec.iadd(playerPos, crosshairDisplacementI), config.aimCircleOffset);
 
         if (ent.spriteUuids.len > 0) {
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
@@ -100,6 +103,24 @@ fn calcCrosshairPosition(player: Player) vec.IVec2 {
         return crosshairPos;
     }
     return vec.izero; // Fallback if entity not found
+}
+
+fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
+    const maybeEntity = entity.getEntity(p.bodyId);
+    if (maybeEntity) |ent| {
+        const currentState = box2d.getState(p.bodyId);
+        const state = box2d.getInterpolatedState(ent.state, currentState);
+        const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+        const spawnPos = vec.iadd(playerPos, config.aimCircleOffset);
+
+        if (ent.spriteUuids.len > 0) {
+            const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return spawnPos;
+            return vec.iadd(spawnPos, firstSprite.offset);
+        }
+        return spawnPos;
+    }
+    return vec.izero;
 }
 
 pub fn spawn(position: vec.IVec2) !usize {
@@ -125,6 +146,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     shapeDef.material = playerMaterialId;
     shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
     shapeDef.filter.maskBits = collision.MASK_PLAYER;
+    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -140,6 +162,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     lowerBodyShapeDef.material = playerMaterialId;
     lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
     lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
+    lowerBodyShapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.2, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
@@ -329,6 +352,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .touchesWallOnLeft = false,
         .touchesWallOnRight = false,
         .aimDirection = vec.west,
+        .isAiming = false,
+        .aimMagnitude = 0,
         .airJumpCounter = 0,
         .movingRight = false,
         .crosshairUuid = crosshairUuid,
@@ -491,18 +516,24 @@ pub fn checkSensors(player: *Player) !void {
     player.touchesWallOnLeft = player.leftWallContactCount > 0;
 }
 
-pub fn aim(player: *Player, direction: vec.Vec2) void {
+pub fn aim(p: *Player, direction: vec.Vec2) void {
     var dir = direction;
     if (vec.equals(dir, vec.zero)) {
-        dir = vec.add(dir, if (player.movingRight) vec.east else vec.west);
+        dir = vec.add(dir, if (p.movingRight) vec.east else vec.west);
     }
-    player.aimDirection = dir;
+    p.isAiming = true;
+    p.aimMagnitude = std.math.clamp(vec.magnitude(dir), 0, 1);
+    p.aimDirection = vec.normalize(dir);
 
     // Update entity flip based on aim direction
-    const maybeEntity = entity.entities.getPtrLocking(player.bodyId);
+    const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
     if (maybeEntity) |ent| {
         ent.flipEntityHorizontally = dir.x > 0;
     }
+}
+
+pub fn aimRelease(p: *Player) void {
+    p.isAiming = false;
 }
 
 pub fn shoot(player: *Player) !void {
@@ -516,11 +547,11 @@ pub fn shoot(player: *Player) !void {
     }
 
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-    const crosshairPos = calcCrosshairPosition(player.*);
-    const position = camera.relativePositionForCreating(crosshairPos);
+    const spawnPos = calcProjectileSpawnPosition(player.*);
+    const position = camera.relativePositionForCreating(spawnPos);
 
     const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
-    try weapon.shoot(selectedWeapon, position, player.aimDirection, playerVelocity);
+    try weapon.shoot(selectedWeapon, position, player.aimDirection, playerVelocity, player.id);
 
     const recoilImpulse = vec.mul(vec.normalize(.{
         .x = player.aimDirection.x,
@@ -540,8 +571,8 @@ pub fn toggleRope(p: *Player) !void {
     if (currentRope != null and currentRope.?.state != .inactive) {
         rope.releaseRope(p.id);
     } else {
-        const crosshairPos = calcCrosshairPosition(p.*);
-        const worldPixelPos = camera.relativePositionForCreating(crosshairPos);
+        const spawnPos = calcProjectileSpawnPosition(p.*);
+        const worldPixelPos = camera.relativePositionForCreating(spawnPos);
         const originM = conv.p2m(worldPixelPos);
         try rope.shootHook(p.id, .{ .x = originM.x, .y = originM.y }, p.aimDirection);
     }

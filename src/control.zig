@@ -115,6 +115,15 @@ pub fn executeAim(playerId: usize, direction: vec.Vec2) void {
     }
 }
 
+pub fn executeAimRelease(playerId: usize) void {
+    const maybePlayer = player.players.getPtr(playerId);
+    if (maybePlayer) |p| {
+        if (p.isDead) return;
+
+        player.aimRelease(p);
+    }
+}
+
 pub fn handleLevelEditorMouseInput() void {
     var x: i32 = 0;
     var y: i32 = 0;

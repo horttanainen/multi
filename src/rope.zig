@@ -53,6 +53,7 @@ pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_HOOK;
     shapeDef.filter.maskBits = collision.MASK_HOOK;
+    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
 
     var bodyDef = box2d.createDynamicBodyDef(origin);
     bodyDef.isBullet = true;

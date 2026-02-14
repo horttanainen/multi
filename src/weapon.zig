@@ -7,7 +7,6 @@ const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
-const config = @import("config.zig");
 const collision = @import("collision.zig");
 const animation = @import("animation.zig");
 const shared = @import("shared.zig");
@@ -31,13 +30,14 @@ pub const Weapon = struct {
     spriteUuid: u64 = 0,
 };
 
-pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2) !void {
+pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
     shapeDef.density = weapon.projectile.density;
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
     shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
+    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
 
     const animCopy = try animation.copyAnimation(weapon.projectile.animation);
 

@@ -38,3 +38,11 @@ pub const MASK_EXPLOSION_SHRAPNEL = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGO
 // Query filters for overlap tests
 pub const MASK_EXPLOSION_QUERY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET;
 pub const MASK_BLOOD_QUERY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_UNBREAKABLE;
+
+// Per-player group index: shapes with the same negative group index never collide.
+// Offset avoids conflicts with existing group indices (-1 shrapnel, -3 blood).
+const playerGroupOffset: i32 = 10;
+
+pub fn playerGroupIndex(playerId: usize) i32 {
+    return -(@as(i32, @intCast(playerId)) + playerGroupOffset);
+}

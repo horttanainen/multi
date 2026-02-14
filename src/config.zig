@@ -22,8 +22,9 @@ pub const physics = .{
 pub const cannonFireSoundDurationMs = 10000;
 pub const cannonHitSoundDurationMs = 10000;
 
-pub const crosshairOffset: vec.IVec2 = .{ .x = 0, .y = -25};
-pub const crosshairDistanceMultiplier = 100;
+pub const aimCircleRadius: f32 = 500;
+pub const aimRestingDistance: f32 = 100;
+pub const aimCircleOffset: vec.IVec2 = .{ .x = 0, .y = -25 };
 
 pub const Player = struct {
     restingFriction: f32,

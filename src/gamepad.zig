@@ -173,6 +173,8 @@ pub fn handle(ctrl: *const controller.Controller) void {
     if (@abs(aimX) > bindings.aimThreshold or @abs(aimY) > bindings.aimThreshold) {
         const aimDirection = vec.Vec2{ .x = aimX, .y = -aimY };
         control.executeAim(ctrl.playerId, aimDirection);
+    } else {
+        control.executeAimRelease(ctrl.playerId);
     }
 
     const shootValue = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.shootAxis));
