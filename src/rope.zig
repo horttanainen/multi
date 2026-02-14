@@ -233,7 +233,16 @@ pub fn drawRopes() !void {
 
         const hookPosPx = conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y });
 
-        const playerScreenPos = camera.relativePosition(playerPosPx);
+        var playerScreenPos = vec.iadd(camera.relativePosition(playerPosPx), config.aimCircleOffset);
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            if (ent.spriteUuids.len > 0) {
+                const firstSprite = sprite.getSprite(ent.spriteUuids[0]);
+                if (firstSprite) |s| {
+                    playerScreenPos = vec.iadd(playerScreenPos, s.offset);
+                }
+            }
+        }
         const hookScreenPos = camera.relativePosition(hookPosPx);
 
         try drawRopeSegments(resources.renderer, segmentSprite, playerScreenPos, hookScreenPos);
