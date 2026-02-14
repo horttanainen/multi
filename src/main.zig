@@ -37,12 +37,12 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: camera should travel with the crosshair
 //TODO: make gun a bit longer
 //TODO: make character grab gun with chainsaw grip
 //TODO: draw another sprite with arm more extended and use that when pointing downwards
 //TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
 //TODO: Add anchorpoints to all animations
+//TODO: camera should travel with the crosshair
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
@@ -50,6 +50,7 @@ const Sprite = entity.Sprite;
 //TODO: change ninja rope attach point to not be in the crotch
 
 //Gun ideas
+//TODO: rope combo: shoot rocket with rope attached and then shoot hook to attach the rocket to e.g. enemy player
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
 //TODO: travel rocket: large slow moving rocket on top which player can jump or attach via rope.
 //TODO: mast breaker: shoot two spike balls with a chain between
