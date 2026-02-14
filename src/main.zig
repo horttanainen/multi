@@ -37,11 +37,12 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: make gun a bit longer
 //TODO: make character grab gun with chainsaw grip
-//TODO: draw another sprite with arm more extended and use that when pointing downwards
 //TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
 //TODO: Add anchorpoints to all animations
+//TODO: draw another sprite with arm more extended and use that when pointing downwards
+//TODO: make gun a bit longer
+
 //TODO: camera should travel with the crosshair
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
