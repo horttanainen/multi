@@ -56,6 +56,7 @@ fn renderCamera(cameraId: usize) !void {
     try ui.drawFps();
     try ui.drawPlayerHealth();
     try ui.drawPlayerLocationsOnViewportBorder();
+    try ui.drawScoreboard();
 }
 
 fn drawHorizontalLine(height: i32) !void {

@@ -31,6 +31,7 @@ pub const Explosion = struct {
 
 pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
 pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(shared.allocator);
+pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(shared.allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -156,7 +157,7 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     }
 }
 
-fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) !void {
+fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
     for (player.players.values()) |*p| {
         if (!box2d.c.b2Body_IsValid(p.bodyId)) {
             continue;
@@ -171,7 +172,7 @@ fn damagePlayersInRadius(pos: vec.Vec2, radius: f32) !void {
         if (distance <= radius) {
             const damage = 100.0 - (99.0 * distance / radius);
 
-            try player.damage(p, damage);
+            try player.damage(p, damage, attackerId);
         }
     }
 }
@@ -224,6 +225,9 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
 
     _ = propulsions.swapRemove(bodyId);
 
+    const attackerId = owners.get(bodyId);
+    _ = owners.swapRemove(bodyId);
+
     const explosion = maybeExplosion.?.value;
     const maybeE = entity.entities.getLocking(bodyId);
 
@@ -250,7 +254,7 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
 
     try damageTerrainInRadius(pos, explosion.blastRadius);
 
-    try damagePlayersInRadius(pos, explosion.blastRadius);
+    try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
 }
 
 fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
@@ -310,6 +314,14 @@ pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
 
 pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32) !void {
     try propulsions.put(bodyId, propulsionMagnitude);
+}
+
+pub fn registerOwner(bodyId: box2d.c.b2BodyId, playerId: usize) !void {
+    try owners.put(bodyId, playerId);
+}
+
+pub fn getOwner(bodyId: box2d.c.b2BodyId) ?usize {
+    return owners.get(bodyId);
 }
 
 pub fn applyPropulsion() void {
@@ -378,6 +390,7 @@ pub fn checkContacts() !void {
 pub fn cleanup() void {
     explosions.clearAndFree();
     propulsions.clearAndFree();
+    owners.clearAndFree();
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {

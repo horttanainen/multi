@@ -66,6 +66,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVe
 
     try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
     try projectile.registerPropulsion(projectileEntity.bodyId, weapon.projectile.propulsion);
+    try projectile.registerOwner(projectileEntity.bodyId, playerId);
 
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
     try animations.put("main", animCopy);

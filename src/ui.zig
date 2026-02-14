@@ -13,6 +13,7 @@ const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
 const vec = @import("vector.zig");
 const controller = @import("controller.zig");
+const score = @import("score.zig");
 
 pub fn drawMode() !void {
     const mode = if (shared.editingLevel) "LEVEL EDITOR" else "PLAY";
@@ -127,4 +128,18 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
         try sdl.setRenderDrawColor(resources.renderer, .{ .r = enemyColor.r, .g = enemyColor.g, .b = enemyColor.b, .a = 255 });
         try sdl.renderFillRect(resources.renderer, rect);
     }
+}
+
+pub fn drawScoreboard() !void {
+    const vp = viewport.activeViewport;
+
+    const activeCamera = camera.getActiveCamera() orelse return;
+    const playerId = activeCamera.playerId;
+    const s = score.getScore(playerId) orelse return;
+
+    const totalScore = s.kills - s.suicides;
+
+    var buf: [64]u8 = undefined;
+    const scoreText = std.fmt.bufPrintZ(&buf, "Score: {d} - Kills: {d} - Suicides: {d} - Deaths: {d}", .{ totalScore, s.kills, s.suicides, s.deaths }) catch return;
+    try text.writeAt(scoreText, .{ .x = @divFloor(vp.width, 2) - 250, .y = vp.height - 20 });
 }

@@ -21,6 +21,7 @@ const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const rope = @import("rope.zig");
+const score = @import("score.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -366,6 +367,9 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     // Register player with central animation system
     try animation.registerAnimationSet(bodyId, animations, "idle", false);
+
+    try score.registerPlayer(playerId);
+
     return playerId;
 }
 
@@ -707,7 +711,7 @@ pub fn drawAllWeapons() !void {
     }
 }
 
-pub fn damage(p: *Player, d: f32) !void {
+pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
     p.health -= d;
 
     const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
@@ -718,7 +722,7 @@ pub fn damage(p: *Player, d: f32) !void {
     }
 
     if (p.health <= 0 and !p.isDead) {
-        try kill(p);
+        try kill(p, attackerId);
     }
 
     if (p.health <= -5) {
@@ -726,7 +730,7 @@ pub fn damage(p: *Player, d: f32) !void {
     }
 }
 
-pub fn kill(p: *Player) !void {
+pub fn kill(p: *Player, killerId: ?usize) !void {
     if (p.health <= 0 and !p.isDead) {
         box2d.c.b2Body_Disable(p.bodyId);
 
@@ -739,6 +743,8 @@ pub fn kill(p: *Player) !void {
         rope.releaseRope(p.id);
 
         p.isDead = true;
+
+        score.recordKill(killerId, p.id);
 
         //TODO: remove this silly stuff when we have a proper map of players and uuids for IDs
         // Add 1 to player ID to avoid null pointer (player ID 0 would become null)
@@ -807,6 +813,8 @@ pub fn cleanup() void {
     }
 
     players.clearAndFree(shared.allocator);
+
+    score.cleanup();
 
     playersToRespawn.mutex.lock();
     defer playersToRespawn.mutex.unlock();

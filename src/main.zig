@@ -37,7 +37,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: keep score
 //TODO: make gun a bit longer
 //TODO: make character grab gun with chainsaw grip
 //TODO: draw another sprite with arm more extended and use that when pointing downwards
@@ -60,6 +59,8 @@ const Sprite = entity.Sprite;
 //TODO: portal gun
 //TODO: Dig2000 for melee and quick digging
 //TODO: grenade launcher with different kinds of grenades
+
+//TODO: display a laughing skull on death
 
 //TODO: add dash to side
 
