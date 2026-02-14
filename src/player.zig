@@ -562,6 +562,10 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
             };
         }
 
+        sprite.colorMatchingPixels(player.crosshairUuid, color, sprite.isAny) catch |err| {
+            std.debug.print("Warning: Failed to color crosshair for player {}: {}\n", .{ playerId, err });
+        };
+
         gibbing.prepareGibletsForPlayer(playerId, color) catch |err| {
             std.debug.print("Warning: Failed to prepare giblets for player {}: {}\n", .{ playerId, err });
         };

@@ -354,6 +354,10 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
 }
 
+pub fn isAny(_: u8, _: u8, _: u8) bool {
+    return true;
+}
+
 pub fn isWhite(r: u8, g: u8, b: u8) bool {
     return r > 150 and g > 150 and b > 150;
 }
