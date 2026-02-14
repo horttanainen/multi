@@ -52,8 +52,7 @@ pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
     shapeDef.friction = 1.0;
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_HOOK;
-    shapeDef.filter.maskBits = collision.MASK_HOOK;
-    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
+    shapeDef.filter.maskBits = collision.MASK_HOOK | collision.otherPlayersMask(playerId);
 
     var bodyDef = box2d.createDynamicBodyDef(origin);
     bodyDef.isBullet = true;
@@ -114,30 +113,29 @@ pub fn checkHookContacts() !void {
         const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
 
         if ((aFilter.categoryBits & collision.CATEGORY_HOOK) != 0) {
-            const maybeRope = getRopePtrByBodyId(bodyIdA);
-            if (maybeRope) |rope| {
-                if (rope.state == .flying) {
-                    attach(rope, bodyIdB);
+            const maybeRope = getRopeByHookBody(bodyIdA);
+            if (maybeRope) |r| {
+                if (r.state == .flying) {
+                    attach(r, bodyIdB);
                 }
             }
         }
         if ((bFilter.categoryBits & collision.CATEGORY_HOOK) != 0) {
-            const maybeRope = getRopePtrByBodyId(bodyIdB);
-            if (maybeRope) |rope| {
-                if (rope.state == .flying) {
-                    attach(rope, bodyIdA);
+            const maybeRope = getRopeByHookBody(bodyIdB);
+            if (maybeRope) |r| {
+                if (r.state == .flying) {
+                    attach(r, bodyIdA);
                 }
             }
         }
     }
 }
 
-fn getRopePtrByBodyId(bodyId: box2d.c.b2BodyId) ?*Rope {
-    for (ropes.values()) |*rope| {
-        if (!box2d.c.B2_ID_EQUALS(rope.hookBodyId, bodyId)) {
-            continue;
+fn getRopeByHookBody(bodyId: box2d.c.b2BodyId) ?*Rope {
+    for (ropes.values()) |*r| {
+        if (box2d.c.B2_ID_EQUALS(r.hookBodyId, bodyId)) {
+            return r;
         }
-        return rope;
     }
     return null;
 }

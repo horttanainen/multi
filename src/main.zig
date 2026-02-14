@@ -37,15 +37,13 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: camera should travel with the crosshair
 //TODO: make gun a bit longer
 //TODO: make character grab gun with chainsaw grip
 //TODO: draw another sprite with arm more extended and use that when pointing downwards
 //TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
 //TODO: Add anchorpoints to all animations
 
-//TODO: different aiming system: players can point to a place with crosshair and some weapons can lock onto that position.
-
-//TOOD: ninja rope should be allowed to attach to other players
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"

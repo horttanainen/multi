@@ -9,14 +9,32 @@ pub const CATEGORY_BLOOD: u64 = 1 << 6;
 pub const CATEGORY_GIBLET: u64 = 1 << 7;
 pub const CATEGORY_HOOK: u64 = 1 << 8;
 
+// Per-player category bits (bits 9+). Each player's body shapes include
+// CATEGORY_PLAYER (for generic masks like terrain/sensors) plus their own
+// per-player bit. Projectiles and hooks use otherPlayersMask() so they only
+// collide with OTHER players, not the one who fired them.
+const PLAYER_BIT_OFFSET = 9;
+
+pub fn playerCategory(playerId: usize) u64 {
+    return @as(u64, 1) << @intCast(PLAYER_BIT_OFFSET + playerId);
+}
+
+/// Returns a mask matching all per-player bits except the given player's.
+pub fn otherPlayersMask(ownerPlayerId: usize) u64 {
+    const allPlayerBits: u64 = ~((@as(u64, 1) << PLAYER_BIT_OFFSET) - 1);
+    return allPlayerBits & ~playerCategory(ownerPlayerId);
+}
+
 // Collision masks - what each category collides with
 pub const MASK_TERRAIN = CATEGORY_TERRAIN | CATEGORY_PLAYER | CATEGORY_PROJECTILE | CATEGORY_BLOOD | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
 pub const MASK_UNBREAKABLE = MASK_TERRAIN;
 
-pub const MASK_PLAYER = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_PROJECTILE | CATEGORY_BLOOD | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE;
-pub const MASK_PLAYER_LOWER_BODY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_PROJECTILE | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE;
+pub const MASK_PLAYER = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_PROJECTILE | CATEGORY_BLOOD | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
+pub const MASK_PLAYER_LOWER_BODY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_PROJECTILE | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
 
-pub const MASK_PROJECTILE = CATEGORY_TERRAIN | CATEGORY_PLAYER | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
+// Base masks for projectiles and hooks — per-player bits are OR'd in at creation time via otherPlayersMask()
+pub const MASK_PROJECTILE = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
+pub const MASK_HOOK = CATEGORY_TERRAIN | CATEGORY_UNBREAKABLE | CATEGORY_DYNAMIC | CATEGORY_PROJECTILE | CATEGORY_GIBLET;
 
 pub const MASK_DYNAMIC = CATEGORY_TERRAIN | CATEGORY_PLAYER | CATEGORY_PROJECTILE | CATEGORY_BLOOD | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_SENSOR | CATEGORY_UNBREAKABLE | CATEGORY_HOOK;
 
@@ -29,20 +47,9 @@ pub const MASK_SENSOR_WALL = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_UNBR
 pub const MASK_SENSOR_GOAL = CATEGORY_PLAYER;
 pub const MASK_SENSOR_SPAWN = CATEGORY_PLAYER;
 
-// Hook interacts with everything it can attach to
-pub const MASK_HOOK = CATEGORY_TERRAIN | CATEGORY_UNBREAKABLE | CATEGORY_DYNAMIC | CATEGORY_PROJECTILE | CATEGORY_GIBLET;
-
-// Explosion shrapnel
+// Explosion shrapnel hits all players (including the shooter)
 pub const MASK_EXPLOSION_SHRAPNEL = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET | CATEGORY_PLAYER | CATEGORY_UNBREAKABLE;
 
 // Query filters for overlap tests
 pub const MASK_EXPLOSION_QUERY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_GIBLET;
 pub const MASK_BLOOD_QUERY = CATEGORY_TERRAIN | CATEGORY_DYNAMIC | CATEGORY_UNBREAKABLE;
-
-// Per-player group index: shapes with the same negative group index never collide.
-// Offset avoids conflicts with existing group indices (-1 shrapnel, -3 blood).
-const playerGroupOffset: i32 = 10;
-
-pub fn playerGroupIndex(playerId: usize) i32 {
-    return -(@as(i32, @intCast(playerId)) + playerGroupOffset);
-}

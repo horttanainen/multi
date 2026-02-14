@@ -222,7 +222,6 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
     const maybeExplosion = explosions.fetchSwapRemove(bodyId);
     if (maybeExplosion == null) return;
 
-    // Remove propulsion config if it exists
     _ = propulsions.swapRemove(bodyId);
 
     const explosion = maybeExplosion.?.value;

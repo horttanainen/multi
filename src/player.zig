@@ -144,9 +144,8 @@ pub fn spawn(position: vec.IVec2) !usize {
     shapeDef.density = 0.45;
     shapeDef.friction = config.player.movementFriction;
     shapeDef.material = playerMaterialId;
-    shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
+    shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
     shapeDef.filter.maskBits = collision.MASK_PLAYER;
-    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
 
     const lowerBodyCircle: box2d.c.b2Circle = .{
@@ -160,9 +159,8 @@ pub fn spawn(position: vec.IVec2) !usize {
     lowerBodyShapeDef.density = 0;
     lowerBodyShapeDef.friction = config.player.movementFriction;
     lowerBodyShapeDef.material = playerMaterialId;
-    lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER;
+    lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
     lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
-    lowerBodyShapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
     const footBox = box2d.c.b2MakeOffsetBox(0.2, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });

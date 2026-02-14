@@ -36,8 +36,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVe
     shapeDef.density = weapon.projectile.density;
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
-    shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
-    shapeDef.filter.groupIndex = collision.playerGroupIndex(playerId);
+    shapeDef.filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
 
     const animCopy = try animation.copyAnimation(weapon.projectile.animation);
 
