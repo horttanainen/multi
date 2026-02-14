@@ -60,9 +60,19 @@ pub fn drawPlayerHealth() !void {
 pub fn drawPlayerLocationsOnViewportBorder() !void {
     const resources = try shared.getResources();
 
+    const activeCamera = camera.getActiveCamera() orelse return;
+    const vpPlayerId = activeCamera.playerId;
+
+    // Get the viewing player's screen position to use as ray origin
+    const vpPlayer = player.players.getPtr(vpPlayerId) orelse return;
+    const vpEnt = entity.getEntity(vpPlayer.bodyId) orelse return;
+    const vpCurrentState = box2d.getState(vpPlayer.bodyId);
+    const vpState = box2d.getInterpolatedState(vpEnt.state, vpCurrentState);
+    const vpScreenPos = camera.relativePosition(conv.m2Pixel(vpState.pos));
+    const ox: f32 = @floatFromInt(vpScreenPos.x);
+    const oy: f32 = @floatFromInt(vpScreenPos.y);
+
     for (player.players.values()) |*p| {
-        const activeCamera = camera.getActiveCamera() orelse continue;
-        const vpPlayerId = activeCamera.playerId;
         if (p.id == vpPlayerId) {
             continue;
         }
@@ -82,6 +92,9 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
 
         const vp = viewport.activeViewport;
         const margin: i32 = 4;
+        const marginF: f32 = @floatFromInt(margin);
+        const vpW: f32 = @floatFromInt(vp.width);
+        const vpH: f32 = @floatFromInt(vp.height);
 
         // Skip if enemy is inside the viewport
         if (enemyPos.x >= margin and enemyPos.x <= vp.width - margin and
@@ -90,32 +103,27 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
             continue;
         }
 
-        // Cast ray from viewport center toward enemy position
-        const cx: f32 = @as(f32, @floatFromInt(vp.width)) / 2.0;
-        const cy: f32 = @as(f32, @floatFromInt(vp.height)) / 2.0;
-        const dx: f32 = @as(f32, @floatFromInt(enemyPos.x)) - cx;
-        const dy: f32 = @as(f32, @floatFromInt(enemyPos.y)) - cy;
+        // Cast ray from viewing player's screen position toward enemy
+        const ex: f32 = @floatFromInt(enemyPos.x);
+        const ey: f32 = @floatFromInt(enemyPos.y);
+        const dx: f32 = ex - ox;
+        const dy: f32 = ey - oy;
 
         if (dx == 0 and dy == 0) continue;
 
-        // Find the smallest positive t where the ray hits a viewport edge
-        const halfW = cx - @as(f32, @floatFromInt(margin));
-        const halfH = cy - @as(f32, @floatFromInt(margin));
-
+        // Find smallest positive t where ray from (ox,oy) in direction (dx,dy) hits a viewport edge
         var t: f32 = std.math.floatMax(f32);
         if (dx != 0) {
-            const tRight = halfW / @abs(dx);
-            const tLeft = halfW / @abs(dx);
-            t = @min(t, if (dx > 0) tRight else tLeft);
+            const tEdge = if (dx > 0) (vpW - marginF - ox) / dx else (marginF - ox) / dx;
+            if (tEdge > 0) t = @min(t, tEdge);
         }
         if (dy != 0) {
-            const tBottom = halfH / @abs(dy);
-            const tTop = halfH / @abs(dy);
-            t = @min(t, if (dy > 0) tBottom else tTop);
+            const tEdge = if (dy > 0) (vpH - marginF - oy) / dy else (marginF - oy) / dy;
+            if (tEdge > 0) t = @min(t, tEdge);
         }
 
-        const ix: i32 = @intFromFloat(cx + dx * t);
-        const iy: i32 = @intFromFloat(cy + dy * t);
+        const ix: i32 = @intFromFloat(std.math.clamp(ox + dx * t, marginF, vpW - marginF));
+        const iy: i32 = @intFromFloat(std.math.clamp(oy + dy * t, marginF, vpH - marginF));
 
         const indicatorSize: i32 = 8;
         const rect = sdl.Rect{
