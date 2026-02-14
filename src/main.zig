@@ -37,6 +37,7 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: keep score
 //TODO: make gun a bit longer
 //TODO: make character grab gun with chainsaw grip
 //TODO: draw another sprite with arm more extended and use that when pointing downwards

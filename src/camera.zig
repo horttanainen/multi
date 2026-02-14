@@ -74,7 +74,7 @@ pub fn setActiveCamera(cameraId: usize) !void {
     try viewport.setActiveViewport(resources.renderer, cameraId);
 }
 
-fn getActiveCamera() ?*Camera {
+pub fn getActiveCamera() ?*Camera {
     return cameras.getPtr(activeCameraId);
 }
 
