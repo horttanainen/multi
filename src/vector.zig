@@ -67,6 +67,17 @@ pub fn mul(a: Vec2, b: f32) Vec2 {
     };
 }
 
+pub fn dot(a: Vec2, b: Vec2) f32 {
+    return a.x * b.x + a.y * b.y;
+}
+
+pub fn subtract(a: Vec2, b: Vec2) Vec2 {
+    return .{
+        .x = a.x - b.x,
+        .y = a.y - b.y,
+    };
+}
+
 pub fn normalize(a: Vec2) Vec2 {
     const length = magnitude(a);
     return .{

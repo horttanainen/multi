@@ -253,10 +253,10 @@ pub fn spawn(position: vec.IVec2) !usize {
             .file = "sounds/cannon_fire.mp3",
             .durationMs = config.cannonFireSoundDurationMs,
         },
-        .impulse = 8,
+        .impulse = 10,
         .spriteUuid = weaponSpriteUuid,
         .projectile = .{
-            .gravityScale = 0,
+            .gravityScale = 0.2,
             .density = 10,
             .propulsion = 40,
             .animation = missileAnimation,
@@ -519,7 +519,8 @@ pub fn shoot(player: *Player) !void {
     const crosshairPos = calcCrosshairPosition(player.*);
     const position = camera.relativePositionForCreating(crosshairPos);
 
-    try weapon.shoot(selectedWeapon, position, player.aimDirection);
+    const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
+    try weapon.shoot(selectedWeapon, position, player.aimDirection, playerVelocity);
 
     const recoilImpulse = vec.mul(vec.normalize(.{
         .x = player.aimDirection.x,

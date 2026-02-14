@@ -31,7 +31,7 @@ pub const Weapon = struct {
     spriteUuid: u64 = 0,
 };
 
-pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
+pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.friction = 0.5;
     shapeDef.density = weapon.projectile.density;
@@ -58,6 +58,12 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2) !void {
     }), weapon.impulse);
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(projectileEntity.bodyId, vec.toBox2d(impulse), true);
+
+    const currentVel = box2d.c.b2Body_GetLinearVelocity(projectileEntity.bodyId);
+    box2d.c.b2Body_SetLinearVelocity(projectileEntity.bodyId, .{
+        .x = currentVel.x + initialVelocity.x,
+        .y = currentVel.y + initialVelocity.y,
+    });
 
     try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
     try projectile.registerPropulsion(projectileEntity.bodyId, weapon.projectile.propulsion);

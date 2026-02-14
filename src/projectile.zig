@@ -330,6 +330,16 @@ pub fn applyPropulsion() void {
         const force = vec.mul(forward, propulsionMagnitude);
 
         box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(force), true);
+
+        // Simulate aerodynamic fin stabilization by damping lateral velocity.
+        // Decompose velocity into forward and lateral components, then apply
+        // a force opposing the lateral component (like drag from fins).
+        const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+        const forwardSpeed = vec.dot(velocity, forward);
+        const forwardVelocity = vec.mul(forward, forwardSpeed);
+        const lateralVelocity = vec.subtract(velocity, forwardVelocity);
+        const lateralDampingForce = vec.mul(lateralVelocity, -config.rocketLateralDamping);
+        box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(lateralDampingForce), true);
     }
 }
 

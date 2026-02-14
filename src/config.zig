@@ -105,6 +105,8 @@ pub const reloadLevelDelayMs = 200;
 pub const respawnDelayMs = 2000;
 pub const ropeToggleDelayMs = 300;
 
+pub const rocketLateralDamping: f32 = 10;
+
 pub const rope = .{
     .hookImpulse = 1.0,
     .hookGravityScale = 1,
