@@ -4,7 +4,6 @@ const sdl = @import("zsdl");
 const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
 const connected_components = @import("connected_components.zig");
 const visvalingam = @import("visvalingam.zig").visvalingam;
-const douglasPeucker = @import("douglas.zig").douglasPeucker;
 const triangle = @import("triangle.zig");
 const shared = @import("shared.zig");
 const sprite = @import("sprite.zig");
@@ -73,28 +72,21 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
 
     // 5. split into triangles
     const triangles = try triangle.split(ccw);
-    defer shared.allocator.free(triangles);
     // std.debug.print("triangles: {}\n", .{triangles.len});
 
-    // 6. scale triangles
-    const scaledTriangles = try scaleTriangles(triangles, s.scale);
+    // 6. scale triangles in-place
+    scaleTriangles(triangles, s.scale);
 
-    return scaledTriangles;
+    return triangles;
 }
 
 pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
     var unique = std.array_list.Managed(IVec2).init(allocator);
     defer unique.deinit();
 
-    for (vertices) |v| {
-        var isUnique = true;
-        for (unique.items) |uV| {
-            if (vec.iequals(uV, v)) {
-                isUnique = false;
-                break;
-            }
-        }
-        if (isUnique) {
+    for (vertices, 0..) |v, i| {
+        const next = if (i + 1 < vertices.len) vertices[i + 1] else vertices[0];
+        if (!vec.iequals(v, next)) {
             try unique.append(v);
         }
     }
@@ -104,7 +96,9 @@ pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
 
 pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
     if (isCounterClockwise(vertices)) {
-        return vertices;
+        const copy = try allocator.alloc(IVec2, vertices.len);
+        @memcpy(copy, vertices);
+        return copy;
     } else {
         var reversed = std.array_list.Managed(IVec2).init(allocator);
 
@@ -118,39 +112,22 @@ pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
     }
 }
 
-fn scaleTriangles(triangles: [][3]IVec2, scale: Vec2) ![][3]IVec2 {
-    var scaledTriangles = std.array_list.Managed([3]IVec2).init(allocator);
-    for (triangles) |t| {
-        const v1 = t[0];
-        const v2 = t[1];
-        const v3 = t[2];
-        const scaledTriangle: [3]IVec2 = .{
-            .{
-                .x = @intFromFloat(@as(f32, @floatFromInt(v1.x)) * scale.x),
-                .y = @intFromFloat(@as(f32, @floatFromInt(v1.y)) * scale.y),
-            },
-            .{
-                .x = @intFromFloat(@as(f32, @floatFromInt(v2.x)) * scale.x),
-                .y = @intFromFloat(@as(f32, @floatFromInt(v2.y)) * scale.y),
-            },
-            .{
-                .x = @intFromFloat(@as(f32, @floatFromInt(v3.x)) * scale.x),
-                .y = @intFromFloat(@as(f32, @floatFromInt(v3.y)) * scale.y),
-            },
-        };
-        try scaledTriangles.append(scaledTriangle);
+fn scaleTriangles(triangles: [][3]IVec2, scale: Vec2) void {
+    for (triangles) |*t| {
+        for (&t.*) |*v| {
+            v.x = @intFromFloat(@as(f32, @floatFromInt(v.x)) * scale.x);
+            v.y = @intFromFloat(@as(f32, @floatFromInt(v.y)) * scale.y);
+        }
     }
-
-    return scaledTriangles.toOwnedSlice();
 }
 
 fn isCounterClockwise(vertices: []IVec2) bool {
-    var sum: i32 = 0.0;
+    var sum: i64 = 0;
     const n = vertices.len;
     for (0..n) |i| {
         const current = vertices[i];
         const next = vertices[(i + 1) % n];
-        sum += (next.x - current.x) * (next.y + current.y);
+        sum += @as(i64, next.x - current.x) * @as(i64, next.y + current.y);
     }
-    return sum > 0.0;
+    return sum > 0;
 }

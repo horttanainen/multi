@@ -38,6 +38,9 @@ pub extern fn trifree(ptr: ?*anyopaque) void;
 
 const allocator = std.heap.c_allocator;
 
+pub const TriangleError = error{
+    TriangulationFailed,
+};
 
 pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
     const point_count = vertices.len;
@@ -82,6 +85,10 @@ pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
     // std.debug.print("numberofsegments: {}\n", .{in_data.numberofsegments});
 
     triangulate("pzqQ", &in_data, &out_data, null);
+
+    if (out_data.numberoftriangles <= 0 or out_data.trianglelist == null or out_data.pointlist == null) {
+        return TriangleError.TriangulationFailed;
+    }
 
     // Triangle may add Steiner points, so use the full output pointlist
     const triangle_count = out_data.numberoftriangles;
