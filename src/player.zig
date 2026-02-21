@@ -688,18 +688,19 @@ pub fn drawWeapon(player: *Player) !void {
     else
         vec.iadd(playerUpperLeft, pAnchor);
 
-    // SDL handles the mirroring around the pivot.
+    const effectiveWAnchorX: i32 = if (weaponFlip) weaponSprite.sizeP.x - wAnchor.x else wAnchor.x;
+
     const weaponHalfW = @divTrunc(weaponSprite.sizeP.x, 2);
     const weaponHalfH = @divTrunc(weaponSprite.sizeP.y, 2);
     const weaponCenterPos = vec.IVec2{
-        .x = shoulderPos.x - wAnchor.x + weaponHalfW,
+        .x = shoulderPos.x - effectiveWAnchorX + weaponHalfW,
         .y = shoulderPos.y - wAnchor.y + weaponHalfH,
     };
 
     const aimAngle = std.math.atan2(-player.aimDirection.y, player.aimDirection.x);
     const weaponAngle: f32 = if (weaponFlip) std.math.pi + aimAngle else aimAngle;
 
-    const pivotPoint: sdl.Point = .{ .x = wAnchor.x, .y = wAnchor.y };
+    const pivotPoint: sdl.Point = .{ .x = effectiveWAnchorX, .y = wAnchor.y };
     try sprite.drawWithOptions(weaponSprite, weaponCenterPos, weaponAngle, false, weaponFlip, 0, null, pivotPoint);
 }
 
