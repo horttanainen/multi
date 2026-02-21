@@ -8,14 +8,16 @@ const entity = @import("entity.zig");
 const time = @import("time.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const fs = @import("fs.zig");
+const timer = @import("sdl_timer.zig");
 
 pub const Animation = struct {
     fps: i32,
     current: usize,
     lastTime: f64,
     frames: []u64,
-    spriteIndex: usize,  // Which sprite slot this animates (0, 1, 2, etc.)
+    spriteIndex: usize, // Which sprite slot this animates (0, 1, 2, etc.)
     loop: bool,
+    switchDelay: f64 = 0, // Delay in seconds before switching to this animation
 };
 
 pub const AnimationSet = struct {
@@ -25,6 +27,9 @@ pub const AnimationSet = struct {
 };
 
 var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(shared.allocator);
+
+var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool){};
+
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
@@ -70,12 +75,47 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
     defer animationSets.mutex.unlock();
 
     const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
-
     const anim = animSet.animations.getPtr(animationKey) orelse return error.AnimationNotFound;
+
+    if (anim.switchDelay > 0) {
+        // If this animation is already the current one, nothing to do
+        if (anim.spriteIndex < animSet.currentAnimations.len and animSet.currentAnimations[anim.spriteIndex] == anim) {
+            return;
+        }
+
+        // Check if delay has elapsed (value == true means ready)
+        if (delayedSwitches.get(bodyId)) |ready| {
+            if (ready) {
+                // Delay elapsed, do the switch
+                _ = delayedSwitches.swapRemove(bodyId);
+                if (anim.spriteIndex < animSet.currentAnimations.len) {
+                    animSet.currentAnimations[anim.spriteIndex] = anim;
+                }
+            }
+            // Otherwise still waiting, do nothing
+            return;
+        }
+
+        // Start a new delay
+        const delayMs: u32 = @intFromFloat(anim.switchDelay * 1000.0);
+        delayedSwitches.put(shared.allocator, bodyId, false) catch return;
+        const keyPtr = delayedSwitches.getPtr(bodyId).?;
+        _ = timer.addTimer(delayMs, delayedSwitchCallback, @ptrCast(keyPtr));
+        return;
+    }
+
+    // Switching to a non-delayed animation cancels any pending delay
+    _ = delayedSwitches.swapRemove(bodyId);
 
     if (anim.spriteIndex < animSet.currentAnimations.len) {
         animSet.currentAnimations[anim.spriteIndex] = anim;
     }
+}
+
+fn delayedSwitchCallback(_: u32, param: ?*anyopaque) callconv(.c) u32 {
+    const ready: *bool = @alignCast(@ptrCast(param));
+    ready.* = true;
+    return 0;
 }
 
 pub fn animate() void {
@@ -156,6 +196,8 @@ pub fn colorAllFrames(bodyId: box2d.c.b2BodyId, color: sprite.Color) !void {
 }
 
 pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
+    _ = delayedSwitches.swapRemove(bodyId);
+
     animationSets.mutex.lock();
     defer animationSets.mutex.unlock();
 
@@ -172,6 +214,8 @@ pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
 }
 
 pub fn cleanup() void {
+    delayedSwitches.clearAndFree(shared.allocator);
+
     animationSets.mutex.lock();
     defer animationSets.mutex.unlock();
 

@@ -197,7 +197,7 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
 
-    const idleAnim = try animation.load(
+    var idleAnim = try animation.load(
         "animations/red/idle",
         2,
         .{ .x = 0.2, .y = 0.2 },
@@ -205,6 +205,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         true,
         0,
     );
+    idleAnim.switchDelay = 0.25;
     try animations.put("idle", idleAnim);
 
     const runAnim = try animation.load(
