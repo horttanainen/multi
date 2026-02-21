@@ -37,13 +37,15 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: make character grab gun with chainsaw grip
 //TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
-//TODO: Add anchorpoints to all animations
 //TODO: draw another sprite with arm more extended and use that when pointing downwards
-//TODO: make gun a bit longer
 
 //TODO: camera should travel with the crosshair
+
+//TODO: spawn should be a levitating teleport thingy
+//TODO: spawn should materialize player with some beaming effect
+//TODO: display a laughing skull on death
+
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
@@ -60,8 +62,6 @@ const Sprite = entity.Sprite;
 //TODO: portal gun
 //TODO: Dig2000 for melee and quick digging
 //TODO: grenade launcher with different kinds of grenades
-
-//TODO: display a laughing skull on death
 
 //TODO: add dash to side
 
