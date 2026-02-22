@@ -37,14 +37,21 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: add the other hand for player. hand is hooked and moves around its pivot point when running. Using ninja rope causes hand to stretch out to the direction of the rope as if pulling.
+
+//Hand ideas
+//TODO: add mechanical hand that deattaches from the wrist
+//TODO: instead of hook the mechanical hand could be shot with a chain.
+
+//TODO: add transparent smoke trail for the rocket
+//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
+//TODO: change ninja rope attach point to not be in the crotch
+
 //TODO: spawn should be a levitating teleport thingy
 //TODO: spawn should materialize player with some beaming effect
 //TODO: display a laughing skull on death
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
-//TODO: add transparent smoke trail for the rocket
-//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
-//TODO: change ninja rope attach point to not be in the crotch
 
 //Gun ideas
 //TODO: rope combo: shoot rocket with rope attached and then shoot hook to attach the rocket to e.g. enemy player
