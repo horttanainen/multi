@@ -112,7 +112,21 @@ pub fn followAllPlayers() void {
             if (maybeEntity) |ent| {
                 const currentState = box2d.getState(ent.bodyId);
                 const state = box2d.getInterpolatedState(ent.state, currentState);
-                const pos = conv.m2Pixel(state.pos);
+                var pos = conv.m2Pixel(state.pos);
+
+                const lerpFactor: f32 = 0.10;
+                const crosshairOffset = player.getCrosshairOffset(p.*);
+                const target: vec.Vec2 = .{
+                    .x = @as(f32, @floatFromInt(crosshairOffset.x)) * 0.5,
+                    .y = @as(f32, @floatFromInt(crosshairOffset.y)) * 0.5,
+                };
+
+                p.zoomOffset.x += (target.x - p.zoomOffset.x) * lerpFactor;
+                p.zoomOffset.y += (target.y - p.zoomOffset.y) * lerpFactor;
+
+                pos.x += @intFromFloat(p.zoomOffset.x);
+                pos.y += @intFromFloat(p.zoomOffset.y);
+
                 moveCamera(cam, pos);
             }
         }

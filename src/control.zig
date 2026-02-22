@@ -124,6 +124,22 @@ pub fn executeAimRelease(playerId: usize) void {
     }
 }
 
+pub fn executeZoom(playerId: usize) void {
+    const maybePlayer = player.players.getPtr(playerId);
+    if (maybePlayer) |p| {
+        if (p.isDead) return;
+        player.zoom(p);
+    }
+}
+
+pub fn executeZoomRelease(playerId: usize) void {
+    const maybePlayer = player.players.getPtr(playerId);
+    if (maybePlayer) |p| {
+        if (p.isDead) return;
+        player.zoomRelease(p);
+    }
+}
+
 pub fn handleLevelEditorMouseInput() void {
     var x: i32 = 0;
     var y: i32 = 0;

@@ -58,6 +58,8 @@ pub const Player = struct {
     health: f32,
     isDead: bool,
     respawnTimerId: i32,
+    isZooming: bool,
+    zoomOffset: vec.Vec2,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -88,14 +90,7 @@ fn calcCrosshairPosition(p: Player) vec.IVec2 {
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        const distance: f32 = if (p.isAiming) p.aimMagnitude * config.aimCircleRadius else config.aimRestingDistance;
-        const crosshairDisplacement = vec.mul(vec.normalize(p.aimDirection), distance);
-        const crosshairDisplacementI: vec.IVec2 = .{
-            .x = @intFromFloat(crosshairDisplacement.x),
-            .y = @intFromFloat(-crosshairDisplacement.y), //inverse y-axel
-        };
-
-        const crosshairPos = vec.iadd(vec.iadd(playerPos, crosshairDisplacementI), config.aimCircleOffset);
+        const crosshairPos = vec.iadd(vec.iadd(playerPos, getCrosshairOffset(p)), config.aimCircleOffset);
 
         if (ent.spriteUuids.len > 0) {
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
@@ -103,7 +98,17 @@ fn calcCrosshairPosition(p: Player) vec.IVec2 {
         }
         return crosshairPos;
     }
-    return vec.izero; // Fallback if entity not found
+    return vec.izero;
+}
+
+pub fn getCrosshairOffset(p: Player) vec.IVec2 {
+    const baseDistance: f32 = if (p.isAiming) p.aimMagnitude * config.aimCircleRadius else config.aimRestingDistance;
+    const distance: f32 = if (p.isZooming) baseDistance * 2 else baseDistance;
+    const displacement = vec.mul(vec.normalize(p.aimDirection), distance);
+    return .{
+        .x = @intFromFloat(displacement.x),
+        .y = @intFromFloat(-displacement.y),
+    };
 }
 
 fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
@@ -361,6 +366,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .health = 100,
         .isDead = false,
         .respawnTimerId = -1,
+        .isZooming = false,
+        .zoomOffset = vec.zero,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -537,6 +544,14 @@ pub fn aim(p: *Player, direction: vec.Vec2) void {
 
 pub fn aimRelease(p: *Player) void {
     p.isAiming = false;
+}
+
+pub fn zoom(p: *Player) void {
+    p.isZooming = true;
+}
+
+pub fn zoomRelease(p: *Player) void {
+    p.isZooming = false;
 }
 
 pub fn shoot(player: *Player) !void {

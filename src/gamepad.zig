@@ -182,6 +182,13 @@ pub fn handle(ctrl: *const controller.Controller) void {
         control.executeAction(ctrl.playerId, .shoot);
     }
 
+    const zoomValue = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, .triggerleft));
+    if (zoomValue > TRIGGER_THRESHOLD) {
+        control.executeZoom(ctrl.playerId);
+    } else {
+        control.executeZoomRelease(ctrl.playerId);
+    }
+
     if (sdl.gameControllerGetButton(sdlCtrl, bindings.ropeButton)) {
         control.executeAction(ctrl.playerId, .rope);
     }

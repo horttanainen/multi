@@ -37,12 +37,9 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: camera should travel with the crosshair
-
 //TODO: spawn should be a levitating teleport thingy
 //TODO: spawn should materialize player with some beaming effect
 //TODO: display a laughing skull on death
-
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: add transparent smoke trail for the rocket
