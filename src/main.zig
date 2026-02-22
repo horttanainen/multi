@@ -43,6 +43,10 @@ const Sprite = entity.Sprite;
 //TODO: add mechanical hand that deattaches from the wrist
 //TODO: instead of hook the mechanical hand could be shot with a chain.
 
+//Fun stuff:
+//TODO: player can spray paint a picture like in cs. Picture overwrites part of the texture until player spray paints somewhere else.
+
+
 //TODO: add transparent smoke trail for the rocket
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
 //TODO: change ninja rope attach point to not be in the crotch
@@ -64,7 +68,11 @@ const Sprite = entity.Sprite;
 //TODO: Dig2000 for melee and quick digging
 //TODO: grenade launcher with different kinds of grenades
 
+//Movement
 //TODO: add dash to side
+//TODO: add sliding
+//TODO: add slope sliding
+//TODO: try if movement vector should be to the direction of slope character is standing on
 
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
@@ -77,11 +85,6 @@ const Sprite = entity.Sprite;
 //TODO: Create landing animation
 //TODO: Create sliding animation
 //TODO: Create wall slide animation that is played when player touches wall 
-
-//Controls
-//TODO: add sliding
-//TODO: add slope sliding
-//TODO: try if movement vector should be to the direction of slope character is standing on
 
 //Items to pick up
 //TODO: jetpack
