@@ -47,7 +47,8 @@ pub const Sprite = struct {
     sizeP: vec.IVec2,
     offset: vec.IVec2,
     imgPath: []const u8,
-    anchorPoint: ?vec.IVec2 = null,
+    anchorPointLeft: ?vec.IVec2 = null, // Magenta pixel - left shoulder
+    anchorPointRight: ?vec.IVec2 = null, // Green pixel - right shoulder
 };
 
 pub const SerializableEntity = struct {
@@ -121,7 +122,8 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     const surface = try image.load(imgPathZ);
     errdefer sdl.freeSurface(surface);
 
-    const anchorPoint = findAndProcessAnchorPixel(surface, scale);
+    const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
+    const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
 
     const resources = try shared.getResources();
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
@@ -140,7 +142,8 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
         .texture = texture,
         .scale = scale,
         .offset = offset,
-        .anchorPoint = anchorPoint,
+        .anchorPointLeft = anchorPointLeft,
+        .anchorPointRight = anchorPointRight,
         .sizeM = .{
             .x = sizeM.x,
             .y = sizeM.y,
@@ -199,7 +202,8 @@ pub fn createCopy(spriteUuid: u64) !u64 {
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
         .offset = originalSprite.offset,
-        .anchorPoint = originalSprite.anchorPoint,
+        .anchorPointLeft = originalSprite.anchorPointLeft,
+        .anchorPointRight = originalSprite.anchorPointRight,
     };
 
     try sprites.putLocking(newUuid, newSprite);
@@ -207,7 +211,15 @@ pub fn createCopy(spriteUuid: u64) !u64 {
     return newUuid;
 }
 
-fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2) ?vec.IVec2 {
+pub fn isMagenta(r: u8, g: u8, b: u8) bool {
+    return r == 255 and g == 0 and b == 255;
+}
+
+pub fn isGreen(r: u8, g: u8, b: u8) bool {
+    return r == 0 and g == 255 and b == 0;
+}
+
+fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2, comptime predicate: fn (u8, u8, u8) bool) ?vec.IVec2 {
     const pixels: [*]u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
     const width: usize = @intCast(surface.w);
@@ -221,7 +233,7 @@ fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2) ?vec.IVec2 
             const pixelIndex = y * pitch + x * bytesPerPixel;
 
             // BGRA: b0=B, b1=G, b2=R, b3=A
-            if (pixels[pixelIndex + 2] == 255 and pixels[pixelIndex + 1] == 0 and pixels[pixelIndex + 0] == 255 and pixels[pixelIndex + 3] > 0) {
+            if (pixels[pixelIndex + 3] > 0 and predicate(pixels[pixelIndex + 2], pixels[pixelIndex + 1], pixels[pixelIndex + 0])) {
                 const minY = if (y >= 5) y - 5 else 0;
                 const maxY = @min(y + 5, height);
                 const minX = if (x >= 5) x - 5 else 0;
@@ -232,7 +244,7 @@ fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2) ?vec.IVec2 
                     var nx: usize = minX;
                     while (nx < maxX) : (nx += 1) {
                         const ni = ny * pitch + nx * bytesPerPixel;
-                        if (pixels[ni + 2] == 255 and pixels[ni + 1] == 0 and pixels[ni + 0] == 255 and pixels[ni + 3] > 0) {
+                        if (pixels[ni + 3] > 0 and predicate(pixels[ni + 2], pixels[ni + 1], pixels[ni + 0])) {
                             pixels[ni + 0] = 255;
                             pixels[ni + 1] = 255;
                             pixels[ni + 2] = 255;

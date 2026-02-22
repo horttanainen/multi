@@ -37,9 +37,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: change shoulder anchor point when facing other direction. This needs additional anchor point
-//TODO: draw another sprite with arm more extended and use that when pointing downwards
-
 //TODO: camera should travel with the crosshair
 
 //TODO: spawn should be a levitating teleport thingy

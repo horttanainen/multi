@@ -660,20 +660,21 @@ pub fn drawWeapon(player: *Player) !void {
 
     const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
 
-    const playerAnchor = if (playerSprite) |ps| ps.anchorPoint else null;
-    const weaponAnchor = weaponSprite.anchorPoint;
+    const playerFlip = ent.flipEntityHorizontally;
+    const weaponFlip = !ent.flipEntityHorizontally;
+
+    // Use left shoulder anchor when facing right (flipped), right shoulder when facing left (default)
+    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointLeft else ps.anchorPointRight orelse ps.anchorPointLeft) else null;
+    const weaponAnchor = weaponSprite.anchorPointLeft;
 
     if (playerAnchor == null or weaponAnchor == null or playerSprite == null) {
         const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
-        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, !ent.flipEntityHorizontally, 0, null, null);
+        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, weaponFlip, 0, null, null);
         return;
     }
     const pAnchor = playerAnchor.?;
     const wAnchor = weaponAnchor.?;
     const ps = playerSprite.?;
-
-    const playerFlip = ent.flipEntityHorizontally;
-    const weaponFlip = !ent.flipEntityHorizontally;
 
     const playerHalfW = @divTrunc(ps.sizeP.x, 2);
     const playerHalfH = @divTrunc(ps.sizeP.y, 2);
@@ -683,6 +684,7 @@ pub fn drawWeapon(player: *Player) !void {
         .y = playerPos.y - playerHalfH + ps.offset.y,
     };
 
+    // When flipped, mirror the anchor X within the sprite
     const shoulderPos = if (playerFlip)
         vec.iadd(playerUpperLeft, .{ .x = ps.sizeP.x - pAnchor.x, .y = pAnchor.y })
     else
@@ -704,12 +706,25 @@ pub fn drawWeapon(player: *Player) !void {
     try sprite.drawWithOptions(weaponSprite, weaponCenterPos, weaponAngle, false, weaponFlip, 0, null, pivotPoint);
 }
 
-pub fn drawAllWeapons() !void {
+pub fn drawAllWeaponsBehind() !void {
     for (players.values()) |*p| {
-        if (p.isDead) {
-            continue;
+        if (p.isDead) continue;
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            // Draw behind when facing left (flipEntityHorizontally == false)
+            if (!ent.flipEntityHorizontally) try drawWeapon(p);
         }
-        try drawWeapon(p);
+    }
+}
+
+pub fn drawAllWeaponsFront() !void {
+    for (players.values()) |*p| {
+        if (p.isDead) continue;
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            // Draw in front when facing right (flipEntityHorizontally == true)
+            if (ent.flipEntityHorizontally) try drawWeapon(p);
+        }
     }
 }
 
