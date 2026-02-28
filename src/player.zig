@@ -335,8 +335,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .enabled = true,
     };
 
-    const leftHandSpriteUuid = try sprite.createFromImg("hook_hand/arm_with_hook.png", weaponScale, vec.izero);
-    const leftHandNoHookSpriteUuid = try sprite.createFromImg("hook_hand/arm_without_hook.png", weaponScale, vec.izero);
+    const leftHandSpriteUuid = data.createSpriteFrom("arm_with_hook") orelse return error.SpriteNotFound;
+    const leftHandNoHookSpriteUuid = data.createSpriteFrom("arm_without_hook") orelse return error.SpriteNotFound;
 
     // Load spray paint sprite from data
     var sprayPaintSpriteUuid: ?u64 = null;
@@ -347,10 +347,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         } else |_| {}
     }
 
-    const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
-        .x = 1,
-        .y = 1,
-    }, vec.izero);
+    const crosshairUuid = data.createSpriteFrom("crosshair") orelse return error.SpriteNotFound;
 
     // Create camera for this player
     const cameraId = try camera.spawnForPlayer(playerId, position);

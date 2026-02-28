@@ -15,6 +15,7 @@ const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
+const data = @import("data.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -35,14 +36,7 @@ pub fn handleGameMouseInput() !void {
                 .x = x,
                 .y = y,
             });
-            const spriteUuid = try sprite.createFromImg(
-                shared.boxImgSrc,
-                .{
-                    .x = 1,
-                    .y = 1,
-                },
-                vec.izero,
-            );
+            const spriteUuid = data.createSpriteFrom("box") orelse return;
             const pos = conv.pixel2M(position);
             const bodyDef = box2d.createDynamicBodyDef(pos);
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");

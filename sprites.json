@@ -8,5 +8,32 @@
         "key": "player_2_spray",
         "path": "spray_paint/player_2.png",
         "scale": 0.2
+    },
+    {
+        "key": "crosshair",
+        "path": "images/crosshair.png"
+    },
+    {
+        "key": "arm_with_hook",
+        "path": "hook_hand/arm_with_hook.png",
+        "scale": 0.2
+    },
+    {
+        "key": "arm_without_hook",
+        "path": "hook_hand/arm_without_hook.png",
+        "scale": 0.2
+    },
+    {
+        "key": "rope_hook",
+        "path": "items/ninja_rope/item.png",
+        "scale": 0.3
+    },
+    {
+        "key": "rope_segment",
+        "path": "items/ninja_rope/segment.png"
+    },
+    {
+        "key": "box",
+        "path": "images/box.png"
     }
 ]

@@ -136,6 +136,9 @@ pub fn main() !void {
 
     defer sprite.deinit();
 
+    try data.init();
+    defer data.cleanup();
+
     try rope.init();
     defer rope.cleanup();
 
@@ -146,9 +149,6 @@ pub fn main() !void {
     defer keyboard.cleanup();
 
     defer gamepad.cleanup();
-
-    try data.init();
-    defer data.cleanup();
 
     try camera.spawn(.{ .x = 0, .y = 0 });
     try gibbing.init();

@@ -10,6 +10,7 @@ const sprite = @import("sprite.zig");
 const player = @import("player.zig");
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
+const data = @import("data.zig");
 
 pub const RopeState = enum {
     inactive,
@@ -29,16 +30,8 @@ var hookSpriteUuid: ?u64 = null;
 var segmentSpriteUuid: ?u64 = null;
 
 pub fn init() !void {
-    hookSpriteUuid = try sprite.createFromImg(
-        "items/ninja_rope/item.png",
-        .{ .x = 0.3, .y = 0.3 },
-        vec.izero,
-    );
-    segmentSpriteUuid = try sprite.createFromImg(
-        "items/ninja_rope/segment.png",
-        .{ .x = 1.0, .y = 1.0 },
-        vec.izero,
-    );
+    hookSpriteUuid = data.createSpriteFrom("rope_hook") orelse return error.SpriteNotFound;
+    segmentSpriteUuid = data.createSpriteFrom("rope_segment") orelse return error.SpriteNotFound;
 }
 
 pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
