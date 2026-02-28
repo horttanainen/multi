@@ -66,6 +66,7 @@ pub const Player = struct {
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
 const PlayerError = error{PlayerUnspawned};
 
+var runAnimationFrameCount: usize = 10;
 var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(shared.allocator);
 
 fn markPlayerForRespawn(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
@@ -216,12 +217,13 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     const runAnim = try animation.load(
         "animations/red/run",
-        12,
+        config.runAnimationFps,
         .{ .x = 0.2, .y = 0.2 },
         .{ .x = 0, .y = -30 },
         true,
         0,
     );
+    runAnimationFrameCount = runAnim.frames.len;
     try animations.put("run", runAnim);
 
     const fallAnim = try animation.load(
@@ -802,7 +804,15 @@ pub fn drawLeftHand(player: *Player) !void {
         .y = shoulderPos.y - hAnchor.y + hookHalfH,
     };
 
-    try sprite.drawWithOptions(hookSprite, hookCenterPos, 0, false, hookFlip, 0, null, null);
+    const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
+    const swingAngle: f32 = if (player.isMoving and player.touchesGround)
+        @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
+    else
+        0;
+    const finalAngle: f32 = if (hookFlip) -swingAngle else swingAngle;
+
+    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
+    try sprite.drawWithOptions(hookSprite, hookCenterPos, finalAngle, false, hookFlip, 0, null, pivotPoint);
 }
 
 pub fn drawAllLeftHandsBehind() !void {

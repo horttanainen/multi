@@ -26,6 +26,8 @@ pub const aimCircleRadius: f32 = 500;
 pub const aimRestingDistance: f32 = 100;
 pub const aimCircleOffset: vec.IVec2 = .{ .x = 0, .y = -25 };
 
+pub const runAnimationFps: i32 = 12;
+
 pub const Player = struct {
     restingFriction: f32,
     movementFriction: f32,
