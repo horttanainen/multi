@@ -615,6 +615,10 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
             };
         }
 
+        sprite.colorMatchingPixels(player.leftHandSpriteUuid, color, sprite.isWhite) catch |err| {
+            std.debug.print("Warning: Failed to color left hand sprite for player {}: {}\n", .{ playerId, err });
+        };
+
         sprite.colorMatchingPixels(player.crosshairUuid, color, sprite.isAny) catch |err| {
             std.debug.print("Warning: Failed to color crosshair for player {}: {}\n", .{ playerId, err });
         };

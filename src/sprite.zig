@@ -371,7 +371,7 @@ pub fn isAny(_: u8, _: u8, _: u8) bool {
 }
 
 pub fn isWhite(r: u8, g: u8, b: u8) bool {
-    return r > 150 and g > 150 and b > 150;
+    return r > 200 and g > 200 and b > 200;
 }
 
 pub fn isCyan(r: u8, _: u8, b: u8) bool {
