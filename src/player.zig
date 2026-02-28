@@ -60,6 +60,7 @@ pub const Player = struct {
     respawnTimerId: i32,
     isZooming: bool,
     zoomOffset: vec.Vec2,
+    leftHandSpriteUuid: u64,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -329,6 +330,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .enabled = true,
     };
 
+    const leftHandSpriteUuid = try sprite.createFromImg("hook_hand/arm_with_hook.png", weaponScale, vec.izero);
+
     const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
         .x = 1,
         .y = 1,
@@ -368,6 +371,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .respawnTimerId = -1,
         .isZooming = false,
         .zoomOffset = vec.zero,
+        .leftHandSpriteUuid = leftHandSpriteUuid,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -739,6 +743,80 @@ pub fn drawAllWeaponsFront() !void {
         if (maybeEntity) |ent| {
             // Draw in front when facing right (flipEntityHorizontally == true)
             if (ent.flipEntityHorizontally) try drawWeapon(p);
+        }
+    }
+}
+
+pub fn drawLeftHand(player: *Player) !void {
+    const hookSprite = sprite.getSprite(player.leftHandSpriteUuid) orelse return;
+
+    const maybeEntity = entity.getEntity(player.bodyId);
+    if (maybeEntity == null) return;
+    const ent = maybeEntity.?;
+    const currentState = box2d.getState(player.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
+
+    const playerFlip = ent.flipEntityHorizontally;
+    const hookFlip = !ent.flipEntityHorizontally;
+
+    // Use the opposite shoulder from the weapon: right when facing right, left when facing left
+    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) else null;
+    const hookAnchor = hookSprite.anchorPointLeft;
+
+    if (playerAnchor == null or hookAnchor == null or playerSprite == null) {
+        const hookPos = vec.iadd(playerPos, hookSprite.offset);
+        try sprite.drawWithOptions(hookSprite, hookPos, 0, false, hookFlip, 0, null, null);
+        return;
+    }
+    const pAnchor = playerAnchor.?;
+    const hAnchor = hookAnchor.?;
+    const ps = playerSprite.?;
+
+    const playerHalfW = @divTrunc(ps.sizeP.x, 2);
+    const playerHalfH = @divTrunc(ps.sizeP.y, 2);
+    const playerOffsetX: i32 = if (playerFlip) ps.offset.x else -ps.offset.x;
+    const playerUpperLeft = vec.IVec2{
+        .x = playerPos.x - playerHalfW + playerOffsetX,
+        .y = playerPos.y - playerHalfH + ps.offset.y,
+    };
+
+    // When flipped, mirror the anchor X within the sprite
+    const shoulderPos = if (playerFlip)
+        vec.iadd(playerUpperLeft, .{ .x = ps.sizeP.x - pAnchor.x, .y = pAnchor.y })
+    else
+        vec.iadd(playerUpperLeft, pAnchor);
+
+    const effectiveHAnchorX: i32 = if (hookFlip) hookSprite.sizeP.x - hAnchor.x else hAnchor.x;
+
+    const hookHalfW = @divTrunc(hookSprite.sizeP.x, 2);
+    const hookHalfH = @divTrunc(hookSprite.sizeP.y, 2);
+    const hookCenterPos = vec.IVec2{
+        .x = shoulderPos.x - effectiveHAnchorX + hookHalfW,
+        .y = shoulderPos.y - hAnchor.y + hookHalfH,
+    };
+
+    try sprite.drawWithOptions(hookSprite, hookCenterPos, 0, false, hookFlip, 0, null, null);
+}
+
+pub fn drawAllLeftHandsBehind() !void {
+    for (players.values()) |*p| {
+        if (p.isDead) continue;
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            if (ent.flipEntityHorizontally) try drawLeftHand(p);
+        }
+    }
+}
+
+pub fn drawAllLeftHandsFront() !void {
+    for (players.values()) |*p| {
+        if (p.isDead) continue;
+        const maybeEntity = entity.getEntity(p.bodyId);
+        if (maybeEntity) |ent| {
+            if (!ent.flipEntityHorizontally) try drawLeftHand(p);
         }
     }
 }
