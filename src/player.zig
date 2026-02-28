@@ -61,6 +61,7 @@ pub const Player = struct {
     isZooming: bool,
     zoomOffset: vec.Vec2,
     leftHandSpriteUuid: u64,
+    leftHandNoHookSpriteUuid: u64,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -333,6 +334,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     };
 
     const leftHandSpriteUuid = try sprite.createFromImg("hook_hand/arm_with_hook.png", weaponScale, vec.izero);
+    const leftHandNoHookSpriteUuid = try sprite.createFromImg("hook_hand/arm_without_hook.png", weaponScale, vec.izero);
 
     const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
         .x = 1,
@@ -374,6 +376,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .isZooming = false,
         .zoomOffset = vec.zero,
         .leftHandSpriteUuid = leftHandSpriteUuid,
+        .leftHandNoHookSpriteUuid = leftHandNoHookSpriteUuid,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -621,6 +624,10 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
             std.debug.print("Warning: Failed to color left hand sprite for player {}: {}\n", .{ playerId, err });
         };
 
+        sprite.colorMatchingPixels(player.leftHandNoHookSpriteUuid, color, sprite.isWhite) catch |err| {
+            std.debug.print("Warning: Failed to color left hand no-hook sprite for player {}: {}\n", .{ playerId, err });
+        };
+
         sprite.colorMatchingPixels(player.crosshairUuid, color, sprite.isAny) catch |err| {
             std.debug.print("Warning: Failed to color crosshair for player {}: {}\n", .{ playerId, err });
         };
@@ -753,34 +760,113 @@ pub fn drawAllWeaponsFront() !void {
     }
 }
 
-pub fn drawLeftHand(player: *Player) !void {
-    const hookSprite = sprite.getSprite(player.leftHandSpriteUuid) orelse return;
+pub fn drawLeftHand(p: *Player) !void {
+    const hasRope = if (rope.ropes.get(p.id)) |r| r.state != .inactive else false;
+    if (hasRope) {
+        try drawLeftArmWithHookDeployed(p);
+    } else {
+        try drawLeftArmWithHook(p);
+    }
+}
 
-    const maybeEntity = entity.getEntity(player.bodyId);
+fn drawLeftArmWithHook(p: *Player) !void {
+    const handSprite = sprite.getSprite(p.leftHandSpriteUuid) orelse return;
+
+    const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity == null) return;
     const ent = maybeEntity.?;
-    const currentState = box2d.getState(player.bodyId);
+    const currentState = box2d.getState(p.bodyId);
     const state = box2d.getInterpolatedState(ent.state, currentState);
     const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
     const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
 
     const playerFlip = ent.flipEntityHorizontally;
-    const hookFlip = !ent.flipEntityHorizontally;
+    const handFlip = !ent.flipEntityHorizontally;
 
-    // Use the opposite shoulder from the weapon: right when facing right, left when facing left
     const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) else null;
-    const hookAnchor = hookSprite.anchorPointLeft;
+    const handAnchor = handSprite.anchorPointLeft;
 
-    if (playerAnchor == null or hookAnchor == null or playerSprite == null) {
-        const hookPos = vec.iadd(playerPos, hookSprite.offset);
-        try sprite.drawWithOptions(hookSprite, hookPos, 0, false, hookFlip, 0, null, null);
+    if (playerAnchor == null or handAnchor == null or playerSprite == null) {
+        const handPos = vec.iadd(playerPos, handSprite.offset);
+        try sprite.drawWithOptions(handSprite, handPos, 0, false, handFlip, 0, null, null);
         return;
     }
     const pAnchor = playerAnchor.?;
-    const hAnchor = hookAnchor.?;
+    const hAnchor = handAnchor.?;
     const ps = playerSprite.?;
 
+    const shoulderPos = calcShoulderPos(ps, playerPos, pAnchor, playerFlip);
+    const effectiveHAnchorX: i32 = if (handFlip) handSprite.sizeP.x - hAnchor.x else hAnchor.x;
+
+    const handCenterPos = vec.IVec2{
+        .x = shoulderPos.x - effectiveHAnchorX + @divTrunc(handSprite.sizeP.x, 2),
+        .y = shoulderPos.y - hAnchor.y + @divTrunc(handSprite.sizeP.y, 2),
+    };
+
+    // Swing arm back and forth when running
+    const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
+    const swingAngle: f32 = if (p.isMoving and p.touchesGround)
+        @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
+    else
+        0;
+    const finalAngle: f32 = if (handFlip) -swingAngle else swingAngle;
+
+    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
+    try sprite.drawWithOptions(handSprite, handCenterPos, finalAngle, false, handFlip, 0, null, pivotPoint);
+}
+
+fn drawLeftArmWithHookDeployed(p: *Player) !void {
+    const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return;
+    const r = rope.ropes.get(p.id) orelse return;
+
+    const maybeEntity = entity.getEntity(p.bodyId);
+    if (maybeEntity == null) return;
+    const ent = maybeEntity.?;
+    const currentState = box2d.getState(p.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
+
+    const playerFlip = ent.flipEntityHorizontally;
+    const handFlip = !ent.flipEntityHorizontally;
+
+    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) else null;
+    const handAnchor = handSprite.anchorPointLeft;
+
+    if (playerAnchor == null or handAnchor == null or playerSprite == null) {
+        const handPos = vec.iadd(playerPos, handSprite.offset);
+        try sprite.drawWithOptions(handSprite, handPos, 0, false, handFlip, 0, null, null);
+        return;
+    }
+    const pAnchor = playerAnchor.?;
+    const hAnchor = handAnchor.?;
+    const ps = playerSprite.?;
+
+    const shoulderPos = calcShoulderPos(ps, playerPos, pAnchor, playerFlip);
+    const effectiveHAnchorX: i32 = if (handFlip) handSprite.sizeP.x - hAnchor.x else hAnchor.x;
+
+    const handCenterPos = vec.IVec2{
+        .x = shoulderPos.x - effectiveHAnchorX + @divTrunc(handSprite.sizeP.x, 2),
+        .y = shoulderPos.y - hAnchor.y + @divTrunc(handSprite.sizeP.y, 2),
+    };
+
+    // Point arm toward the hook position
+    const hookPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(r.hookBodyId));
+    const hookPosPx = camera.relativePosition(conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y }));
+    const dx = @as(f32, @floatFromInt(hookPosPx.x - shoulderPos.x));
+    const dy = @as(f32, @floatFromInt(hookPosPx.y - shoulderPos.y));
+    const angle = std.math.atan2(dy, dx);
+    const flipSign: f32 = if (playerFlip) -1 else 1;
+    const rotationOffset: f32 = flipSign * std.math.pi / 2.0;
+    const finalAngle: f32 = if (handFlip) std.math.pi + angle + rotationOffset else angle + rotationOffset;
+
+    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
+    try sprite.drawWithOptions(handSprite, handCenterPos, finalAngle, false, handFlip, 0, null, pivotPoint);
+}
+
+fn calcShoulderPos(ps: sprite.Sprite, playerPos: vec.IVec2, pAnchor: vec.IVec2, playerFlip: bool) vec.IVec2 {
     const playerHalfW = @divTrunc(ps.sizeP.x, 2);
     const playerHalfH = @divTrunc(ps.sizeP.y, 2);
     const playerOffsetX: i32 = if (playerFlip) ps.offset.x else -ps.offset.x;
@@ -789,30 +875,10 @@ pub fn drawLeftHand(player: *Player) !void {
         .y = playerPos.y - playerHalfH + ps.offset.y,
     };
 
-    // When flipped, mirror the anchor X within the sprite
-    const shoulderPos = if (playerFlip)
+    return if (playerFlip)
         vec.iadd(playerUpperLeft, .{ .x = ps.sizeP.x - pAnchor.x, .y = pAnchor.y })
     else
         vec.iadd(playerUpperLeft, pAnchor);
-
-    const effectiveHAnchorX: i32 = if (hookFlip) hookSprite.sizeP.x - hAnchor.x else hAnchor.x;
-
-    const hookHalfW = @divTrunc(hookSprite.sizeP.x, 2);
-    const hookHalfH = @divTrunc(hookSprite.sizeP.y, 2);
-    const hookCenterPos = vec.IVec2{
-        .x = shoulderPos.x - effectiveHAnchorX + hookHalfW,
-        .y = shoulderPos.y - hAnchor.y + hookHalfH,
-    };
-
-    const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
-    const swingAngle: f32 = if (player.isMoving and player.touchesGround)
-        @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
-    else
-        0;
-    const finalAngle: f32 = if (hookFlip) -swingAngle else swingAngle;
-
-    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
-    try sprite.drawWithOptions(hookSprite, hookCenterPos, finalAngle, false, hookFlip, 0, null, pivotPoint);
 }
 
 pub fn drawAllLeftHandsBehind() !void {
