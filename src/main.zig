@@ -33,12 +33,12 @@ const sprite = @import("sprite.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const gibbing = @import("gibbing.zig");
+const data = @import("data.zig");
 const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Entity system
-//TODO: change spray loading to use entity systen
 
 //Hand ideas
 //TODO: instead of hook the mechanical hand could be shot with a chain.
@@ -146,6 +146,9 @@ pub fn main() !void {
     defer keyboard.cleanup();
 
     defer gamepad.cleanup();
+
+    try data.init();
+    defer data.cleanup();
 
     try camera.spawn(.{ .x = 0, .y = 0 });
     try gibbing.init();

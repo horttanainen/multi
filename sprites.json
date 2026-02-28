@@ -1,0 +1,12 @@
+[
+    {
+        "key": "player_1_spray",
+        "path": "spray_paint/player_1.png",
+        "scale": 0.5
+    },
+    {
+        "key": "player_2_spray",
+        "path": "spray_paint/player_2.png",
+        "scale": 0.2
+    }
+]

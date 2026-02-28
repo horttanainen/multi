@@ -25,6 +25,7 @@ const score = @import("score.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
+const data = @import("data.zig");
 
 const conv = @import("conversion.zig");
 
@@ -63,7 +64,6 @@ pub const Player = struct {
     leftHandSpriteUuid: u64,
     leftHandNoHookSpriteUuid: u64,
     sprayPaintSpriteUuid: ?u64,
-    sprayPaintScale: f32,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -338,31 +338,13 @@ pub fn spawn(position: vec.IVec2) !usize {
     const leftHandSpriteUuid = try sprite.createFromImg("hook_hand/arm_with_hook.png", weaponScale, vec.izero);
     const leftHandNoHookSpriteUuid = try sprite.createFromImg("hook_hand/arm_without_hook.png", weaponScale, vec.izero);
 
-    // Try loading spray paint image for this player
-    // Filename format: player_N.png or player_N_S.png where S becomes 0.S scale
+    // Load spray paint sprite from data
     var sprayPaintSpriteUuid: ?u64 = null;
-    var sprayPaintScale: f32 = 1.0;
     {
-        // Try filenames with scale suffix: player_1_1.png through player_1_9.png
-        var s: u8 = 1;
-        while (s <= 9) : (s += 1) {
-            var sprayBuf: [64:0]u8 = undefined;
-            const sprayPath = std.fmt.bufPrintZ(&sprayBuf, "spray_paint/player_{d}_{d}.png", .{ playerId + 1, s }) catch continue;
-            if (sprite.createFromImg(sprayPath, .{ .x = 1, .y = 1 }, vec.izero)) |sprayUuid| {
-                sprayPaintSpriteUuid = sprayUuid;
-                sprayPaintScale = @as(f32, @floatFromInt(s)) / 10.0;
-                break;
-            } else |_| {}
-        }
-        // Fall back to player_N.png with scale 1.0
-        if (sprayPaintSpriteUuid == null) {
-            var sprayBuf: [64:0]u8 = undefined;
-            if (std.fmt.bufPrintZ(&sprayBuf, "spray_paint/player_{d}.png", .{playerId + 1})) |sprayPath| {
-                if (sprite.createFromImg(sprayPath, .{ .x = 1, .y = 1 }, vec.izero)) |sprayUuid| {
-                    sprayPaintSpriteUuid = sprayUuid;
-                } else |_| {}
-            } else |_| {}
-        }
+        var keyBuf: [64]u8 = undefined;
+        if (std.fmt.bufPrint(&keyBuf, "player_{d}_spray", .{playerId + 1})) |key| {
+            sprayPaintSpriteUuid = data.createSpriteFrom(key);
+        } else |_| {}
     }
 
     const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
@@ -407,7 +389,6 @@ pub fn spawn(position: vec.IVec2) !usize {
         .leftHandSpriteUuid = leftHandSpriteUuid,
         .leftHandNoHookSpriteUuid = leftHandNoHookSpriteUuid,
         .sprayPaintSpriteUuid = sprayPaintSpriteUuid,
-        .sprayPaintScale = sprayPaintScale,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -732,8 +713,8 @@ pub fn sprayPaint(p: *Player) !void {
             if (e.spriteUuids.len == 0) continue;
 
             // Natural world size: source pixels at fixed met2pix ratio, then apply player scale
-            var sizeWorldX = @as(f32, @floatFromInt(spraySprite.surface.w)) / config.met2pix * p.sprayPaintScale;
-            var sizeWorldY = @as(f32, @floatFromInt(spraySprite.surface.h)) / config.met2pix * p.sprayPaintScale;
+            var sizeWorldX = @as(f32, @floatFromInt(spraySprite.surface.w)) / config.met2pix * spraySprite.scale.x;
+            var sizeWorldY = @as(f32, @floatFromInt(spraySprite.surface.h)) / config.met2pix * spraySprite.scale.y;
 
             // Scale down proportionally if either dimension exceeds the max
             const maxDim = @max(sizeWorldX, sizeWorldY);
