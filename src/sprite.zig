@@ -303,10 +303,20 @@ fn iterateCircleOnSurface(
     const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x;
 
     // 4. Calculate bounding box for iteration efficiency
-    const minX: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.x - radiusPixels))));
-    const maxX: usize = @min(width - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.x + radiusPixels))));
-    const minY: usize = @max(0, @as(i32, @intFromFloat(@floor(centerPixelF.y - radiusPixels))));
-    const maxY: usize = @min(height - 1, @as(usize, @intFromFloat(@ceil(centerPixelF.y + radiusPixels))));
+    const rawMinX: i32 = @intFromFloat(@floor(centerPixelF.x - radiusPixels));
+    const rawMaxX: i32 = @intFromFloat(@ceil(centerPixelF.x + radiusPixels));
+    const rawMinY: i32 = @intFromFloat(@floor(centerPixelF.y - radiusPixels));
+    const rawMaxY: i32 = @intFromFloat(@ceil(centerPixelF.y + radiusPixels));
+
+    const widthI: i32 = @intCast(width);
+    const heightI: i32 = @intCast(height);
+
+    if (rawMaxX < 0 or rawMinX >= widthI or rawMaxY < 0 or rawMinY >= heightI) return;
+
+    const minX: usize = @intCast(@max(0, rawMinX));
+    const maxX: usize = @intCast(@min(widthI - 1, rawMaxX));
+    const minY: usize = @intCast(@max(0, rawMinY));
+    const maxY: usize = @intCast(@min(heightI - 1, rawMaxY));
 
     // 5. Iterate over pixels within the circle
     var y = minY;

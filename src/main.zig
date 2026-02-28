@@ -38,6 +38,10 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: buy rounds game and steal their ideas
+//TODO: e.g. different levels can have different camera distances
+//TODO: enable ricochets for some slugs
+
 //TODO: add green pixel to gun for bullet spawn anchor point
 //TODO: add item.zig that spawns items on the map
 //TODO: add weapon item sprites so that weapons can be picked up
