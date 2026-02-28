@@ -15,6 +15,7 @@ const level = @import("level.zig");
 const viewport = @import("viewport.zig");
 const particle = @import("particle.zig");
 const rope = @import("rope.zig");
+const weapon = @import("weapon.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -47,6 +48,7 @@ fn renderCamera(cameraId: usize) !void {
     try player.drawAllLeftHandsFront();
     try particle.drawAll();
     try rope.drawRopes();
+    try weapon.drawTrails();
     try player.drawAllCrosshairs();
 
     if (config.debug) {

@@ -221,9 +221,13 @@ pub fn spawn(position: vec.IVec2) !usize {
     try animations.put("afterjump", afterJumpAnim);
 
     const rocketLauncher = try data.createWeaponFrom("rocket_launcher");
+    const shotgun = try data.createWeaponFrom("shotgun");
+    const railgun = try data.createWeaponFrom("railgun");
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(rocketLauncher);
+    try weapons.append(shotgun);
+    try weapons.append(railgun);
 
     var playerSpriteUuids = try shared.allocator.alloc(u64, 1);
     playerSpriteUuids[0] = try sprite.createCopy(idleAnim.frames[0]);
@@ -480,6 +484,17 @@ pub fn zoomRelease(p: *Player) void {
     p.isZooming = false;
 }
 
+pub fn cycleWeapon(p: *Player, direction: i32) void {
+    if (p.weapons.len == 0) return;
+    var buf: [32:0]u8 = undefined;
+    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_wpn", .{p.id}) catch unreachable;
+    if (delay.check(delayKey)) return;
+    const len: i32 = @intCast(p.weapons.len);
+    const current: i32 = @intCast(p.selectedWeaponIndex);
+    p.selectedWeaponIndex = @intCast(@mod(current + direction, len));
+    delay.action(delayKey, 300);
+}
+
 pub fn shoot(player: *Player) !void {
     if (player.weapons.len == 0) return;
 
@@ -656,11 +671,12 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
             std.debug.print("Warning: Failed to color animation frames for player {}: {}\n", .{ playerId, err });
         };
 
-        const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-        if (selectedWeapon.spriteUuid != 0) {
-            sprite.colorMatchingPixels(selectedWeapon.spriteUuid, color, sprite.isWhite) catch |err| {
-                std.debug.print("Warning: Failed to color weapon sprite for player {}: {}\n", .{ playerId, err });
-            };
+        for (player.weapons) |w| {
+            if (w.spriteUuid != 0) {
+                sprite.colorMatchingPixels(w.spriteUuid, color, sprite.isWhite) catch |err| {
+                    std.debug.print("Warning: Failed to color weapon sprite for player {}: {}\n", .{ playerId, err });
+                };
+            }
         }
 
         sprite.colorMatchingPixels(player.leftHandSpriteUuid, color, sprite.isWhite) catch |err| {
@@ -954,6 +970,8 @@ pub fn drawAllLeftHandsFront() !void {
 }
 
 pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
+    if (p.isDead) return;
+
     p.health -= d;
 
     const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
@@ -963,12 +981,11 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
         try particle.createBloodParticles(playerPosM, d);
     }
 
-    if (p.health <= 0 and !p.isDead) {
+    if (p.health <= 0) {
+        if (p.health <= -5) {
+            try gib(p);
+        }
         try kill(p, attackerId);
-    }
-
-    if (p.health <= -5) {
-        try gib(p);
     }
 }
 
@@ -1039,10 +1056,24 @@ pub fn cleanup() void {
 
         // Cleanup weapon animations and sprites
         for (p.weapons) |w| {
-            animation.cleanupOne(w.projectile.animation);
-            animation.cleanupOne(w.projectile.explosion.animation);
-            if (w.projectile.propulsionAnimation) |propAnim| {
-                animation.cleanupOne(propAnim);
+            if (w.projectile) |proj| {
+                animation.cleanupOne(proj.animation);
+                if (proj.explosion.animation) |expAnim| {
+                    animation.cleanupOne(expAnim);
+                }
+                if (proj.propulsionAnimation) |propAnim| {
+                    animation.cleanupOne(propAnim);
+                }
+            }
+            if (w.pellet) |pel| {
+                if (pel.explosion.animation) |peAnim| {
+                    animation.cleanupOne(peAnim);
+                }
+            }
+            if (w.hitscanExplosion) |he| {
+                if (he.animation) |heAnim| {
+                    animation.cleanupOne(heAnim);
+                }
             }
             if (w.spriteUuid != 0) {
                 sprite.cleanupLater(w.spriteUuid);

@@ -15,6 +15,7 @@ const background = @import("background.zig");
 const animation = @import("animation.zig");
 const controller = @import("controller.zig");
 const rope = @import("rope.zig");
+const weapon = @import("weapon.zig");
 
 const conv = @import("conversion.zig");
 
@@ -177,6 +178,7 @@ pub fn cleanup() void {
     player.cleanup();
     sensor.cleanup();
     projectile.cleanup();
+    weapon.cleanupTrails();
     entity.cleanup();
     background.cleanup();
     animation.cleanup();

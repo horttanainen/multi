@@ -40,6 +40,10 @@ pub const GamepadBindings = struct {
 
     // Spray paint
     sprayPaintButton: sdl.GameController.Button,
+
+    // Weapon switching
+    weaponNextButton: sdl.GameController.Button,
+    weaponPrevButton: sdl.GameController.Button,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -59,6 +63,9 @@ pub const defaultBindings = GamepadBindings{
     .ropeButton = .leftshoulder,
 
     .sprayPaintButton = .y,
+
+    .weaponNextButton = .dpad_right,
+    .weaponPrevButton = .dpad_left,
 };
 
 pub var availableGamepads: std.ArrayList(GamepadState) = .{};
@@ -200,6 +207,13 @@ pub fn handle(ctrl: *const controller.Controller) void {
 
     if (sdl.gameControllerGetButton(sdlCtrl, bindings.sprayPaintButton)) {
         control.executeAction(ctrl.playerId, .spray_paint);
+    }
+
+    if (sdl.gameControllerGetButton(sdlCtrl, bindings.weaponNextButton)) {
+        control.executeAction(ctrl.playerId, .weapon_next);
+    }
+    if (sdl.gameControllerGetButton(sdlCtrl, bindings.weaponPrevButton)) {
+        control.executeAction(ctrl.playerId, .weapon_prev);
     }
 }
 

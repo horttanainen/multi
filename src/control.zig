@@ -97,6 +97,8 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
             .spray_paint => player.sprayPaint(p) catch |err| {
                 std.debug.print("Error spray painting: {}\n", .{err});
             },
+            .weapon_next => player.cycleWeapon(p, 1),
+            .weapon_prev => player.cycleWeapon(p, -1),
             .aim_left, .aim_right, .aim_up, .aim_down => {},
         }
     }

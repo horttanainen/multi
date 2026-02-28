@@ -6,5 +6,31 @@
         "sound": "cannon_fire",
         "impulse": 10,
         "projectile": "missile"
+    },
+    {
+        "key": "shotgun",
+        "sprite": "rocket_launcher",
+        "delay": 1000,
+        "sound": "cannon_fire",
+        "impulse": 0.5,
+        "directDamage": 15,
+        "pellet": {
+            "count": 11,
+            "spreadAngle": 11,
+            "explosion": "pellet_impact",
+            "color": { "r": 200, "g": 200, "b": 0 }
+        }
+    },
+    {
+        "key": "railgun",
+        "sprite": "rocket_launcher",
+        "delay": 1500,
+        "sound": "cannon_fire",
+        "impulse": 0,
+        "explosion": "railgun_impact",
+        "directDamage": 80,
+        "range": 50,
+        "trailDurationMs": 500,
+        "trailColor": { "r": 50, "g": 128, "b": 255 }
     }
 ]

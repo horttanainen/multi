@@ -38,8 +38,7 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: add railgun
-//TODO: add shotgun
+//TODO: add green pixel to gun for bullet spawn anchor point
 //TODO: add item.zig that spawns items on the map
 //TODO: add weapon item sprites so that weapons can be picked up
 //TODO: display weapons name above it

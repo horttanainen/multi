@@ -31,8 +31,8 @@ pub const SoundData = struct {
 };
 
 pub const ExplosionData = struct {
-    sound: []const u8,
-    animation: []const u8,
+    sound: ?[]const u8,
+    animation: ?[]const u8,
     blastPower: f32,
     blastRadius: f32,
     particleCount: u32,
@@ -42,6 +42,7 @@ pub const ExplosionData = struct {
     particleRadius: f32,
     particleLinearDamping: f32,
     particleGravityScale: f32,
+    damagePlayers: bool,
 };
 
 pub const ProjectileData = struct {
@@ -54,12 +55,31 @@ pub const ProjectileData = struct {
     explosion: []const u8,
 };
 
+pub const PelletData = struct {
+    gravityScale: f32,
+    density: f32,
+    friction: f32,
+    radius: f32,
+    spriteScale: f32,
+    count: u32,
+    spreadAngle: f32,
+    spawnRadius: f32,
+    explosion: []const u8,
+    color: sprite.Color,
+};
+
 pub const WeaponData = struct {
     sprite: []const u8,
     delay: u32,
     sound: []const u8,
     impulse: f32,
-    projectile: []const u8,
+    projectile: ?[]const u8,
+    pellet: ?PelletData,
+    explosion: ?[]const u8,
+    range: f32,
+    trailDurationMs: u32,
+    trailColor: sprite.Color,
+    directDamage: f32,
 };
 
 var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
@@ -218,17 +238,18 @@ fn initExplosions() !void {
 
     const Entry = struct {
         key: []const u8,
-        sound: []const u8,
-        animation: []const u8,
-        blastPower: f32 = 100,
+        sound: ?[]const u8 = null,
+        animation: ?[]const u8 = null,
+        blastPower: f32 = 0,
         blastRadius: f32 = 2.0,
-        particleCount: u32 = 100,
+        particleCount: u32 = 0,
         particleDensity: f32 = 1.5,
         particleFriction: f32 = 0,
         particleRestitution: f32 = 0.99,
         particleRadius: f32 = 0.05,
         particleLinearDamping: f32 = 10,
         particleGravityScale: f32 = 0,
+        damagePlayers: bool = true,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -239,15 +260,21 @@ fn initExplosions() !void {
 
     for (parsed.value) |entry| {
         const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const soundKey = shared.allocator.dupe(u8, entry.sound) catch {
-            shared.allocator.free(key);
-            continue;
-        };
-        const animKey = shared.allocator.dupe(u8, entry.animation) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(soundKey);
-            continue;
-        };
+        const soundKey = if (entry.sound) |s|
+            shared.allocator.dupe(u8, s) catch {
+                shared.allocator.free(key);
+                continue;
+            }
+        else
+            null;
+        const animKey = if (entry.animation) |a|
+            shared.allocator.dupe(u8, a) catch {
+                shared.allocator.free(key);
+                if (soundKey) |sk| shared.allocator.free(sk);
+                continue;
+            }
+        else
+            null;
 
         explosionDataMap.put(shared.allocator, key, .{
             .sound = soundKey,
@@ -261,10 +288,11 @@ fn initExplosions() !void {
             .particleRadius = entry.particleRadius,
             .particleLinearDamping = entry.particleLinearDamping,
             .particleGravityScale = entry.particleGravityScale,
+            .damagePlayers = entry.damagePlayers,
         }) catch {
             shared.allocator.free(key);
-            shared.allocator.free(soundKey);
-            shared.allocator.free(animKey);
+            if (soundKey) |sk| shared.allocator.free(sk);
+            if (animKey) |ak| shared.allocator.free(ak);
             continue;
         };
 
@@ -344,13 +372,32 @@ fn initWeapons() !void {
         return;
     };
 
+    const PelletEntry = struct {
+        gravityScale: f32 = 0.5,
+        density: f32 = 2.0,
+        friction: f32 = 0.3,
+        radius: f32 = 0.05,
+        spriteScale: f32 = 0.3,
+        count: u32 = 1,
+        spreadAngle: f32 = 0,
+        spawnRadius: f32 = 0.15,
+        explosion: []const u8,
+        color: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
+    };
+
     const Entry = struct {
         key: []const u8,
         sprite: []const u8,
         delay: u32 = 500,
         sound: []const u8,
         impulse: f32 = 10,
-        projectile: []const u8,
+        projectile: ?[]const u8 = null,
+        pellet: ?PelletEntry = null,
+        explosion: ?[]const u8 = null,
+        range: f32 = 50,
+        trailDurationMs: u32 = 0,
+        trailColor: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
+        directDamage: f32 = 0,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -370,12 +417,47 @@ fn initWeapons() !void {
             shared.allocator.free(spriteKey);
             continue;
         };
-        const projKey = shared.allocator.dupe(u8, entry.projectile) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(spriteKey);
-            shared.allocator.free(soundKey);
-            continue;
-        };
+        const projKey = if (entry.projectile) |p|
+            shared.allocator.dupe(u8, p) catch {
+                shared.allocator.free(key);
+                shared.allocator.free(spriteKey);
+                shared.allocator.free(soundKey);
+                continue;
+            }
+        else
+            null;
+        const pelletData: ?PelletData = if (entry.pellet) |pel|
+            .{
+                .gravityScale = pel.gravityScale,
+                .density = pel.density,
+                .friction = pel.friction,
+                .radius = pel.radius,
+                .spriteScale = pel.spriteScale,
+                .count = pel.count,
+                .spreadAngle = pel.spreadAngle,
+                .spawnRadius = pel.spawnRadius,
+                .color = pel.color,
+                .explosion = shared.allocator.dupe(u8, pel.explosion) catch {
+                    shared.allocator.free(key);
+                    shared.allocator.free(spriteKey);
+                    shared.allocator.free(soundKey);
+                    if (projKey) |pk| shared.allocator.free(pk);
+                    continue;
+                },
+            }
+        else
+            null;
+        const explosionKey = if (entry.explosion) |e|
+            shared.allocator.dupe(u8, e) catch {
+                shared.allocator.free(key);
+                shared.allocator.free(spriteKey);
+                shared.allocator.free(soundKey);
+                if (projKey) |pk| shared.allocator.free(pk);
+                if (pelletData) |pd| shared.allocator.free(pd.explosion);
+                continue;
+            }
+        else
+            null;
 
         weaponDataMap.put(shared.allocator, key, .{
             .sprite = spriteKey,
@@ -383,11 +465,19 @@ fn initWeapons() !void {
             .sound = soundKey,
             .impulse = entry.impulse,
             .projectile = projKey,
+            .pellet = pelletData,
+            .explosion = explosionKey,
+            .range = entry.range,
+            .trailDurationMs = entry.trailDurationMs,
+            .trailColor = entry.trailColor,
+            .directDamage = entry.directDamage,
         }) catch {
             shared.allocator.free(key);
             shared.allocator.free(spriteKey);
             shared.allocator.free(soundKey);
-            shared.allocator.free(projKey);
+            if (projKey) |pk| shared.allocator.free(pk);
+            if (pelletData) |pd| shared.allocator.free(pd.explosion);
+            if (explosionKey) |ek| shared.allocator.free(ek);
             continue;
         };
 
@@ -423,8 +513,8 @@ pub fn createAudioFrom(key: []const u8) ?audio.Audio {
 
 pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
     const d = explosionDataMap.get(key) orelse return error.ExplosionDataNotFound;
-    const sound = createAudioFrom(d.sound) orelse return error.SoundDataNotFound;
-    const anim = try createAnimationFrom(d.animation);
+    const sound = if (d.sound) |sk| createAudioFrom(sk) else null;
+    const anim = if (d.animation) |ak| try createAnimationFrom(ak) else null;
     return projectile.Explosion{
         .sound = sound,
         .animation = anim,
@@ -437,6 +527,7 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
         .particleRadius = d.particleRadius,
         .particleLinearDamping = d.particleLinearDamping,
         .particleGravityScale = d.particleGravityScale,
+        .damagePlayers = d.damagePlayers,
     };
 }
 
@@ -462,7 +553,29 @@ pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
 pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
     const d = weaponDataMap.get(key) orelse return error.WeaponDataNotFound;
     const sound = createAudioFrom(d.sound) orelse return error.SoundDataNotFound;
-    const proj = try createProjectileFrom(d.projectile);
+    const proj = if (d.projectile) |projKey|
+        try createProjectileFrom(projKey)
+    else
+        null;
+    const pel: ?weapon.Pellet = if (d.pellet) |pelData|
+        .{
+            .gravityScale = pelData.gravityScale,
+            .density = pelData.density,
+            .friction = pelData.friction,
+            .radius = pelData.radius,
+            .spriteScale = pelData.spriteScale,
+            .count = pelData.count,
+            .spreadAngle = pelData.spreadAngle,
+            .spawnRadius = pelData.spawnRadius,
+            .explosion = try createExplosionFrom(pelData.explosion),
+            .color = pelData.color,
+        }
+    else
+        null;
+    const hitscanExp = if (d.explosion) |eKey|
+        try createExplosionFrom(eKey)
+    else
+        null;
     const spriteUuid = createSpriteFrom(d.sprite) orelse 0;
     return weapon.Weapon{
         .name = key,
@@ -470,7 +583,13 @@ pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
         .sound = sound,
         .impulse = d.impulse,
         .projectile = proj,
+        .pellet = pel,
         .spriteUuid = spriteUuid,
+        .hitscanExplosion = hitscanExp,
+        .range = d.range,
+        .trailDurationMs = d.trailDurationMs,
+        .trailColor = d.trailColor,
+        .directDamage = d.directDamage,
     };
 }
 
@@ -507,8 +626,8 @@ pub fn cleanup() void {
     var explosionIter = explosionDataMap.iterator();
     while (explosionIter.next()) |entry| {
         shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.sound);
-        shared.allocator.free(entry.value_ptr.animation);
+        if (entry.value_ptr.sound) |s| shared.allocator.free(s);
+        if (entry.value_ptr.animation) |a| shared.allocator.free(a);
     }
     explosionDataMap.deinit(shared.allocator);
 
@@ -526,7 +645,9 @@ pub fn cleanup() void {
         shared.allocator.free(entry.key_ptr.*);
         shared.allocator.free(entry.value_ptr.sprite);
         shared.allocator.free(entry.value_ptr.sound);
-        shared.allocator.free(entry.value_ptr.projectile);
+        if (entry.value_ptr.projectile) |p| shared.allocator.free(p);
+        if (entry.value_ptr.pellet) |pel| shared.allocator.free(pel.explosion);
+        if (entry.value_ptr.explosion) |e| shared.allocator.free(e);
     }
     weaponDataMap.deinit(shared.allocator);
 }

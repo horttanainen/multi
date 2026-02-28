@@ -12,5 +12,26 @@
         "particleRadius": 0.05,
         "particleLinearDamping": 10,
         "particleGravityScale": 0
+    },
+    {
+        "key": "pellet_impact",
+        "blastRadius": 0.3,
+        "particleCount": 0,
+        "damagePlayers": false
+    },
+    {
+        "key": "railgun_impact",
+        "sound": "cannon_hit",
+        "animation": "missile_explosion",
+        "blastPower": 50,
+        "blastRadius": 0.8,
+        "particleCount": 20,
+        "particleDensity": 1.0,
+        "particleRadius": 0.04,
+        "particleLinearDamping": 10,
+        "particleFriction": 0,
+        "particleRestitution": 0.5,
+        "particleGravityScale": 0,
+        "damagePlayers": false
     }
 ]

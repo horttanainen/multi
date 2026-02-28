@@ -16,8 +16,8 @@ const player = @import("player.zig");
 const particle = @import("particle.zig");
 
 pub const Explosion = struct {
-    sound: audio.Audio,
-    animation: animation.Animation,
+    sound: ?audio.Audio = null,
+    animation: ?animation.Animation = null,
     blastPower: f32,
     blastRadius: f32,
     particleCount: u32,
@@ -27,6 +27,7 @@ pub const Explosion = struct {
     particleRadius: f32,
     particleLinearDamping: f32,
     particleGravityScale: f32,
+    damagePlayers: bool = true,
 };
 
 pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
@@ -37,6 +38,7 @@ const PropulsionData = struct {
 
 pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, PropulsionData).init(shared.allocator);
 pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(shared.allocator);
+pub var directDamages = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(shared.allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -184,7 +186,9 @@ fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
 
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
-    try audio.playFor(explosion.sound);
+    if (explosion.sound) |snd| {
+        try audio.playFor(snd);
+    }
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
 
@@ -232,6 +236,7 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
 
     const attackerId = owners.get(bodyId);
     _ = owners.swapRemove(bodyId);
+    _ = directDamages.swapRemove(bodyId);
 
     const explosion = maybeExplosion.?.value;
     const maybeE = entity.entities.getLocking(bodyId);
@@ -244,22 +249,7 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
         entity.cleanupLater(e);
     }
 
-    const explosionBodies = try createExplosion(pos, explosion);
-
-    const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
-    try shrapnel.appendLocking(.{
-        .id = id,
-        .cleaned = false,
-        .bodies = explosionBodies,
-        .timerId = timerId,
-    });
-    id = id + 1;
-
-    try createExplosionAnimation(pos, explosion.animation);
-
-    try damageTerrainInRadius(pos, explosion.blastRadius);
-
-    try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
+    try explodeAt(pos, explosion, attackerId);
 }
 
 fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
@@ -313,8 +303,39 @@ pub fn cleanupShrapnel() !void {
 }
 
 
+pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
+    const explosionBodies = try createExplosion(pos, explosion);
+
+    if (explosionBodies.len > 0) {
+        const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
+        try shrapnel.appendLocking(.{
+            .id = id,
+            .cleaned = false,
+            .bodies = explosionBodies,
+            .timerId = timerId,
+        });
+        id = id + 1;
+    } else {
+        shared.allocator.free(explosionBodies);
+    }
+
+    if (explosion.animation) |anim| {
+        try createExplosionAnimation(pos, anim);
+    }
+
+    try damageTerrainInRadius(pos, explosion.blastRadius);
+
+    if (explosion.damagePlayers) {
+        try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
+    }
+}
+
 pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
     try explosions.put(bodyId, explosion);
+}
+
+pub fn registerDirectDamage(bodyId: box2d.c.b2BodyId, damage: f32) !void {
+    try directDamages.put(bodyId, damage);
 }
 
 pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32, lateralDamping: f32) !void {
@@ -359,36 +380,63 @@ pub fn applyPropulsion() void {
     }
 }
 
-pub fn checkContacts() !void {
+pub fn damagePlayerDirect(hitBodyId: box2d.c.b2BodyId, damage: f32, attackerId: ?usize) !void {
+    if (!box2d.c.b2Body_IsValid(hitBodyId)) return;
 
+    for (player.players.values()) |*p| {
+        if (!box2d.c.b2Body_IsValid(p.bodyId)) continue;
+        if (box2d.c.B2_ID_EQUALS(p.bodyId, hitBodyId)) {
+            try player.damage(p, damage, attackerId);
+            return;
+        }
+    }
+}
+
+fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {
+    if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) {
+        return;
+    }
+
+    const aFilter = box2d.c.b2Shape_GetFilter(shapeIdA);
+    const bFilter = box2d.c.b2Shape_GetFilter(shapeIdB);
+
+    const bodyIdA = box2d.c.b2Shape_GetBody(shapeIdA);
+    const bodyIdB = box2d.c.b2Shape_GetBody(shapeIdB);
+
+    // Check if shape A is a projectile
+    if ((aFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (bFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
+        if (explosions.contains(bodyIdA)) {
+            if (directDamages.get(bodyIdA)) |dmg| {
+                const attackerId = owners.get(bodyIdA);
+                try damagePlayerDirect(bodyIdB, dmg, attackerId);
+            }
+            try explode(bodyIdA);
+        }
+    }
+    // Check if shape B is a projectile
+    if ((bFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (aFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
+        if (explosions.contains(bodyIdB)) {
+            if (directDamages.get(bodyIdB)) |dmg| {
+                const attackerId = owners.get(bodyIdB);
+                try damagePlayerDirect(bodyIdA, dmg, attackerId);
+            }
+            try explode(bodyIdB);
+        }
+    }
+}
+
+pub fn checkContacts() !void {
     const resources = try shared.getResources();
     const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
 
+    for (0..@intCast(contactEvents.beginCount)) |i| {
+        const event = contactEvents.beginEvents[i];
+        try handleProjectileContact(event.shapeIdA, event.shapeIdB);
+    }
+
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
-
-        if (!box2d.c.b2Shape_IsValid(event.shapeIdA) or !box2d.c.b2Shape_IsValid(event.shapeIdB)) {
-            continue;
-        }
-
-        const aFilter = box2d.c.b2Shape_GetFilter(event.shapeIdA);
-        const bFilter = box2d.c.b2Shape_GetFilter(event.shapeIdB);
-
-        const bodyIdA = box2d.c.b2Shape_GetBody(event.shapeIdA);
-        const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
-
-        // Check if shape A is a projectile
-        if ((aFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (bFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
-            if (explosions.contains(bodyIdA)) {
-                try explode(bodyIdA);
-            }
-        }
-        // Check if shape B is a projectile
-        if ((bFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (aFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
-            if (explosions.contains(bodyIdB)) {
-                try explode(bodyIdB);
-            }
-        }
+        try handleProjectileContact(event.shapeIdA, event.shapeIdB);
     }
 }
 
@@ -396,6 +444,7 @@ pub fn cleanup() void {
     explosions.clearAndFree();
     propulsions.clearAndFree();
     owners.clearAndFree();
+    directDamages.clearAndFree();
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {
