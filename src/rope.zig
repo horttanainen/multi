@@ -225,24 +225,11 @@ pub fn drawRopes() !void {
         if (maybePlayer == null) continue;
         const p = maybePlayer.?;
 
-        const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-        const playerPosPx = conv.m2Pixel(.{ .x = playerPosM.x, .y = playerPosM.y });
-
         const hookPosM: vec.Vec2 = vec.fromBox2d(box2d.c.b2Body_GetPosition(ropeState.hookBodyId));
-
         const hookPosPx = conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y });
-
-        var playerScreenPos = vec.iadd(camera.relativePosition(playerPosPx), config.aimCircleOffset);
-        const maybeEntity = entity.getEntity(p.bodyId);
-        if (maybeEntity) |ent| {
-            if (ent.spriteUuids.len > 0) {
-                const firstSprite = sprite.getSprite(ent.spriteUuids[0]);
-                if (firstSprite) |s| {
-                    playerScreenPos = vec.iadd(playerScreenPos, s.offset);
-                }
-            }
-        }
         const hookScreenPos = camera.relativePosition(hookPosPx);
+
+        const playerScreenPos = player.getLeftArmRopeAttachPoint(p, hookScreenPos) orelse continue;
 
         try drawRopeSegments(resources.renderer, segmentSprite, playerScreenPos, hookScreenPos);
     }

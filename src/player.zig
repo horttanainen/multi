@@ -760,6 +760,63 @@ pub fn drawAllWeaponsFront() !void {
     }
 }
 
+const LeftArmPlacement = struct {
+    shoulderPos: vec.IVec2,
+    handCenterPos: vec.IVec2,
+    effectiveHAnchorX: i32,
+    hAnchor: vec.IVec2,
+    playerFlip: bool,
+    handFlip: bool,
+};
+
+fn calcLeftArmPlacement(p: Player, handSprite: sprite.Sprite) ?LeftArmPlacement {
+    const maybeEntity = entity.getEntity(p.bodyId);
+    if (maybeEntity == null) return null;
+    const ent = maybeEntity.?;
+    const currentState = box2d.getState(p.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+
+    const ps = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) orelse return null else return null;
+
+    const playerFlip = ent.flipEntityHorizontally;
+    const handFlip = !playerFlip;
+
+    const pAnchor = (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) orelse return null;
+    const hAnchor = handSprite.anchorPointLeft orelse return null;
+
+    const shoulderPos = calcShoulderPos(ps, playerPos, pAnchor, playerFlip);
+    const effectiveHAnchorX: i32 = if (handFlip) handSprite.sizeP.x - hAnchor.x else hAnchor.x;
+
+    const handCenterPos = vec.IVec2{
+        .x = shoulderPos.x - effectiveHAnchorX + @divTrunc(handSprite.sizeP.x, 2),
+        .y = shoulderPos.y - hAnchor.y + @divTrunc(handSprite.sizeP.y, 2),
+    };
+
+    return .{
+        .shoulderPos = shoulderPos,
+        .handCenterPos = handCenterPos,
+        .effectiveHAnchorX = effectiveHAnchorX,
+        .hAnchor = hAnchor,
+        .playerFlip = playerFlip,
+        .handFlip = handFlip,
+    };
+}
+
+fn calcArmAngleTowardHook(placement: LeftArmPlacement, hookScreenPos: vec.IVec2) f32 {
+    const dx = @as(f32, @floatFromInt(hookScreenPos.x - placement.shoulderPos.x));
+    const dy = @as(f32, @floatFromInt(hookScreenPos.y - placement.shoulderPos.y));
+    const angle = std.math.atan2(dy, dx);
+    const flipSign: f32 = if (placement.playerFlip) -1 else 1;
+    const rotationOffset: f32 = flipSign * std.math.pi / 2.0;
+    return if (placement.handFlip) std.math.pi + angle + rotationOffset else angle + rotationOffset;
+}
+
+fn drawLeftArm(handSprite: sprite.Sprite, placement: LeftArmPlacement, angle: f32) !void {
+    const pivotPoint: sdl.Point = .{ .x = placement.effectiveHAnchorX, .y = placement.hAnchor.y };
+    try sprite.drawWithOptions(handSprite, placement.handCenterPos, angle, false, placement.handFlip, 0, null, pivotPoint);
+}
+
 pub fn drawLeftHand(p: *Player) !void {
     const hasRope = if (rope.ropes.get(p.id)) |r| r.state != .inactive else false;
     if (hasRope) {
@@ -771,38 +828,7 @@ pub fn drawLeftHand(p: *Player) !void {
 
 fn drawLeftArmWithHook(p: *Player) !void {
     const handSprite = sprite.getSprite(p.leftHandSpriteUuid) orelse return;
-
-    const maybeEntity = entity.getEntity(p.bodyId);
-    if (maybeEntity == null) return;
-    const ent = maybeEntity.?;
-    const currentState = box2d.getState(p.bodyId);
-    const state = box2d.getInterpolatedState(ent.state, currentState);
-    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
-
-    const playerFlip = ent.flipEntityHorizontally;
-    const handFlip = !ent.flipEntityHorizontally;
-
-    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) else null;
-    const handAnchor = handSprite.anchorPointLeft;
-
-    if (playerAnchor == null or handAnchor == null or playerSprite == null) {
-        const handPos = vec.iadd(playerPos, handSprite.offset);
-        try sprite.drawWithOptions(handSprite, handPos, 0, false, handFlip, 0, null, null);
-        return;
-    }
-    const pAnchor = playerAnchor.?;
-    const hAnchor = handAnchor.?;
-    const ps = playerSprite.?;
-
-    const shoulderPos = calcShoulderPos(ps, playerPos, pAnchor, playerFlip);
-    const effectiveHAnchorX: i32 = if (handFlip) handSprite.sizeP.x - hAnchor.x else hAnchor.x;
-
-    const handCenterPos = vec.IVec2{
-        .x = shoulderPos.x - effectiveHAnchorX + @divTrunc(handSprite.sizeP.x, 2),
-        .y = shoulderPos.y - hAnchor.y + @divTrunc(handSprite.sizeP.y, 2),
-    };
+    const placement = calcLeftArmPlacement(p.*, handSprite) orelse return;
 
     // Swing arm back and forth when running
     const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
@@ -810,60 +836,43 @@ fn drawLeftArmWithHook(p: *Player) !void {
         @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
     else
         0;
-    const finalAngle: f32 = if (handFlip) -swingAngle else swingAngle;
+    const finalAngle: f32 = if (placement.handFlip) -swingAngle else swingAngle;
 
-    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
-    try sprite.drawWithOptions(handSprite, handCenterPos, finalAngle, false, handFlip, 0, null, pivotPoint);
+    try drawLeftArm(handSprite, placement, finalAngle);
 }
 
 fn drawLeftArmWithHookDeployed(p: *Player) !void {
     const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return;
     const r = rope.ropes.get(p.id) orelse return;
+    const placement = calcLeftArmPlacement(p.*, handSprite) orelse return;
 
-    const maybeEntity = entity.getEntity(p.bodyId);
-    if (maybeEntity == null) return;
-    const ent = maybeEntity.?;
-    const currentState = box2d.getState(p.bodyId);
-    const state = box2d.getInterpolatedState(ent.state, currentState);
-    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
-
-    const playerFlip = ent.flipEntityHorizontally;
-    const handFlip = !ent.flipEntityHorizontally;
-
-    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointRight orelse ps.anchorPointLeft else ps.anchorPointLeft) else null;
-    const handAnchor = handSprite.anchorPointLeft;
-
-    if (playerAnchor == null or handAnchor == null or playerSprite == null) {
-        const handPos = vec.iadd(playerPos, handSprite.offset);
-        try sprite.drawWithOptions(handSprite, handPos, 0, false, handFlip, 0, null, null);
-        return;
-    }
-    const pAnchor = playerAnchor.?;
-    const hAnchor = handAnchor.?;
-    const ps = playerSprite.?;
-
-    const shoulderPos = calcShoulderPos(ps, playerPos, pAnchor, playerFlip);
-    const effectiveHAnchorX: i32 = if (handFlip) handSprite.sizeP.x - hAnchor.x else hAnchor.x;
-
-    const handCenterPos = vec.IVec2{
-        .x = shoulderPos.x - effectiveHAnchorX + @divTrunc(handSprite.sizeP.x, 2),
-        .y = shoulderPos.y - hAnchor.y + @divTrunc(handSprite.sizeP.y, 2),
-    };
-
-    // Point arm toward the hook position
     const hookPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(r.hookBodyId));
     const hookPosPx = camera.relativePosition(conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y }));
-    const dx = @as(f32, @floatFromInt(hookPosPx.x - shoulderPos.x));
-    const dy = @as(f32, @floatFromInt(hookPosPx.y - shoulderPos.y));
-    const angle = std.math.atan2(dy, dx);
-    const flipSign: f32 = if (playerFlip) -1 else 1;
-    const rotationOffset: f32 = flipSign * std.math.pi / 2.0;
-    const finalAngle: f32 = if (handFlip) std.math.pi + angle + rotationOffset else angle + rotationOffset;
+    const finalAngle = calcArmAngleTowardHook(placement, hookPosPx);
 
-    const pivotPoint: sdl.Point = .{ .x = effectiveHAnchorX, .y = hAnchor.y };
-    try sprite.drawWithOptions(handSprite, handCenterPos, finalAngle, false, handFlip, 0, null, pivotPoint);
+    try drawLeftArm(handSprite, placement, finalAngle);
+}
+
+pub fn getLeftArmRopeAttachPoint(p: Player, hookScreenPos: vec.IVec2) ?vec.IVec2 {
+    const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return null;
+    const placement = calcLeftArmPlacement(p, handSprite) orelse return null;
+
+    const greenAnchor = handSprite.anchorPointRight orelse return placement.shoulderPos;
+
+    const finalAngle = calcArmAngleTowardHook(placement, hookScreenPos);
+
+    // Green pixel position relative to pivot, rotated by arm angle
+    const effectiveGreenX: i32 = if (placement.handFlip) handSprite.sizeP.x - greenAnchor.x else greenAnchor.x;
+    const relX = @as(f32, @floatFromInt(effectiveGreenX - placement.effectiveHAnchorX));
+    const relY = @as(f32, @floatFromInt(greenAnchor.y - placement.hAnchor.y));
+
+    const cosA = @cos(finalAngle);
+    const sinA = @sin(finalAngle);
+
+    return vec.IVec2{
+        .x = placement.shoulderPos.x + @as(i32, @intFromFloat(relX * cosA - relY * sinA)),
+        .y = placement.shoulderPos.y + @as(i32, @intFromFloat(relX * sinA + relY * cosA)),
+    };
 }
 
 fn calcShoulderPos(ps: sprite.Sprite, playerPos: vec.IVec2, pAnchor: vec.IVec2, playerFlip: bool) vec.IVec2 {

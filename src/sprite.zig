@@ -216,7 +216,7 @@ pub fn isMagenta(r: u8, g: u8, b: u8) bool {
 }
 
 pub fn isGreen(r: u8, g: u8, b: u8) bool {
-    return r == 0 and g == 255 and b == 0;
+    return r <= 5 and g >= 250 and b <= 5;
 }
 
 fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2, comptime predicate: fn (u8, u8, u8) bool) ?vec.IVec2 {
