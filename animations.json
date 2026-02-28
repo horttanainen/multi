@@ -1,0 +1,73 @@
+[
+    {
+        "key": "player_idle",
+        "path": "animations/red/idle",
+        "fps": 2,
+        "scale": 0.2,
+        "offsetX": 0,
+        "offsetY": -30,
+        "loop": true,
+        "spriteIndex": 0,
+        "switchDelay": 0.25
+    },
+    {
+        "key": "player_run",
+        "path": "animations/red/run",
+        "fps": 12,
+        "scale": 0.2,
+        "offsetX": 0,
+        "offsetY": -30,
+        "loop": true,
+        "spriteIndex": 0
+    },
+    {
+        "key": "player_fall",
+        "path": "animations/red/fall",
+        "fps": 4,
+        "scale": 0.2,
+        "offsetX": 0,
+        "offsetY": -30,
+        "loop": true,
+        "spriteIndex": 0
+    },
+    {
+        "key": "player_afterjump",
+        "path": "animations/red/after_jump",
+        "fps": 8,
+        "scale": 0.2,
+        "offsetX": 0,
+        "offsetY": -30,
+        "loop": true,
+        "spriteIndex": 0
+    },
+    {
+        "key": "missile_projectile",
+        "path": "weapons/rocket_launcher/projectile",
+        "fps": 8,
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "loop": true,
+        "spriteIndex": 0
+    },
+    {
+        "key": "missile_explosion",
+        "path": "weapons/rocket_launcher/explosion",
+        "fps": 10,
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "loop": false,
+        "spriteIndex": 0
+    },
+    {
+        "key": "missile_propulsion",
+        "path": "weapons/rocket_launcher/propulsion_flame",
+        "fps": 2,
+        "scale": 1.0,
+        "offsetX": 0,
+        "offsetY": 50,
+        "loop": false,
+        "spriteIndex": 1
+    }
+]

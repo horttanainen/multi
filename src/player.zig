@@ -207,74 +207,22 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
 
-    var idleAnim = try animation.load(
-        "animations/red/idle",
-        2,
-        .{ .x = 0.2, .y = 0.2 },
-        .{ .x = 0, .y = -30 },
-        true,
-        0,
-    );
-    idleAnim.switchDelay = 0.25;
+    const idleAnim = try data.createAnimationFrom("player_idle");
     try animations.put("idle", idleAnim);
 
-    const runAnim = try animation.load(
-        "animations/red/run",
-        config.runAnimationFps,
-        .{ .x = 0.2, .y = 0.2 },
-        .{ .x = 0, .y = -30 },
-        true,
-        0,
-    );
+    const runAnim = try data.createAnimationFrom("player_run");
     runAnimationFrameCount = runAnim.frames.len;
     try animations.put("run", runAnim);
 
-    const fallAnim = try animation.load(
-        "animations/red/fall",
-        4,
-        .{ .x = 0.2, .y = 0.2 },
-        .{ .x = 0, .y = -30 },
-        true,
-        0,
-    );
+    const fallAnim = try data.createAnimationFrom("player_fall");
     try animations.put("fall", fallAnim);
 
-    const afterJumpAnim = try animation.load(
-        "animations/red/after_jump",
-        8,
-        .{ .x = 0.2, .y = 0.2 },
-        .{ .x = 0, .y = -30 },
-        true,
-        0,
-    );
+    const afterJumpAnim = try data.createAnimationFrom("player_afterjump");
     try animations.put("afterjump", afterJumpAnim);
 
-    const missileAnimation = try animation.load(
-        "weapons/rocket_launcher/projectile",
-        8,
-        .{ .x = 1, .y = 1 },
-        .{ .x = 0, .y = 0 },
-        true,
-        0,
-    );
-
-    const missileExplosionAnimation = try animation.load(
-        "weapons/rocket_launcher/explosion",
-        10,
-        .{ .x = 1.0, .y = 1.0 },
-        .{ .x = 0, .y = 0 },
-        false,
-        0,
-    );
-
-    const missilePropulsionAnimation = try animation.load(
-        "weapons/rocket_launcher/propulsion_flame",
-        2,
-        .{ .x = 1.0, .y = 1.0 },
-        .{ .x = 0, .y = 50 },
-        false,
-        1,
-    );
+    const missileAnimation = try data.createAnimationFrom("missile_projectile");
+    const missileExplosionAnimation = try data.createAnimationFrom("missile_explosion");
+    const missilePropulsionAnimation = try data.createAnimationFrom("missile_propulsion");
 
     const weaponScale: vec.Vec2 = .{ .x = 0.2, .y = 0.2 };
     const weaponSpriteUuid = try sprite.createFromImg("weapons/rocket_launcher/weapon_with_arm.png", weaponScale, vec.izero);
