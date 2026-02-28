@@ -1,0 +1,10 @@
+[
+    {
+        "key": "rocket_launcher",
+        "sprite": "rocket_launcher",
+        "delay": 500,
+        "sound": "cannon_fire",
+        "impulse": 10,
+        "projectile": "missile"
+    }
+]

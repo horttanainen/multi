@@ -19,9 +19,6 @@ pub const physics = .{
     .subStepCount = 4,
 };
 
-pub const cannonFireSoundDurationMs = 10000;
-pub const cannonHitSoundDurationMs = 10000;
-
 pub const aimCircleRadius: f32 = 500;
 pub const aimRestingDistance: f32 = 100;
 pub const aimCircleOffset: vec.IVec2 = .{ .x = 0, .y = -25 };
@@ -101,7 +98,6 @@ pub const levelEditorCameraMovementForce = 10;
 pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
-pub const shootDelayMs = 500;
 pub const levelEditorClickDelayMs = 200;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
@@ -110,8 +106,6 @@ pub const ropeToggleDelayMs = 300;
 pub const sprayPaintDelayMs = 2000;
 
 pub const sprayPaintWorldSize: f32 = 5;
-
-pub const rocketLateralDamping: f32 = 10;
 
 pub const rope = .{
     .hookImpulse = 1.0,

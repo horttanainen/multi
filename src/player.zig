@@ -6,14 +6,14 @@ const camera = @import("camera.zig");
 const delay = @import("delay.zig");
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
-const uuid = @import("uuid.zig");
+
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
 const time = @import("time.zig");
-const audio = @import("audio.zig");
+
 const weapon = @import("weapon.zig");
-const projectile = @import("projectile.zig");
+
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
 const particle = @import("particle.zig");
@@ -220,47 +220,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const afterJumpAnim = try data.createAnimationFrom("player_afterjump");
     try animations.put("afterjump", afterJumpAnim);
 
-    const missileAnimation = try data.createAnimationFrom("missile_projectile");
-    const missileExplosionAnimation = try data.createAnimationFrom("missile_explosion");
-    const missilePropulsionAnimation = try data.createAnimationFrom("missile_propulsion");
-
-    const weaponScale: vec.Vec2 = .{ .x = 0.2, .y = 0.2 };
-    const weaponSpriteUuid = try sprite.createFromImg("weapons/rocket_launcher/weapon_with_arm.png", weaponScale, vec.izero);
-
-    const rocketLauncher: weapon.Weapon = .{
-        .name = "rocket_launcher",
-        .scale = weaponScale,
-        .delay = config.shootDelayMs,
-        .sound = .{
-            .file = "sounds/cannon_fire.mp3",
-            .durationMs = config.cannonFireSoundDurationMs,
-        },
-        .impulse = 10,
-        .spriteUuid = weaponSpriteUuid,
-        .projectile = .{
-            .gravityScale = 0.2,
-            .density = 10,
-            .propulsion = 40,
-            .animation = missileAnimation,
-            .propulsionAnimation = missilePropulsionAnimation,
-            .explosion = .{
-                .sound = .{
-                    .file = "sounds/cannon_hit.mp3",
-                    .durationMs = config.cannonHitSoundDurationMs,
-                },
-                .animation = missileExplosionAnimation,
-                .blastPower = 100,
-                .blastRadius = 2.0,
-                .particleCount = 100,
-                .particleDensity = 1.5,
-                .particleFriction = 0,
-                .particleRestitution = 0.99,
-                .particleRadius = 0.05,
-                .particleLinearDamping = 10,
-                .particleGravityScale = 0,
-            },
-        },
-    };
+    const rocketLauncher = try data.createWeaponFrom("rocket_launcher");
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
     try weapons.append(rocketLauncher);

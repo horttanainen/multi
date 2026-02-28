@@ -1,0 +1,4 @@
+[
+    {"key": "cannon_fire", "path": "sounds/cannon_fire.mp3", "durationMs": 10000, "volume": 0.5},
+    {"key": "cannon_hit", "path": "sounds/cannon_hit.mp3", "durationMs": 10000, "volume": 0.5}
+]

@@ -1,0 +1,16 @@
+[
+    {
+        "key": "missile_explosion",
+        "sound": "cannon_hit",
+        "animation": "missile_explosion",
+        "blastPower": 100,
+        "blastRadius": 2.0,
+        "particleCount": 100,
+        "particleDensity": 1.5,
+        "particleFriction": 0,
+        "particleRestitution": 0.99,
+        "particleRadius": 0.05,
+        "particleLinearDamping": 10,
+        "particleGravityScale": 0
+    }
+]

@@ -35,5 +35,10 @@
     {
         "key": "box",
         "path": "images/box.png"
+    },
+    {
+        "key": "rocket_launcher",
+        "path": "weapons/rocket_launcher/weapon_with_arm.png",
+        "scale": 0.2
     }
 ]

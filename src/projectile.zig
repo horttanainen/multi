@@ -7,7 +7,7 @@ const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
 const shared = @import("shared.zig");
 const box2d = @import("box2d.zig");
-const config = @import("config.zig");
+
 const collision = @import("collision.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
@@ -30,7 +30,12 @@ pub const Explosion = struct {
 };
 
 pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
-pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(shared.allocator);
+const PropulsionData = struct {
+    magnitude: f32,
+    lateralDamping: f32,
+};
+
+pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, PropulsionData).init(shared.allocator);
 pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(shared.allocator);
 
 pub var id: usize = 1;
@@ -312,8 +317,8 @@ pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
     try explosions.put(bodyId, explosion);
 }
 
-pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32) !void {
-    try propulsions.put(bodyId, propulsionMagnitude);
+pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32, lateralDamping: f32) !void {
+    try propulsions.put(bodyId, .{ .magnitude = propulsionMagnitude, .lateralDamping = lateralDamping });
 }
 
 pub fn registerOwner(bodyId: box2d.c.b2BodyId, playerId: usize) !void {
@@ -325,7 +330,7 @@ pub fn getOwner(bodyId: box2d.c.b2BodyId) ?usize {
 }
 
 pub fn applyPropulsion() void {
-    for (propulsions.keys(), propulsions.values()) |bodyId, propulsionMagnitude| {
+    for (propulsions.keys(), propulsions.values()) |bodyId, propData| {
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             continue;
         }
@@ -338,7 +343,7 @@ pub fn applyPropulsion() void {
         // forward = (cos(angle), sin(angle)) = (cos(rot - π/2), sin(rot - π/2))
         //         = (sin(rot), -cos(rot)) = (rot.s, -rot.c)
         const forward = vec.Vec2{ .x = rot.s, .y = -rot.c };
-        const force = vec.mul(forward, propulsionMagnitude);
+        const force = vec.mul(forward, propData.magnitude);
 
         box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(force), true);
 
@@ -349,7 +354,7 @@ pub fn applyPropulsion() void {
         const forwardSpeed = vec.dot(velocity, forward);
         const forwardVelocity = vec.mul(forward, forwardSpeed);
         const lateralVelocity = vec.subtract(velocity, forwardVelocity);
-        const lateralDampingForce = vec.mul(lateralVelocity, -config.rocketLateralDamping);
+        const lateralDampingForce = vec.mul(lateralVelocity, -propData.lateralDamping);
         box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(lateralDampingForce), true);
     }
 }

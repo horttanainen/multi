@@ -1,0 +1,12 @@
+[
+    {
+        "key": "missile",
+        "gravityScale": 0.2,
+        "density": 10,
+        "propulsion": 40,
+        "lateralDamping": 10,
+        "animation": "missile_projectile",
+        "propulsionAnimation": "missile_propulsion",
+        "explosion": "missile_explosion"
+    }
+]

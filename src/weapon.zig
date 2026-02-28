@@ -15,14 +15,14 @@ pub const Projectile = struct {
     gravityScale: f32,
     density: f32,
     propulsion: f32,
+    lateralDamping: f32,
     animation: animation.Animation,
     explosion: projectile.Explosion,
     propulsionAnimation: ?animation.Animation = null,
 };
 
 pub const Weapon = struct {
-    name: [:0]const u8,
-    scale: vec.Vec2,
+    name: []const u8,
     delay: u32,
     sound: audio.Audio,
     impulse: f32,
@@ -65,7 +65,7 @@ pub fn shoot(weapon: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVe
     });
 
     try projectile.create(projectileEntity.bodyId, weapon.projectile.explosion);
-    try projectile.registerPropulsion(projectileEntity.bodyId, weapon.projectile.propulsion);
+    try projectile.registerPropulsion(projectileEntity.bodyId, weapon.projectile.propulsion, weapon.projectile.lateralDamping);
     try projectile.registerOwner(projectileEntity.bodyId, playerId);
 
     var animations = std.StringHashMap(animation.Animation).init(shared.allocator);

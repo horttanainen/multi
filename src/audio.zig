@@ -15,7 +15,8 @@ pub const AudioError = error{
 
 pub const Audio = struct {
     file: []const u8,
-    durationMs: u32
+    durationMs: u32,
+    volume: f32 = 1.0,
 };
 
 var engine: c.ma_engine = undefined;
@@ -52,6 +53,7 @@ pub fn playFor(audio: Audio) !void {
         return AudioError.SoundInitFailed;
     }
 
+    c.ma_sound_set_volume(&entry.sound, audio.volume);
     _ = c.ma_sound_start(&entry.sound);
 
     const id = nextId;

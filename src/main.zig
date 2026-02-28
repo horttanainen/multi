@@ -38,7 +38,15 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//Entity system
+//TODO: add railgun
+//TODO: add shotgun
+//TODO: add item.zig that spawns items on the map
+//TODO: add weapon item sprites so that weapons can be picked up
+//TODO: display weapons name above it
+//TODO: weapons could levitate on top of some reverse spawn thingy in pulsating light
+//TODO: add two or more spawn locations to the map
+//TODO: spawn should be a levitating teleport thingy
+//TODO: spawn should materialize player with some beaming effect
 
 //Hand ideas
 //TODO: instead of hook the mechanical hand could be shot with a chain.
@@ -47,8 +55,6 @@ const Sprite = entity.Sprite;
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
 //TODO: change ninja rope attach point to not be in the crotch
 
-//TODO: spawn should be a levitating teleport thingy
-//TODO: spawn should materialize player with some beaming effect
 //TODO: display a laughing skull on death
 
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
