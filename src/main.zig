@@ -37,15 +37,11 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: add the other hand for player. hand is hooked and moves around its pivot point when running. Using ninja rope causes hand to stretch out to the direction of the rope as if pulling.
+//Entity system
+//TODO: change spray loading to use entity systen
 
 //Hand ideas
-//TODO: add mechanical hand that deattaches from the wrist
 //TODO: instead of hook the mechanical hand could be shot with a chain.
-
-//Fun stuff:
-//TODO: player can spray paint a picture like in cs. Picture overwrites part of the texture until player spray paints somewhere else.
-
 
 //TODO: add transparent smoke trail for the rocket
 //TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"

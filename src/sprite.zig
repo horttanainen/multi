@@ -354,6 +354,108 @@ pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld:
     iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, Color, color, colorPixel);
 }
 
+pub fn paintSpriteOnSurface(
+    targetUuid: u64,
+    sourceUuid: u64,
+    centerWorld: vec.Vec2,
+    sizeWorldX: f32,
+    sizeWorldY: f32,
+    entityPos: vec.Vec2,
+    rotation: f32,
+) !void {
+    const target = sprites.getLocking(targetUuid) orelse return error.SpriteNotFound;
+    const source = sprites.getLocking(sourceUuid) orelse return error.SpriteNotFound;
+
+    const targetSurface = target.surface.*;
+    const targetPixels: [*]u8 = @ptrCast(targetSurface.pixels);
+    const targetPitch: usize = @intCast(targetSurface.pitch);
+    const targetWidth: usize = @intCast(targetSurface.w);
+    const targetHeight: usize = @intCast(targetSurface.h);
+
+    const sourceSurface = source.surface.*;
+    const sourcePixels: [*]u8 = @ptrCast(sourceSurface.pixels);
+    const sourcePitch: usize = @intCast(sourceSurface.pitch);
+    const sourceWidth: usize = @intCast(sourceSurface.w);
+    const sourceHeight: usize = @intCast(sourceSurface.h);
+
+    const bytesPerPixel: usize = 4;
+
+    // Transform centerWorld to target sprite local pixel coords (same as iterateCircleOnSurface)
+    const relativeWorld = vec.Vec2{
+        .x = centerWorld.x - entityPos.x,
+        .y = centerWorld.y - entityPos.y,
+    };
+
+    const cosA = @cos(-rotation);
+    const sinA = @sin(-rotation);
+    const rotatedLocal = vec.Vec2{
+        .x = relativeWorld.x * cosA - relativeWorld.y * sinA,
+        .y = relativeWorld.x * sinA + relativeWorld.y * cosA,
+    };
+
+    const rotatedLocalPixels = conv.m2Pixel(.{ .x = rotatedLocal.x, .y = rotatedLocal.y });
+    const centerPixelF = vec.Vec2{
+        .x = @as(f32, @floatFromInt(rotatedLocalPixels.x)) / target.scale.x + @as(f32, @floatFromInt(targetWidth)) / 2.0,
+        .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / target.scale.y + @as(f32, @floatFromInt(targetHeight)) / 2.0,
+    };
+
+    const halfWidthPixels = (sizeWorldX / 2.0 * config.met2pix) / target.scale.x;
+    const halfHeightPixels = (sizeWorldY / 2.0 * config.met2pix) / target.scale.y;
+
+    // Bounding box in target pixels
+    const minXi = @as(i32, @intFromFloat(@floor(centerPixelF.x - halfWidthPixels)));
+    const maxXi = @as(i32, @intFromFloat(@ceil(centerPixelF.x + halfWidthPixels)));
+    const minYi = @as(i32, @intFromFloat(@floor(centerPixelF.y - halfHeightPixels)));
+    const maxYi = @as(i32, @intFromFloat(@ceil(centerPixelF.y + halfHeightPixels)));
+
+    const twi: i32 = @intCast(targetWidth - 1);
+    const thi: i32 = @intCast(targetHeight - 1);
+
+    // Early return if entirely outside the target surface
+    if (maxXi < 0 or minXi > twi or maxYi < 0 or minYi > thi) return;
+
+    const minX: usize = @intCast(@max(0, minXi));
+    const maxX: usize = @intCast(@min(twi, maxXi));
+    const minY: usize = @intCast(@max(0, minYi));
+    const maxY: usize = @intCast(@min(thi, maxYi));
+
+    const sprayLeft = centerPixelF.x - halfWidthPixels;
+    const sprayTop = centerPixelF.y - halfHeightPixels;
+    const spraySizeX = halfWidthPixels * 2.0;
+    const spraySizeY = halfHeightPixels * 2.0;
+
+    var y = minY;
+    while (y <= maxY) : (y += 1) {
+        var x = minX;
+        while (x <= maxX) : (x += 1) {
+            const targetIndex = y * targetPitch + x * bytesPerPixel;
+
+            // Skip transparent target pixels
+            if (targetPixels[targetIndex + 3] < 50) continue;
+
+            // Map target pixel to source pixel
+            const srcXf = (@as(f32, @floatFromInt(x)) - sprayLeft) / spraySizeX * @as(f32, @floatFromInt(sourceWidth));
+            const srcYf = (@as(f32, @floatFromInt(y)) - sprayTop) / spraySizeY * @as(f32, @floatFromInt(sourceHeight));
+
+            const srcX = @as(i32, @intFromFloat(srcXf));
+            const srcY = @as(i32, @intFromFloat(srcYf));
+
+            if (srcX < 0 or srcX >= @as(i32, @intCast(sourceWidth)) or
+                srcY < 0 or srcY >= @as(i32, @intCast(sourceHeight))) continue;
+
+            const sourceIndex = @as(usize, @intCast(srcY)) * sourcePitch + @as(usize, @intCast(srcX)) * bytesPerPixel;
+
+            // Only paint if source pixel is not transparent
+            if (sourcePixels[sourceIndex + 3] > 50) {
+                targetPixels[targetIndex + 0] = sourcePixels[sourceIndex + 0]; // B
+                targetPixels[targetIndex + 1] = sourcePixels[sourceIndex + 1]; // G
+                targetPixels[targetIndex + 2] = sourcePixels[sourceIndex + 2]; // R
+                // Keep target alpha
+            }
+        }
+    }
+}
+
 pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     const sprite = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
 

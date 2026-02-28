@@ -37,6 +37,9 @@ pub const GamepadBindings = struct {
 
     // Rope
     ropeButton: sdl.GameController.Button,
+
+    // Spray paint
+    sprayPaintButton: sdl.GameController.Button,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -54,6 +57,8 @@ pub const defaultBindings = GamepadBindings{
     .shootThreshold = TRIGGER_THRESHOLD,
 
     .ropeButton = .leftshoulder,
+
+    .sprayPaintButton = .y,
 };
 
 pub var availableGamepads: std.ArrayList(GamepadState) = .{};
@@ -191,6 +196,10 @@ pub fn handle(ctrl: *const controller.Controller) void {
 
     if (sdl.gameControllerGetButton(sdlCtrl, bindings.ropeButton)) {
         control.executeAction(ctrl.playerId, .rope);
+    }
+
+    if (sdl.gameControllerGetButton(sdlCtrl, bindings.sprayPaintButton)) {
+        control.executeAction(ctrl.playerId, .spray_paint);
     }
 }
 

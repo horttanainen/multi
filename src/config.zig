@@ -107,6 +107,9 @@ pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
 pub const respawnDelayMs = 2000;
 pub const ropeToggleDelayMs = 300;
+pub const sprayPaintDelayMs = 2000;
+
+pub const sprayPaintWorldSize: f32 = 5;
 
 pub const rocketLateralDamping: f32 = 10;
 

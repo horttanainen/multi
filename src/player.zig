@@ -62,6 +62,8 @@ pub const Player = struct {
     zoomOffset: vec.Vec2,
     leftHandSpriteUuid: u64,
     leftHandNoHookSpriteUuid: u64,
+    sprayPaintSpriteUuid: ?u64,
+    sprayPaintScale: f32,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
@@ -336,6 +338,33 @@ pub fn spawn(position: vec.IVec2) !usize {
     const leftHandSpriteUuid = try sprite.createFromImg("hook_hand/arm_with_hook.png", weaponScale, vec.izero);
     const leftHandNoHookSpriteUuid = try sprite.createFromImg("hook_hand/arm_without_hook.png", weaponScale, vec.izero);
 
+    // Try loading spray paint image for this player
+    // Filename format: player_N.png or player_N_S.png where S becomes 0.S scale
+    var sprayPaintSpriteUuid: ?u64 = null;
+    var sprayPaintScale: f32 = 1.0;
+    {
+        // Try filenames with scale suffix: player_1_1.png through player_1_9.png
+        var s: u8 = 1;
+        while (s <= 9) : (s += 1) {
+            var sprayBuf: [64:0]u8 = undefined;
+            const sprayPath = std.fmt.bufPrintZ(&sprayBuf, "spray_paint/player_{d}_{d}.png", .{ playerId + 1, s }) catch continue;
+            if (sprite.createFromImg(sprayPath, .{ .x = 1, .y = 1 }, vec.izero)) |sprayUuid| {
+                sprayPaintSpriteUuid = sprayUuid;
+                sprayPaintScale = @as(f32, @floatFromInt(s)) / 10.0;
+                break;
+            } else |_| {}
+        }
+        // Fall back to player_N.png with scale 1.0
+        if (sprayPaintSpriteUuid == null) {
+            var sprayBuf: [64:0]u8 = undefined;
+            if (std.fmt.bufPrintZ(&sprayBuf, "spray_paint/player_{d}.png", .{playerId + 1})) |sprayPath| {
+                if (sprite.createFromImg(sprayPath, .{ .x = 1, .y = 1 }, vec.izero)) |sprayUuid| {
+                    sprayPaintSpriteUuid = sprayUuid;
+                } else |_| {}
+            } else |_| {}
+        }
+    }
+
     const crosshairUuid = try sprite.createFromImg(shared.crosshairImgSrc, .{
         .x = 1,
         .y = 1,
@@ -377,6 +406,8 @@ pub fn spawn(position: vec.IVec2) !usize {
         .zoomOffset = vec.zero,
         .leftHandSpriteUuid = leftHandSpriteUuid,
         .leftHandNoHookSpriteUuid = leftHandNoHookSpriteUuid,
+        .sprayPaintSpriteUuid = sprayPaintSpriteUuid,
+        .sprayPaintScale = sprayPaintScale,
     });
 
     // Register player entity with entity system (needed for animation sprite updates)
@@ -604,6 +635,132 @@ pub fn toggleRope(p: *Player) !void {
         try rope.shootHook(p.id, .{ .x = originM.x, .y = originM.y }, p.aimDirection);
     }
     delay.action(delayKey, config.ropeToggleDelayMs);
+}
+
+pub fn sprayPaint(p: *Player) !void {
+    const sprayPaintSpriteUuid = p.sprayPaintSpriteUuid orelse return;
+
+    var buf: [32:0]u8 = undefined;
+    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_spray", .{p.id}) catch unreachable;
+    if (delay.check(delayKey)) return;
+
+    const resources = try shared.getResources();
+
+    // Get crosshair world position in meters
+    const maybeEntity = entity.getEntity(p.bodyId);
+    if (maybeEntity == null) return;
+    const ent = maybeEntity.?;
+    const currentState = box2d.getState(p.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPixelPos = conv.m2Pixel(state.pos);
+
+    const crosshairOffset = getCrosshairOffset(p.*);
+    var crosshairPixelPos = vec.iadd(playerPixelPos, crosshairOffset);
+    crosshairPixelPos = vec.iadd(crosshairPixelPos, config.aimCircleOffset);
+    if (ent.spriteUuids.len > 0) {
+        if (sprite.getSprite(ent.spriteUuids[0])) |firstSprite| {
+            crosshairPixelPos = vec.iadd(crosshairPixelPos, firstSprite.offset);
+        }
+    }
+
+    const crosshairWorldPos = conv.pixel2M(crosshairPixelPos);
+
+    // Overlap query to find terrain entities
+    const OverlapContext = struct {
+        bodies: [100]box2d.c.b2BodyId,
+        count: usize,
+    };
+
+    var context = OverlapContext{
+        .bodies = undefined,
+        .count = 0,
+    };
+
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = config.sprayPaintWorldSize / 2.0,
+    };
+
+    const transform = box2d.c.b2Transform{
+        .p = .{ .x = crosshairWorldPos.x, .y = crosshairWorldPos.y },
+        .q = box2d.c.b2Rot_identity,
+    };
+
+    var filter = box2d.c.b2DefaultQueryFilter();
+    const sprayMask = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_UNBREAKABLE | collision.CATEGORY_GIBLET;
+    filter.categoryBits = sprayMask;
+    filter.maskBits = sprayMask;
+
+    const overlapCallback = struct {
+        fn cb(shapeId: box2d.c.b2ShapeId, ctx: ?*anyopaque) callconv(.c) bool {
+            const c: *OverlapContext = @ptrCast(@alignCast(ctx.?));
+            const bodyId = box2d.c.b2Shape_GetBody(shapeId);
+
+            for (c.bodies[0..c.count]) |existingBody| {
+                if (box2d.c.b2Body_IsValid(existingBody) and
+                    box2d.c.B2_ID_EQUALS(existingBody, bodyId))
+                {
+                    return true;
+                }
+            }
+
+            if (c.count < 100) {
+                c.bodies[c.count] = bodyId;
+                c.count += 1;
+            }
+            return true;
+        }
+    }.cb;
+
+    _ = box2d.c.b2World_OverlapCircle(
+        resources.worldId,
+        &circle,
+        transform,
+        filter,
+        overlapCallback,
+        &context,
+    );
+
+    // Get source sprite dimensions to compute natural world size
+    const spraySprite = sprite.getSprite(sprayPaintSpriteUuid) orelse return;
+
+    for (context.bodies[0..context.count]) |bodyId| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+
+        const maybeEnt = entity.entities.getPtrLocking(bodyId);
+        if (maybeEnt) |e| {
+            if (e.spriteUuids.len == 0) continue;
+
+            // Natural world size: source pixels at fixed met2pix ratio, then apply player scale
+            var sizeWorldX = @as(f32, @floatFromInt(spraySprite.surface.w)) / config.met2pix * p.sprayPaintScale;
+            var sizeWorldY = @as(f32, @floatFromInt(spraySprite.surface.h)) / config.met2pix * p.sprayPaintScale;
+
+            // Scale down proportionally if either dimension exceeds the max
+            const maxDim = @max(sizeWorldX, sizeWorldY);
+            if (maxDim > config.sprayPaintWorldSize) {
+                const scaleFactor = config.sprayPaintWorldSize / maxDim;
+                sizeWorldX *= scaleFactor;
+                sizeWorldY *= scaleFactor;
+            }
+
+            const entState = box2d.getState(bodyId);
+            const entityPos = vec.fromBox2d(entState.pos);
+            const rotation = entState.rotAngle;
+
+            try sprite.paintSpriteOnSurface(
+                e.spriteUuids[0],
+                sprayPaintSpriteUuid,
+                crosshairWorldPos,
+                sizeWorldX,
+                sizeWorldY,
+                entityPos,
+                rotation,
+            );
+            try sprite.updateTextureFromSurface(e.spriteUuids[0]);
+        }
+    }
+
+    delay.action(delayKey, config.sprayPaintDelayMs);
 }
 
 pub fn setColor(playerId: usize, color: sprite.Color) void {
@@ -1009,6 +1166,9 @@ pub fn cleanup() void {
         // Cleanup player resources
         shared.allocator.free(p.weapons);
         sprite.cleanupLater(p.crosshairUuid);
+        if (p.sprayPaintSpriteUuid) |sprayUuid| {
+            sprite.cleanupLater(sprayUuid);
+        }
     }
 
     players.clearAndFree(shared.allocator);

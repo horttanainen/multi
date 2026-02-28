@@ -22,6 +22,7 @@ pub const GameAction = enum {
     aim_down,
     shoot,
     rope,
+    spray_paint,
 };
 
 pub var availableColors: std.ArrayList(sprite.Color) = .{};

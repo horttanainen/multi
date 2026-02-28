@@ -100,6 +100,9 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
             .rope => player.toggleRope(p) catch |err| {
                 std.debug.print("Error toggling rope: {}\n", .{err});
             },
+            .spray_paint => player.sprayPaint(p) catch |err| {
+                std.debug.print("Error spray painting: {}\n", .{err});
+            },
             .aim_left, .aim_right, .aim_up, .aim_down => {},
         }
     }
