@@ -41,6 +41,7 @@ pub const Entity = struct {
     maskBits: u64,
     enabled: bool,
     color: ?sprite.Color = null,
+    glow: bool = false,
 };
 
 pub const SerializableEntity = struct {
@@ -92,7 +93,11 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
 
         const pos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color, null);
+        if (entity.glow) {
+            try sprite.drawGlow(entitySprite, pos, state.rotAngle, flip, entity.color);
+        } else {
+            try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color, null);
+        }
     }
 }
 

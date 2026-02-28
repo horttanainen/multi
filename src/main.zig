@@ -41,6 +41,7 @@ const Sprite = entity.Sprite;
 //TODO: buy rounds game and steal their ideas
 //TODO: e.g. different levels can have different camera distances
 //TODO: enable ricochets for some slugs
+//TODO: make slug glow configurable
 
 //TODO: add green pixel to gun for bullet spawn anchor point
 //TODO: add item.zig that spawns items on the map

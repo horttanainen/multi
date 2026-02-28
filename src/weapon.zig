@@ -243,6 +243,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .maskBits = shapeDef.filter.maskBits,
             .enabled = true,
             .color = pel.color,
+            .glow = true,
         });
 
         const impulse = vec.mul(pelletDir, w.impulse);

@@ -111,6 +111,47 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
     try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
 }
 
+pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeColor: ?Color) !void {
+    const resources = try shared.getResources();
+    const renderer = resources.renderer;
+
+    const color = maybeColor orelse Color{ .r = 255, .g = 255, .b = 255 };
+
+    try sdl.setTextureBlendMode(s.texture, .add);
+
+    // t=0 is innermost (white), t=1 is outermost (pellet color)
+    const glowPasses = [_]struct { scale: f32, alpha: u8, t: f32 }{
+        .{ .scale = 3.0, .alpha = 30, .t = 1.0 },
+        .{ .scale = 2.0, .alpha = 60, .t = 0.5 },
+        .{ .scale = 1.5, .alpha = 90, .t = 0.2 },
+    };
+
+    for (glowPasses) |pass| {
+        const w: i32 = @intFromFloat(@as(f32, @floatFromInt(s.sizeP.x)) * pass.scale);
+        const h: i32 = @intFromFloat(@as(f32, @floatFromInt(s.sizeP.y)) * pass.scale);
+
+        const rect = sdl.Rect{
+            .x = centerPos.x - @divTrunc(w, 2),
+            .y = centerPos.y - @divTrunc(h, 2),
+            .w = w,
+            .h = h,
+        };
+
+        // Lerp from white to pellet color
+        const r: u8 = @intFromFloat(255.0 - (255.0 - @as(f32, @floatFromInt(color.r))) * pass.t);
+        const g: u8 = @intFromFloat(255.0 - (255.0 - @as(f32, @floatFromInt(color.g))) * pass.t);
+        const b: u8 = @intFromFloat(255.0 - (255.0 - @as(f32, @floatFromInt(color.b))) * pass.t);
+
+        try sdl.setTextureColorMod(s.texture, r, g, b);
+        try sdl.setTextureAlphaMod(s.texture, pass.alpha);
+        try sdl.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
+    }
+
+    // Restore to normal blend mode
+    try sdl.setTextureBlendMode(s.texture, .blend);
+    try sdl.setTextureAlphaMod(s.texture, 255);
+}
+
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
     const spriteUuid = uuid.generate();
 
