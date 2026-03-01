@@ -155,6 +155,7 @@ pub const Texture = struct {
     width: i32,
     height: i32,
     is_atlas: bool = true,
+    owns_atlas_region: bool = true,
     standalone_gpu_texture: ?*c.SDL_GPUTexture = null,
     color_mod: Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
     blend_mode: BlendMode = .blend,
@@ -299,6 +300,17 @@ const ViewportUniforms = extern struct {
     viewport_size: [2]f32,
 };
 
+const FullscreenVertex = extern struct {
+    x: f32,
+    y: f32,
+    u: f32,
+    v: f32,
+};
+
+const CrtUniforms = extern struct {
+    resolution: [2]f32,
+};
+
 // ============================================================
 // GPU Batch Renderer State (deferred rendering)
 // ============================================================
@@ -349,6 +361,14 @@ const GpuState = struct {
     sprite_additive_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_triangles_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_lines_pipeline: *c.SDL_GPUGraphicsPipeline,
+
+    // CRT post-processing
+    offscreen_texture: *c.SDL_GPUTexture,
+    offscreen_w: u32,
+    offscreen_h: u32,
+    crt_pipeline: *c.SDL_GPUGraphicsPipeline,
+    fullscreen_quad_buffer: *c.SDL_GPUBuffer,
+    crt_sampler: *c.SDL_GPUSampler,
 
     // Sampler
     sampler: *c.SDL_GPUSampler,
@@ -467,6 +487,7 @@ const sprite_vert_msl = @embedFile("shaders/sprite.metal");
 const sprite_frag_msl = @embedFile("shaders/sprite.metal");
 const colored_vert_msl = @embedFile("shaders/colored.metal");
 const colored_frag_msl = @embedFile("shaders/colored.metal");
+const crt_msl = @embedFile("shaders/crt.metal");
 
 fn createShader(
     device: *c.SDL_GPUDevice,
@@ -496,52 +517,87 @@ fn createShader(
 // Pipeline creation
 // ============================================================
 
-fn createSpritePipeline(
+const MAX_VERTEX_ATTRS = 4;
+
+const VertexLayout = struct {
+    pitch: u32,
+    attrs: []const c.SDL_GPUVertexAttribute,
+};
+
+const PipelineConfig = struct {
+    // Shader source (same file for both vert and frag)
+    shader_code: []const u8,
+    vert_entry: [*:0]const u8,
+    frag_entry: [*:0]const u8,
+
+    // Shader resource counts
+    vert_samplers: u32 = 0,
+    vert_uniforms: u32 = 0,
+    frag_samplers: u32 = 0,
+    frag_uniforms: u32 = 0,
+
+    // Vertex layout
+    vertex_layout: VertexLayout,
+
+    // Rendering config
+    primitive_type: c.SDL_GPUPrimitiveType = c.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+    blend_state: c.SDL_GPUColorTargetBlendState = no_blend,
+
+    const no_blend = c.SDL_GPUColorTargetBlendState{
+        .enable_blend = false,
+        .src_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .dst_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ZERO,
+        .color_blend_op = c.SDL_GPU_BLENDOP_ADD,
+        .src_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .dst_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ZERO,
+        .alpha_blend_op = c.SDL_GPU_BLENDOP_ADD,
+        .color_write_mask = 0xF,
+        .enable_color_write_mask = true,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+};
+
+fn createPipeline(
     device: *c.SDL_GPUDevice,
     swapchain_format: c.SDL_GPUTextureFormat,
-    blend_state: c.SDL_GPUColorTargetBlendState,
+    config: PipelineConfig,
 ) !*c.SDL_GPUGraphicsPipeline {
     const vert_shader = try createShader(
         device,
-        sprite_vert_msl.ptr,
-        sprite_vert_msl.len,
-        "sprite_vert",
+        config.shader_code.ptr,
+        config.shader_code.len,
+        config.vert_entry,
         c.SDL_GPU_SHADERSTAGE_VERTEX,
-        0,
-        1,
+        config.vert_samplers,
+        config.vert_uniforms,
     );
     defer c.SDL_ReleaseGPUShader(device, vert_shader);
 
     const frag_shader = try createShader(
         device,
-        sprite_frag_msl.ptr,
-        sprite_frag_msl.len,
-        "sprite_frag",
+        config.shader_code.ptr,
+        config.shader_code.len,
+        config.frag_entry,
         c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-        1,
-        0,
+        config.frag_samplers,
+        config.frag_uniforms,
     );
     defer c.SDL_ReleaseGPUShader(device, frag_shader);
 
     const vertex_buffer_desc = [_]c.SDL_GPUVertexBufferDescription{
         .{
             .slot = 0,
-            .pitch = @sizeOf(SpriteVertex),
+            .pitch = config.vertex_layout.pitch,
             .input_rate = c.SDL_GPU_VERTEXINPUTRATE_VERTEX,
             .instance_step_rate = 0,
         },
     };
 
-    const vertex_attrs = [_]c.SDL_GPUVertexAttribute{
-        .{ .location = 0, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(SpriteVertex, "x") },
-        .{ .location = 1, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(SpriteVertex, "u") },
-        .{ .location = 2, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM, .offset = @offsetOf(SpriteVertex, "color") },
-    };
-
     const color_target = [_]c.SDL_GPUColorTargetDescription{
         .{
             .format = swapchain_format,
-            .blend_state = blend_state,
+            .blend_state = config.blend_state,
         },
     };
 
@@ -551,10 +607,10 @@ fn createSpritePipeline(
         .vertex_input_state = .{
             .vertex_buffer_descriptions = &vertex_buffer_desc,
             .num_vertex_buffers = vertex_buffer_desc.len,
-            .vertex_attributes = &vertex_attrs,
-            .num_vertex_attributes = vertex_attrs.len,
+            .vertex_attributes = config.vertex_layout.attrs.ptr,
+            .num_vertex_attributes = @intCast(config.vertex_layout.attrs.len),
         },
-        .primitive_type = c.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .primitive_type = config.primitive_type,
         .rasterizer_state = .{
             .fill_mode = c.SDL_GPU_FILLMODE_FILL,
             .cull_mode = c.SDL_GPU_CULLMODE_NONE,
@@ -591,99 +647,88 @@ fn createSpritePipeline(
     return c.SDL_CreateGPUGraphicsPipeline(device, &pipeline_info) orelse return error.CreatePipelineFailed;
 }
 
-fn createColoredPipeline(
-    device: *c.SDL_GPUDevice,
-    swapchain_format: c.SDL_GPUTextureFormat,
-    primitive_type: c.SDL_GPUPrimitiveType,
-    blend_state: c.SDL_GPUColorTargetBlendState,
-) !*c.SDL_GPUGraphicsPipeline {
-    const vert_shader = try createShader(
-        device,
-        colored_vert_msl.ptr,
-        colored_vert_msl.len,
-        "colored_vert",
-        c.SDL_GPU_SHADERSTAGE_VERTEX,
-        0,
-        1,
-    );
-    defer c.SDL_ReleaseGPUShader(device, vert_shader);
+// Pre-defined vertex layouts
+const sprite_vertex_layout = VertexLayout{
+    .pitch = @sizeOf(SpriteVertex),
+    .attrs = &[_]c.SDL_GPUVertexAttribute{
+        .{ .location = 0, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(SpriteVertex, "x") },
+        .{ .location = 1, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(SpriteVertex, "u") },
+        .{ .location = 2, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM, .offset = @offsetOf(SpriteVertex, "color") },
+    },
+};
 
-    const frag_shader = try createShader(
-        device,
-        colored_frag_msl.ptr,
-        colored_frag_msl.len,
-        "colored_frag",
-        c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-        0,
-        0,
-    );
-    defer c.SDL_ReleaseGPUShader(device, frag_shader);
-
-    const vertex_buffer_desc = [_]c.SDL_GPUVertexBufferDescription{
-        .{
-            .slot = 0,
-            .pitch = @sizeOf(ColorVertex),
-            .input_rate = c.SDL_GPU_VERTEXINPUTRATE_VERTEX,
-            .instance_step_rate = 0,
-        },
-    };
-
-    const vertex_attrs = [_]c.SDL_GPUVertexAttribute{
+const color_vertex_layout = VertexLayout{
+    .pitch = @sizeOf(ColorVertex),
+    .attrs = &[_]c.SDL_GPUVertexAttribute{
         .{ .location = 0, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(ColorVertex, "x") },
         .{ .location = 1, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM, .offset = @offsetOf(ColorVertex, "color") },
-    };
+    },
+};
 
-    const color_target = [_]c.SDL_GPUColorTargetDescription{
-        .{
-            .format = swapchain_format,
-            .blend_state = blend_state,
-        },
-    };
+const fullscreen_vertex_layout = VertexLayout{
+    .pitch = @sizeOf(FullscreenVertex),
+    .attrs = &[_]c.SDL_GPUVertexAttribute{
+        .{ .location = 0, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(FullscreenVertex, "x") },
+        .{ .location = 1, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = @offsetOf(FullscreenVertex, "u") },
+    },
+};
 
-    const pipeline_info = c.SDL_GPUGraphicsPipelineCreateInfo{
-        .vertex_shader = vert_shader,
-        .fragment_shader = frag_shader,
-        .vertex_input_state = .{
-            .vertex_buffer_descriptions = &vertex_buffer_desc,
-            .num_vertex_buffers = vertex_buffer_desc.len,
-            .vertex_attributes = &vertex_attrs,
-            .num_vertex_attributes = vertex_attrs.len,
-        },
-        .primitive_type = primitive_type,
-        .rasterizer_state = .{
-            .fill_mode = c.SDL_GPU_FILLMODE_FILL,
-            .cull_mode = c.SDL_GPU_CULLMODE_NONE,
-            .front_face = c.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
-            .depth_bias_constant_factor = 0,
-            .depth_bias_clamp = 0,
-            .depth_bias_slope_factor = 0,
-            .enable_depth_bias = false,
-            .enable_depth_clip = false,
-            .padding1 = 0,
-            .padding2 = 0,
-        },
-        .multisample_state = .{
-            .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
-            .sample_mask = 0,
-            .enable_mask = false,
-            .enable_alpha_to_coverage = false,
-            .padding2 = 0,
-            .padding3 = 0,
-        },
-        .depth_stencil_state = std.mem.zeroes(c.SDL_GPUDepthStencilState),
-        .target_info = .{
-            .color_target_descriptions = &color_target,
-            .num_color_targets = 1,
-            .depth_stencil_format = c.SDL_GPU_TEXTUREFORMAT_INVALID,
-            .has_depth_stencil_target = false,
-            .padding1 = 0,
-            .padding2 = 0,
-            .padding3 = 0,
-        },
+fn createOffscreenTexture(device: *c.SDL_GPUDevice, w: u32, h: u32, swapchain_format: c.SDL_GPUTextureFormat) !*c.SDL_GPUTexture {
+    const tex_info = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = swapchain_format,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER | c.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+        .width = w,
+        .height = h,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
         .props = 0,
     };
+    return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+}
 
-    return c.SDL_CreateGPUGraphicsPipeline(device, &pipeline_info) orelse return error.CreatePipelineFailed;
+fn uploadFullscreenQuad(device: *c.SDL_GPUDevice, buffer: *c.SDL_GPUBuffer) void {
+    // Fullscreen quad: two triangles covering NDC [-1,1] with UV [0,1]
+    const vertices = [6]FullscreenVertex{
+        .{ .x = -1, .y = 1, .u = 0, .v = 0 }, // top-left
+        .{ .x = 1, .y = 1, .u = 1, .v = 0 }, // top-right
+        .{ .x = 1, .y = -1, .u = 1, .v = 1 }, // bottom-right
+        .{ .x = -1, .y = 1, .u = 0, .v = 0 }, // top-left
+        .{ .x = 1, .y = -1, .u = 1, .v = 1 }, // bottom-right
+        .{ .x = -1, .y = -1, .u = 0, .v = 1 }, // bottom-left
+    };
+
+    const data_size = @sizeOf(@TypeOf(vertices));
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = data_size,
+        .props = 0,
+    }) orelse return;
+    defer c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+
+    const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse return;
+    const dst: [*]u8 = @ptrCast(mapped);
+    const src: [*]const u8 = @ptrCast(&vertices);
+    @memcpy(dst[0..data_size], src[0..data_size]);
+    c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+
+    const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse return;
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse return;
+    c.SDL_UploadToGPUBuffer(copy_pass, &c.SDL_GPUTransferBufferLocation{
+        .transfer_buffer = transfer_buf,
+        .offset = 0,
+    }, &c.SDL_GPUBufferRegion{
+        .buffer = buffer,
+        .offset = 0,
+        .size = data_size,
+    }, false);
+    c.SDL_EndGPUCopyPass(copy_pass);
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    if (fence) |f| {
+        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
+        c.SDL_ReleaseGPUFence(device, f);
+    }
 }
 
 // ============================================================
@@ -737,10 +782,41 @@ pub fn createRenderer(window: *Window) !*Renderer {
     };
 
     // Create 4 pipelines
-    const sprite_alpha = try createSpritePipeline(device, swapchain_format, alpha_blend);
-    const sprite_additive = try createSpritePipeline(device, swapchain_format, additive_blend);
-    const colored_triangles = try createColoredPipeline(device, swapchain_format, c.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, alpha_blend);
-    const colored_lines = try createColoredPipeline(device, swapchain_format, c.SDL_GPU_PRIMITIVETYPE_LINELIST, alpha_blend);
+    const sprite_alpha = try createPipeline(device, swapchain_format, .{
+        .shader_code = sprite_vert_msl,
+        .vert_entry = "sprite_vert",
+        .frag_entry = "sprite_frag",
+        .vert_uniforms = 1,
+        .frag_samplers = 1,
+        .vertex_layout = sprite_vertex_layout,
+        .blend_state = alpha_blend,
+    });
+    const sprite_additive = try createPipeline(device, swapchain_format, .{
+        .shader_code = sprite_vert_msl,
+        .vert_entry = "sprite_vert",
+        .frag_entry = "sprite_frag",
+        .vert_uniforms = 1,
+        .frag_samplers = 1,
+        .vertex_layout = sprite_vertex_layout,
+        .blend_state = additive_blend,
+    });
+    const colored_triangles = try createPipeline(device, swapchain_format, .{
+        .shader_code = colored_vert_msl,
+        .vert_entry = "colored_vert",
+        .frag_entry = "colored_frag",
+        .vert_uniforms = 1,
+        .vertex_layout = color_vertex_layout,
+        .blend_state = alpha_blend,
+    });
+    const colored_lines = try createPipeline(device, swapchain_format, .{
+        .shader_code = colored_vert_msl,
+        .vert_entry = "colored_vert",
+        .frag_entry = "colored_frag",
+        .vert_uniforms = 1,
+        .vertex_layout = color_vertex_layout,
+        .primitive_type = c.SDL_GPU_PRIMITIVETYPE_LINELIST,
+        .blend_state = alpha_blend,
+    });
 
     // Create sampler (nearest-neighbor for pixel art)
     const sampler_info = c.SDL_GPUSamplerCreateInfo{
@@ -789,6 +865,53 @@ pub fn createRenderer(window: *Window) !*Renderer {
         .props = 0,
     }) orelse return error.CreateBufferFailed;
 
+    // CRT pipeline
+    const crt_pipe = try createPipeline(device, swapchain_format, .{
+        .shader_code = crt_msl,
+        .vert_entry = "crt_vert",
+        .frag_entry = "crt_frag",
+        .frag_samplers = 1,
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
+    });
+
+    // Linear sampler for CRT post-processing
+    const crt_sampler_info = c.SDL_GPUSamplerCreateInfo{
+        .min_filter = c.SDL_GPU_FILTER_LINEAR,
+        .mag_filter = c.SDL_GPU_FILTER_LINEAR,
+        .mipmap_mode = c.SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+        .address_mode_u = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+        .address_mode_v = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+        .address_mode_w = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+        .mip_lod_bias = 0,
+        .max_anisotropy = 1,
+        .compare_op = c.SDL_GPU_COMPAREOP_NEVER,
+        .min_lod = 0,
+        .max_lod = 0,
+        .enable_anisotropy = false,
+        .enable_compare = false,
+        .padding1 = 0,
+        .padding2 = 0,
+        .props = 0,
+    };
+    const crt_samp = c.SDL_CreateGPUSampler(device, &crt_sampler_info) orelse return error.CreateSamplerFailed;
+
+    // Fullscreen quad vertex buffer
+    const quad_buffer = c.SDL_CreateGPUBuffer(device, &c.SDL_GPUBufferCreateInfo{
+        .usage = c.SDL_GPU_BUFFERUSAGE_VERTEX,
+        .size = 6 * @sizeOf(FullscreenVertex),
+        .props = 0,
+    }) orelse return error.CreateBufferFailed;
+    uploadFullscreenQuad(device, quad_buffer);
+
+    // Offscreen texture for scene rendering (initial size from window)
+    var init_w: c_int = 0;
+    var init_h: c_int = 0;
+    _ = c.SDL_GetWindowSize(window, &init_w, &init_h);
+    const ow: u32 = if (init_w > 0) @intCast(init_w) else 640;
+    const oh: u32 = if (init_h > 0) @intCast(init_h) else 480;
+    const offscreen_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
+
     // Create atlas GPU texture
     const atlas_tex_info = c.SDL_GPUTextureCreateInfo{
         .type = c.SDL_GPU_TEXTURETYPE_2D,
@@ -815,6 +938,12 @@ pub fn createRenderer(window: *Window) !*Renderer {
         .sprite_additive_pipeline = sprite_additive,
         .colored_triangles_pipeline = colored_triangles,
         .colored_lines_pipeline = colored_lines,
+        .offscreen_texture = offscreen_tex,
+        .offscreen_w = ow,
+        .offscreen_h = oh,
+        .crt_pipeline = crt_pipe,
+        .fullscreen_quad_buffer = quad_buffer,
+        .crt_sampler = crt_samp,
         .sampler = gpu_sampler,
         .sprite_gpu_buffer = sprite_vb,
         .color_gpu_buffer = color_vb,
@@ -830,6 +959,10 @@ pub fn createRenderer(window: *Window) !*Renderer {
 pub fn destroyRenderer(renderer: *Renderer) void {
     _ = renderer;
     if (gpu) |g| {
+        c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
+        c.SDL_ReleaseGPUBuffer(g.device, g.fullscreen_quad_buffer);
+        c.SDL_ReleaseGPUSampler(g.device, g.crt_sampler);
         c.SDL_ReleaseGPUTexture(g.device, g.atlas.gpu_texture);
         c.SDL_ReleaseGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
         c.SDL_ReleaseGPUTransferBuffer(g.device, g.color_transfer_buffer);
@@ -1087,6 +1220,7 @@ pub fn cloneTexture(source: *Texture) !*Texture {
         .width = source.width,
         .height = source.height,
         .is_atlas = source.is_atlas,
+        .owns_atlas_region = false,
         .standalone_gpu_texture = source.standalone_gpu_texture,
         .color_mod = source.color_mod,
         .blend_mode = source.blend_mode,
@@ -1109,6 +1243,7 @@ pub fn reallocateAtlasRegion(texture: *Texture, surface: *Surface) !void {
     const region = try g.atlas.allocate(w, h);
     texture.atlas_x = region.x;
     texture.atlas_y = region.y;
+    texture.owns_atlas_region = true;
 
     uploadToAtlasRegion(g, rgba_surface, region.x, region.y, w, h);
 }
@@ -1257,6 +1392,14 @@ pub fn renderClear(renderer: *Renderer) !void {
     g.swapchain_w = @floatFromInt(sw_w);
     g.swapchain_h = @floatFromInt(sw_h);
 
+    // Recreate offscreen texture if window was resized
+    if (sw_w != g.offscreen_w or sw_h != g.offscreen_h) {
+        c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
+        g.offscreen_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
+        g.offscreen_w = sw_w;
+        g.offscreen_h = sw_h;
+    }
+
     // Set default viewport to full window
     g.viewport_x = 0;
     g.viewport_y = 0;
@@ -1335,10 +1478,10 @@ pub fn renderPresent(renderer: *Renderer) void {
         }
     }
 
-    // Begin render pass with clear
+    // === Pass 1: Render scene to offscreen texture ===
     const cc = g.clear_color;
-    const color_target = c.SDL_GPUColorTargetInfo{
-        .texture = swapchain_tex,
+    const offscreen_target = c.SDL_GPUColorTargetInfo{
+        .texture = g.offscreen_texture,
         .mip_level = 0,
         .layer_or_depth_plane = 0,
         .clear_color = .{
@@ -1357,7 +1500,7 @@ pub fn renderPresent(renderer: *Renderer) void {
         .padding1 = 0,
         .padding2 = 0,
     };
-    const render_pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null);
+    const render_pass = c.SDL_BeginGPURenderPass(cmd, &offscreen_target, 1, null);
     if (render_pass == null) {
         _ = c.SDL_SubmitGPUCommandBuffer(cmd);
         g.cmd_buf = null;
@@ -1451,8 +1594,48 @@ pub fn renderPresent(renderer: *Renderer) void {
         }
     }
 
-    // End render pass and submit
+    // End scene render pass
     c.SDL_EndGPURenderPass(rp);
+
+    // === Pass 2: CRT post-processing to swapchain ===
+    const crt_target = c.SDL_GPUColorTargetInfo{
+        .texture = swapchain_tex,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+        .load_op = c.SDL_GPU_LOADOP_DONT_CARE,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const crt_pass = c.SDL_BeginGPURenderPass(cmd, &crt_target, 1, null);
+    if (crt_pass) |cp| {
+        c.SDL_BindGPUGraphicsPipeline(cp, g.crt_pipeline);
+
+        const quad_binding = c.SDL_GPUBufferBinding{
+            .buffer = g.fullscreen_quad_buffer,
+            .offset = 0,
+        };
+        c.SDL_BindGPUVertexBuffers(cp, 0, &quad_binding, 1);
+
+        const crt_sampler_binding = c.SDL_GPUTextureSamplerBinding{
+            .texture = g.offscreen_texture,
+            .sampler = g.crt_sampler,
+        };
+        c.SDL_BindGPUFragmentSamplers(cp, 0, &crt_sampler_binding, 1);
+
+        const crt_uniforms = CrtUniforms{ .resolution = .{ g.swapchain_w, g.swapchain_h } };
+        c.SDL_PushGPUFragmentUniformData(cmd, 0, &crt_uniforms, @sizeOf(CrtUniforms));
+
+        c.SDL_DrawGPUPrimitives(cp, 6, 1, 0, 0);
+        c.SDL_EndGPURenderPass(cp);
+    }
+
     _ = c.SDL_SubmitGPUCommandBuffer(cmd);
 
     // Release deferred texture destroys (now safe - command buffer submitted)

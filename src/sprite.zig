@@ -171,17 +171,21 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
             .width = cached.width,
             .height = cached.height,
             .is_atlas = true,
+            .owns_atlas_region = false,
         };
         break :blk tex;
     } else blk: {
         const resources = try shared.getResources();
         const tex = try sdl.addToAtlas(resources.renderer, surface);
-        textureCache.put(imgPath, .{
+        const cacheKey = shared.allocator.dupe(u8, imgPath) catch break :blk tex;
+        textureCache.put(cacheKey, .{
             .atlas_x = tex.atlas_x,
             .atlas_y = tex.atlas_y,
             .width = tex.width,
             .height = tex.height,
-        }) catch {};
+        }) catch {
+            shared.allocator.free(cacheKey);
+        };
         break :blk tex;
     };
     errdefer sdl.destroyTexture(texture);
@@ -521,16 +525,11 @@ pub fn paintSpriteOnSurface(
 pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     const s = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
 
-    // If this atlas texture might share its region with other sprites (via cache),
+    // If this atlas texture shares its region with other sprites,
     // allocate a new private atlas region so we don't overwrite shared data.
-    if (s.texture.is_atlas) {
-        if (textureCache.get(s.imgPath)) |cached| {
-            if (s.texture.atlas_x == cached.atlas_x and s.texture.atlas_y == cached.atlas_y) {
-                // Still pointing at the shared cached region — allocate a private copy
-                try sdl.reallocateAtlasRegion(s.texture, s.surface);
-                return;
-            }
-        }
+    if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
+        try sdl.reallocateAtlasRegion(s.texture, s.surface);
+        return;
     }
 
     // Already private or standalone — just re-upload in place
@@ -749,7 +748,11 @@ pub fn cleanupAll() void {
     }
     sprites.map.clearRetainingCapacity();
 
-    // Clear texture cache and reset atlas packer for level reload
+    // Free cache-owned key strings, then clear cache and reset atlas packer for level reload
+    var cacheIter = textureCache.keyIterator();
+    while (cacheIter.next()) |key_ptr| {
+        shared.allocator.free(key_ptr.*);
+    }
     textureCache.clearRetainingCapacity();
     sdl.resetAtlas();
 }
