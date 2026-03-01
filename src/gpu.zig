@@ -95,6 +95,7 @@ const GpuState = struct {
     colored_lines_pipeline: *c.SDL_GPUGraphicsPipeline,
 
     // CRT post-processing
+    crt_enabled: bool = true,
     offscreen_texture: *c.SDL_GPUTexture,
     offscreen_w: u32,
     offscreen_h: u32,
@@ -812,8 +813,8 @@ pub fn renderClear(renderer: *Renderer) !void {
     g.swapchain_w = @floatFromInt(sw_w);
     g.swapchain_h = @floatFromInt(sw_h);
 
-    // Recreate offscreen texture if window was resized
-    if (sw_w != g.offscreen_w or sw_h != g.offscreen_h) {
+    // Recreate offscreen texture if window was resized (only needed for post-processing)
+    if (g.crt_enabled and (sw_w != g.offscreen_w or sw_h != g.offscreen_h)) {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         g.offscreen_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
         g.offscreen_w = sw_w;
@@ -840,68 +841,78 @@ pub fn renderClear(renderer: *Renderer) !void {
 pub fn renderPresent(renderer: *Renderer) void {
     _ = renderer;
     const g = getGpu();
-
-    // Finalize any pending batch
     finalizeBatch(g);
 
     const cmd = g.cmd_buf orelse return;
     const swapchain_tex = g.swapchain_texture orelse return;
 
-    // Upload vertex data via copy pass using pre-allocated transfer buffers
-    if (g.sprite_vertex_count > 0 or g.color_vertex_count > 0) {
-        // Map and fill transfer buffers before starting copy pass
-        if (g.sprite_vertex_count > 0) {
-            if (c.SDL_MapGPUTransferBuffer(g.device, g.sprite_transfer_buffer, true)) |mapped| {
-                const sprite_data_size = g.sprite_vertex_count * @sizeOf(SpriteVertex);
-                const src_bytes: [*]const u8 = @ptrCast(&g.sprite_vertices);
-                const dst_bytes: [*]u8 = @ptrCast(mapped);
-                @memcpy(dst_bytes[0..sprite_data_size], src_bytes[0..sprite_data_size]);
-                c.SDL_UnmapGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
-            }
-        }
+    uploadVertexData(g, cmd);
 
-        if (g.color_vertex_count > 0) {
-            if (c.SDL_MapGPUTransferBuffer(g.device, g.color_transfer_buffer, true)) |mapped| {
-                const color_data_size = g.color_vertex_count * @sizeOf(ColorVertex);
-                const src_bytes: [*]const u8 = @ptrCast(&g.color_vertices);
-                const dst_bytes: [*]u8 = @ptrCast(mapped);
-                @memcpy(dst_bytes[0..color_data_size], src_bytes[0..color_data_size]);
-                c.SDL_UnmapGPUTransferBuffer(g.device, g.color_transfer_buffer);
-            }
-        }
+    if (g.crt_enabled) {
+        renderScene(g, cmd, g.offscreen_texture);
+        applyCrtEffect(g, cmd, g.offscreen_texture, swapchain_tex);
+    } else {
+        renderScene(g, cmd, swapchain_tex);
+    }
 
-        const copy_pass = c.SDL_BeginGPUCopyPass(cmd);
-        if (copy_pass) |cp| {
-            if (g.sprite_vertex_count > 0) {
-                c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
-                    .transfer_buffer = g.sprite_transfer_buffer,
-                    .offset = 0,
-                }, &c.SDL_GPUBufferRegion{
-                    .buffer = g.sprite_gpu_buffer,
-                    .offset = 0,
-                    .size = g.sprite_vertex_count * @sizeOf(SpriteVertex),
-                }, false);
-            }
+    submitFrame(g, cmd);
+}
 
-            if (g.color_vertex_count > 0) {
-                c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
-                    .transfer_buffer = g.color_transfer_buffer,
-                    .offset = 0,
-                }, &c.SDL_GPUBufferRegion{
-                    .buffer = g.color_gpu_buffer,
-                    .offset = 0,
-                    .size = g.color_vertex_count * @sizeOf(ColorVertex),
-                }, false);
-            }
+fn uploadVertexData(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
+    if (g.sprite_vertex_count == 0 and g.color_vertex_count == 0) return;
 
-            c.SDL_EndGPUCopyPass(cp);
+    if (g.sprite_vertex_count > 0) {
+        if (c.SDL_MapGPUTransferBuffer(g.device, g.sprite_transfer_buffer, true)) |mapped| {
+            const sprite_data_size = g.sprite_vertex_count * @sizeOf(SpriteVertex);
+            const src_bytes: [*]const u8 = @ptrCast(&g.sprite_vertices);
+            const dst_bytes: [*]u8 = @ptrCast(mapped);
+            @memcpy(dst_bytes[0..sprite_data_size], src_bytes[0..sprite_data_size]);
+            c.SDL_UnmapGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
         }
     }
 
-    // === Pass 1: Render scene to offscreen texture ===
+    if (g.color_vertex_count > 0) {
+        if (c.SDL_MapGPUTransferBuffer(g.device, g.color_transfer_buffer, true)) |mapped| {
+            const color_data_size = g.color_vertex_count * @sizeOf(ColorVertex);
+            const src_bytes: [*]const u8 = @ptrCast(&g.color_vertices);
+            const dst_bytes: [*]u8 = @ptrCast(mapped);
+            @memcpy(dst_bytes[0..color_data_size], src_bytes[0..color_data_size]);
+            c.SDL_UnmapGPUTransferBuffer(g.device, g.color_transfer_buffer);
+        }
+    }
+
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd);
+    if (copy_pass) |cp| {
+        if (g.sprite_vertex_count > 0) {
+            c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
+                .transfer_buffer = g.sprite_transfer_buffer,
+                .offset = 0,
+            }, &c.SDL_GPUBufferRegion{
+                .buffer = g.sprite_gpu_buffer,
+                .offset = 0,
+                .size = g.sprite_vertex_count * @sizeOf(SpriteVertex),
+            }, false);
+        }
+
+        if (g.color_vertex_count > 0) {
+            c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
+                .transfer_buffer = g.color_transfer_buffer,
+                .offset = 0,
+            }, &c.SDL_GPUBufferRegion{
+                .buffer = g.color_gpu_buffer,
+                .offset = 0,
+                .size = g.color_vertex_count * @sizeOf(ColorVertex),
+            }, false);
+        }
+
+        c.SDL_EndGPUCopyPass(cp);
+    }
+}
+
+fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SDL_GPUTexture) void {
     const cc = g.clear_color;
-    const offscreen_target = c.SDL_GPUColorTargetInfo{
-        .texture = g.offscreen_texture,
+    const color_target = c.SDL_GPUColorTargetInfo{
+        .texture = target_texture,
         .mip_level = 0,
         .layer_or_depth_plane = 0,
         .clear_color = .{
@@ -920,19 +931,12 @@ pub fn renderPresent(renderer: *Renderer) void {
         .padding1 = 0,
         .padding2 = 0,
     };
-    const render_pass = c.SDL_BeginGPURenderPass(cmd, &offscreen_target, 1, null);
-    if (render_pass == null) {
-        _ = c.SDL_SubmitGPUCommandBuffer(cmd);
-        g.cmd_buf = null;
-        g.swapchain_texture = null;
-        return;
-    }
+    const render_pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null);
+    if (render_pass == null) return;
     const rp = render_pass.?;
 
-    // Set initial viewport to full window (use saved swapchain dimensions)
     setGpuViewport(rp, 0, 0, g.swapchain_w, g.swapchain_h);
 
-    // Replay all batch records (track last-bound state to skip redundant GPU calls)
     var current_vp_w: f32 = g.swapchain_w;
     var current_vp_h: f32 = g.swapchain_h;
     var last_pipeline: ?PipelineType = null;
@@ -948,7 +952,6 @@ pub fn renderPresent(renderer: *Renderer) void {
                 uniforms_dirty = true;
             },
             .draw_sprites => |batch| {
-                // Only rebind pipeline if changed
                 if (last_pipeline != batch.pipeline) {
                     const pipeline = switch (batch.pipeline) {
                         .sprite_alpha => g.sprite_alpha_pipeline,
@@ -957,7 +960,7 @@ pub fn renderPresent(renderer: *Renderer) void {
                     };
                     c.SDL_BindGPUGraphicsPipeline(rp, pipeline);
                     last_pipeline = batch.pipeline;
-                    uniforms_dirty = true; // pipeline bind resets uniform state
+                    uniforms_dirty = true;
                 }
 
                 if (uniforms_dirty) {
@@ -972,7 +975,6 @@ pub fn renderPresent(renderer: *Renderer) void {
                 };
                 c.SDL_BindGPUVertexBuffers(rp, 0, &binding, 1);
 
-                // Only rebind texture if changed
                 if (last_texture != batch.texture) {
                     const sampler_binding = c.SDL_GPUTextureSamplerBinding{
                         .texture = batch.texture,
@@ -993,7 +995,7 @@ pub fn renderPresent(renderer: *Renderer) void {
                     };
                     c.SDL_BindGPUGraphicsPipeline(rp, pipeline);
                     last_pipeline = batch.pipeline;
-                    last_texture = null; // switching to colored pipeline invalidates texture state
+                    last_texture = null;
                     uniforms_dirty = true;
                 }
 
@@ -1014,12 +1016,12 @@ pub fn renderPresent(renderer: *Renderer) void {
         }
     }
 
-    // End scene render pass
     c.SDL_EndGPURenderPass(rp);
+}
 
-    // === Pass 2: CRT post-processing to swapchain ===
+fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.SDL_GPUTexture, output_texture: *c.SDL_GPUTexture) void {
     const crt_target = c.SDL_GPUColorTargetInfo{
-        .texture = swapchain_tex,
+        .texture = output_texture,
         .mip_level = 0,
         .layer_or_depth_plane = 0,
         .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
@@ -1044,7 +1046,7 @@ pub fn renderPresent(renderer: *Renderer) void {
         c.SDL_BindGPUVertexBuffers(cp, 0, &quad_binding, 1);
 
         const crt_sampler_binding = c.SDL_GPUTextureSamplerBinding{
-            .texture = g.offscreen_texture,
+            .texture = input_texture,
             .sampler = g.crt_sampler,
         };
         c.SDL_BindGPUFragmentSamplers(cp, 0, &crt_sampler_binding, 1);
@@ -1055,10 +1057,11 @@ pub fn renderPresent(renderer: *Renderer) void {
         c.SDL_DrawGPUPrimitives(cp, 6, 1, 0, 0);
         c.SDL_EndGPURenderPass(cp);
     }
+}
 
+fn submitFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
     _ = c.SDL_SubmitGPUCommandBuffer(cmd);
 
-    // Release deferred texture destroys (now safe - command buffer submitted)
     var di: u32 = 0;
     while (di < g.pending_destroy_count) : (di += 1) {
         c.SDL_ReleaseGPUTexture(g.device, g.pending_destroys[di]);
