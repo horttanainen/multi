@@ -1,6 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
-const image = @import("zsdl_image");
+const sdl = @import("sdl.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");

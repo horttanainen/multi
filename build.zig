@@ -14,28 +14,17 @@ pub fn build(b: *std.Build) !void {
     });
     exe.linkLibC();
 
-    if (target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("SDL2");
-        exe.linkSystemLibrary("SDL2_image");
-        exe.linkSystemLibrary("SDL2_ttf");
-    } else {
-        const sdl_dep = b.dependency("SDL", .{ .target = target, .optimize = optimize });
-        const sdl = sdl_dep.artifact("SDL2");
-        exe.linkLibrary(sdl);
+    const sdl_dep = b.dependency("SDL3", .{ .target = target, .optimize = optimize });
+    const sdl = sdl_dep.artifact("SDL3");
+    exe.linkLibrary(sdl);
 
-        const sdl_image_dep = b.dependency("SDL_image", .{ .target = target, .optimize = optimize });
-        const sdl_image = sdl_image_dep.artifact("SDL2_image");
-        exe.linkLibrary(sdl_image);
+    const sdl_image_dep = b.dependency("SDL_image", .{ .target = target, .optimize = optimize });
+    const sdl_image = sdl_image_dep.artifact("SDL3_image");
+    exe.linkLibrary(sdl_image);
 
-        const sdl_ttf_dep = b.dependency("SDL_ttf", .{ .target = target, .optimize = optimize });
-        const sdl_ttf = sdl_ttf_dep.artifact("SDL2_ttf");
-        exe.linkLibrary(sdl_ttf);
-    }
-
-    const zsdl = b.dependency("zsdl", .{ .target = target, .optimize = optimize });
-    exe.root_module.addImport("zsdl", zsdl.module("zsdl2"));
-    exe.root_module.addImport("zsdl_image", zsdl.module("zsdl2_image"));
-    exe.root_module.addImport("zsdl_ttf", zsdl.module("zsdl2_ttf"));
+    const sdl_ttf_dep = b.dependency("SDL_ttf", .{ .target = target, .optimize = optimize });
+    const sdl_ttf = sdl_ttf_dep.artifact("SDL3_ttf");
+    exe.linkLibrary(sdl_ttf);
 
     exe.addCSourceFiles(.{
         .root = b.path("./box2d/src/"),

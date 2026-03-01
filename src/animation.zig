@@ -1,4 +1,5 @@
 const std = @import("std");
+const sdl = @import("sdl.zig");
 
 const vec = @import("vector.zig");
 const shared = @import("shared.zig");
@@ -112,7 +113,7 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
     }
 }
 
-fn delayedSwitchCallback(_: u32, param: ?*anyopaque) callconv(.c) u32 {
+fn delayedSwitchCallback(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const ready: *bool = @alignCast(@ptrCast(param));
     ready.* = true;
     return 0;

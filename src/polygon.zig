@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
 const connected_components = @import("connected_components.zig");

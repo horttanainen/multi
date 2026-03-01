@@ -12,7 +12,7 @@ const animation = @import("animation.zig");
 const shared = @import("shared.zig");
 const camera = @import("camera.zig");
 const time = @import("time.zig");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 pub const Projectile = struct {
     gravityScale: f32,

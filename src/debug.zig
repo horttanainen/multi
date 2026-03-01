@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 const box2d = @import("box2d.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
@@ -150,9 +150,9 @@ pub fn drawSolidCircle(transform: box2d.c.b2Transform, radius: f32, color: box2d
     const half = radius;
     const verts = [_]box2d.c.b2Vec2{
         .{ .x = -half, .y = -half },
-        .{ .x =  half, .y = -half },
-        .{ .x =  half, .y =  half },
-        .{ .x = -half, .y =  half },
+        .{ .x = half, .y = -half },
+        .{ .x = half, .y = half },
+        .{ .x = -half, .y = half },
     };
 
     drawSolidPolygon(transform, &verts, verts.len, radius, color, context);

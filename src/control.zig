@@ -1,6 +1,6 @@
 const std = @import("std");
 const box2d = @import("box2d.zig");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -49,8 +49,8 @@ pub fn handleGameMouseInput() !void {
 pub fn handleGlobalHotkeys() void {
     const currentKeyStates = sdl.getKeyboardState();
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and
-        currentKeyStates[@intFromEnum(sdl.Scancode.r)] == 1)
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and
+        currentKeyStates[@intFromEnum(sdl.Scancode.r)])
     {
         if (!delay.check("reloadLevel")) {
             level.reload() catch |err| {
@@ -60,14 +60,14 @@ pub fn handleGlobalHotkeys() void {
         }
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
         if (!delay.check("quitGame")) {
             shared.quitGame = true;
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)]) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.enter() catch |err| {
                 std.debug.print("Error entering level editor: {}\n", .{err});
@@ -156,27 +156,27 @@ pub fn handleLevelEditorMouseInput() void {
 
 pub fn handleLevelEditorKeyboardInput() void {
     const currentKeyStates = sdl.getKeyboardState();
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)]) {
         camera.moveLeft();
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)]) {
         camera.moveRight();
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.w)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.w)]) {
         camera.moveUp();
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.s)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.s)]) {
         camera.moveDown();
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.c)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and currentKeyStates[@intFromEnum(sdl.Scancode.c_)]) {
         if (!delay.check("levelEditorClick")) {
             levelEditor.copySelection();
             delay.action("levelEditorClick", config.levelEditorClickDelayMs);
         }
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] == 1 and currentKeyStates[@intFromEnum(sdl.Scancode.v)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and currentKeyStates[@intFromEnum(sdl.Scancode.v)]) {
         if (!delay.check("levelEditorClick")) {
             var x: i32 = 0;
             var y: i32 = 0;
@@ -188,14 +188,14 @@ pub fn handleLevelEditorKeyboardInput() void {
         }
     }
 
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.exit();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)] == 1) {
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)]) {
         if (!delay.check("leveleditortoggle")) {
             levelEditor.exit();
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);

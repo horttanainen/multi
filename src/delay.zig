@@ -1,4 +1,5 @@
 const std = @import("std");
+const sdl = @import("sdl.zig");
 
 const shared = @import("shared.zig");
 const timer = @import("sdl_timer.zig");
@@ -23,8 +24,7 @@ pub fn action(name: [:0]const u8, delayMs: u32) void {
     _ = timer.addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
 }
 
-fn shutTimer(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn shutTimer(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const name: *[]const u8 = @alignCast(@ptrCast(param));
 
     if (delayedActions.fetchRemove(name.*)) |entry| {

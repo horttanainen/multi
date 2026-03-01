@@ -1,4 +1,5 @@
 const std = @import("std");
+const sdl = @import("sdl.zig");
 const timer = @import("sdl_timer.zig");
 
 const vec = @import("vector.zig");
@@ -17,7 +18,7 @@ pub const Particle = struct {
     spriteUuid: u64,
     state: ?box2d.State,
     color: ?sprite.Color,
-    timerId: i32,
+    timerId: sdl.TimerID,
     scale: f32,
 };
 
@@ -276,8 +277,7 @@ pub fn checkContacts() !void {
     }
 }
 
-fn markParticleForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn markParticleForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
 

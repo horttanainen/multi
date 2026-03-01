@@ -1,6 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
-const image = @import("zsdl_image");
+const sdl = @import("sdl.zig");
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
@@ -19,19 +18,6 @@ const conv = @import("conversion.zig");
 const uuid = @import("uuid.zig");
 const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
-
-// SDL_LockSurface/SDL_UnlockSurface are not exposed by zsdl
-pub const SDL_LockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) c_int, .{ .name = "SDL_LockSurface" });
-pub const SDL_UnlockSurface = @extern(*const fn (surface: *sdl.Surface) callconv(.c) void, .{ .name = "SDL_UnlockSurface" });
-
-// SDL_CreateRGBSurfaceWithFormat is not exposed by zsdl, so we declare it here
-const SDL_CreateRGBSurfaceWithFormat = @extern(*const fn (
-    flags: c_int,
-    width: c_int,
-    height: c_int,
-    depth: c_int,
-    format: u32,
-) callconv(.c) ?*sdl.Surface, .{ .name = "SDL_CreateRGBSurfaceWithFormat" });
 
 pub const Color = struct {
     r: u8,
@@ -108,7 +94,7 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
     }
 
     const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
-    try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
+    try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
 }
 
 pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeColor: ?Color) !void {
@@ -144,7 +130,7 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 
         try sdl.setTextureColorMod(s.texture, r, g, b);
         try sdl.setTextureAlphaMod(s.texture, pass.alpha);
-        try sdl.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) sdl.RendererFlip.horizontal else sdl.RendererFlip.none);
+        try sdl.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none);
     }
 
     // Restore to normal blend mode
@@ -160,8 +146,8 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
 
     const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
     defer shared.allocator.free(imgPathZ);
-    const surface = try image.load(imgPathZ);
-    errdefer sdl.freeSurface(surface);
+    const surface = try sdl.image.load(imgPathZ);
+    errdefer sdl.destroySurface(surface);
 
     const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
     const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
@@ -171,7 +157,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     errdefer sdl.destroyTexture(texture);
 
     var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, null, null, &size.x, &size.y);
+    try sdl.queryTexture(texture, &size.x, &size.y);
 
     size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
     size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
@@ -215,17 +201,13 @@ pub fn createCopy(spriteUuid: u64) !u64 {
 
     const resources = try shared.getResources();
 
-    const format: u32 = if (originalSprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
-    const copiedSurface = SDL_CreateRGBSurfaceWithFormat(
-        0,
+    const format: sdl.PixelFormat = @enumFromInt(originalSprite.surface.format);
+    const copiedSurface = try sdl.createSurface(
         originalSprite.surface.w,
         originalSprite.surface.h,
-        32,
         format,
-    ) orelse {
-        return error.SurfaceCopyFailed;
-    };
-    errdefer sdl.freeSurface(copiedSurface);
+    );
+    errdefer sdl.destroySurface(copiedSurface);
 
     try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
@@ -534,10 +516,8 @@ pub fn isCyan(r: u8, _: u8, b: u8) bool {
 pub fn colorMatchingPixels(spriteUuid: u64, color: Color, comptime predicate: fn (u8, u8, u8) bool) !void {
     const s = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
 
-    if (SDL_LockSurface(s.surface) != 0) {
-        return error.SDLLockSurfaceFailed;
-    }
-    defer SDL_UnlockSurface(s.surface);
+    try sdl.lockSurface(s.surface);
+    defer sdl.unlockSurface(s.surface);
 
     const pixels: [*]u8 = @ptrCast(s.surface.pixels);
     const bytesPerPixel: usize = 4;
@@ -608,15 +588,13 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
             const tileHeight = @min(maxTileSize, height - startY);
 
             // Create new surface for this tile using the same format as the original
-            const format: u32 = if (originalSprite.surface.format) |fmt| @intFromEnum(fmt.*) else 373694468; // fallback to RGBA8888
-            const tileSurface = SDL_CreateRGBSurfaceWithFormat(
-                0,
+            const format: sdl.PixelFormat = @enumFromInt(originalSprite.surface.format);
+            const tileSurface = sdl.createSurface(
                 @intCast(tileWidth),
                 @intCast(tileHeight),
-                32,
                 format,
-            ) orelse {
-                std.debug.print("Could not SDL_CreateRGBSurfaceWithFormat. Continuing to next tile", .{});
+            ) catch {
+                std.debug.print("Could not create surface. Continuing to next tile", .{});
                 continue;
             };
 
@@ -627,10 +605,10 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
                 .w = @intCast(tileWidth),
                 .h = @intCast(tileHeight),
             };
-            try sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null);
+            sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null) catch continue;
 
             // Create texture from tile surface
-            const tileTexture = try sdl.createTextureFromSurface(resources.renderer, tileSurface);
+            const tileTexture = sdl.createTextureFromSurface(resources.renderer, tileSurface) catch continue;
 
             // Calculate tile offset in meters from original sprite center
             // Tile center in unscaled pixels
@@ -656,7 +634,7 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
             const tileSizeM = vec.Vec2{ .x = tileSizeMB2d.x, .y = tileSizeMB2d.y };
 
             // Duplicate imgPath for this tile
-            const imgPath = try allocator.dupe(u8, originalSprite.imgPath);
+            const imgPath = allocator.dupe(u8, originalSprite.imgPath) catch continue;
 
             const tileSprite = Sprite{
                 .surface = tileSurface,
@@ -669,12 +647,12 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
             };
 
             const tileUuid = uuid.generate();
-            try sprites.putLocking(tileUuid, tileSprite);
+            sprites.putLocking(tileUuid, tileSprite) catch continue;
 
-            try tiles.append(SpriteTile{
+            tiles.append(SpriteTile{
                 .spriteUuid = tileUuid,
                 .offsetPos = offsetMeters,
-            });
+            }) catch continue;
         }
     }
 
@@ -689,9 +667,7 @@ pub fn cleanupLater(spriteUuid: u64) void {
     _ = timer.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
 }
 
-fn markSpriteForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
-
+fn markSpriteForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const spriteUuid: u64 = @intFromPtr(param.?);
 
     spritesToCleanup.appendLocking(spriteUuid) catch {};
@@ -716,7 +692,7 @@ pub fn cleanupSprites() void {
 fn cleanupOne(s: Sprite) void {
     shared.allocator.free(s.imgPath);
     sdl.destroyTexture(s.texture);
-    sdl.freeSurface(s.surface);
+    sdl.destroySurface(s.surface);
 }
 
 pub fn cleanupAll() void {

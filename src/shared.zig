@@ -1,7 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
-const image = @import("zsdl_image");
-const ttf = @import("zsdl_ttf");
+const sdl = @import("sdl.zig");
 
 const box2d = @import("box2d.zig");
 
@@ -28,7 +26,7 @@ const SharedResourcesError = error{Uninitialized};
 pub const SharedResources = struct {
     worldId: box2d.c.b2WorldId,
     renderer: *sdl.Renderer,
-    monocraftFont: *ttf.Font,
+    monocraftFont: *sdl.Font,
 };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -51,12 +49,12 @@ pub fn init() !SharedResources {
     time.init();
     try audio.init();
 
-    try ttf.init();
+    try sdl.ttf.init();
 
-    const monocraftFont = try ttf.Font.open(monocraftSrc, 16);
+    const monocraftFont = try sdl.ttf.openFont(monocraftSrc, 16);
 
     const sdlWindow = try window.getWindow();
-    const renderer = try sdl.createRenderer(sdlWindow, null, .{ .accelerated = true, .present_vsync = true });
+    const renderer = try sdl.createRenderer(sdlWindow);
 
     const gravity = box2d.c.b2Vec2{ .x = 0.0, .y = 10 };
     var worldDef = box2d.c.b2DefaultWorldDef();
@@ -85,10 +83,10 @@ pub fn cleanup() void {
 
     if (maybeResources) |resources| {
         box2d.c.b2DestroyWorld(resources.worldId);
-        ttf.Font.close(resources.monocraftFont);
+        sdl.ttf.closeFont(resources.monocraftFont);
         sdl.destroyRenderer(resources.renderer);
     }
-    ttf.quit();
+    sdl.ttf.quit();
 
     const deInitStatus = gpa.deinit();
     if (deInitStatus == .leak) @panic("We are leaking memory");

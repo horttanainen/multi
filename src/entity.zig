@@ -1,6 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
-const image = @import("zsdl_image");
+const sdl = @import("sdl.zig");
 
 const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
@@ -196,8 +195,7 @@ pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
     }
 }
 
-fn markEntityForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn markEntityForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
 
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);

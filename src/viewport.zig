@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
 const window = @import("window.zig");

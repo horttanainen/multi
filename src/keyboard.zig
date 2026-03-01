@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 const shared = @import("shared.zig");
 const sprite = @import("sprite.zig");
@@ -76,6 +76,10 @@ pub fn createController(playerId: usize, color: sprite.Color) ?controller.Contro
     return null;
 }
 
+fn key(keyStates: []const bool, scancode: sdl.Scancode) bool {
+    return keyStates[@as(usize, @intCast(@intFromEnum(scancode)))];
+}
+
 pub fn handle(ctrl: *const controller.Controller) void {
     const bindings = ctrl.keyBindings orelse return;
 
@@ -83,8 +87,8 @@ pub fn handle(ctrl: *const controller.Controller) void {
     var aimDirection = vec.zero;
 
     // Movement
-    const movingLeft = keyStates[@intFromEnum(bindings.moveLeft)] == 1;
-    const movingRight = keyStates[@intFromEnum(bindings.moveRight)] == 1;
+    const movingLeft = key(keyStates, bindings.moveLeft);
+    const movingRight = key(keyStates, bindings.moveRight);
 
     if (movingLeft) {
         control.executeAction(ctrl.playerId, .move_left);
@@ -98,21 +102,21 @@ pub fn handle(ctrl: *const controller.Controller) void {
     }
 
     // Jump
-    if (keyStates[@intFromEnum(bindings.jump)] == 1) {
+    if (key(keyStates, bindings.jump)) {
         control.executeAction(ctrl.playerId, .jump);
     }
 
     // Aiming - accumulate directions
-    if (keyStates[@intFromEnum(bindings.aimLeft)] == 1) {
+    if (key(keyStates, bindings.aimLeft)) {
         aimDirection = vec.add(aimDirection, vec.west);
     }
-    if (keyStates[@intFromEnum(bindings.aimRight)] == 1) {
+    if (key(keyStates, bindings.aimRight)) {
         aimDirection = vec.add(aimDirection, vec.east);
     }
-    if (keyStates[@intFromEnum(bindings.aimUp)] == 1) {
+    if (key(keyStates, bindings.aimUp)) {
         aimDirection = vec.add(aimDirection, vec.north);
     }
-    if (keyStates[@intFromEnum(bindings.aimDown)] == 1) {
+    if (key(keyStates, bindings.aimDown)) {
         aimDirection = vec.add(aimDirection, vec.south);
     }
 
@@ -123,15 +127,15 @@ pub fn handle(ctrl: *const controller.Controller) void {
     }
 
     // Shooting
-    if (keyStates[@intFromEnum(bindings.shoot)] == 1) {
+    if (key(keyStates, bindings.shoot)) {
         control.executeAction(ctrl.playerId, .shoot);
     }
 
-    if (keyStates[@intFromEnum(bindings.rope)] == 1) {
+    if (key(keyStates, bindings.rope)) {
         control.executeAction(ctrl.playerId, .rope);
     }
 
-    if (keyStates[@intFromEnum(bindings.sprayPaint)] == 1) {
+    if (key(keyStates, bindings.sprayPaint)) {
         control.executeAction(ctrl.playerId, .spray_paint);
     }
 }

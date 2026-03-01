@@ -1,4 +1,5 @@
 const std = @import("std");
+const sdl = @import("sdl.zig");
 const shared = @import("shared.zig");
 const timer = @import("sdl_timer.zig");
 const config = @import("config.zig");
@@ -63,8 +64,7 @@ pub fn playFor(audio: Audio) !void {
     _ = timer.addTimer(audio.durationMs, shutSound, @ptrFromInt(id));
 }
 
-fn shutSound(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn shutSound(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const id: usize = @intFromPtr(param.?);
 
     if (activeSounds.fetchRemove(id)) |kv| {

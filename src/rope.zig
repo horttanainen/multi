@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 const box2d = @import("box2d.zig");
 const vec = @import("vector.zig");
 const config = @import("config.zig");
@@ -133,18 +133,18 @@ fn getRopeByHookBody(bodyId: box2d.c.b2BodyId) ?*Rope {
     return null;
 }
 
-fn attach(rope: *Rope, targetBodyId: box2d.c.b2BodyId) void {
-    rope.state = .attached;
-    rope.attachedToBodyId = targetBodyId;
+fn attach(r: *Rope, targetBodyId: box2d.c.b2BodyId) void {
+    r.state = .attached;
+    r.attachedToBodyId = targetBodyId;
 
     const resources = shared.getResources() catch return;
 
     // Get the hook's current position to use as the anchor point
-    const hookPos = box2d.c.b2Body_GetPosition(rope.hookBodyId);
+    const hookPos = box2d.c.b2Body_GetPosition(r.hookBodyId);
 
     // Create a weld joint to attach the hook to the target body
     var weldDef = box2d.c.b2DefaultWeldJointDef();
-    weldDef.bodyIdA = rope.hookBodyId;
+    weldDef.bodyIdA = r.hookBodyId;
     weldDef.bodyIdB = targetBodyId;
 
     // Set local anchors - hook anchor at center, target anchor at the contact point
@@ -163,13 +163,13 @@ fn attach(rope: *Rope, targetBodyId: box2d.c.b2BodyId) void {
     };
 
     // Reference angle is the difference between hook and target rotation
-    const hookRot = box2d.c.b2Body_GetRotation(rope.hookBodyId);
+    const hookRot = box2d.c.b2Body_GetRotation(r.hookBodyId);
     weldDef.referenceAngle = std.math.atan2(
         hookRot.s * targetRot.c - hookRot.c * targetRot.s,
         hookRot.c * targetRot.c + hookRot.s * targetRot.s,
     );
 
-    rope.jointId = box2d.c.b2CreateWeldJoint(resources.worldId, &weldDef);
+    r.jointId = box2d.c.b2CreateWeldJoint(resources.worldId, &weldDef);
 }
 
 pub fn applyTension() void {
@@ -264,7 +264,7 @@ fn drawRopeSegments(renderer: *sdl.Renderer, segmentSprite: sprite.Sprite, start
             &rect,
             angleDegrees + 90.0,
             null,
-            sdl.RendererFlip.none,
+            .none,
         );
     }
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const image = @import("zsdl_image");
+const sdl = @import("sdl.zig");
 
 const entity = @import("entity.zig");
 const shared = @import("shared.zig");

@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 var freqMs: u64 = 0;
 var lastTime: u64 = 0;

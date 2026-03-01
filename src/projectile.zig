@@ -1,4 +1,5 @@
 const std = @import("std");
+const sdl = @import("sdl.zig");
 const timer = @import("sdl_timer.zig");
 
 const audio = @import("audio.zig");
@@ -45,7 +46,7 @@ pub const Shrapnel = struct {
     id: usize,
     cleaned: bool,
     bodies: []box2d.c.b2BodyId,
-    timerId: i32,
+    timerId: sdl.TimerID,
 };
 
 pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocator);
@@ -252,8 +253,7 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
     try explodeAt(pos, explosion, attackerId);
 }
 
-fn markShrapnelForCleanup(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn markShrapnelForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const shrapnelId: usize = @intFromPtr(param.?);
 
     shrapnel.mutex.lock();

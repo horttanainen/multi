@@ -1,4 +1,3 @@
-const sdl = @import("zsdl");
 const box2d = @import("box2d.zig");
 const std = @import("std");
 
@@ -38,7 +37,14 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: move sdl_timer.zig to sdl.zig
+//TODO: is shared.zig necessary anymore?
+//TODO: investigate why aiming is so snappy
+
 //TODO: buy rounds game and steal their ideas
+//TODO: create a rounds style 1v1 level with single camera
+//TODO: make it possible to switch to the current level with splitscreen with its camera distance, both should be supported
+
 //TODO: e.g. different levels can have different camera distances
 //TODO: enable ricochets for some slugs
 //TODO: make slug glow configurable

@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 const shared = @import("shared.zig");
 const sprite = @import("sprite.zig");
@@ -13,37 +13,37 @@ pub const MOVEMENT_THRESHOLD: f32 = 0.2;
 pub const axisMax: f32 = 32767.0;
 
 pub const GamepadState = struct {
-    controller: ?*sdl.GameController,
-    deviceIndex: i32,
+    gamepad: ?*sdl.Gamepad,
+    instanceId: sdl.c.SDL_JoystickID,
 };
 
 pub const GamepadBindings = struct {
     // Movement
-    moveLeftAxis: sdl.GameController.Axis,
-    moveRightAxis: sdl.GameController.Axis,
+    moveLeftAxis: sdl.GamepadAxis,
+    moveRightAxis: sdl.GamepadAxis,
     moveThreshold: f32,
 
     // Jump
-    jumpButton: sdl.GameController.Button,
+    jumpButton: sdl.GamepadButton,
 
     // Aiming
-    aimXAxis: sdl.GameController.Axis,
-    aimYAxis: sdl.GameController.Axis,
+    aimXAxis: sdl.GamepadAxis,
+    aimYAxis: sdl.GamepadAxis,
     aimThreshold: f32,
 
     // Shooting
-    shootAxis: sdl.GameController.Axis,
+    shootAxis: sdl.GamepadAxis,
     shootThreshold: f32,
 
     // Rope
-    ropeButton: sdl.GameController.Button,
+    ropeButton: sdl.GamepadButton,
 
     // Spray paint
-    sprayPaintButton: sdl.GameController.Button,
+    sprayPaintButton: sdl.GamepadButton,
 
     // Weapon switching
-    weaponNextButton: sdl.GameController.Button,
-    weaponPrevButton: sdl.GameController.Button,
+    weaponNextButton: sdl.GamepadButton,
+    weaponPrevButton: sdl.GamepadButton,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -72,21 +72,21 @@ pub var availableGamepads: std.ArrayList(GamepadState) = .{};
 
 pub var assignedGamepads: std.AutoHashMapUnmanaged(usize, GamepadState) = .{};
 
-fn openGamepad(deviceIndex: i32) !void {
-    const gc = try sdl.gameControllerOpen(deviceIndex);
+fn openGamepad(instanceId: sdl.c.SDL_JoystickID) !void {
+    const gp = try sdl.openGamepad(instanceId);
 
     const gamepadState = GamepadState{
-        .controller = gc,
-        .deviceIndex = deviceIndex,
+        .gamepad = gp,
+        .instanceId = instanceId,
     };
 
     try availableGamepads.append(shared.allocator, gamepadState);
-    std.debug.print("Gamepad {d} detected and added to available list\n", .{deviceIndex});
+    std.debug.print("Gamepad {d} detected and added to available list\n", .{instanceId});
 }
 
-pub fn handleDeviceAdded(deviceIndex: i32) !void {
-    openGamepad(deviceIndex) catch |err| {
-        std.debug.print("Failed to open gamepad {d}: {}\n", .{ deviceIndex, err });
+pub fn handleDeviceAdded(instanceId: sdl.c.SDL_JoystickID) !void {
+    openGamepad(instanceId) catch |err| {
+        std.debug.print("Failed to open gamepad {d}: {}\n", .{ instanceId, err });
         return;
     };
 
@@ -95,16 +95,16 @@ pub fn handleDeviceAdded(deviceIndex: i32) !void {
     };
 }
 
-pub fn handleDeviceRemoved(deviceIndex: i32) void {
+pub fn handleDeviceRemoved(instanceId: sdl.c.SDL_JoystickID) void {
     var iter = assignedGamepads.iterator();
     var playerIdToRemove: ?usize = null;
     while (iter.next()) |entry| {
-        if (entry.value_ptr.deviceIndex == deviceIndex) {
-            if (entry.value_ptr.controller) |ctrl| {
-                sdl.gameControllerClose(ctrl);
+        if (entry.value_ptr.instanceId == instanceId) {
+            if (entry.value_ptr.gamepad) |gp| {
+                sdl.closeGamepad(gp);
             }
             playerIdToRemove = entry.key_ptr.*;
-            std.debug.print("Gamepad {d} disconnected from player {d}\n", .{ deviceIndex, entry.key_ptr.* });
+            std.debug.print("Gamepad {d} disconnected from player {d}\n", .{ instanceId, entry.key_ptr.* });
             break;
         }
     }
@@ -113,12 +113,12 @@ pub fn handleDeviceRemoved(deviceIndex: i32) void {
     }
 
     for (availableGamepads.items, 0..) |gp, i| {
-        if (gp.deviceIndex == deviceIndex) {
-            if (gp.controller) |ctrl| {
-                sdl.gameControllerClose(ctrl);
+        if (gp.instanceId == instanceId) {
+            if (gp.gamepad) |ctrl| {
+                sdl.closeGamepad(ctrl);
             }
             _ = availableGamepads.swapRemove(i);
-            std.debug.print("Gamepad {d} removed from available list\n", .{deviceIndex});
+            std.debug.print("Gamepad {d} removed from available list\n", .{instanceId});
             break;
         }
     }
@@ -164,9 +164,9 @@ pub fn handle(ctrl: *const controller.Controller) void {
     const bindings = ctrl.gamepadBindings orelse return;
 
     const gp = assignedGamepads.get(ctrl.playerId) orelse return;
-    const sdlCtrl = gp.controller orelse return;
+    const sdlGamepad = gp.gamepad orelse return;
 
-    const moveAxis = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.moveLeftAxis));
+    const moveAxis = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveLeftAxis));
     if (moveAxis < -bindings.moveThreshold) {
         control.executeAction(ctrl.playerId, .move_left);
     } else if (moveAxis > bindings.moveThreshold) {
@@ -175,12 +175,12 @@ pub fn handle(ctrl: *const controller.Controller) void {
         control.executeAction(ctrl.playerId, .brake);
     }
 
-    if (sdl.gameControllerGetButton(sdlCtrl, bindings.jumpButton)) {
+    if (sdl.getGamepadButton(sdlGamepad, bindings.jumpButton)) {
         control.executeAction(ctrl.playerId, .jump);
     }
 
-    const aimX = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.aimXAxis));
-    const aimY = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.aimYAxis));
+    const aimX = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis));
+    const aimY = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis));
 
     if (@abs(aimX) > bindings.aimThreshold or @abs(aimY) > bindings.aimThreshold) {
         const aimDirection = vec.Vec2{ .x = aimX, .y = -aimY };
@@ -189,30 +189,30 @@ pub fn handle(ctrl: *const controller.Controller) void {
         control.executeAimRelease(ctrl.playerId);
     }
 
-    const shootValue = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, bindings.shootAxis));
+    const shootValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.shootAxis));
     if (shootValue > bindings.shootThreshold) {
         control.executeAction(ctrl.playerId, .shoot);
     }
 
-    const zoomValue = normalizeAxis(sdl.gameControllerGetAxis(sdlCtrl, .triggerleft));
+    const zoomValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, .triggerleft));
     if (zoomValue > TRIGGER_THRESHOLD) {
         control.executeZoom(ctrl.playerId);
     } else {
         control.executeZoomRelease(ctrl.playerId);
     }
 
-    if (sdl.gameControllerGetButton(sdlCtrl, bindings.ropeButton)) {
+    if (sdl.getGamepadButton(sdlGamepad, bindings.ropeButton)) {
         control.executeAction(ctrl.playerId, .rope);
     }
 
-    if (sdl.gameControllerGetButton(sdlCtrl, bindings.sprayPaintButton)) {
+    if (sdl.getGamepadButton(sdlGamepad, bindings.sprayPaintButton)) {
         control.executeAction(ctrl.playerId, .spray_paint);
     }
 
-    if (sdl.gameControllerGetButton(sdlCtrl, bindings.weaponNextButton)) {
+    if (sdl.getGamepadButton(sdlGamepad, bindings.weaponNextButton)) {
         control.executeAction(ctrl.playerId, .weapon_next);
     }
-    if (sdl.gameControllerGetButton(sdlCtrl, bindings.weaponPrevButton)) {
+    if (sdl.getGamepadButton(sdlGamepad, bindings.weaponPrevButton)) {
         control.executeAction(ctrl.playerId, .weapon_prev);
     }
 }
@@ -220,15 +220,15 @@ pub fn handle(ctrl: *const controller.Controller) void {
 pub fn cleanup() void {
     var iter = assignedGamepads.valueIterator();
     while (iter.next()) |gp| {
-        if (gp.controller) |ctrl| {
-            sdl.gameControllerClose(ctrl);
+        if (gp.gamepad) |ctrl| {
+            sdl.closeGamepad(ctrl);
         }
     }
     assignedGamepads.deinit(shared.allocator);
 
     for (availableGamepads.items) |gp| {
-        if (gp.controller) |ctrl| {
-            sdl.gameControllerClose(ctrl);
+        if (gp.gamepad) |ctrl| {
+            sdl.closeGamepad(ctrl);
         }
     }
     availableGamepads.deinit(shared.allocator);

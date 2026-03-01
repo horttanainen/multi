@@ -1,6 +1,6 @@
 const box2d = @import("box2d.zig");
 const std = @import("std");
-const sdl = @import("zsdl");
+const sdl = @import("sdl.zig");
 
 const shared = @import("shared.zig");
 const polygon = @import("polygon.zig");

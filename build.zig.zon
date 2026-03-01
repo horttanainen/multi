@@ -3,21 +3,17 @@
     .fingerprint = 0xc59143053b31ea74,
     .version = "0.0.0",
     .dependencies = .{
-        .zsdl = .{
-            .url = "https://github.com/zig-gamedev/zsdl/archive/a764b0ee51a157a6133007e4f423a869df9e31d7.tar.gz",
-            .hash = "zsdl-0.4.0-dev-rFpjE2BgWQADibKkkIjv0Ig8k96MOu3Yeo6e0n9OD85L",
+        .SDL3 = .{
+            .url = "git+https://github.com/allyourcodebase/SDL3?ref=main#467a4baad2acdda1bcf717065793fbbdf2569f8d",
+            .hash = "sdl-0.0.0-i4QD0WN-qQB1RKdRC9-6iZyTco2jIIr3y2DFrAz-D9CH",
         },
         .SDL_image = .{
-            .url = "https://github.com/allyourcodebase/SDL_image/archive/19dd7b87d0085814b02426d6cb0f6ddcae0b94ec.tar.gz",
-            .hash = "SDL_image-2.8.8--aJoHT8XAADaf5X2s-Lrs43rXMeutgcZZ8IMq0PHsOdc",
+            .url = "git+https://github.com/allyourcodebase/SDL_image?ref=main#971b1227ecde1450c95acef110191a775cd9da23",
+            .hash = "SDL_image-3.4.0--aJoHcoWAAB0fnqTA4tSSKuhV4Lt_mAPzqiG64dGdPup",
         },
         .SDL_ttf = .{
-            .url = "https://github.com/allyourcodebase/SDL_ttf/archive/2a67280b90590ed65ca57e6a8930f04284078795.tar.gz",
-            .hash = "SDL_ttf-2.24.0-PNW5xOwPAADGVve3FrqTrfwqVsLIvwMlayq6GOJHD6F0",
-        },
-        .SDL = .{
-            .url = "https://github.com/allyourcodebase/SDL/archive/d29847ebcb6da34dec466a06163431982500a092.tar.gz",
-            .hash = "SDL-2.32.6-JToi38aTEgECY2mV9iUG7dNouCbarfJ1mkzjjm53gC80",
+            .url = "git+https://github.com/allyourcodebase/SDL_ttf?ref=main#00bf02e44d486787034ccdc3eced6e455b125f56",
+            .hash = "SDL_ttf-3.2.2-PNW5xNIRAADcUkA75pWizqojQE4hM75QjOequyw4aET6",
         },
     },
     .paths = .{

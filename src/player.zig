@@ -1,6 +1,5 @@
 const std = @import("std");
-const sdl = @import("zsdl");
-const image = @import("zsdl_image");
+const sdl = @import("sdl.zig");
 
 const camera = @import("camera.zig");
 const delay = @import("delay.zig");
@@ -58,7 +57,7 @@ pub const Player = struct {
     crosshairUuid: u64,
     health: f32,
     isDead: bool,
-    respawnTimerId: i32,
+    respawnTimerId: sdl.TimerID,
     isZooming: bool,
     zoomOffset: vec.Vec2,
     leftHandSpriteUuid: u64,
@@ -72,8 +71,7 @@ const PlayerError = error{PlayerUnspawned};
 var runAnimationFrameCount: usize = 10;
 var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(shared.allocator);
 
-fn markPlayerForRespawn(interval: u32, param: ?*anyopaque) callconv(.c) u32 {
-    _ = interval;
+fn markPlayerForRespawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     if (param) |p| {
         // Subtract 1 because we added 1 to avoid null pointer (player ID 0 would be null)
         const playerId: usize = @intFromPtr(p) - 1;
@@ -136,11 +134,11 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
 
 pub fn spawn(position: vec.IVec2) !usize {
     const resources = try shared.getResources();
-    const surface = try image.load(shared.lieroImgSrc);
+    const surface = try sdl.image.load(shared.lieroImgSrc);
     const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, null, null, &size.x, &size.y);
+    try sdl.queryTexture(texture, &size.x, &size.y);
 
     const pos = conv.pixel2M(position);
 
@@ -292,7 +290,7 @@ pub fn spawn(position: vec.IVec2) !usize {
         .cameraId = cameraId,
         .health = 100,
         .isDead = false,
-        .respawnTimerId = -1,
+        .respawnTimerId = 0,
         .isZooming = false,
         .zoomOffset = vec.zero,
         .leftHandSpriteUuid = leftHandSpriteUuid,
@@ -1039,7 +1037,7 @@ pub fn processRespawns() !void {
             }
 
             p.isDead = false;
-            p.respawnTimerId = -1;
+            p.respawnTimerId = 0;
         }
     }
 
@@ -1048,7 +1046,7 @@ pub fn processRespawns() !void {
 
 pub fn cleanup() void {
     for (players.values()) |*p| {
-        if (p.respawnTimerId != -1) {
+        if (p.respawnTimerId != 0) {
             _ = timer.removeTimer(p.respawnTimerId);
         }
 
