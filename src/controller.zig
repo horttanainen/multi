@@ -82,7 +82,7 @@ pub fn init() !void {
     try availableColors.append(shared.allocator, .{ .r = 255, .g = 1, .b = 1 });
     try availableColors.append(shared.allocator, .{ .r = 1, .g = 1, .b = 255 });
     try availableColors.append(shared.allocator, .{ .r = 1, .g = 255, .b = 1 });
-    try availableColors.append(shared.allocator, .{ .r = 255, .g = 1, .b = 255 });
+    try availableColors.append(shared.allocator, .{ .r = 20, .g = 200, .b = 255 });
 }
 
 pub fn cleanup() void {

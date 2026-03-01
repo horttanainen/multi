@@ -135,7 +135,7 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
 pub fn spawn(position: vec.IVec2) !usize {
     const resources = try shared.getResources();
     const surface = try sdl.image.load(shared.lieroImgSrc);
-    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
+    const texture = try sdl.addToAtlas(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
     try sdl.queryTexture(texture, &size.x, &size.y);

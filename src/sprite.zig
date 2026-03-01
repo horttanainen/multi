@@ -47,6 +47,16 @@ pub const SerializableEntity = struct {
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 
+// Texture cache: maps image path → atlas region + dimensions.
+// Sprites with the same image share the same atlas region for draw call batching.
+const CachedTexInfo = struct {
+    atlas_x: u32,
+    atlas_y: u32,
+    width: i32,
+    height: i32,
+};
+var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
+
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
     const resources = try shared.getResources();
     const renderer = resources.renderer;
@@ -152,8 +162,28 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
     const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
 
-    const resources = try shared.getResources();
-    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
+    // Check texture cache - share atlas region for sprites with same image
+    const texture = if (textureCache.get(imagePath)) |cached| blk: {
+        const tex = try std.heap.c_allocator.create(sdl.Texture);
+        tex.* = .{
+            .atlas_x = cached.atlas_x,
+            .atlas_y = cached.atlas_y,
+            .width = cached.width,
+            .height = cached.height,
+            .is_atlas = true,
+        };
+        break :blk tex;
+    } else blk: {
+        const resources = try shared.getResources();
+        const tex = try sdl.addToAtlas(resources.renderer, surface);
+        textureCache.put(imgPath, .{
+            .atlas_x = tex.atlas_x,
+            .atlas_y = tex.atlas_y,
+            .width = tex.width,
+            .height = tex.height,
+        }) catch {};
+        break :blk tex;
+    };
     errdefer sdl.destroyTexture(texture);
 
     var size: sdl.Point = undefined;
@@ -199,8 +229,6 @@ pub fn createCopy(spriteUuid: u64) !u64 {
 
     const newUuid = uuid.generate();
 
-    const resources = try shared.getResources();
-
     const format: sdl.PixelFormat = @enumFromInt(originalSprite.surface.format);
     const copiedSurface = try sdl.createSurface(
         originalSprite.surface.w,
@@ -211,7 +239,8 @@ pub fn createCopy(spriteUuid: u64) !u64 {
 
     try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
-    const copiedTexture = try sdl.createTextureFromSurface(resources.renderer, copiedSurface);
+    // Share atlas region with original (just copy atlas coordinates)
+    const copiedTexture = try sdl.cloneTexture(originalSprite.texture);
     errdefer sdl.destroyTexture(copiedTexture);
 
     const imgPathCopy = try shared.allocator.dupe(u8, originalSprite.imgPath);
@@ -490,15 +519,22 @@ pub fn paintSpriteOnSurface(
 }
 
 pub fn updateTextureFromSurface(spriteUuid: u64) !void {
-    const sprite = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
+    const s = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
 
-    const resources = try shared.getResources();
+    // If this atlas texture might share its region with other sprites (via cache),
+    // allocate a new private atlas region so we don't overwrite shared data.
+    if (s.texture.is_atlas) {
+        if (textureCache.get(s.imgPath)) |cached| {
+            if (s.texture.atlas_x == cached.atlas_x and s.texture.atlas_y == cached.atlas_y) {
+                // Still pointing at the shared cached region — allocate a private copy
+                try sdl.reallocateAtlasRegion(s.texture, s.surface);
+                return;
+            }
+        }
+    }
 
-    // Destroy old texture
-    sdl.destroyTexture(sprite.texture);
-
-    // Create new texture from modified surface
-    sprite.texture = try sdl.createTextureFromSurface(resources.renderer, sprite.surface);
+    // Already private or standalone — just re-upload in place
+    try sdl.reuploadTexture(s.texture, s.surface);
 }
 
 pub fn isAny(_: u8, _: u8, _: u8) bool {
@@ -575,8 +611,6 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
     const tilesX = (width + maxTileSize - 1) / maxTileSize;
     const tilesY = (height + maxTileSize - 1) / maxTileSize;
 
-    const resources = try shared.getResources();
-
     // Create tiles
     var tileY: u32 = 0;
     while (tileY < tilesY) : (tileY += 1) {
@@ -607,8 +641,15 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
             };
             sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null) catch continue;
 
-            // Create texture from tile surface
-            const tileTexture = sdl.createTextureFromSurface(resources.renderer, tileSurface) catch continue;
+            // Create atlas sub-region texture referencing the parent's atlas region
+            const tileTexture = std.heap.c_allocator.create(sdl.Texture) catch continue;
+            tileTexture.* = .{
+                .atlas_x = originalSprite.texture.atlas_x + startX,
+                .atlas_y = originalSprite.texture.atlas_y + startY,
+                .width = @intCast(tileWidth),
+                .height = @intCast(tileHeight),
+                .is_atlas = true,
+            };
 
             // Calculate tile offset in meters from original sprite center
             // Tile center in unscaled pixels
@@ -707,6 +748,10 @@ pub fn cleanupAll() void {
         cleanupOne(s);
     }
     sprites.map.clearRetainingCapacity();
+
+    // Clear texture cache and reset atlas packer for level reload
+    textureCache.clearRetainingCapacity();
+    sdl.resetAtlas();
 }
 
 pub fn deinit() void {

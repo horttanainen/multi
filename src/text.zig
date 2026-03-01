@@ -12,7 +12,7 @@ pub fn writeAt(text: [:0]const u8, position: IVec2) !void {
     const surface = try sdl.ttf.renderTextSolid(resources.monocraftFont, text, color);
     defer sdl.destroySurface(surface);
 
-    const texture = try sdl.createTextureFromSurface(resources.renderer, surface);
+    const texture = try sdl.createStandaloneTexture(resources.renderer, surface);
     defer sdl.destroyTexture(texture);
 
     const rect = sdl.Rect{ .x = position.x, .y = position.y, .w = surface.*.w, .h = surface.*.h };

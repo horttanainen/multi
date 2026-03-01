@@ -75,6 +75,16 @@ pub fn handleGlobalHotkeys() void {
             delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
         }
     }
+
+    // § key - dump atlas texture to disk (try both grave and nonusbackslash for Nordic keyboards)
+    if (currentKeyStates[@intFromEnum(sdl.Scancode.grave)] or
+        currentKeyStates[@intFromEnum(sdl.Scancode.nonusbackslash)])
+    {
+        if (!delay.check("atlasDump")) {
+            sdl.saveAtlasToDisk("atlas_dump.png");
+            delay.action("atlasDump", 1000);
+        }
+    }
 }
 
 pub fn executeAction(playerId: usize, action: controller.GameAction) void {
