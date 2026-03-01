@@ -37,9 +37,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: move atlas and texture stuff out of sdl.zig we could have texture.zig and atlas.zig
-//TODO: move render pipeline out of sdl.zig. E.g to pipeline.zig
-
 //TODO: add rounds pistol with the glow and spark effect and heavy drop
 
 //Level ideas:
