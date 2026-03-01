@@ -51,7 +51,7 @@ pub fn init() !SharedResources {
 
     try sdl.ttf.init();
 
-    const monocraftFont = try sdl.ttf.openFont(monocraftSrc, 16);
+    const monocraftFont = try sdl.ttf.openFont(monocraftSrc, 24);
 
     const sdlWindow = try window.getWindow();
     const renderer = try sdl.createRenderer(sdlWindow);

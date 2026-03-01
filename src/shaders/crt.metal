@@ -50,12 +50,16 @@ fragment float4 crt_frag(
         return float4(0.0, 0.0, 0.0, 1.0);
     }
 
+    // Downsample to virtual CRT resolution by snapping UVs to pixel grid
+    float2 pixel = floor(distorted_uv * uniforms.resolution) + 0.5;
+    float2 snapped_uv = pixel / uniforms.resolution;
+
     // Chromatic aberration - offset R/G/B channels slightly
     float aberration = 0.002;
-    float2 dir = distorted_uv - 0.5;
-    float r = scene_tex.sample(smp, distorted_uv + dir * aberration).r;
-    float g = scene_tex.sample(smp, distorted_uv).g;
-    float b = scene_tex.sample(smp, distorted_uv - dir * aberration).b;
+    float2 dir = snapped_uv - 0.5;
+    float r = scene_tex.sample(smp, snapped_uv + dir * aberration).r;
+    float g = scene_tex.sample(smp, snapped_uv).g;
+    float b = scene_tex.sample(smp, snapped_uv - dir * aberration).b;
     float3 color = float3(r, g, b);
 
     // Scanlines - darken every other pixel row

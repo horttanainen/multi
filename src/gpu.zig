@@ -1051,7 +1051,7 @@ fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.
         };
         c.SDL_BindGPUFragmentSamplers(cp, 0, &crt_sampler_binding, 1);
 
-        const crt_uniforms = CrtUniforms{ .resolution = .{ g.swapchain_w, g.swapchain_h } };
+        const crt_uniforms = CrtUniforms{ .resolution = .{ 1280.0, 720.0 } };
         c.SDL_PushGPUFragmentUniformData(cmd, 0, &crt_uniforms, @sizeOf(CrtUniforms));
 
         c.SDL_DrawGPUPrimitives(cp, 6, 1, 0, 0);
