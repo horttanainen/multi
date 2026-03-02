@@ -16,7 +16,6 @@ const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
 const uuid = @import("uuid.zig");
-const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 
 pub const Color = struct {
@@ -704,7 +703,7 @@ pub fn cleanupLater(spriteUuid: u64) void {
         return;
     }
     const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
-    _ = timer.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
+    _ = sdl.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
 }
 
 fn markSpriteForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {

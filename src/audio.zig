@@ -1,7 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 const shared = @import("shared.zig");
-const timer = @import("sdl_timer.zig");
 const config = @import("config.zig");
 
 const c = @cImport({
@@ -61,7 +60,7 @@ pub fn playFor(audio: Audio) !void {
     nextId += 1;
     try activeSounds.put(id, entry);
 
-    _ = timer.addTimer(audio.durationMs, shutSound, @ptrFromInt(id));
+    _ = sdl.addTimer(audio.durationMs, shutSound, @ptrFromInt(id));
 }
 
 fn shutSound(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {

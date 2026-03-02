@@ -43,7 +43,6 @@ const Sprite = entity.Sprite;
 //TODO: nothing: physics and gun is set so that both players need to shoot down from time to time to levitate and then of course shoot each other
 //TODO: breakfloor: all stuff dangle and you can shoot boxes in the ropes to make the platforms fall down
 
-//TODO: move sdl_timer.zig to sdl.zig
 //TODO: is shared.zig necessary anymore?
 //TODO: investigate why aiming is so snappy
 //TODO: investigate if it would be simpler to migrate to sdl_audio

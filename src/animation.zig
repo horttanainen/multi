@@ -9,7 +9,6 @@ const entity = @import("entity.zig");
 const time = @import("time.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const fs = @import("fs.zig");
-const timer = @import("sdl_timer.zig");
 
 pub const Animation = struct {
     fps: i32,
@@ -101,7 +100,7 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
         const delayMs: u32 = @intFromFloat(anim.switchDelay * 1000.0);
         delayedSwitches.put(shared.allocator, bodyId, false) catch return;
         const keyPtr = delayedSwitches.getPtr(bodyId).?;
-        _ = timer.addTimer(delayMs, delayedSwitchCallback, @ptrCast(keyPtr));
+        _ = sdl.addTimer(delayMs, delayedSwitchCallback, @ptrCast(keyPtr));
         return;
     }
 

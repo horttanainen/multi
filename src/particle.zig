@@ -1,6 +1,5 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
-const timer = @import("sdl_timer.zig");
 
 const vec = @import("vector.zig");
 const sprite = @import("sprite.zig");
@@ -35,8 +34,8 @@ pub fn create(bodyId: box2d.c.b2BodyId, lifetime: u32, color: ?sprite.Color, sca
 
     const id_int: usize = @bitCast(bodyId);
     const ptr: ?*anyopaque = @ptrFromInt(id_int);
-    const timerId = timer.addTimer(lifetime, markParticleForCleanup, ptr);
-    errdefer _ = timer.removeTimer(timerId);
+    const timerId = sdl.addTimer(lifetime, markParticleForCleanup, ptr);
+    errdefer _ = sdl.removeTimer(timerId);
 
     const particle = Particle{
         .bodyId = bodyId,
@@ -222,7 +221,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
     // Mark blood particle for cleanup
     const maybeParticleToCleanup = particles.fetchSwapRemoveLocking(bloodBodyId);
     if (maybeParticleToCleanup) |p| {
-        _ = timer.removeTimer(p.value.timerId);
+        _ = sdl.removeTimer(p.value.timerId);
         sprite.cleanupLater(p.value.spriteUuid);
         try particlesToCleanup.appendLocking(bloodBodyId);
     }
@@ -309,7 +308,7 @@ pub fn cleanup() void {
     for (particles.map.keys()) |bodyId| {
         const maybeParticle = particles.map.get(bodyId);
         if (maybeParticle) |p| {
-            _ = timer.removeTimer(p.timerId);
+            _ = sdl.removeTimer(p.timerId);
             sprite.cleanupLater(p.spriteUuid);
         }
         if (box2d.c.b2Body_IsValid(bodyId)) {

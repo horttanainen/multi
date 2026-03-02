@@ -16,7 +16,6 @@ const weapon = @import("weapon.zig");
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
 const particle = @import("particle.zig");
-const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const rope = @import("rope.zig");
@@ -1005,7 +1004,7 @@ pub fn kill(p: *Player, killerId: ?usize) !void {
 
         //TODO: remove this silly stuff when we have a proper map of players and uuids for IDs
         // Add 1 to player ID to avoid null pointer (player ID 0 would become null)
-        p.respawnTimerId = timer.addTimer(config.respawnDelayMs, markPlayerForRespawn, @ptrFromInt(p.id + 1));
+        p.respawnTimerId = sdl.addTimer(config.respawnDelayMs, markPlayerForRespawn, @ptrFromInt(p.id + 1));
     }
 }
 
@@ -1047,7 +1046,7 @@ pub fn processRespawns() !void {
 pub fn cleanup() void {
     for (players.values()) |*p| {
         if (p.respawnTimerId != 0) {
-            _ = timer.removeTimer(p.respawnTimerId);
+            _ = sdl.removeTimer(p.respawnTimerId);
         }
 
         camera.destroyCamera(p.cameraId);

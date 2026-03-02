@@ -1,7 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
-const timer = @import("sdl_timer.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 
 const AutoArrayHashMap = std.AutoArrayHashMap;
@@ -179,7 +178,7 @@ pub fn cleanupLater(entity: Entity) void {
     const id_int: usize = @bitCast(entity.bodyId);
     const ptr: ?*anyopaque = @ptrFromInt(id_int);
 
-    _ = timer.addTimer(10, markEntityForCleanup, ptr);
+    _ = sdl.addTimer(10, markEntityForCleanup, ptr);
 }
 
 pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {

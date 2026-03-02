@@ -1,6 +1,5 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
-const timer = @import("sdl_timer.zig");
 
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
@@ -307,7 +306,7 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
     const explosionBodies = try createExplosion(pos, explosion);
 
     if (explosionBodies.len > 0) {
-        const timerId = timer.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
+        const timerId = sdl.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
         try shrapnel.appendLocking(.{
             .id = id,
             .cleaned = false,
@@ -448,7 +447,7 @@ pub fn cleanup() void {
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {
-        _ = timer.removeTimer(item.timerId);
+        _ = sdl.removeTimer(item.timerId);
         for (item.bodies) |toClean| {
             box2d.c.b2DestroyBody(toClean);
         }
