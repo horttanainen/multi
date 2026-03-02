@@ -1,7 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
@@ -80,7 +80,7 @@ fn openGamepad(instanceId: sdl.c.SDL_JoystickID) !void {
         .instanceId = instanceId,
     };
 
-    try availableGamepads.append(shared.allocator, gamepadState);
+    try availableGamepads.append(allocator, gamepadState);
     std.debug.print("Gamepad {d} detected and added to available list\n", .{instanceId});
 }
 
@@ -144,7 +144,7 @@ pub fn createController(playerId: usize, color: sprite.Color) ?controller.Contro
     }
     const gamepadState = maybeGamepad.?;
 
-    assignedGamepads.put(shared.allocator, playerId, gamepadState) catch {
+    assignedGamepads.put(allocator, playerId, gamepadState) catch {
         std.debug.print("Failed to assign gamepad to player {d}\n", .{playerId});
         return null;
     };
@@ -224,12 +224,12 @@ pub fn cleanup() void {
             sdl.closeGamepad(ctrl);
         }
     }
-    assignedGamepads.deinit(shared.allocator);
+    assignedGamepads.deinit(allocator);
 
     for (availableGamepads.items) |gp| {
         if (gp.gamepad) |ctrl| {
             sdl.closeGamepad(ctrl);
         }
     }
-    availableGamepads.deinit(shared.allocator);
+    availableGamepads.deinit(allocator);
 }

@@ -2,7 +2,8 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 
 const entity = @import("entity.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
+const state = @import("state.zig");
 const conv = @import("conversion.zig");
 const box2d = @import("box2d.zig");
 const level = @import("level.zig");
@@ -78,20 +79,20 @@ fn createNewVersion() !void {
 fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
-        const data = try currentlyOpenLevelFile.readToEndAlloc(shared.allocator, config.maxLevelSizeInBytes);
-        defer shared.allocator.free(data);
+        const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
+        defer allocator.free(data);
         const parsed = try level.parseFromData(data);
         defer parsed.deinit();
         var serializableLevel = parsed.value;
 
-        var entities = std.array_list.Managed(entity.SerializableEntity).init(shared.allocator);
+        var entities = std.array_list.Managed(entity.SerializableEntity).init(allocator);
         defer entities.deinit();
 
         try entities.appendSlice(serializableLevel.entities);
         try entities.append(serializableEntity);
 
         serializableLevel.entities = try entities.toOwnedSlice();
-        defer shared.allocator.free(serializableLevel.entities);
+        defer allocator.free(serializableLevel.entities);
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);
@@ -107,7 +108,7 @@ fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
 }
 
 fn createRandomAlphabeticalString(length: usize) ![]const u8 {
-    var buffer = std.array_list.Managed(u8).init(shared.allocator);
+    var buffer = std.array_list.Managed(u8).init(allocator);
 
     for (0..length) |_| {
         const randomInt = std.crypto.random.intRangeAtMost(u8, 97, 122);
@@ -118,7 +119,7 @@ fn createRandomAlphabeticalString(length: usize) ![]const u8 {
 }
 
 pub fn enter() !void {
-    shared.editingLevel = true;
+    state.editingLevel = true;
 
     if (maybeCurrentlyOpenLevelFile == null) {
         currentVersion = 0;
@@ -128,7 +129,7 @@ pub fn enter() !void {
 
 fn createCopyOfCurrentLevel() !void {
     const randomString = try createRandomAlphabeticalString(4);
-    defer shared.allocator.free(randomString);
+    defer allocator.free(randomString);
 
     var it = std.mem.splitSequence(u8, level.json, ".");
     const levelName = it.first();
@@ -165,7 +166,7 @@ pub fn exit() void {
     if (maybeSelectedBodyId) |selectedBodyId| {
         setSelection(selectedBodyId, false);
     }
-    shared.editingLevel = false;
+    state.editingLevel = false;
 }
 
 pub fn selectEntityAt(pos: vec.IVec2) !void {
@@ -178,10 +179,8 @@ pub fn selectEntityAt(pos: vec.IVec2) !void {
         .lowerBound = box2d.subtract(posM, .{ .x = 0.1, .y = 0.1 }),
         .upperBound = box2d.add(posM, .{ .x = 0.1, .y = 0.1 }),
     };
-    const resources = try shared.getResources();
-
     const filter = box2d.c.b2DefaultQueryFilter();
-    _ = box2d.c.b2World_OverlapAABB(resources.worldId, aabb, filter, &overlapAABBCallback, null);
+    _ = box2d.c.b2World_OverlapAABB(box2d.getWorldId(), aabb, filter, &overlapAABBCallback, null);
 }
 
 fn setSelection(bodyId: box2d.c.b2BodyId, select: bool) void {
@@ -209,7 +208,7 @@ fn findTemporaryFolders() ![][]const u8 {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
 
-    var folderList = std.array_list.Managed([]const u8).init(shared.allocator);
+    var folderList = std.array_list.Managed([]const u8).init(allocator);
 
     var dirIterator = dir.iterate();
 
@@ -228,11 +227,11 @@ pub fn cleanup() !void {
 
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
         try currentlyOpenFile.seekTo(0);
-        const data = try currentlyOpenFile.readToEndAlloc(shared.allocator, config.maxLevelSizeInBytes);
-        defer shared.allocator.free(data);
+        const data = try currentlyOpenFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
+        defer allocator.free(data);
 
         const randomString = try createRandomAlphabeticalString(4);
-        defer shared.allocator.free(randomString);
+        defer allocator.free(randomString);
 
         var buffer: [100]u8 = undefined;
         const newFileName = try std.fmt.bufPrint(&buffer, "{s}.json", .{randomString});
@@ -244,7 +243,7 @@ pub fn cleanup() !void {
     }
 
     const folders = try findTemporaryFolders();
-    defer shared.allocator.free(folders);
+    defer allocator.free(folders);
 
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
         currentlyOpenFile.close();

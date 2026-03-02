@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
 
-const shared = @import("shared.zig");
+const state = @import("state.zig");
 const config = @import("config.zig");
 const time = @import("time.zig");
 const text = @import("text.zig");
@@ -17,7 +17,7 @@ const controller = @import("controller.zig");
 const score = @import("score.zig");
 
 pub fn drawMode() !void {
-    const mode = if (shared.editingLevel) "LEVEL EDITOR" else "PLAY";
+    const mode = if (state.editingLevel) "LEVEL EDITOR" else "PLAY";
 
     const vp = viewport.activeViewport;
 
@@ -42,8 +42,8 @@ pub fn drawPlayerHealth() !void {
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             const currentState = box2d.getState(p.bodyId);
-            const state = box2d.getInterpolatedState(ent.state, currentState);
-            const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+            const interpState = box2d.getInterpolatedState(ent.state, currentState);
+            const playerPos = camera.relativePosition(conv.m2Pixel(interpState.pos));
 
             var buf: [32]u8 = undefined;
             const healthText = std.fmt.bufPrintZ(&buf, "{d}", .{@as(i32, @intFromFloat(p.health))}) catch return;
@@ -59,8 +59,6 @@ pub fn drawPlayerHealth() !void {
 }
 
 pub fn drawPlayerLocationsOnViewportBorder() !void {
-    const resources = try shared.getResources();
-
     const activeCamera = camera.getActiveCamera() orelse return;
     const vpPlayerId = activeCamera.playerId;
 
@@ -85,8 +83,8 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
         const ent = entity.getEntity(p.bodyId) orelse continue;
 
         const currentState = box2d.getState(p.bodyId);
-        const state = box2d.getInterpolatedState(ent.state, currentState);
-        const enemyPos = camera.relativePosition(conv.m2Pixel(state.pos));
+        const interpState = box2d.getInterpolatedState(ent.state, currentState);
+        const enemyPos = camera.relativePosition(conv.m2Pixel(interpState.pos));
 
         const enemyController = controller.controllers.get(p.id) orelse continue;
         const enemyColor = enemyController.color;
@@ -134,8 +132,8 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
             .h = indicatorSize,
         };
 
-        try gpu.setRenderDrawColor(resources.renderer, .{ .r = enemyColor.r, .g = enemyColor.g, .b = enemyColor.b, .a = 255 });
-        try gpu.renderFillRect(resources.renderer, rect);
+        try gpu.setRenderDrawColor(.{ .r = enemyColor.r, .g = enemyColor.g, .b = enemyColor.b, .a = 255 });
+        try gpu.renderFillRect(rect);
     }
 }
 

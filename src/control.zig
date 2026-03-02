@@ -7,7 +7,7 @@ const config = @import("config.zig");
 const collision = @import("collision.zig");
 const delay = @import("delay.zig");
 const camera = @import("camera.zig");
-const shared = @import("shared.zig");
+const state = @import("state.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const levelEditor = @import("leveleditor.zig");
@@ -63,7 +63,7 @@ pub fn handleGlobalHotkeys() void {
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
         if (!delay.check("quitGame")) {
-            shared.quitGame = true;
+            state.quitGame = true;
             delay.action("quitGame", config.quitGameDelayMs);
         }
     }

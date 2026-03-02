@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const config = @import("config.zig");
 
 const c = @cImport({
@@ -27,7 +27,7 @@ const SoundEntry = struct {
     data: []u8,
 };
 
-pub var activeSounds = std.AutoHashMap(usize, *SoundEntry).init(shared.allocator);
+pub var activeSounds = std.AutoHashMap(usize, *SoundEntry).init(allocator);
 var nextId: usize = 1;
 
 pub fn init() !void {
@@ -36,20 +36,20 @@ pub fn init() !void {
 }
 
 pub fn playFor(audio: Audio) !void {
-    const entry = try shared.allocator.create(SoundEntry);
-    entry.data = try std.fs.cwd().readFileAlloc(shared.allocator, audio.file, config.maxAudioSizeInBytes);
+    const entry = try allocator.create(SoundEntry);
+    entry.data = try std.fs.cwd().readFileAlloc(allocator, audio.file, config.maxAudioSizeInBytes);
 
     if (c.ma_decoder_init_memory(entry.data.ptr, entry.data.len, null, &entry.decoder) != c.MA_SUCCESS) {
-        shared.allocator.destroy(entry);
-        shared.allocator.free(entry.data);
+        allocator.destroy(entry);
+        allocator.free(entry.data);
         return AudioError.DecoderInitFailed;
     }
 
     const ds: *c.ma_data_source = @ptrCast(&entry.decoder);
     if (c.ma_sound_init_from_data_source(&engine, ds, 0, null, &entry.sound) != c.MA_SUCCESS) {
         _ = c.ma_decoder_uninit(&entry.decoder);
-        shared.allocator.destroy(entry);
-        shared.allocator.free(entry.data);
+        allocator.destroy(entry);
+        allocator.free(entry.data);
         return AudioError.SoundInitFailed;
     }
 
@@ -72,15 +72,15 @@ fn shutSound(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
         // Stop & free in reverse order
         c.ma_sound_uninit(&entry.sound);
         _ = c.ma_decoder_uninit(&entry.decoder);
-        shared.allocator.free(entry.data);
-        shared.allocator.destroy(entry);
+        allocator.free(entry.data);
+        allocator.destroy(entry);
     }
 
     return 0;
 }
 
 pub fn cleanupOne(audio: Audio) void {
-    shared.allocator.free(audio.file);
+    allocator.free(audio.file);
 }
 
 pub fn cleanup() void {
@@ -89,8 +89,8 @@ pub fn cleanup() void {
         const entry = kv.value_ptr.*;
         c.ma_sound_uninit(&entry.sound);
         _ = c.ma_decoder_uninit(&entry.decoder);
-        shared.allocator.free(entry.data);
-        shared.allocator.destroy(entry);
+        allocator.free(entry.data);
+        allocator.destroy(entry);
     }
     activeSounds.deinit();
 

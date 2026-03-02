@@ -7,7 +7,7 @@ const delay = @import("delay.zig");
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
 
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
 const time = @import("time.zig");
@@ -69,7 +69,7 @@ pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
 const PlayerError = error{PlayerUnspawned};
 
 var runAnimationFrameCount: usize = 10;
-var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(shared.allocator);
+var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(allocator);
 
 fn markPlayerForRespawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     if (param) |p| {
@@ -133,13 +133,6 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
 }
 
 pub fn spawn(position: vec.IVec2) !usize {
-    const resources = try shared.getResources();
-    const surface = try sdl.image.load(shared.lieroImgSrc);
-    const texture = try tex.addToAtlas(resources.renderer, surface);
-
-    var size: sdl.Point = undefined;
-    try tex.queryTexture(texture, &size.x, &size.y);
-
     const pos = conv.pixel2M(position);
 
     const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
@@ -196,14 +189,14 @@ pub fn spawn(position: vec.IVec2) !usize {
     rightWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
     const rightWallSensorId = box2d.c.b2CreatePolygonShape(bodyId, &rightWallShapeDef, &rightWallBox);
 
-    var shapeIds = std.array_list.Managed(box2d.c.b2ShapeId).init(shared.allocator);
+    var shapeIds = std.array_list.Managed(box2d.c.b2ShapeId).init(allocator);
     try shapeIds.append(bodyShapeId);
     try shapeIds.append(lowerBodyShapeId);
     try shapeIds.append(footSensorShapeId);
     try shapeIds.append(leftWallSensorId);
     try shapeIds.append(rightWallSensorId);
 
-    var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
+    var animations = std.StringHashMap(animation.Animation).init(allocator);
 
     const idleAnim = try data.createAnimationFrom("player_idle");
     try animations.put("idle", idleAnim);
@@ -222,16 +215,16 @@ pub fn spawn(position: vec.IVec2) !usize {
     const shotgun = try data.createWeaponFrom("shotgun");
     const railgun = try data.createWeaponFrom("railgun");
 
-    var weapons = std.array_list.Managed(weapon.Weapon).init(shared.allocator);
+    var weapons = std.array_list.Managed(weapon.Weapon).init(allocator);
     try weapons.append(rocketLauncher);
     try weapons.append(shotgun);
     try weapons.append(railgun);
 
-    var playerSpriteUuids = try shared.allocator.alloc(u64, 1);
+    var playerSpriteUuids = try allocator.alloc(u64, 1);
     playerSpriteUuids[0] = try sprite.createCopy(idleAnim.frames[0]);
 
     const playerEntity = entity.Entity{
-        .type = try shared.allocator.dupe(u8, "dynamic"),
+        .type = try allocator.dupe(u8, "dynamic"),
         .friction = config.player.movementFriction,
         .bodyId = bodyId,
         .spriteUuids = playerSpriteUuids,
@@ -263,7 +256,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const cameraId = try camera.spawnForPlayer(playerId, position);
     try viewport.addViewportForCamera(cameraId);
 
-    try players.put(shared.allocator, playerId, Player{
+    try players.put(allocator, playerId, Player{
         .id = playerId,
         .bodyId = bodyId,
         .bodyShapeId = bodyShapeId,
@@ -394,8 +387,7 @@ pub fn getFrictionForPlayer(player: *Player) f32 {
 }
 
 pub fn checkSensors(player: *Player) !void {
-    const resources = try shared.getResources();
-    const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
+    const sensorEvents = box2d.c.b2World_GetSensorEvents(box2d.getWorldId());
 
     for (0..@intCast(sensorEvents.beginCount)) |i| {
         const e = sensorEvents.beginEvents[i];
@@ -543,8 +535,6 @@ pub fn sprayPaint(p: *Player) !void {
     const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_spray", .{p.id}) catch unreachable;
     if (delay.check(delayKey)) return;
 
-    const resources = try shared.getResources();
-
     // Get crosshair world position in meters
     const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity == null) return;
@@ -612,7 +602,7 @@ pub fn sprayPaint(p: *Player) !void {
     }.cb;
 
     _ = box2d.c.b2World_OverlapCircle(
-        resources.worldId,
+        box2d.getWorldId(),
         &circle,
         transform,
         filter,
@@ -1079,14 +1069,14 @@ pub fn cleanup() void {
         }
 
         // Cleanup player resources
-        shared.allocator.free(p.weapons);
+        allocator.free(p.weapons);
         sprite.cleanupLater(p.crosshairUuid);
         if (p.sprayPaintSpriteUuid) |sprayUuid| {
             sprite.cleanupLater(sprayUuid);
         }
     }
 
-    players.clearAndFree(shared.allocator);
+    players.clearAndFree(allocator);
 
     score.cleanup();
 

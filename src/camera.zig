@@ -4,7 +4,7 @@ const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const level = @import("level.zig");
 const config = @import("config.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const viewport = @import("viewport.zig");
@@ -56,7 +56,7 @@ pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
         .state = null,
     };
 
-    try cameras.put(shared.allocator, cameraId, camera);
+    try cameras.put(allocator, cameraId, camera);
     return cameraId;
 }
 
@@ -67,11 +67,9 @@ pub fn destroyCamera(cameraId: usize) void {
 }
 
 pub fn setActiveCamera(cameraId: usize) !void {
-    const resources = try shared.getResources();
-
     activeCameraId = cameraId;
 
-    try viewport.setActiveViewport(resources.renderer, cameraId);
+    try viewport.setActiveViewport(cameraId);
 }
 
 pub fn getActiveCamera() ?*Camera {
@@ -208,5 +206,5 @@ fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
 }
 
 pub fn cleanup() void {
-    cameras.deinit(shared.allocator);
+    cameras.deinit(allocator);
 }

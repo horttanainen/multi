@@ -1,5 +1,5 @@
 const std = @import("std");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 
 pub const PlayerScore = struct {
     kills: i32,
@@ -10,7 +10,7 @@ pub const PlayerScore = struct {
 pub var scores: std.AutoArrayHashMapUnmanaged(usize, PlayerScore) = .{};
 
 pub fn registerPlayer(playerId: usize) !void {
-    try scores.put(shared.allocator, playerId, .{ .kills = 0, .deaths = 0, .suicides = 0 });
+    try scores.put(allocator, playerId, .{ .kills = 0, .deaths = 0, .suicides = 0 });
 }
 
 pub fn recordKill(killerId: ?usize, victimId: usize) void {
@@ -43,5 +43,5 @@ pub fn getScore(playerId: usize) ?PlayerScore {
 }
 
 pub fn cleanup() void {
-    scores.clearAndFree(shared.allocator);
+    scores.clearAndFree(allocator);
 }

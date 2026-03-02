@@ -11,8 +11,7 @@ const config = @import("config.zig");
 
 const PI = std.math.pi;
 
-const shared = @import("shared.zig");
-const allocator = @import("shared.zig").allocator;
+const allocator = @import("allocator.zig").allocator;
 
 const vec = @import("vector.zig");
 
@@ -59,9 +58,6 @@ const CachedTexInfo = struct {
 var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
 
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
-    const resources = try shared.getResources();
-    const renderer = resources.renderer;
-
     // Calculate top-left corner from center position
     const halfW = @divTrunc(sprite.sizeP.x, 2);
     const halfH = @divTrunc(sprite.sizeP.y, 2);
@@ -105,13 +101,10 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
     }
 
     const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
-    try gpu.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
+    try gpu.renderCopyEx(sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
 }
 
 pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeColor: ?Color) !void {
-    const resources = try shared.getResources();
-    const renderer = resources.renderer;
-
     const color = maybeColor orelse Color{ .r = 255, .g = 255, .b = 255 };
 
     try tex.setTextureBlendMode(s.texture, .add);
@@ -141,7 +134,7 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 
         try tex.setTextureColorMod(s.texture, r, g, b);
         try tex.setTextureAlphaMod(s.texture, pass.alpha);
-        try gpu.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none);
+        try gpu.renderCopyEx(s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none);
     }
 
     // Restore to normal blend mode
@@ -152,11 +145,11 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
     const spriteUuid = uuid.generate();
 
-    const imgPath = try shared.allocator.dupe(u8, imagePath);
-    errdefer shared.allocator.free(imgPath);
+    const imgPath = try allocator.dupe(u8, imagePath);
+    errdefer allocator.free(imgPath);
 
-    const imgPathZ = try shared.allocator.dupeZ(u8, imagePath);
-    defer shared.allocator.free(imgPathZ);
+    const imgPathZ = try allocator.dupeZ(u8, imagePath);
+    defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
 
@@ -176,16 +169,15 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
         };
         break :blk new_tex;
     } else blk: {
-        const resources = try shared.getResources();
-        const new_tex = try tex.addToAtlas(resources.renderer, surface);
-        const cacheKey = shared.allocator.dupe(u8, imgPath) catch break :blk new_tex;
+        const new_tex = try tex.addToAtlas(surface);
+        const cacheKey = allocator.dupe(u8, imgPath) catch break :blk new_tex;
         textureCache.put(cacheKey, .{
             .atlas_x = new_tex.atlas_x,
             .atlas_y = new_tex.atlas_y,
             .width = new_tex.width,
             .height = new_tex.height,
         }) catch {
-            shared.allocator.free(cacheKey);
+            allocator.free(cacheKey);
         };
         break :blk new_tex;
     };
@@ -222,7 +214,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
 }
 
 pub fn cleanup(sprite: Sprite) void {
-    shared.allocator.free(sprite.imgPath);
+    allocator.free(sprite.imgPath);
 }
 
 pub fn getSprite(spriteUuid: u64) ?Sprite {
@@ -248,8 +240,8 @@ pub fn createCopy(spriteUuid: u64) !u64 {
     const copiedTexture = try tex.cloneTexture(originalSprite.texture);
     errdefer tex.destroyTexture(copiedTexture);
 
-    const imgPathCopy = try shared.allocator.dupe(u8, originalSprite.imgPath);
-    errdefer shared.allocator.free(imgPathCopy);
+    const imgPathCopy = try allocator.dupe(u8, originalSprite.imgPath);
+    errdefer allocator.free(imgPathCopy);
 
     const newSprite = Sprite{
         .surface = copiedSurface,
@@ -731,7 +723,7 @@ pub fn cleanupSprites() void {
 }
 
 fn cleanupOne(s: Sprite) void {
-    shared.allocator.free(s.imgPath);
+    allocator.free(s.imgPath);
     tex.destroyTexture(s.texture);
     sdl.destroySurface(s.surface);
 }
@@ -752,7 +744,7 @@ pub fn cleanupAll() void {
     // Free cache-owned key strings, then clear cache and reset atlas packer for level reload
     var cacheIter = textureCache.keyIterator();
     while (cacheIter.next()) |key_ptr| {
-        shared.allocator.free(key_ptr.*);
+        allocator.free(key_ptr.*);
     }
     textureCache.clearRetainingCapacity();
     tex.resetAtlas();

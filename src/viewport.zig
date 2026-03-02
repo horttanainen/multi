@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
 const config = @import("config.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const window = @import("window.zig");
 
 pub const Viewport = struct {
@@ -22,7 +22,7 @@ pub var activeViewport: Viewport = .{
 pub var viewports: std.AutoArrayHashMapUnmanaged(usize, Viewport) = .{};
 
 pub fn addViewportForCamera(cameraId: usize) !void {
-    try viewports.put(shared.allocator, cameraId, .{
+    try viewports.put(allocator, cameraId, .{
         .x = 0,
         .y = 0,
         .width = window.width,
@@ -42,7 +42,7 @@ pub fn regenerateViewports() !void {
 
     if (count == 1) {
         // Full screen
-        try viewports.put(shared.allocator, cameraIds[0], .{
+        try viewports.put(allocator, cameraIds[0], .{
             .x = 0,
             .y = 0,
             .width = window.width,
@@ -53,13 +53,13 @@ pub fn regenerateViewports() !void {
 
     if (count == 2) {
         // Vertical split
-        try viewports.put(shared.allocator, cameraIds[0], .{
+        try viewports.put(allocator, cameraIds[0], .{
             .x = 0,
             .y = 0,
             .width = @divFloor(window.width, 2),
             .height = window.height,
         });
-        try viewports.put(shared.allocator, cameraIds[1], .{
+        try viewports.put(allocator, cameraIds[1], .{
             .x = @divFloor(window.width, 2),
             .y = 0,
             .width = @divFloor(window.width, 2),
@@ -75,10 +75,10 @@ pub fn getViewportForCamera(cameraId: usize) ?Viewport {
 }
 
 pub fn cleanup() void {
-    viewports.deinit(shared.allocator);
+    viewports.deinit(allocator);
 }
 
-pub fn setActiveViewport(renderer: *gpu.Renderer, cameraId: usize) !void {
+pub fn setActiveViewport(cameraId: usize) !void {
     const maybeVp = getViewportForCamera(cameraId);
 
     if (maybeVp) |vp| {
@@ -88,7 +88,7 @@ pub fn setActiveViewport(renderer: *gpu.Renderer, cameraId: usize) !void {
             .w = vp.width,
             .h = vp.height,
         };
-        try gpu.renderSetViewport(renderer, &sdlVp);
+        try gpu.renderSetViewport(&sdlVp);
         activeViewport = vp;
     }
 }

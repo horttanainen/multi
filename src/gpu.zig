@@ -447,7 +447,15 @@ fn uploadFullscreenQuad(device: *c.SDL_GPUDevice, buffer: *c.SDL_GPUBuffer) void
 var gpu_state_storage: GpuState = undefined;
 var mem_allocator: std.mem.Allocator = undefined;
 
-pub fn createRenderer(window: *sdl.Window) !*Renderer {
+pub fn init(win: *sdl.Window) !void {
+    try createRenderer(win);
+}
+
+pub fn cleanup() void {
+    destroyRenderer();
+}
+
+pub fn createRenderer(window: *sdl.Window) !void {
     mem_allocator = std.heap.c_allocator;
 
     const device = c.SDL_CreateGPUDevice(
@@ -662,11 +670,9 @@ pub fn createRenderer(window: *sdl.Window) !*Renderer {
     };
 
     gpu = &gpu_state_storage;
-    return &gpu_state_storage;
 }
 
-pub fn destroyRenderer(renderer: *Renderer) void {
-    _ = renderer;
+pub fn destroyRenderer() void {
     if (gpu) |g| {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
@@ -692,20 +698,17 @@ pub fn destroyRenderer(renderer: *Renderer) void {
 // Draw color / blend mode state
 // ============================================================
 
-pub fn setRenderDrawColor(renderer: *Renderer, color: sdl.Color) !void {
-    _ = renderer;
+pub fn setRenderDrawColor(color: sdl.Color) !void {
     const g = getGpu();
     g.draw_color = color;
 }
 
-pub fn setRenderDrawBlendMode(renderer: *Renderer, mode: sdl.BlendMode) !void {
-    _ = renderer;
+pub fn setRenderDrawBlendMode(mode: sdl.BlendMode) !void {
     const g = getGpu();
     g.draw_blend_mode = mode;
 }
 
-pub fn getRenderDrawBlendMode(renderer: *Renderer) !sdl.BlendMode {
-    _ = renderer;
+pub fn getRenderDrawBlendMode() !sdl.BlendMode {
     const g = getGpu();
     return g.draw_blend_mode;
 }
@@ -788,8 +791,7 @@ fn setGpuViewport(pass: *c.SDL_GPURenderPass, vp_x: f32, vp_y: f32, vp_w: f32, v
 // Frame management
 // ============================================================
 
-pub fn renderClear(renderer: *Renderer) !void {
-    _ = renderer;
+pub fn renderClear() !void {
     const g = getGpu();
 
     // Store clear color
@@ -838,8 +840,7 @@ pub fn renderClear(renderer: *Renderer) !void {
     g.color_batch_start = 0;
 }
 
-pub fn renderPresent(renderer: *Renderer) void {
-    _ = renderer;
+pub fn renderPresent() void {
     const g = getGpu();
     finalizeBatch(g);
 
@@ -1076,12 +1077,11 @@ fn submitFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
 // Drawing - renderCopyEx (sprites)
 // ============================================================
 
-pub fn renderCopy(renderer: *Renderer, tex: *Texture, src_rect: ?*const sdl.Rect, dst_rect: ?*const sdl.Rect) !void {
-    try renderCopyEx(renderer, tex, src_rect, dst_rect, 0, null, .none);
+pub fn renderCopy(tex: *Texture, src_rect: ?*const sdl.Rect, dst_rect: ?*const sdl.Rect) !void {
+    try renderCopyEx(tex, src_rect, dst_rect, 0, null, .none);
 }
 
 pub fn renderCopyEx(
-    renderer: *Renderer,
     tex: *Texture,
     src_rect: ?*const sdl.Rect,
     dst_rect: ?*const sdl.Rect,
@@ -1089,7 +1089,6 @@ pub fn renderCopyEx(
     center: ?*const sdl.Point,
     flip: sdl.FlipMode,
 ) !void {
-    _ = renderer;
     const g = getGpu();
 
     // Determine pipeline based on texture blend mode
@@ -1225,8 +1224,7 @@ pub fn renderCopyEx(
 // Drawing - lines and filled rects
 // ============================================================
 
-pub fn renderDrawLine(renderer: *Renderer, x1: i32, y1: i32, x2: i32, y2: i32) !void {
-    _ = renderer;
+pub fn renderDrawLine(x1: i32, y1: i32, x2: i32, y2: i32) !void {
     const g = getGpu();
     ensureColorPipeline(g, .colored_lines);
 
@@ -1252,8 +1250,7 @@ pub fn renderDrawLine(renderer: *Renderer, x1: i32, y1: i32, x2: i32, y2: i32) !
     g.color_vertex_count += 2;
 }
 
-pub fn renderFillRect(renderer: *Renderer, rect: sdl.Rect) !void {
-    _ = renderer;
+pub fn renderFillRect(rect: sdl.Rect) !void {
     const g = getGpu();
     ensureColorPipeline(g, .colored_triangles);
 
@@ -1286,8 +1283,7 @@ pub fn renderFillRect(renderer: *Renderer, rect: sdl.Rect) !void {
 // Viewport
 // ============================================================
 
-pub fn renderSetViewport(renderer: *Renderer, rect: ?*const sdl.Rect) !void {
-    _ = renderer;
+pub fn renderSetViewport(rect: ?*const sdl.Rect) !void {
     const g = getGpu();
 
     // Finalize current batch before viewport change

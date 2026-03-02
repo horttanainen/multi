@@ -1,6 +1,6 @@
 const sdl = @import("sdl.zig");
 
-const shared = @import("shared.zig");
+const state = @import("state.zig");
 const control = @import("control.zig");
 const controller = @import("controller.zig");
 const keyboard = @import("keyboard.zig");
@@ -13,7 +13,7 @@ pub fn handle() !void {
     while (sdl.pollEvent(&event)) {
         switch (event.type) {
             sdl.EventType.quit => {
-                shared.quitGame = true;
+                state.quitGame = true;
             },
             sdl.EventType.window_resized => {
                 try window.handleResize(event.window.data1, event.window.data2);
@@ -28,7 +28,7 @@ pub fn handle() !void {
         }
     }
 
-    if (shared.editingLevel) {
+    if (state.editingLevel) {
         control.handleLevelEditorKeyboardInput();
         control.handleLevelEditorMouseInput();
     } else {

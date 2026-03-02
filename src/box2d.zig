@@ -14,10 +14,30 @@ pub const c = @cImport({
 const std = @import("std");
 const vec = @import("vector.zig");
 
-const shared = @import("shared.zig");
 const time = @import("time.zig");
 
 const conv = @import("conversion.zig");
+const allocator = @import("allocator.zig").allocator;
+
+var world_id: ?c.b2WorldId = null;
+
+pub fn initWorld() void {
+    const gravity = c.b2Vec2{ .x = 0.0, .y = 10 };
+    var worldDef = c.b2DefaultWorldDef();
+    worldDef.gravity = gravity;
+    world_id = c.b2CreateWorld(&worldDef);
+}
+
+pub fn getWorldId() c.b2WorldId {
+    return world_id orelse @panic("box2d.getWorldId() called before box2d.initWorld()");
+}
+
+pub fn destroyWorld() void {
+    if (world_id) |wid| {
+        c.b2DestroyWorld(wid);
+        world_id = null;
+    }
+}
 
 pub const State = struct {
     pos: c.b2Vec2,
@@ -44,16 +64,15 @@ pub fn createStaticBodyDef(position: vec.Vec2) c.b2BodyDef {
 }
 
 pub fn createBody(bodyDef: c.b2BodyDef) !c.b2BodyId {
-    const resources = try shared.getResources();
-    const worldId = resources.worldId;
+    const worldId = getWorldId();
     const bodyId = c.b2CreateBody(worldId, &bodyDef);
     return bodyId;
 }
 
 pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: [][3]vec.IVec2, dimP: vec.IVec2, shapeDef: c.b2ShapeDef) ![]c.b2ShapeId {
     const polygons = try createPolygons(triangles, dimP);
-    defer shared.allocator.free(polygons);
-    var shapeIds = std.array_list.Managed(c.b2ShapeId).init(shared.allocator);
+    defer allocator.free(polygons);
+    var shapeIds = std.array_list.Managed(c.b2ShapeId).init(allocator);
 
     for (polygons) |polygon| {
         const shapeId = c.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
@@ -64,7 +83,7 @@ pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: [][3]vec.IVec2, dimP: v
 }
 
 fn createPolygons(triangles: [][3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polygon {
-    var polygons = std.array_list.Managed(c.b2Polygon).init(shared.allocator);
+    var polygons = std.array_list.Managed(c.b2Polygon).init(allocator);
 
     for (triangles) |tri| {
         var triangle: [3]vec.IVec2 = undefined;

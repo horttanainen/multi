@@ -1,7 +1,7 @@
 const std = @import("std");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
-const allocator = @import("shared.zig").allocator;
+const allocator = @import("allocator.zig").allocator;
 
 const PI = std.math.pi;
 

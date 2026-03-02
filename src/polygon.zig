@@ -5,14 +5,13 @@ const pavlidisContour = @import("pavlidis.zig").pavlidisContour;
 const connected_components = @import("connected_components.zig");
 const visvalingam = @import("visvalingam.zig").visvalingam;
 const triangle = @import("triangle.zig");
-const shared = @import("shared.zig");
 const sprite = @import("sprite.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
 const vec = @import("vector.zig");
 
-const allocator = @import("shared.zig").allocator;
+const allocator = @import("allocator.zig").allocator;
 const PI = std.math.pi;
 
 pub const PolygonError = error{
@@ -67,7 +66,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
 
     // 4. ensure counter clockwise
     const ccw = try ensureCounterClockwise(withoutDuplicates);
-    defer shared.allocator.free(ccw);
+    defer allocator.free(ccw);
     // std.debug.print("CCW vertices: {}\n", .{ccw.len});
 
     // 5. split into triangles

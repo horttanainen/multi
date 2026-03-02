@@ -4,7 +4,7 @@ const gpu = @import("gpu.zig");
 const background = @import("background.zig");
 const camera = @import("camera.zig");
 const config = @import("config.zig");
-const shared = @import("shared.zig");
+const state = @import("state.zig");
 const window = @import("window.zig");
 const ui = @import("ui.zig");
 const debug = @import("debug.zig");
@@ -20,23 +20,18 @@ const weapon = @import("weapon.zig");
 const RendererError = error{RendererUninitialized};
 
 pub fn render() !void {
-    const resources = try shared.getResources();
-    const renderer = resources.renderer;
-
     // Clear entire window once
-    try gpu.setRenderDrawColor(renderer, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
-    try gpu.renderClear(renderer);
+    try gpu.setRenderDrawColor(.{ .r = 255, .g = 0, .b = 0, .a = 255 });
+    try gpu.renderClear();
 
     for (camera.cameras.keys()) |cameraId| {
         try renderCamera(cameraId);
     }
 
-    gpu.renderPresent(renderer);
+    gpu.renderPresent();
 }
 
 fn renderCamera(cameraId: usize) !void {
-    const resources = try shared.getResources();
-
     try camera.setActiveCamera(cameraId);
 
     try background.draw();
@@ -55,7 +50,7 @@ fn renderCamera(cameraId: usize) !void {
         try debug.draw();
     }
 
-    try gpu.setRenderDrawColor(resources.renderer, .{ .r = 0, .g = 255, .b = 255, .a = 255 });
+    try gpu.setRenderDrawColor(.{ .r = 0, .g = 255, .b = 255, .a = 255 });
 
     try ui.drawMode();
     try ui.drawFps();
@@ -65,15 +60,13 @@ fn renderCamera(cameraId: usize) !void {
 }
 
 fn drawHorizontalLine(height: i32) !void {
-    const resources = try shared.getResources();
     const xAxisStart = camera.relativePosition(.{ .x = 0, .y = height });
     const xAxisEnd = camera.relativePosition(.{ .x = window.width, .y = height });
-    try gpu.renderDrawLine(resources.renderer, xAxisStart.x, xAxisStart.y, xAxisEnd.x, xAxisEnd.y);
+    try gpu.renderDrawLine(xAxisStart.x, xAxisStart.y, xAxisEnd.x, xAxisEnd.y);
 }
 
 fn drawVerticalLine(height: i32) !void {
-    const resources = try shared.getResources();
     const yAxisStart = camera.relativePosition(.{ .x = height, .y = window.height });
     const yAxisEnd = camera.relativePosition(.{ .x = height, .y = 0 });
-    try gpu.renderDrawLine(resources.renderer, yAxisStart.x, yAxisStart.y, yAxisEnd.x, yAxisEnd.y);
+    try gpu.renderDrawLine(yAxisStart.x, yAxisStart.y, yAxisEnd.x, yAxisEnd.y);
 }

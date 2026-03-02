@@ -4,9 +4,11 @@ const std = @import("std");
 const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
-const shared = @import("shared.zig");
-const SharedResources = @import("shared.zig").SharedResources;
-const allocator = @import("shared.zig").allocator;
+const allocator = @import("allocator.zig");
+const state = @import("state.zig");
+const gpu = @import("gpu.zig");
+const text = @import("text.zig");
+const sprite = @import("sprite.zig");
 const sensor = @import("sensor.zig");
 const time = @import("time.zig");
 const renderer = @import("renderer.zig");
@@ -15,6 +17,9 @@ const input = @import("input.zig");
 const camera = @import("camera.zig");
 const animation = @import("animation.zig");
 
+const audio = @import("audio.zig");
+const delay = @import("delay.zig");
+const viewport = @import("viewport.zig");
 const friction = @import("friction.zig");
 
 const debug = @import("debug.zig");
@@ -28,7 +33,6 @@ const rope = @import("rope.zig");
 const level = @import("level.zig");
 const levelEditor = @import("leveleditor.zig");
 const entity = @import("entity.zig");
-const sprite = @import("sprite.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const gibbing = @import("gibbing.zig");
@@ -37,13 +41,16 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: use allyourbase box2d instead of shitty submodule
+//TODO: wrap box2d calls so that we do not have to pass worldId
+//TODO: make main function deinit explicit instead of the deffered reverse order deinit
+
 //TODO: add rounds pistol with the glow and spark effect and heavy drop
 
 //Level ideas:
 //TODO: nothing: physics and gun is set so that both players need to shoot down from time to time to levitate and then of course shoot each other
 //TODO: breakfloor: all stuff dangle and you can shoot boxes in the ropes to make the platforms fall down
 
-//TODO: is shared.zig necessary anymore?
 //TODO: investigate why aiming is so snappy
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 
@@ -150,11 +157,29 @@ const Sprite = entity.Sprite;
 //TODO: Level json creation broke during 0.15 update
 
 pub fn main() !void {
+    defer allocator.deinit();
     try window.init();
     defer window.cleanup();
 
-    const resources = try shared.init();
-    defer shared.cleanup();
+    time.init();
+
+    try audio.init();
+    defer audio.cleanup();
+
+    try gpu.init(try window.getWindow());
+    defer gpu.cleanup();
+
+    try text.init();
+    defer text.cleanup();
+
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+
+    try debug.init();
+
+    defer viewport.cleanup();
+    defer camera.cleanup();
+    defer delay.cleanup();
 
     defer sprite.deinit();
 
@@ -182,16 +207,16 @@ pub fn main() !void {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
 
-    box2d.c.b2World_SetFrictionCallback(resources.worldId, &friction.callback);
+    box2d.c.b2World_SetFrictionCallback(box2d.getWorldId(), &friction.callback);
 
-    while (!shared.quitGame) {
+    while (!state.quitGame) {
         time.frameBegin();
 
         try physics.step();
 
         try input.handle();
 
-        if (shared.editingLevel) {
+        if (state.editingLevel) {
             levelEditorLoop();
         } else {
             try gameLoop();
@@ -209,7 +234,7 @@ fn levelEditorLoop() void {
 }
 
 fn gameLoop() !void {
-    if (shared.goalReached) {
+    if (state.goalReached) {
         try level.next();
     }
 

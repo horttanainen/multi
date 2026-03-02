@@ -26,8 +26,7 @@ pub const Texture = struct {
 };
 
 /// Add a surface to the texture atlas. Returns an atlas-backed Texture.
-pub fn addToAtlas(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
-    _ = renderer;
+pub fn addToAtlas(surface: *sdl.Surface) !*Texture {
     const device = gpu.getDevice();
     const tex_atlas = gpu.getAtlas();
     const allocator = gpu.getAllocator();
@@ -55,8 +54,7 @@ pub fn addToAtlas(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
 }
 
 /// Create a standalone GPU texture (not in atlas). Used for ephemeral textures like text.
-pub fn createStandaloneTexture(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
-    _ = renderer;
+pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
     const device = gpu.getDevice();
     const allocator = gpu.getAllocator();
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const sprite = @import("sprite.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
 const config = @import("config.zig");
@@ -39,25 +39,25 @@ pub fn init() !void {
         vec.izero,
     );
 
-    playerGiblets = std.AutoHashMap(usize, GibletSet).init(shared.allocator);
+    playerGiblets = std.AutoHashMap(usize, GibletSet).init(allocator);
 
     std.debug.print("Loaded giblet templates - heads: {}, legs: {}, meat: {}\n", .{ templateHeadGiblets.len, templateLegGiblets.len, templateMeatGiblets.len });
 }
 
 pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void {
-    var coloredHeads = std.array_list.Managed(u64).init(shared.allocator);
+    var coloredHeads = std.array_list.Managed(u64).init(allocator);
     for (templateHeadGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredHeads.append(colored);
     }
 
-    var coloredLegs = std.array_list.Managed(u64).init(shared.allocator);
+    var coloredLegs = std.array_list.Managed(u64).init(allocator);
     for (templateLegGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredLegs.append(colored);
     }
 
-    var coloredMeat = std.array_list.Managed(u64).init(shared.allocator);
+    var coloredMeat = std.array_list.Managed(u64).init(allocator);
     for (templateMeatGiblets) |templateGiblet| {
         const colored = try createColoredSprite(templateGiblet, playerColor);
         try coloredMeat.append(colored);
@@ -155,17 +155,17 @@ pub fn cleanup() void {
     for (templateHeadGiblets) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);
     }
-    shared.allocator.free(templateHeadGiblets);
+    allocator.free(templateHeadGiblets);
 
     for (templateLegGiblets) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);
     }
-    shared.allocator.free(templateLegGiblets);
+    allocator.free(templateLegGiblets);
 
     for (templateMeatGiblets) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);
     }
-    shared.allocator.free(templateMeatGiblets);
+    allocator.free(templateMeatGiblets);
 
     // Clean up all player-specific colored giblets
     var iter = playerGiblets.valueIterator();
@@ -173,17 +173,17 @@ pub fn cleanup() void {
         for (gibletSet.heads) |spriteUuid| {
             sprite.cleanupLater(spriteUuid);
         }
-        shared.allocator.free(gibletSet.heads);
+        allocator.free(gibletSet.heads);
 
         for (gibletSet.legs) |spriteUuid| {
             sprite.cleanupLater(spriteUuid);
         }
-        shared.allocator.free(gibletSet.legs);
+        allocator.free(gibletSet.legs);
 
         for (gibletSet.meat) |spriteUuid| {
             sprite.cleanupLater(spriteUuid);
         }
-        shared.allocator.free(gibletSet.meat);
+        allocator.free(gibletSet.meat);
     }
 
     playerGiblets.deinit();

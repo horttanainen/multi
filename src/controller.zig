@@ -1,7 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const gamepad = @import("gamepad.zig");
 const keyboard = @import("keyboard.zig");
@@ -47,14 +47,14 @@ pub fn recalculateControllers() !void {
             if (gamepad.createController(ctrl.playerId, ctrl.color)) |newCtrl| {
 
                 if (ctrl.keyBindings) |keyBindings| {
-                    try keyboard.keyboardBindings.append(shared.allocator, keyBindings);
+                    try keyboard.keyboardBindings.append(allocator, keyBindings);
                 }
-                try controllers.put(shared.allocator, ctrl.playerId, newCtrl);
+                try controllers.put(allocator, ctrl.playerId, newCtrl);
             }
         }
         if (ctrl.inputType == .gamepad and !gamepad.assignedGamepads.contains(ctrl.playerId)) {
             if (keyboard.createController(ctrl.playerId, ctrl.color)) |newCtrl| {
-                try controllers.put(shared.allocator, ctrl.playerId, newCtrl);
+                try controllers.put(allocator, ctrl.playerId, newCtrl);
             }
         }
     }
@@ -66,12 +66,12 @@ pub fn createControllerForPlayer(playerId: usize) !sprite.Color {
     const color = if (maybeColor) |c| c else defaultColor;
 
     if (gamepad.createController(playerId, color)) |ctrl| {
-        try controllers.put(shared.allocator, playerId, ctrl);
+        try controllers.put(allocator, playerId, ctrl);
         return color;
     }
 
     if (keyboard.createController(playerId, color)) |ctrl| {
-        try controllers.put(shared.allocator, playerId, ctrl);
+        try controllers.put(allocator, playerId, ctrl);
         return color;
     }
 
@@ -79,13 +79,13 @@ pub fn createControllerForPlayer(playerId: usize) !sprite.Color {
 }
 
 pub fn init() !void {
-    try availableColors.append(shared.allocator, .{ .r = 255, .g = 1, .b = 1 });
-    try availableColors.append(shared.allocator, .{ .r = 1, .g = 1, .b = 255 });
-    try availableColors.append(shared.allocator, .{ .r = 1, .g = 255, .b = 1 });
-    try availableColors.append(shared.allocator, .{ .r = 20, .g = 200, .b = 255 });
+    try availableColors.append(allocator, .{ .r = 255, .g = 1, .b = 1 });
+    try availableColors.append(allocator, .{ .r = 1, .g = 1, .b = 255 });
+    try availableColors.append(allocator, .{ .r = 1, .g = 255, .b = 1 });
+    try availableColors.append(allocator, .{ .r = 20, .g = 200, .b = 255 });
 }
 
 pub fn cleanup() void {
-    controllers.deinit(shared.allocator);
-    availableColors.deinit(shared.allocator);
+    controllers.deinit(allocator);
+    availableColors.deinit(allocator);
 }

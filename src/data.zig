@@ -1,7 +1,7 @@
 const std = @import("std");
 const sprite = @import("sprite.zig");
 const animation = @import("animation.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const audio = @import("audio.zig");
@@ -111,25 +111,25 @@ fn initSprites() !void {
         scale: f32 = 1.0,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse sprites.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const path = shared.allocator.dupe(u8, entry.path) catch {
-            shared.allocator.free(key);
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const path = allocator.dupe(u8, entry.path) catch {
+            allocator.free(key);
             continue;
         };
 
-        spriteDataMap.put(shared.allocator, key, .{
+        spriteDataMap.put(allocator, key, .{
             .path = path,
             .scale = entry.scale,
         }) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(path);
+            allocator.free(key);
+            allocator.free(path);
             continue;
         };
 
@@ -156,20 +156,20 @@ fn initAnimations() !void {
         switchDelay: f64 = 0,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse animations.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const path = shared.allocator.dupe(u8, entry.path) catch {
-            shared.allocator.free(key);
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const path = allocator.dupe(u8, entry.path) catch {
+            allocator.free(key);
             continue;
         };
 
-        animationDataMap.put(shared.allocator, key, .{
+        animationDataMap.put(allocator, key, .{
             .path = path,
             .fps = entry.fps,
             .scale = entry.scale,
@@ -179,8 +179,8 @@ fn initAnimations() !void {
             .spriteIndex = entry.spriteIndex,
             .switchDelay = entry.switchDelay,
         }) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(path);
+            allocator.free(key);
+            allocator.free(path);
             continue;
         };
 
@@ -202,26 +202,26 @@ fn initSounds() !void {
         volume: f32 = 1.0,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse sounds.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const path = shared.allocator.dupe(u8, entry.path) catch {
-            shared.allocator.free(key);
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const path = allocator.dupe(u8, entry.path) catch {
+            allocator.free(key);
             continue;
         };
 
-        soundDataMap.put(shared.allocator, key, .{
+        soundDataMap.put(allocator, key, .{
             .path = path,
             .durationMs = entry.durationMs,
             .volume = entry.volume,
         }) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(path);
+            allocator.free(key);
+            allocator.free(path);
             continue;
         };
 
@@ -252,31 +252,31 @@ fn initExplosions() !void {
         damagePlayers: bool = true,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse explosions.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
+        const key = allocator.dupe(u8, entry.key) catch continue;
         const soundKey = if (entry.sound) |s|
-            shared.allocator.dupe(u8, s) catch {
-                shared.allocator.free(key);
+            allocator.dupe(u8, s) catch {
+                allocator.free(key);
                 continue;
             }
         else
             null;
         const animKey = if (entry.animation) |a|
-            shared.allocator.dupe(u8, a) catch {
-                shared.allocator.free(key);
-                if (soundKey) |sk| shared.allocator.free(sk);
+            allocator.dupe(u8, a) catch {
+                allocator.free(key);
+                if (soundKey) |sk| allocator.free(sk);
                 continue;
             }
         else
             null;
 
-        explosionDataMap.put(shared.allocator, key, .{
+        explosionDataMap.put(allocator, key, .{
             .sound = soundKey,
             .animation = animKey,
             .blastPower = entry.blastPower,
@@ -290,9 +290,9 @@ fn initExplosions() !void {
             .particleGravityScale = entry.particleGravityScale,
             .damagePlayers = entry.damagePlayers,
         }) catch {
-            shared.allocator.free(key);
-            if (soundKey) |sk| shared.allocator.free(sk);
-            if (animKey) |ak| shared.allocator.free(ak);
+            allocator.free(key);
+            if (soundKey) |sk| allocator.free(sk);
+            if (animKey) |ak| allocator.free(ak);
             continue;
         };
 
@@ -318,34 +318,34 @@ fn initProjectiles() !void {
         explosion: []const u8,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse projectiles.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const animKey = shared.allocator.dupe(u8, entry.animation) catch {
-            shared.allocator.free(key);
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const animKey = allocator.dupe(u8, entry.animation) catch {
+            allocator.free(key);
             continue;
         };
-        const explosionKey = shared.allocator.dupe(u8, entry.explosion) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(animKey);
+        const explosionKey = allocator.dupe(u8, entry.explosion) catch {
+            allocator.free(key);
+            allocator.free(animKey);
             continue;
         };
         const propAnimKey = if (entry.propulsionAnimation) |pa|
-            shared.allocator.dupe(u8, pa) catch {
-                shared.allocator.free(key);
-                shared.allocator.free(animKey);
-                shared.allocator.free(explosionKey);
+            allocator.dupe(u8, pa) catch {
+                allocator.free(key);
+                allocator.free(animKey);
+                allocator.free(explosionKey);
                 continue;
             }
         else
             null;
 
-        projectileDataMap.put(shared.allocator, key, .{
+        projectileDataMap.put(allocator, key, .{
             .gravityScale = entry.gravityScale,
             .density = entry.density,
             .propulsion = entry.propulsion,
@@ -354,10 +354,10 @@ fn initProjectiles() !void {
             .propulsionAnimation = propAnimKey,
             .explosion = explosionKey,
         }) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(animKey);
-            shared.allocator.free(explosionKey);
-            if (propAnimKey) |pa| shared.allocator.free(pa);
+            allocator.free(key);
+            allocator.free(animKey);
+            allocator.free(explosionKey);
+            if (propAnimKey) |pa| allocator.free(pa);
             continue;
         };
 
@@ -400,28 +400,28 @@ fn initWeapons() !void {
         directDamage: f32 = 0,
     };
 
-    const parsed = std.json.parseFromSlice([]const Entry, shared.allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
         std.debug.print("Warning: Failed to parse weapons.json: {}\n", .{err});
         return;
     };
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
-        const key = shared.allocator.dupe(u8, entry.key) catch continue;
-        const spriteKey = shared.allocator.dupe(u8, entry.sprite) catch {
-            shared.allocator.free(key);
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const spriteKey = allocator.dupe(u8, entry.sprite) catch {
+            allocator.free(key);
             continue;
         };
-        const soundKey = shared.allocator.dupe(u8, entry.sound) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(spriteKey);
+        const soundKey = allocator.dupe(u8, entry.sound) catch {
+            allocator.free(key);
+            allocator.free(spriteKey);
             continue;
         };
         const projKey = if (entry.projectile) |p|
-            shared.allocator.dupe(u8, p) catch {
-                shared.allocator.free(key);
-                shared.allocator.free(spriteKey);
-                shared.allocator.free(soundKey);
+            allocator.dupe(u8, p) catch {
+                allocator.free(key);
+                allocator.free(spriteKey);
+                allocator.free(soundKey);
                 continue;
             }
         else
@@ -437,29 +437,29 @@ fn initWeapons() !void {
                 .spreadAngle = pel.spreadAngle,
                 .spawnRadius = pel.spawnRadius,
                 .color = pel.color,
-                .explosion = shared.allocator.dupe(u8, pel.explosion) catch {
-                    shared.allocator.free(key);
-                    shared.allocator.free(spriteKey);
-                    shared.allocator.free(soundKey);
-                    if (projKey) |pk| shared.allocator.free(pk);
+                .explosion = allocator.dupe(u8, pel.explosion) catch {
+                    allocator.free(key);
+                    allocator.free(spriteKey);
+                    allocator.free(soundKey);
+                    if (projKey) |pk| allocator.free(pk);
                     continue;
                 },
             }
         else
             null;
         const explosionKey = if (entry.explosion) |e|
-            shared.allocator.dupe(u8, e) catch {
-                shared.allocator.free(key);
-                shared.allocator.free(spriteKey);
-                shared.allocator.free(soundKey);
-                if (projKey) |pk| shared.allocator.free(pk);
-                if (pelletData) |pd| shared.allocator.free(pd.explosion);
+            allocator.dupe(u8, e) catch {
+                allocator.free(key);
+                allocator.free(spriteKey);
+                allocator.free(soundKey);
+                if (projKey) |pk| allocator.free(pk);
+                if (pelletData) |pd| allocator.free(pd.explosion);
                 continue;
             }
         else
             null;
 
-        weaponDataMap.put(shared.allocator, key, .{
+        weaponDataMap.put(allocator, key, .{
             .sprite = spriteKey,
             .delay = entry.delay,
             .sound = soundKey,
@@ -472,12 +472,12 @@ fn initWeapons() !void {
             .trailColor = entry.trailColor,
             .directDamage = entry.directDamage,
         }) catch {
-            shared.allocator.free(key);
-            shared.allocator.free(spriteKey);
-            shared.allocator.free(soundKey);
-            if (projKey) |pk| shared.allocator.free(pk);
-            if (pelletData) |pd| shared.allocator.free(pd.explosion);
-            if (explosionKey) |ek| shared.allocator.free(ek);
+            allocator.free(key);
+            allocator.free(spriteKey);
+            allocator.free(soundKey);
+            if (projKey) |pk| allocator.free(pk);
+            if (pelletData) |pd| allocator.free(pd.explosion);
+            if (explosionKey) |ek| allocator.free(ek);
             continue;
         };
 
@@ -604,50 +604,50 @@ pub fn getSpriteData(key: []const u8) ?SpriteData {
 pub fn cleanup() void {
     var spriteIter = spriteDataMap.iterator();
     while (spriteIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.path);
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.path);
     }
-    spriteDataMap.deinit(shared.allocator);
+    spriteDataMap.deinit(allocator);
 
     var animIter = animationDataMap.iterator();
     while (animIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.path);
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.path);
     }
-    animationDataMap.deinit(shared.allocator);
+    animationDataMap.deinit(allocator);
 
     var soundIter = soundDataMap.iterator();
     while (soundIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.path);
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.path);
     }
-    soundDataMap.deinit(shared.allocator);
+    soundDataMap.deinit(allocator);
 
     var explosionIter = explosionDataMap.iterator();
     while (explosionIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        if (entry.value_ptr.sound) |s| shared.allocator.free(s);
-        if (entry.value_ptr.animation) |a| shared.allocator.free(a);
+        allocator.free(entry.key_ptr.*);
+        if (entry.value_ptr.sound) |s| allocator.free(s);
+        if (entry.value_ptr.animation) |a| allocator.free(a);
     }
-    explosionDataMap.deinit(shared.allocator);
+    explosionDataMap.deinit(allocator);
 
     var projIter = projectileDataMap.iterator();
     while (projIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.animation);
-        shared.allocator.free(entry.value_ptr.explosion);
-        if (entry.value_ptr.propulsionAnimation) |pa| shared.allocator.free(pa);
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.animation);
+        allocator.free(entry.value_ptr.explosion);
+        if (entry.value_ptr.propulsionAnimation) |pa| allocator.free(pa);
     }
-    projectileDataMap.deinit(shared.allocator);
+    projectileDataMap.deinit(allocator);
 
     var weaponIter = weaponDataMap.iterator();
     while (weaponIter.next()) |entry| {
-        shared.allocator.free(entry.key_ptr.*);
-        shared.allocator.free(entry.value_ptr.sprite);
-        shared.allocator.free(entry.value_ptr.sound);
-        if (entry.value_ptr.projectile) |p| shared.allocator.free(p);
-        if (entry.value_ptr.pellet) |pel| shared.allocator.free(pel.explosion);
-        if (entry.value_ptr.explosion) |e| shared.allocator.free(e);
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.sprite);
+        allocator.free(entry.value_ptr.sound);
+        if (entry.value_ptr.projectile) |p| allocator.free(p);
+        if (entry.value_ptr.pellet) |pel| allocator.free(pel.explosion);
+        if (entry.value_ptr.explosion) |e| allocator.free(e);
     }
-    weaponDataMap.deinit(shared.allocator);
+    weaponDataMap.deinit(allocator);
 }

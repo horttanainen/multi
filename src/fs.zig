@@ -1,6 +1,6 @@
 const std = @import("std");
 const sprite = @import("sprite.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
 
 const FsError = error{
@@ -14,9 +14,9 @@ pub fn listFiles(folderPath: []const u8) ![][]const u8 {
     };
     defer dir.close();
 
-    var names = std.array_list.Managed([]const u8).init(shared.allocator);
+    var names = std.array_list.Managed([]const u8).init(allocator);
     errdefer {
-        for (names.items) |name| shared.allocator.free(name);
+        for (names.items) |name| allocator.free(name);
         names.deinit();
     }
 
@@ -24,7 +24,7 @@ pub fn listFiles(folderPath: []const u8) ![][]const u8 {
     while (try dirIter.next()) |entry| {
         if (entry.kind != .file) continue;
         if (std.mem.eql(u8, entry.name, ".DS_Store")) continue;
-        try names.append(try shared.allocator.dupe(u8, entry.name));
+        try names.append(try allocator.dupe(u8, entry.name));
     }
 
     std.mem.sort([]const u8, names.items, {}, struct {
@@ -46,8 +46,8 @@ pub fn readFile(path: []const u8, buf: []u8) ![]const u8 {
 pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]u64 {
     const fileNames = try listFiles(folderPath);
     defer {
-        for (fileNames) |name| shared.allocator.free(name);
-        shared.allocator.free(fileNames);
+        for (fileNames) |name| allocator.free(name);
+        allocator.free(fileNames);
     }
 
     if (fileNames.len == 0) {
@@ -55,7 +55,7 @@ pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: ve
         return FsError.NotFound;
     }
 
-    var spriteUuids = std.array_list.Managed(u64).init(shared.allocator);
+    var spriteUuids = std.array_list.Managed(u64).init(allocator);
     for (fileNames) |imageName| {
         var pathBuf: [256]u8 = undefined;
         const imagePath = try std.fmt.bufPrint(&pathBuf, "{s}/{s}", .{ folderPath, imageName });

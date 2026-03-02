@@ -1,7 +1,7 @@
 const std = @import("std");
 const sprite = @import("sprite.zig");
 const vec = @import("vector.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const camera = @import("camera.zig");
 
 pub const SerializableParallaxEntity = struct {
@@ -20,7 +20,7 @@ pub const ParallaxEntity = struct {
     spriteUuid: u64,
 };
 
-var parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);
+var parallaxEntities = std.array_list.Managed(ParallaxEntity).init(allocator);
 
 pub fn draw() !void {
     for (parallaxEntities.items) |parallaxEntity| {
@@ -67,6 +67,6 @@ pub fn cleanup() void {
         sprite.cleanupLater(pEntity.spriteUuid);
     }
     parallaxEntities.deinit();
-    parallaxEntities = std.array_list.Managed(ParallaxEntity).init(shared.allocator);
+    parallaxEntities = std.array_list.Managed(ParallaxEntity).init(allocator);
 }
 

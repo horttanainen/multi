@@ -1,6 +1,6 @@
 const std = @import("std");
 const vec = @import("vector.zig");
-const shared = @import("shared.zig");
+const gpa_allocator = @import("allocator.zig").allocator;
 
 pub const triangulateio = extern struct {
     pointlist: ?[*]f64,
@@ -94,8 +94,8 @@ pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
     const triangle_count = out_data.numberoftriangles;
     const triangle_indices = out_data.trianglelist;
     const output_vertex_count = @as(usize, @intCast(out_data.numberofpoints));
-    const output_vertices = try shared.allocator.alloc(vec.IVec2, output_vertex_count);
-    defer shared.allocator.free(output_vertices);
+    const output_vertices = try allocator.alloc(vec.IVec2, output_vertex_count);
+    defer allocator.free(output_vertices);
 
     for (output_vertices, 0..) |*out_v, i| {
         const x = out_data.pointlist.?[i * 2 + 0];
@@ -105,7 +105,7 @@ pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
             .y = @intFromFloat(y),
         };
     }
-    const tris = try shared.allocator.alloc([3]vec.IVec2, @as(usize, @intCast(triangle_count)));
+    const tris = try gpa_allocator.alloc([3]vec.IVec2, @as(usize, @intCast(triangle_count)));
 
     for (tris, 0..) |*tri, i| {
         const ia = triangle_indices.?[i * 3 + 0];

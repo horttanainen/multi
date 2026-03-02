@@ -1,7 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
@@ -52,12 +52,12 @@ pub const player2Bindings = KeyboardBindings{
 pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .{};
 
 pub fn init() !void {
-    try keyboardBindings.append(shared.allocator, player2Bindings);
-    try keyboardBindings.append(shared.allocator, player1Bindings);
+    try keyboardBindings.append(allocator, player2Bindings);
+    try keyboardBindings.append(allocator, player1Bindings);
 }
 
 pub fn cleanup() void {
-    keyboardBindings.deinit(shared.allocator);
+    keyboardBindings.deinit(allocator);
 }
 
 pub fn createController(playerId: usize, color: sprite.Color) ?controller.Controller {

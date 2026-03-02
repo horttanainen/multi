@@ -3,7 +3,7 @@ const sdl = @import("sdl.zig");
 
 const vec = @import("vector.zig");
 const sprite = @import("sprite.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -21,8 +21,8 @@ pub const Particle = struct {
     scale: f32,
 };
 
-pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(shared.allocator);
-var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
+pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
+var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
 
 pub fn create(bodyId: box2d.c.b2BodyId, lifetime: u32, color: ?sprite.Color, scale: f32) !void {
     const particleSpriteUuid = try sprite.createFromImg(
@@ -149,7 +149,6 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
 }
 
 fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
-    const resources = try shared.getResources();
     const cfg = config.bloodParticle;
 
     // Get blood particle to access its scale
@@ -188,7 +187,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(
-        resources.worldId,
+        box2d.getWorldId(),
         &circle,
         transform,
         filter,
@@ -228,8 +227,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 }
 
 pub fn checkContacts() !void {
-    const resources = try shared.getResources();
-    const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
+    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
 
     // Check begin contact events for blood particles
     for (0..@intCast(contactEvents.beginCount)) |i| {

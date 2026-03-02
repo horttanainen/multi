@@ -1,6 +1,6 @@
 const std = @import("std");
 const IVec2 = @import("vector.zig").IVec2;
-const allocator = @import("shared.zig").allocator;
+const allocator = @import("allocator.zig").allocator;
 const config = @import("config.zig");
 
 pub const ConnectedComponent = struct {

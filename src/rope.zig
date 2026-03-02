@@ -5,7 +5,7 @@ const box2d = @import("box2d.zig");
 const vec = @import("vector.zig");
 const config = @import("config.zig");
 const collision = @import("collision.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
 const player = @import("player.zig");
@@ -61,7 +61,7 @@ pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
     const impulse = vec.mul(normalizedDir, config.rope.hookImpulse);
     box2d.c.b2Body_ApplyLinearImpulseToCenter(hookEntity.bodyId, vec.toBox2d(impulse), true);
 
-    try ropes.put(shared.allocator, playerId, Rope{
+    try ropes.put(allocator, playerId, Rope{
         .state = .flying,
         .hookBodyId = hookEntity.bodyId,
         .attachedToBodyId = undefined,
@@ -90,8 +90,7 @@ pub fn releaseRope(playerId: usize) void {
 }
 
 pub fn checkHookContacts() !void {
-    const resources = try shared.getResources();
-    const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
+    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
@@ -138,8 +137,6 @@ fn attach(r: *Rope, targetBodyId: box2d.c.b2BodyId) void {
     r.state = .attached;
     r.attachedToBodyId = targetBodyId;
 
-    const resources = shared.getResources() catch return;
-
     // Get the hook's current position to use as the anchor point
     const hookPos = box2d.c.b2Body_GetPosition(r.hookBodyId);
 
@@ -170,7 +167,7 @@ fn attach(r: *Rope, targetBodyId: box2d.c.b2BodyId) void {
         hookRot.c * targetRot.c + hookRot.s * targetRot.s,
     );
 
-    r.jointId = box2d.c.b2CreateWeldJoint(resources.worldId, &weldDef);
+    r.jointId = box2d.c.b2CreateWeldJoint(box2d.getWorldId(), &weldDef);
 }
 
 pub fn applyTension() void {
@@ -209,7 +206,6 @@ pub fn applyTension() void {
 }
 
 pub fn drawRopes() !void {
-    const resources = try shared.getResources();
     const segmentSprite = sprite.getSprite(segmentSpriteUuid orelse return) orelse return;
 
     for (ropes.keys(), ropes.values()) |playerId, ropeState| {
@@ -225,11 +221,11 @@ pub fn drawRopes() !void {
 
         const playerScreenPos = player.getLeftArmRopeAttachPoint(p, hookScreenPos) orelse continue;
 
-        try drawRopeSegments(resources.renderer, segmentSprite, playerScreenPos, hookScreenPos);
+        try drawRopeSegments(segmentSprite, playerScreenPos, hookScreenPos);
     }
 }
 
-fn drawRopeSegments(renderer: *gpu.Renderer, segmentSprite: sprite.Sprite, start: vec.IVec2, end: vec.IVec2) !void {
+fn drawRopeSegments(segmentSprite: sprite.Sprite, start: vec.IVec2, end: vec.IVec2) !void {
     const dx = @as(f32, @floatFromInt(end.x - start.x));
     const dy = @as(f32, @floatFromInt(end.y - start.y));
     const length = @sqrt(dx * dx + dy * dy);
@@ -259,7 +255,6 @@ fn drawRopeSegments(renderer: *gpu.Renderer, segmentSprite: sprite.Sprite, start
         };
 
         try gpu.renderCopyEx(
-            renderer,
             segmentSprite.texture,
             null,
             &rect,
@@ -288,5 +283,5 @@ pub fn cleanup() void {
             entity.cleanupOne(ent.value);
         }
     }
-    ropes.clearAndFree(shared.allocator);
+    ropes.clearAndFree(allocator);
 }

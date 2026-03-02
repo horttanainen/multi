@@ -5,7 +5,8 @@ const config = @import("config.zig");
 const collision = @import("collision.zig");
 const polygon = @import("polygon.zig");
 const box2d = @import("box2d.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
+const state = @import("state.zig");
 const player = @import("player.zig");
 const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
@@ -53,13 +54,13 @@ pub const Level = struct {
 };
 
 pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
-    const parsed = try std.json.parseFromSlice(Level, shared.allocator, data, .{ .allocate = .alloc_always });
+    const parsed = try std.json.parseFromSlice(Level, allocator, data, .{ .allocate = .alloc_always });
     return parsed;
 }
 
 pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.fs.cwd().readFileAlloc(shared.allocator, path, config.maxLevelSizeInBytes);
-    defer shared.allocator.free(data);
+    const data = try std.fs.cwd().readFileAlloc(allocator, path, config.maxLevelSizeInBytes);
+    defer allocator.free(data);
     return parseFromData(data);
 }
 
@@ -67,7 +68,7 @@ pub fn findLevels() ![][]const u8 {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
 
-    var fileList = std.array_list.Managed([]const u8).init(shared.allocator);
+    var fileList = std.array_list.Managed([]const u8).init(allocator);
 
     var dirIterator = dir.iterate();
 
@@ -112,7 +113,7 @@ fn loadByName(levelName: []const u8) !void {
         } else if (std.mem.eql(u8, e.type, "static")) {
             // Split large static terrain into tiles for better performance
             const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
-            defer shared.allocator.free(tiles);
+            defer allocator.free(tiles);
 
             const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
             const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
@@ -184,7 +185,7 @@ pub fn cleanup() void {
 }
 
 pub fn reset() void {
-    shared.goalReached = false;
+    state.goalReached = false;
     cleanup();
 }
 
@@ -192,7 +193,7 @@ pub fn next() !void {
     reset();
 
     const levels = try findLevels();
-    defer shared.allocator.free(levels);
+    defer allocator.free(levels);
     levelNumber = @mod(levelNumber + 1, levels.len);
 
     const levelName = levels[levelNumber];

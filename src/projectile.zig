@@ -5,7 +5,7 @@ const audio = @import("audio.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
 const sprite = @import("sprite.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
 const collision = @import("collision.zig");
@@ -30,15 +30,15 @@ pub const Explosion = struct {
     damagePlayers: bool = true,
 };
 
-pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(shared.allocator);
+pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(allocator);
 const PropulsionData = struct {
     magnitude: f32,
     lateralDamping: f32,
 };
 
-pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, PropulsionData).init(shared.allocator);
-pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(shared.allocator);
-pub var directDamages = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(shared.allocator);
+pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, PropulsionData).init(allocator);
+pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(allocator);
+pub var directDamages = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(allocator);
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -48,9 +48,9 @@ pub const Shrapnel = struct {
     timerId: sdl.TimerID,
 };
 
-pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(shared.allocator);
+pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(allocator);
 
-var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(shared.allocator);
+var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
 
 fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
     const animCopy = try animation.copyAnimation(anim);
@@ -105,8 +105,6 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
 }
 
 fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
-    const resources = try shared.getResources();
-
     // Setup overlap query
     var context = OverlapContext{
         .bodies = undefined,
@@ -129,7 +127,7 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
 
     // Query for overlapping bodies
     _ = box2d.c.b2World_OverlapCircle(
-        resources.worldId,
+        box2d.getWorldId(),
         &circle,
         transform,
         filter,
@@ -190,7 +188,7 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
         try audio.playFor(snd);
     }
 
-    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator);
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
 
     for (0..explosion.particleCount) |i| {
         const angle = std.math.degreesToRadians(@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(explosion.particleCount)) * 360);
@@ -270,8 +268,8 @@ fn markShrapnelForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.
 }
 
 pub fn cleanupShrapnel() !void {
-    var shrapnelToKeep = std.array_list.Managed(Shrapnel).init(shared.allocator);
-    var shrapnelToDiscard = std.array_list.Managed(Shrapnel).init(shared.allocator);
+    var shrapnelToKeep = std.array_list.Managed(Shrapnel).init(allocator);
+    var shrapnelToDiscard = std.array_list.Managed(Shrapnel).init(allocator);
     defer shrapnelToDiscard.deinit();
 
     shrapnel.mutex.lock();
@@ -292,11 +290,11 @@ pub fn cleanupShrapnel() !void {
     }
     shrapnelToCleanup.mutex.unlock();
 
-    shrapnelToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(shared.allocator));
+    shrapnelToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(allocator));
 
     for (shrapnelToDiscard.items) |item| {
         if (item.cleaned) {
-            shared.allocator.free(item.bodies);
+            allocator.free(item.bodies);
         }
     }
 }
@@ -315,7 +313,7 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
         });
         id = id + 1;
     } else {
-        shared.allocator.free(explosionBodies);
+        allocator.free(explosionBodies);
     }
 
     if (explosion.animation) |anim| {
@@ -425,8 +423,7 @@ fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2Shap
 }
 
 pub fn checkContacts() !void {
-    const resources = try shared.getResources();
-    const contactEvents = box2d.c.b2World_GetContactEvents(resources.worldId);
+    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
 
     for (0..@intCast(contactEvents.beginCount)) |i| {
         const event = contactEvents.beginEvents[i];
@@ -451,11 +448,11 @@ pub fn cleanup() void {
         for (item.bodies) |toClean| {
             box2d.c.b2DestroyBody(toClean);
         }
-        shared.allocator.free(item.bodies);
+        allocator.free(item.bodies);
     }
     shrapnel.mutex.unlock();
 
-    shrapnel.replaceLocking(std.array_list.Managed(Shrapnel).init(shared.allocator));
+    shrapnel.replaceLocking(std.array_list.Managed(Shrapnel).init(allocator));
 
     shrapnelToCleanup.mutex.lock();
     defer shrapnelToCleanup.mutex.unlock();

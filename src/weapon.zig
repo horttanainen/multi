@@ -9,7 +9,7 @@ const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const collision = @import("collision.zig");
 const animation = @import("animation.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const camera = @import("camera.zig");
 const time = @import("time.zig");
 const gpu = @import("gpu.zig");
@@ -114,7 +114,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     try projectile.registerPropulsion(projectileEntity.bodyId, proj.propulsion, proj.lateralDamping);
     try projectile.registerOwner(projectileEntity.bodyId, playerId);
 
-    var animations = std.StringHashMap(animation.Animation).init(shared.allocator);
+    var animations = std.StringHashMap(animation.Animation).init(allocator);
     try animations.put("main", animCopy);
 
     if (proj.propulsionAnimation) |propAnim| {
@@ -129,7 +129,6 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
 }
 
 fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: usize) !void {
-    const resources = try shared.getResources();
     const explosion = w.hitscanExplosion.?;
 
     const origin = conv.pixel2M(position);
@@ -143,7 +142,7 @@ fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: u
     filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
 
     const result = box2d.c.b2World_CastRayClosest(
-        resources.worldId,
+        box2d.getWorldId(),
         vec.toBox2d(origin),
         vec.toBox2d(translation),
         filter,
@@ -162,7 +161,7 @@ fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: u
     try projectile.explodeAt(hitPoint, explosion, playerId);
 
     if (w.trailDurationMs > 0) {
-        try activeTrails.append(shared.allocator, .{
+        try activeTrails.append(allocator, .{
             .startPos = origin,
             .endPos = hitPoint,
             .color = w.trailColor,
@@ -225,12 +224,12 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .{ .x = 0, .y = 0 },
         );
 
-        var spriteUuids = try shared.allocator.alloc(u64, 1);
+        var spriteUuids = try allocator.alloc(u64, 1);
         spriteUuids[0] = spriteUuid;
-        const shapeIds = try shared.allocator.alloc(box2d.c.b2ShapeId, 0);
+        const shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
 
         try entity.entities.putLocking(bodyId, entity.Entity{
-            .type = try shared.allocator.dupe(u8, "projectile"),
+            .type = try allocator.dupe(u8, "projectile"),
             .friction = shapeDef.friction,
             .bodyId = bodyId,
             .spriteUuids = spriteUuids,
@@ -264,11 +263,10 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
 }
 
 pub fn drawTrails() !void {
-    const resources = try shared.getResources();
     const currentTime = time.now();
 
-    const prevBlendMode = try gpu.getRenderDrawBlendMode(resources.renderer);
-    try gpu.setRenderDrawBlendMode(resources.renderer, .blend);
+    const prevBlendMode = try gpu.getRenderDrawBlendMode();
+    try gpu.setRenderDrawBlendMode(.blend);
 
     var i: usize = 0;
     while (i < activeTrails.items.len) {
@@ -318,16 +316,16 @@ pub fn drawTrails() !void {
             const ox: i32 = @intFromFloat(perpX * offset);
             const oy: i32 = @intFromFloat(perpY * offset);
 
-            try gpu.setRenderDrawColor(resources.renderer, .{ .r = colorR, .g = colorG, .b = colorB, .a = lineAlpha });
-            try gpu.renderDrawLine(resources.renderer, startPx.x + ox, startPx.y + oy, endPx.x + ox, endPx.y + oy);
+            try gpu.setRenderDrawColor(.{ .r = colorR, .g = colorG, .b = colorB, .a = lineAlpha });
+            try gpu.renderDrawLine(startPx.x + ox, startPx.y + oy, endPx.x + ox, endPx.y + oy);
         }
 
         i += 1;
     }
 
-    try gpu.setRenderDrawBlendMode(resources.renderer, prevBlendMode);
+    try gpu.setRenderDrawBlendMode(prevBlendMode);
 }
 
 pub fn cleanupTrails() void {
-    activeTrails.clearAndFree(shared.allocator);
+    activeTrails.clearAndFree(allocator);
 }

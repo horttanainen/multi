@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 
 const vec = @import("vector.zig");
-const shared = @import("shared.zig");
+const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
@@ -26,14 +26,14 @@ pub const AnimationSet = struct {
     autoDestroy: bool, // Destroy entity when animation completes (for one-off effects)
 };
 
-var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(shared.allocator);
+var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(allocator);
 
 var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool){};
 
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
-    var animations = std.StringHashMap(Animation).init(shared.allocator);
+    var animations = std.StringHashMap(Animation).init(allocator);
     try animations.put("default", anim);
 
     try registerAnimationSet(bodyId, animations, "default", true);
@@ -49,7 +49,7 @@ pub fn registerAnimationSet(
     if (maybeEntityPtr) |entPtr| {
         entPtr.animated = true;
 
-        const currentAnimations = try shared.allocator.alloc(?*Animation, entPtr.spriteUuids.len);
+        const currentAnimations = try allocator.alloc(?*Animation, entPtr.spriteUuids.len);
         for (currentAnimations) |*slot| {
             slot.* = null;
         }
@@ -98,7 +98,7 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
 
         // Start a new delay
         const delayMs: u32 = @intFromFloat(anim.switchDelay * 1000.0);
-        delayedSwitches.put(shared.allocator, bodyId, false) catch return;
+        delayedSwitches.put(allocator, bodyId, false) catch return;
         const keyPtr = delayedSwitches.getPtr(bodyId).?;
         _ = sdl.addTimer(delayMs, delayedSwitchCallback, @ptrCast(keyPtr));
         return;
@@ -209,12 +209,12 @@ pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
             cleanupOne(anim.*);
         }
         animations.deinit();
-        shared.allocator.free(animSet.value.currentAnimations);
+        allocator.free(animSet.value.currentAnimations);
     }
 }
 
 pub fn cleanup() void {
-    delayedSwitches.clearAndFree(shared.allocator);
+    delayedSwitches.clearAndFree(allocator);
 
     animationSets.mutex.lock();
     defer animationSets.mutex.unlock();
@@ -226,7 +226,7 @@ pub fn cleanup() void {
             cleanupOne(anim.*);
         }
         entry.value_ptr.animations.deinit();
-        shared.allocator.free(entry.value_ptr.currentAnimations);
+        allocator.free(entry.value_ptr.currentAnimations);
     }
     animationSets.map.clearAndFree();
 }
@@ -235,7 +235,7 @@ pub fn cleanupOne(anim: Animation) void {
     for (anim.frames) |frameUuid| {
         sprite.cleanupLater(frameUuid);
     }
-    shared.allocator.free(anim.frames);
+    allocator.free(anim.frames);
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize) !Animation {
@@ -253,7 +253,7 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
 
 pub fn copyAnimation(anim: Animation) !Animation {
     // Allocate new frames array
-    const framesCopy = try shared.allocator.alloc(u64, anim.frames.len);
+    const framesCopy = try allocator.alloc(u64, anim.frames.len);
 
     // Deep copy each sprite frame
     for (anim.frames, 0..) |frameUuid, i| {

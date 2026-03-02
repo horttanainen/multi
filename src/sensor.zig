@@ -2,7 +2,7 @@ const box2d = @import("box2d.zig");
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
-const shared = @import("shared.zig");
+const state = @import("state.zig");
 const polygon = @import("polygon.zig");
 const player = @import("player.zig");
 
@@ -44,9 +44,8 @@ pub fn createGoalSensorFromImg(position: vec.Vec2, spriteUuid: u64) !void {
 }
 
 pub fn checkGoal() !void {
-    const resources = try shared.getResources();
     if (maybeGoalSensor) |goalSensor| {
-        const sensorEvents = box2d.c.b2World_GetSensorEvents(resources.worldId);
+        const sensorEvents = box2d.c.b2World_GetSensorEvents(box2d.getWorldId());
 
         // Check if any player touches the goal
         for (player.players.values()) |p| {
@@ -58,7 +57,7 @@ pub fn checkGoal() !void {
                 }
                 for (goalSensor.shapeIds) |sensorId| {
                     if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, sensorId)) {
-                        shared.goalReached = true;
+                        state.goalReached = true;
                         return;
                     }
                 }
