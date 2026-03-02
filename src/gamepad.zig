@@ -55,7 +55,7 @@ pub const defaultBindings = GamepadBindings{
 
     .aimXAxis = .rightx,
     .aimYAxis = .righty,
-    .aimThreshold = 0.1,
+    .aimThreshold = 0.0,
 
     .shootAxis = .triggerright,
     .shootThreshold = TRIGGER_THRESHOLD,
@@ -130,11 +130,31 @@ pub fn handleDeviceRemoved(instanceId: sdl.c.SDL_JoystickID) void {
 }
 
 fn normalizeAxis(rawValue: i16) f32 {
-    const normalized = @as(f32, @floatFromInt(rawValue)) / axisMax;
+    const normalized = std.math.clamp(@as(f32, @floatFromInt(rawValue)) / axisMax, -1.0, 1.0);
     if (@abs(normalized) < stickDeadzone) {
         return 0.0;
     }
     return normalized;
+}
+
+fn applyRadialDeadzone(rawX: i16, rawY: i16, deadzone: f32) vec.Vec2 {
+    var x = std.math.clamp(@as(f32, @floatFromInt(rawX)) / axisMax, -1.0, 1.0);
+    var y = std.math.clamp(@as(f32, @floatFromInt(rawY)) / axisMax, -1.0, 1.0);
+
+    const mag = @sqrt(x * x + y * y);
+    if (mag <= deadzone) {
+        return .{ .x = 0, .y = 0 };
+    }
+
+    // Rescale from [deadzone..1] -> [0..1] to keep fine control near center.
+    const legalRange = 1.0 - deadzone;
+    const scaledMag = std.math.clamp((mag - deadzone) / legalRange, 0.0, 1.0);
+    const invMag = 1.0 / mag;
+
+    x = x * invMag * scaledMag;
+    y = y * invMag * scaledMag;
+
+    return .{ .x = x, .y = y };
 }
 
 pub fn createController(playerId: usize, color: sprite.Color) ?controller.Controller {
@@ -179,11 +199,12 @@ pub fn handle(ctrl: *const controller.Controller) void {
         control.executeAction(ctrl.playerId, .jump);
     }
 
-    const aimX = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis));
-    const aimY = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis));
+    const rawAimX = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis);
+    const rawAimY = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis);
+    const aim = applyRadialDeadzone(rawAimX, rawAimY, stickDeadzone);
 
-    if (@abs(aimX) > bindings.aimThreshold or @abs(aimY) > bindings.aimThreshold) {
-        const aimDirection = vec.Vec2{ .x = aimX, .y = -aimY };
+    if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold) {
+        const aimDirection = vec.Vec2{ .x = aim.x, .y = -aim.y };
         control.executeAim(ctrl.playerId, aimDirection);
     } else {
         control.executeAimRelease(ctrl.playerId);

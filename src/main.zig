@@ -45,7 +45,6 @@ const Sprite = entity.Sprite;
 //TODO: use allyourbase box2d instead of shitty submodule
 //TODO: wrap box2d calls so that we do not have to pass worldId
 //TODO: make main function deinit explicit instead of the deffered reverse order deinit
-//TODO: investigate why aiming is so snappy
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
@@ -162,7 +161,6 @@ pub fn main() !void {
         time.frameEnd();
     }
 
-    // Explicit shutdown in reverse init order
     levelEditor.cleanup() catch |err| {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
