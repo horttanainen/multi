@@ -41,48 +41,25 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Small improvements
 //TODO: use allyourbase box2d instead of shitty submodule
 //TODO: wrap box2d calls so that we do not have to pass worldId
 //TODO: make main function deinit explicit instead of the deffered reverse order deinit
-
-//TODO: add rounds pistol with the glow and spark effect and heavy drop
-
-//Level ideas:
-//TODO: nothing: physics and gun is set so that both players need to shoot down from time to time to levitate and then of course shoot each other
-//TODO: breakfloor: all stuff dangle and you can shoot boxes in the ropes to make the platforms fall down
-
+//TODO: patch the memory leak
 //TODO: investigate why aiming is so snappy
 //TODO: investigate if it would be simpler to migrate to sdl_audio
-
-//TODO: buy rounds game and steal their ideas
-//TODO: create a rounds style 1v1 level with single camera
-//TODO: make it possible to switch to the current level with splitscreen with its camera distance, both should be supported
-
-//TODO: e.g. different levels can have different camera distances
-//TODO: enable ricochets for some slugs
-//TODO: make slug glow configurable
-
-//TODO: add green pixel to gun for bullet spawn anchor point
-//TODO: add item.zig that spawns items on the map
-//TODO: add weapon item sprites so that weapons can be picked up
-//TODO: display weapons name above it
-//TODO: weapons could levitate on top of some reverse spawn thingy in pulsating light
-//TODO: add two or more spawn locations to the map
-//TODO: spawn should be a levitating teleport thingy
-//TODO: spawn should materialize player with some beaming effect
-
-//Hand ideas
-//TODO: instead of hook the mechanical hand could be shot with a chain.
-
-//TODO: add transparent smoke trail for the rocket
-//TODO: ninja rope attach: can shorten rope to attach without dangling; "clinging"
-//TODO: change ninja rope attach point to not be in the crotch
-
-//TODO: display a laughing skull on death
-
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
+//TODO: instead of all the silly playerId indexing start using real uids for players and a map.
+//TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
+//TODO: refactor sensor stuff into regular entities
 
 //Gun ideas
+//TODO: add transparent smoke trail for the rocket
+//TODO: add rounds pistol with the glow and spark effect and heavy drop
+//TODO: enable ricochets for some slugs
+//TODO: make slug glow configurable
+//TODO: add green pixel to gun for bullet spawn anchor point
+
 //TODO: rope combo: shoot rocket with rope attached and then shoot hook to attach the rocket to e.g. enemy player
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
 //TODO: travel rocket: large slow moving rocket on top which player can jump or attach via rope.
@@ -93,19 +70,39 @@ const Sprite = entity.Sprite;
 //TODO: Dig2000 for melee and quick digging
 //TODO: grenade launcher with different kinds of grenades
 
+//Level ideas:
+//TODO: nothing: physics and gun is set so that both players need to shoot down from time to time to levitate and then of course shoot each other
+//TODO: breakfloor: all stuff dangle and you can shoot boxes in the ropes to make the platforms fall down
+//TODO: e.g. different levels can have different camera distances
+//TODO: create a rounds style 1v1 level with single camera
+
+//Quake style:
+//TODO: add item.zig that spawns items on the map
+//TODO: add weapon item sprites so that weapons can be picked up
+//TODO: display weapons name above it
+//TODO: weapons could levitate on top of some reverse spawn thingy in pulsating light
+
+//Spawn:
+//TODO: add two or more spawn locations to the map
+//TODO: spawn should be a levitating teleport thingy
+//TODO: spawn should materialize player with some beaming effect
+
+//Fun stuff:
+//TODO: display a laughing skull on death
+//TODO: buy rounds game and steal their ideas
+//TODO: towerfall is game that we can copy ideas from
+//TODO: instead of hook the mechanical hand could be shot with a chain/rope
+//TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
+//TODO: we could have different gamemodes: rounds, liero, quake, soldat, towerfall, super meat boy
+
 //Movement
+//TODO: character could be able to grab wall by hand
 //TODO: add dash to side
 //TODO: add sliding
 //TODO: add slope sliding
 //TODO: try if movement vector should be to the direction of slope character is standing on
 
-//TODO: instead of all the silly playerId indexing start using real uids for players and a map.
-//TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
-
-//extras:
-//TODO: refactor sensor stuff into regular entities
-
-//Look and feel
+//Character
 //TODO: Create jumping animation 
 //TODO: Create landing animation
 //TODO: Create sliding animation
@@ -117,30 +114,10 @@ const Sprite = entity.Sprite;
 //TODO: health
 //TODO: piercing rocket launcher ammo
 //TODO: shrapnel rocket launcher ammo
-//TODO: mine bazooka ammo
 
 //Music
 //TODO: There should be basic music fitting the deathmatch theme of the game
 //TODO: music can be turned off
-
-//level editor:
-//TODO: Pressing r in level editor reloads the level from latest version
-//TODO: pressing ctrl z in level editor loads the previous version of the json.
-//TODO: pressing ctrl r in level editor loads the next version of the json.
-//TODO: user can move entities
-//TODO: user can drop images into a folder to use in the editor
-//TODO: user can choose to create static objects or dynamic
-//TODO: pause time when entering level editor
-//TODO: add option for user to create parallax background from images
-//TODO: user can create spawn for player
-//TODO: user can create goal for player
-//TODO: user can create level that is bigger than screen
-
-//E2E demo:
-//TODO: 3 levels. Each level has some physics puzzle
-//TODO: There is Main menu: start game, settings, level editor, exit game
-//TODO: Music plays in the background
-//TODO: end credits
 
 //Multiplayer:
 //TODO: add localhost multiplayer
@@ -149,9 +126,6 @@ const Sprite = entity.Sprite;
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
-
-//Game content:
-//TODO: niddhog style 1 v 1 or 2 v 2 or 4 deatmatch tournament, level changes after each match
 
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
