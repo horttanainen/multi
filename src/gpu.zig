@@ -2,11 +2,11 @@
 // Extracted from sdl.zig - handles pipelines, shaders, vertex types, batch recording, draw calls, frame management
 const std = @import("std");
 const sdl = @import("sdl.zig");
-const atlas_mod = @import("atlas.zig");
-const texture_mod = @import("texture.zig");
+const atlas = @import("atlas.zig");
+const texture = @import("texture.zig");
 const c = sdl.c;
 
-pub const Texture = texture_mod.Texture;
+pub const Texture = texture.Texture;
 
 // ============================================================
 // Vertex types for batch renderer
@@ -86,7 +86,7 @@ const GpuState = struct {
     window: *sdl.Window,
 
     // Texture atlas
-    atlas: atlas_mod.Atlas,
+    atlas: atlas.Atlas,
 
     // Pipelines
     sprite_alpha_pipeline: *c.SDL_GPUGraphicsPipeline,
@@ -169,7 +169,7 @@ pub fn getDevice() *c.SDL_GPUDevice {
     return getGpu().device;
 }
 
-pub fn getAtlas() *atlas_mod.Atlas {
+pub fn getAtlas() *atlas.Atlas {
     return &getGpu().atlas;
 }
 
@@ -626,8 +626,8 @@ pub fn createRenderer(window: *sdl.Window) !*Renderer {
         .type = c.SDL_GPU_TEXTURETYPE_2D,
         .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
         .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = atlas_mod.ATLAS_SIZE,
-        .height = atlas_mod.ATLAS_SIZE,
+        .width = atlas.ATLAS_SIZE,
+        .height = atlas.ATLAS_SIZE,
         .layer_count_or_depth = 1,
         .num_levels = 1,
         .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
@@ -639,7 +639,7 @@ pub fn createRenderer(window: *sdl.Window) !*Renderer {
         .device = device,
         .window = window,
         .atlas = blk: {
-            var a = atlas_mod.Atlas{ .gpu_texture = atlas_gpu_texture };
+            var a = atlas.Atlas{ .gpu_texture = atlas_gpu_texture };
             a.init();
             break :blk a;
         },
@@ -1076,13 +1076,13 @@ fn submitFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
 // Drawing - renderCopyEx (sprites)
 // ============================================================
 
-pub fn renderCopy(renderer: *Renderer, texture: *Texture, src_rect: ?*const sdl.Rect, dst_rect: ?*const sdl.Rect) !void {
-    try renderCopyEx(renderer, texture, src_rect, dst_rect, 0, null, .none);
+pub fn renderCopy(renderer: *Renderer, tex: *Texture, src_rect: ?*const sdl.Rect, dst_rect: ?*const sdl.Rect) !void {
+    try renderCopyEx(renderer, tex, src_rect, dst_rect, 0, null, .none);
 }
 
 pub fn renderCopyEx(
     renderer: *Renderer,
-    texture: *Texture,
+    tex: *Texture,
     src_rect: ?*const sdl.Rect,
     dst_rect: ?*const sdl.Rect,
     angle: f64,
@@ -1093,21 +1093,21 @@ pub fn renderCopyEx(
     const g = getGpu();
 
     // Determine pipeline based on texture blend mode
-    const pipeline_type: PipelineType = switch (texture.blend_mode) {
+    const pipeline_type: PipelineType = switch (tex.blend_mode) {
         .add => .sprite_additive,
         else => .sprite_alpha,
     };
-    ensureSpritePipeline(g, pipeline_type, texture.gpuTexture());
+    ensureSpritePipeline(g, pipeline_type, tex.gpuTexture());
 
     // Source UV coords - atlas vs standalone
     var uv_left: f32 = undefined;
     var uv_top: f32 = undefined;
     var uv_right: f32 = undefined;
     var uv_bottom: f32 = undefined;
-    if (texture.is_atlas) {
-        const atlas_size: f32 = @floatFromInt(atlas_mod.ATLAS_SIZE);
-        const ax: f32 = @floatFromInt(texture.atlas_x);
-        const ay: f32 = @floatFromInt(texture.atlas_y);
+    if (tex.is_atlas) {
+        const atlas_size: f32 = @floatFromInt(atlas.ATLAS_SIZE);
+        const ax: f32 = @floatFromInt(tex.atlas_x);
+        const ay: f32 = @floatFromInt(tex.atlas_y);
         if (src_rect) |sr| {
             uv_left = (ax + @as(f32, @floatFromInt(sr.x))) / atlas_size;
             uv_top = (ay + @as(f32, @floatFromInt(sr.y))) / atlas_size;
@@ -1116,8 +1116,8 @@ pub fn renderCopyEx(
         } else {
             uv_left = ax / atlas_size;
             uv_top = ay / atlas_size;
-            uv_right = (ax + @as(f32, @floatFromInt(texture.width))) / atlas_size;
-            uv_bottom = (ay + @as(f32, @floatFromInt(texture.height))) / atlas_size;
+            uv_right = (ax + @as(f32, @floatFromInt(tex.width))) / atlas_size;
+            uv_bottom = (ay + @as(f32, @floatFromInt(tex.height))) / atlas_size;
         }
     } else {
         // Standalone texture: UVs relative to texture size (0..1)
@@ -1126,8 +1126,8 @@ pub fn renderCopyEx(
         uv_right = 1;
         uv_bottom = 1;
         if (src_rect) |sr| {
-            const tw: f32 = @floatFromInt(texture.width);
-            const th: f32 = @floatFromInt(texture.height);
+            const tw: f32 = @floatFromInt(tex.width);
+            const th: f32 = @floatFromInt(tex.height);
             uv_left = @as(f32, @floatFromInt(sr.x)) / tw;
             uv_top = @as(f32, @floatFromInt(sr.y)) / th;
             uv_right = @as(f32, @floatFromInt(sr.x + sr.w)) / tw;
@@ -1138,8 +1138,8 @@ pub fn renderCopyEx(
     // Destination rect
     var dx: f32 = 0;
     var dy: f32 = 0;
-    var dw: f32 = @floatFromInt(texture.width);
-    var dh: f32 = @floatFromInt(texture.height);
+    var dw: f32 = @floatFromInt(tex.width);
+    var dh: f32 = @floatFromInt(tex.height);
     if (dst_rect) |dr| {
         dx = @floatFromInt(dr.x);
         dy = @floatFromInt(dr.y);
@@ -1160,7 +1160,7 @@ pub fn renderCopyEx(
     }
 
     // Color modulation
-    const cm = texture.color_mod;
+    const cm = tex.color_mod;
     const vc = PackedColor{ .r = cm.r, .g = cm.g, .b = cm.b, .a = cm.a };
 
     // Generate 4 corners relative to center of rotation

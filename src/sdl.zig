@@ -1,56 +1,11 @@
 // SDL3 bindings - thin Zig wrapper over SDL3 C API
 const std = @import("std");
-const atlas_mod = @import("atlas.zig");
-const texture_mod = @import("texture.zig");
-const gpu_mod = @import("gpu.zig");
 
 pub const c = @cImport({
     @cInclude("SDL3/SDL.h");
     @cInclude("SDL3_image/SDL_image.h");
     @cInclude("SDL3_ttf/SDL_ttf.h");
 });
-
-// ============================================================
-// Re-exports from atlas and texture modules
-// ============================================================
-
-pub const Atlas = atlas_mod.Atlas;
-pub const ATLAS_SIZE = atlas_mod.ATLAS_SIZE;
-pub const Texture = texture_mod.Texture;
-pub const addToAtlas = texture_mod.addToAtlas;
-pub const createStandaloneTexture = texture_mod.createStandaloneTexture;
-pub const destroyTexture = texture_mod.destroyTexture;
-pub const cloneTexture = texture_mod.cloneTexture;
-pub const reallocateAtlasRegion = texture_mod.reallocateAtlasRegion;
-pub const resetAtlas = texture_mod.resetAtlas;
-pub const queryTexture = texture_mod.queryTexture;
-pub const setTextureColorMod = texture_mod.setTextureColorMod;
-pub const setTextureAlphaMod = texture_mod.setTextureAlphaMod;
-pub const setTextureBlendMode = texture_mod.setTextureBlendMode;
-pub const reuploadTexture = texture_mod.reuploadTexture;
-pub const saveAtlasToDisk = texture_mod.saveAtlasToDisk;
-
-// ============================================================
-// Re-exports from gpu module
-// ============================================================
-
-pub const Renderer = gpu_mod.Renderer;
-pub const createRenderer = gpu_mod.createRenderer;
-pub const destroyRenderer = gpu_mod.destroyRenderer;
-pub const setRenderDrawColor = gpu_mod.setRenderDrawColor;
-pub const setRenderDrawBlendMode = gpu_mod.setRenderDrawBlendMode;
-pub const getRenderDrawBlendMode = gpu_mod.getRenderDrawBlendMode;
-pub const renderClear = gpu_mod.renderClear;
-pub const renderPresent = gpu_mod.renderPresent;
-pub const renderCopy = gpu_mod.renderCopy;
-pub const renderCopyEx = gpu_mod.renderCopyEx;
-pub const renderDrawLine = gpu_mod.renderDrawLine;
-pub const renderFillRect = gpu_mod.renderFillRect;
-pub const renderSetViewport = gpu_mod.renderSetViewport;
-pub const getDevice = gpu_mod.getDevice;
-pub const getAtlas = gpu_mod.getAtlas;
-pub const getAllocator = gpu_mod.getAllocator;
-pub const queueTextureDestroy = gpu_mod.queueTextureDestroy;
 
 // ============================================================
 // Types

@@ -12,7 +12,7 @@ const animation = @import("animation.zig");
 const shared = @import("shared.zig");
 const camera = @import("camera.zig");
 const time = @import("time.zig");
-const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 
 pub const Projectile = struct {
     gravityScale: f32,
@@ -267,8 +267,8 @@ pub fn drawTrails() !void {
     const resources = try shared.getResources();
     const currentTime = time.now();
 
-    const prevBlendMode = try sdl.getRenderDrawBlendMode(resources.renderer);
-    try sdl.setRenderDrawBlendMode(resources.renderer, .blend);
+    const prevBlendMode = try gpu.getRenderDrawBlendMode(resources.renderer);
+    try gpu.setRenderDrawBlendMode(resources.renderer, .blend);
 
     var i: usize = 0;
     while (i < activeTrails.items.len) {
@@ -318,14 +318,14 @@ pub fn drawTrails() !void {
             const ox: i32 = @intFromFloat(perpX * offset);
             const oy: i32 = @intFromFloat(perpY * offset);
 
-            try sdl.setRenderDrawColor(resources.renderer, .{ .r = colorR, .g = colorG, .b = colorB, .a = lineAlpha });
-            try sdl.renderDrawLine(resources.renderer, startPx.x + ox, startPx.y + oy, endPx.x + ox, endPx.y + oy);
+            try gpu.setRenderDrawColor(resources.renderer, .{ .r = colorR, .g = colorG, .b = colorB, .a = lineAlpha });
+            try gpu.renderDrawLine(resources.renderer, startPx.x + ox, startPx.y + oy, endPx.x + ox, endPx.y + oy);
         }
 
         i += 1;
     }
 
-    try sdl.setRenderDrawBlendMode(resources.renderer, prevBlendMode);
+    try gpu.setRenderDrawBlendMode(resources.renderer, prevBlendMode);
 }
 
 pub fn cleanupTrails() void {

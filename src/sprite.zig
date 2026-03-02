@@ -1,5 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const tex = @import("texture.zig");
+const gpu = @import("gpu.zig");
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
@@ -25,7 +27,7 @@ pub const Color = struct {
 };
 
 pub const Sprite = struct {
-    texture: *sdl.Texture,
+    texture: *tex.Texture,
     surface: *sdl.Surface,
     scale: vec.Vec2,
     sizeM: vec.Vec2,
@@ -79,9 +81,9 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
         .h = sprite.sizeP.y,
     };
 
-    try sdl.setTextureColorMod(sprite.texture, 255, 255, 255);
+    try tex.setTextureColorMod(sprite.texture, 255, 255, 255);
     if (fog > 0) {
-        try sdl.setTextureColorMod(
+        try tex.setTextureColorMod(
             sprite.texture,
             @intFromFloat(@as(f32, @floatFromInt(255)) * (1 - fog)),
             @intFromFloat(@as(f32, @floatFromInt(255)) * (1 - fog)),
@@ -90,11 +92,11 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
     }
 
     if (highlight) {
-        try sdl.setTextureColorMod(sprite.texture, 100, 100, 100);
+        try tex.setTextureColorMod(sprite.texture, 100, 100, 100);
     }
 
     if (maybeColor) |color| {
-        try sdl.setTextureColorMod(
+        try tex.setTextureColorMod(
             sprite.texture,
             color.r,
             color.g,
@@ -103,7 +105,7 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
     }
 
     const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
-    try sdl.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
+    try gpu.renderCopyEx(renderer, sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
 }
 
 pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeColor: ?Color) !void {
@@ -112,7 +114,7 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 
     const color = maybeColor orelse Color{ .r = 255, .g = 255, .b = 255 };
 
-    try sdl.setTextureBlendMode(s.texture, .add);
+    try tex.setTextureBlendMode(s.texture, .add);
 
     // t=0 is innermost (white), t=1 is outermost (pellet color)
     const glowPasses = [_]struct { scale: f32, alpha: u8, t: f32 }{
@@ -137,14 +139,14 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
         const g: u8 = @intFromFloat(255.0 - (255.0 - @as(f32, @floatFromInt(color.g))) * pass.t);
         const b: u8 = @intFromFloat(255.0 - (255.0 - @as(f32, @floatFromInt(color.b))) * pass.t);
 
-        try sdl.setTextureColorMod(s.texture, r, g, b);
-        try sdl.setTextureAlphaMod(s.texture, pass.alpha);
-        try sdl.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none);
+        try tex.setTextureColorMod(s.texture, r, g, b);
+        try tex.setTextureAlphaMod(s.texture, pass.alpha);
+        try gpu.renderCopyEx(renderer, s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none);
     }
 
     // Restore to normal blend mode
-    try sdl.setTextureBlendMode(s.texture, .blend);
-    try sdl.setTextureAlphaMod(s.texture, 255);
+    try tex.setTextureBlendMode(s.texture, .blend);
+    try tex.setTextureAlphaMod(s.texture, 255);
 }
 
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
@@ -163,8 +165,8 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
 
     // Check texture cache - share atlas region for sprites with same image
     const texture = if (textureCache.get(imagePath)) |cached| blk: {
-        const tex = try std.heap.c_allocator.create(sdl.Texture);
-        tex.* = .{
+        const new_tex = try std.heap.c_allocator.create(tex.Texture);
+        new_tex.* = .{
             .atlas_x = cached.atlas_x,
             .atlas_y = cached.atlas_y,
             .width = cached.width,
@@ -172,25 +174,25 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
             .is_atlas = true,
             .owns_atlas_region = false,
         };
-        break :blk tex;
+        break :blk new_tex;
     } else blk: {
         const resources = try shared.getResources();
-        const tex = try sdl.addToAtlas(resources.renderer, surface);
-        const cacheKey = shared.allocator.dupe(u8, imgPath) catch break :blk tex;
+        const new_tex = try tex.addToAtlas(resources.renderer, surface);
+        const cacheKey = shared.allocator.dupe(u8, imgPath) catch break :blk new_tex;
         textureCache.put(cacheKey, .{
-            .atlas_x = tex.atlas_x,
-            .atlas_y = tex.atlas_y,
-            .width = tex.width,
-            .height = tex.height,
+            .atlas_x = new_tex.atlas_x,
+            .atlas_y = new_tex.atlas_y,
+            .width = new_tex.width,
+            .height = new_tex.height,
         }) catch {
             shared.allocator.free(cacheKey);
         };
-        break :blk tex;
+        break :blk new_tex;
     };
-    errdefer sdl.destroyTexture(texture);
+    errdefer tex.destroyTexture(texture);
 
     var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, &size.x, &size.y);
+    try tex.queryTexture(texture, &size.x, &size.y);
 
     size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
     size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
@@ -243,8 +245,8 @@ pub fn createCopy(spriteUuid: u64) !u64 {
     try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
     // Share atlas region with original (just copy atlas coordinates)
-    const copiedTexture = try sdl.cloneTexture(originalSprite.texture);
-    errdefer sdl.destroyTexture(copiedTexture);
+    const copiedTexture = try tex.cloneTexture(originalSprite.texture);
+    errdefer tex.destroyTexture(copiedTexture);
 
     const imgPathCopy = try shared.allocator.dupe(u8, originalSprite.imgPath);
     errdefer shared.allocator.free(imgPathCopy);
@@ -527,12 +529,12 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     // If this atlas texture shares its region with other sprites,
     // allocate a new private atlas region so we don't overwrite shared data.
     if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
-        try sdl.reallocateAtlasRegion(s.texture, s.surface);
+        try tex.reallocateAtlasRegion(s.texture, s.surface);
         return;
     }
 
     // Already private or standalone — just re-upload in place
-    try sdl.reuploadTexture(s.texture, s.surface);
+    try tex.reuploadTexture(s.texture, s.surface);
 }
 
 pub fn isAny(_: u8, _: u8, _: u8) bool {
@@ -640,7 +642,7 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
             sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null) catch continue;
 
             // Create atlas sub-region texture referencing the parent's atlas region
-            const tileTexture = std.heap.c_allocator.create(sdl.Texture) catch continue;
+            const tileTexture = std.heap.c_allocator.create(tex.Texture) catch continue;
             tileTexture.* = .{
                 .atlas_x = originalSprite.texture.atlas_x + startX,
                 .atlas_y = originalSprite.texture.atlas_y + startY,
@@ -730,7 +732,7 @@ pub fn cleanupSprites() void {
 
 fn cleanupOne(s: Sprite) void {
     shared.allocator.free(s.imgPath);
-    sdl.destroyTexture(s.texture);
+    tex.destroyTexture(s.texture);
     sdl.destroySurface(s.surface);
 }
 
@@ -753,7 +755,7 @@ pub fn cleanupAll() void {
         shared.allocator.free(key_ptr.*);
     }
     textureCache.clearRetainingCapacity();
-    sdl.resetAtlas();
+    tex.resetAtlas();
 }
 
 pub fn deinit() void {

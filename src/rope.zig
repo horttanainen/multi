@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 const box2d = @import("box2d.zig");
 const vec = @import("vector.zig");
 const config = @import("config.zig");
@@ -228,7 +229,7 @@ pub fn drawRopes() !void {
     }
 }
 
-fn drawRopeSegments(renderer: *sdl.Renderer, segmentSprite: sprite.Sprite, start: vec.IVec2, end: vec.IVec2) !void {
+fn drawRopeSegments(renderer: *gpu.Renderer, segmentSprite: sprite.Sprite, start: vec.IVec2, end: vec.IVec2) !void {
     const dx = @as(f32, @floatFromInt(end.x - start.x));
     const dy = @as(f32, @floatFromInt(end.y - start.y));
     const length = @sqrt(dx * dx + dy * dy);
@@ -257,7 +258,7 @@ fn drawRopeSegments(renderer: *sdl.Renderer, segmentSprite: sprite.Sprite, start
             .h = @as(i32, @intFromFloat(actualSegmentLength)),
         };
 
-        try sdl.renderCopyEx(
+        try gpu.renderCopyEx(
             renderer,
             segmentSprite.texture,
             null,

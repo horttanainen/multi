@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const tex = @import("texture.zig");
 
 const camera = @import("camera.zig");
 const delay = @import("delay.zig");
@@ -134,10 +135,10 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
 pub fn spawn(position: vec.IVec2) !usize {
     const resources = try shared.getResources();
     const surface = try sdl.image.load(shared.lieroImgSrc);
-    const texture = try sdl.addToAtlas(resources.renderer, surface);
+    const texture = try tex.addToAtlas(resources.renderer, surface);
 
     var size: sdl.Point = undefined;
-    try sdl.queryTexture(texture, &size.x, &size.y);
+    try tex.queryTexture(texture, &size.x, &size.y);
 
     const pos = conv.pixel2M(position);
 

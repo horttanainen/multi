@@ -1,6 +1,7 @@
 const std = @import("std");
 const box2d = @import("box2d.zig");
 const sdl = @import("sdl.zig");
+const tex = @import("texture.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -81,7 +82,7 @@ pub fn handleGlobalHotkeys() void {
         currentKeyStates[@intFromEnum(sdl.Scancode.nonusbackslash)])
     {
         if (!delay.check("atlasDump")) {
-            sdl.saveAtlasToDisk("atlas_dump.png");
+            tex.saveAtlasToDisk("atlas_dump.png");
             delay.action("atlasDump", 1000);
         }
     }

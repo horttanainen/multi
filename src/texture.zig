@@ -1,10 +1,10 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
-const atlas_mod = @import("atlas.zig");
+const atlas = @import("atlas.zig");
 const c = sdl.c;
-const Atlas = atlas_mod.Atlas;
-const ATLAS_SIZE = atlas_mod.ATLAS_SIZE;
+const Atlas = atlas.Atlas;
+const ATLAS_SIZE = atlas.ATLAS_SIZE;
 
 pub const Texture = struct {
     atlas_x: u32 = 0,
@@ -29,7 +29,7 @@ pub const Texture = struct {
 pub fn addToAtlas(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
     _ = renderer;
     const device = gpu.getDevice();
-    const atlas = gpu.getAtlas();
+    const tex_atlas = gpu.getAtlas();
     const allocator = gpu.getAllocator();
 
     const rgba_surface = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888);
@@ -39,7 +39,7 @@ pub fn addToAtlas(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
     const w: u32 = @intCast(rgba_surface.*.w);
     const h: u32 = @intCast(rgba_surface.*.h);
 
-    const region = try atlas.allocate(w, h);
+    const region = try tex_atlas.allocate(w, h);
 
     const texture = try allocator.create(Texture);
     texture.* = .{
@@ -50,7 +50,7 @@ pub fn addToAtlas(renderer: *gpu.Renderer, surface: *sdl.Surface) !*Texture {
         .is_atlas = true,
     };
 
-    uploadToAtlasRegion(device, atlas, rgba_surface, region.x, region.y, w, h);
+    uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
     return texture;
 }
 
@@ -124,7 +124,7 @@ pub fn cloneTexture(source: *Texture) !*Texture {
 /// Used for copy-on-write when a texture shares its atlas region with the cache.
 pub fn reallocateAtlasRegion(texture: *Texture, surface: *sdl.Surface) !void {
     const device = gpu.getDevice();
-    const atlas = gpu.getAtlas();
+    const tex_atlas = gpu.getAtlas();
 
     const rgba_surface = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888);
     if (rgba_surface == null) return error.ConvertSurfaceFailed;
@@ -133,12 +133,12 @@ pub fn reallocateAtlasRegion(texture: *Texture, surface: *sdl.Surface) !void {
     const w: u32 = @intCast(texture.width);
     const h: u32 = @intCast(texture.height);
 
-    const region = try atlas.allocate(w, h);
+    const region = try tex_atlas.allocate(w, h);
     texture.atlas_x = region.x;
     texture.atlas_y = region.y;
     texture.owns_atlas_region = true;
 
-    uploadToAtlasRegion(device, atlas, rgba_surface, region.x, region.y, w, h);
+    uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
 }
 
 /// Reset atlas packer state (call on level reload to reclaim all atlas space).
@@ -182,7 +182,7 @@ pub fn reuploadTexture(texture: *Texture, surface: *sdl.Surface) !void {
 }
 
 /// Upload surface pixel data to a sub-region of the atlas texture.
-fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, atlas: *Atlas, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32, w: u32, h: u32) void {
+fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32, w: u32, h: u32) void {
     const pitch: u32 = @intCast(rgba_surface.*.pitch);
     const data_size: u32 = pitch * h;
 
@@ -222,7 +222,7 @@ fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, atlas: *Atlas, rgba_surface: *s
         .rows_per_layer = h,
     };
     const dst_region = c.SDL_GPUTextureRegion{
-        .texture = atlas.gpu_texture,
+        .texture = tex_atlas.gpu_texture,
         .mip_level = 0,
         .layer = 0,
         .x = dst_x,
@@ -307,7 +307,7 @@ fn uploadTextureImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTextu
 
 pub fn saveAtlasToDisk(path: [*:0]const u8) void {
     const device = gpu.getDevice();
-    const atlas = gpu.getAtlas();
+    const tex_atlas = gpu.getAtlas();
 
     const bpp: u32 = 4;
     const data_size: u32 = ATLAS_SIZE * ATLAS_SIZE * bpp;
@@ -334,7 +334,7 @@ pub fn saveAtlasToDisk(path: [*:0]const u8) void {
     };
 
     const src_region = c.SDL_GPUTextureRegion{
-        .texture = atlas.gpu_texture,
+        .texture = tex_atlas.gpu_texture,
         .mip_level = 0,
         .layer = 0,
         .x = 0,

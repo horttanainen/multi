@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 const config = @import("config.zig");
 const shared = @import("shared.zig");
 const window = @import("window.zig");
@@ -77,7 +78,7 @@ pub fn cleanup() void {
     viewports.deinit(shared.allocator);
 }
 
-pub fn setActiveViewport(renderer: *sdl.Renderer, cameraId: usize) !void {
+pub fn setActiveViewport(renderer: *gpu.Renderer, cameraId: usize) !void {
     const maybeVp = getViewportForCamera(cameraId);
 
     if (maybeVp) |vp| {
@@ -87,7 +88,7 @@ pub fn setActiveViewport(renderer: *sdl.Renderer, cameraId: usize) !void {
             .w = vp.width,
             .h = vp.height,
         };
-        try sdl.renderSetViewport(renderer, &sdlVp);
+        try gpu.renderSetViewport(renderer, &sdlVp);
         activeViewport = vp;
     }
 }

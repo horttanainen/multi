@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 
 const box2d = @import("box2d.zig");
 
@@ -25,7 +26,7 @@ const SharedResourcesError = error{Uninitialized};
 
 pub const SharedResources = struct {
     worldId: box2d.c.b2WorldId,
-    renderer: *sdl.Renderer,
+    renderer: *gpu.Renderer,
     monocraftFont: *sdl.Font,
 };
 
@@ -54,7 +55,7 @@ pub fn init() !SharedResources {
     const monocraftFont = try sdl.ttf.openFont(monocraftSrc, 24);
 
     const sdlWindow = try window.getWindow();
-    const renderer = try sdl.createRenderer(sdlWindow);
+    const renderer = try gpu.createRenderer(sdlWindow);
 
     const gravity = box2d.c.b2Vec2{ .x = 0.0, .y = 10 };
     var worldDef = box2d.c.b2DefaultWorldDef();
@@ -84,7 +85,7 @@ pub fn cleanup() void {
     if (maybeResources) |resources| {
         box2d.c.b2DestroyWorld(resources.worldId);
         sdl.ttf.closeFont(resources.monocraftFont);
-        sdl.destroyRenderer(resources.renderer);
+        gpu.destroyRenderer(resources.renderer);
     }
     sdl.ttf.quit();
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 
 const shared = @import("shared.zig");
 const config = @import("config.zig");
@@ -133,8 +134,8 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
             .h = indicatorSize,
         };
 
-        try sdl.setRenderDrawColor(resources.renderer, .{ .r = enemyColor.r, .g = enemyColor.g, .b = enemyColor.b, .a = 255 });
-        try sdl.renderFillRect(resources.renderer, rect);
+        try gpu.setRenderDrawColor(resources.renderer, .{ .r = enemyColor.r, .g = enemyColor.g, .b = enemyColor.b, .a = 255 });
+        try gpu.renderFillRect(resources.renderer, rect);
     }
 }
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const gpu = @import("gpu.zig");
 const box2d = @import("box2d.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
@@ -41,7 +42,7 @@ pub fn drawSolidPolygon(transform: box2d.c.b2Transform, vertices: [*c]const box2
     const g: u8 = @intCast((color >> 8) & 0xFF);
     const b: u8 = @intCast(color & 0xFF);
 
-    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
         std.debug.print("Error setting draw color\n", .{});
         return;
     };
@@ -71,7 +72,7 @@ pub fn drawSolidPolygon(transform: box2d.c.b2Transform, vertices: [*c]const box2
         };
         const next: IVec2 = camera.relativePosition(m2Pixel(world_next));
 
-        sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+        gpu.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
             std.debug.print("Error drawing line\n", .{});
             return;
         };
@@ -85,7 +86,7 @@ pub fn drawPolygon(vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, color
     const g: u8 = @intCast((color >> 8) & 0xFF);
     const b: u8 = @intCast(color & 0xFF);
 
-    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -96,7 +97,7 @@ pub fn drawPolygon(vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, color
     for (0..@intCast(vertexCount)) |i| {
         const current: IVec2 = camera.relativePosition(m2Pixel(vertices[i]));
         const next: IVec2 = camera.relativePosition(m2Pixel(vertices[(i + 1) % @as(usize, @intCast(vertexCount))]));
-        sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+        gpu.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
             std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
             return;
         };
@@ -110,7 +111,7 @@ pub fn drawSegment(p1: box2d.c.b2Vec2, p2: box2d.c.b2Vec2, color: box2d.c.b2HexC
     const g: u8 = @intCast((color >> 8) & 0xFF);
     const b: u8 = @intCast(color & 0xFF);
 
-    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -118,7 +119,7 @@ pub fn drawSegment(p1: box2d.c.b2Vec2, p2: box2d.c.b2Vec2, color: box2d.c.b2HexC
     const current: IVec2 = camera.relativePosition(m2Pixel(p1));
     const next: IVec2 = camera.relativePosition(m2Pixel(p2));
 
-    sdl.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
+    gpu.renderDrawLine(res.renderer, current.x, current.y, next.x, next.y) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to renderDrawLine\n", .{});
         return;
     };
@@ -131,7 +132,7 @@ pub fn drawPoint(p1: box2d.c.b2Vec2, size: f32, color: box2d.c.b2HexColor, conte
     const g: u8 = @intCast((color >> 8) & 0xFF);
     const b: u8 = @intCast(color & 0xFF);
 
-    sdl.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(res.renderer, .{ .r = r, .g = g, .b = b, .a = 255 }) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -140,7 +141,7 @@ pub fn drawPoint(p1: box2d.c.b2Vec2, size: f32, color: box2d.c.b2HexColor, conte
 
     const rect = sdl.Rect{ .x = current.x, .y = current.y, .w = @intFromFloat(size), .h = @intFromFloat(size) };
 
-    sdl.renderFillRect(res.renderer, rect) catch {
+    gpu.renderFillRect(res.renderer, rect) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to renderFillRect\n", .{});
         return;
     };
