@@ -44,7 +44,6 @@ const Sprite = entity.Sprite;
 //Small improvements
 //TODO: use allyourbase box2d instead of shitty submodule
 //TODO: wrap box2d calls so that we do not have to pass worldId
-//TODO: make main function deinit explicit instead of the deffered reverse order deinit
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
