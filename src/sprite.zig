@@ -46,6 +46,7 @@ pub const SerializableEntity = struct {
 
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
+var acceptSpriteCleanupTimers = true;
 
 // Texture cache: maps image path → atlas region + dimensions.
 // Sprites with the same image share the same atlas region for draw call batching.
@@ -696,6 +697,12 @@ pub fn cleanupLater(spriteUuid: u64) void {
     if (sprites.getLocking(spriteUuid) == null) {
         return;
     }
+
+    spritesToCleanup.mutex.lock();
+    const acceptTimers = acceptSpriteCleanupTimers;
+    spritesToCleanup.mutex.unlock();
+    if (!acceptTimers) return;
+
     const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
     _ = sdl.addTimer(10, markSpriteForCleanup, uuid_as_ptr);
 }
@@ -703,7 +710,11 @@ pub fn cleanupLater(spriteUuid: u64) void {
 fn markSpriteForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const spriteUuid: u64 = @intFromPtr(param.?);
 
-    spritesToCleanup.appendLocking(spriteUuid) catch {};
+    spritesToCleanup.mutex.lock();
+    defer spritesToCleanup.mutex.unlock();
+
+    if (!acceptSpriteCleanupTimers) return 0;
+    spritesToCleanup.list.append(spriteUuid) catch {};
 
     return 0; // Don't repeat timer
 }
@@ -751,6 +762,10 @@ pub fn cleanupAll() void {
 }
 
 pub fn deinit() void {
+    spritesToCleanup.mutex.lock();
+    acceptSpriteCleanupTimers = false;
+    spritesToCleanup.mutex.unlock();
+
     cleanupAll();
 
     sprites.mutex.lock();
@@ -760,4 +775,6 @@ pub fn deinit() void {
     spritesToCleanup.mutex.lock();
     spritesToCleanup.list.deinit();
     spritesToCleanup.mutex.unlock();
+
+    textureCache.deinit();
 }

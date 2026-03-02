@@ -45,7 +45,6 @@ const Sprite = entity.Sprite;
 //TODO: use allyourbase box2d instead of shitty submodule
 //TODO: wrap box2d calls so that we do not have to pass worldId
 //TODO: make main function deinit explicit instead of the deffered reverse order deinit
-//TODO: patch the memory leak
 //TODO: investigate why aiming is so snappy
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
@@ -131,63 +130,26 @@ const Sprite = entity.Sprite;
 //TODO: Level json creation broke during 0.15 update
 
 pub fn main() !void {
-    defer allocator.deinit();
     try window.init();
-    defer window.cleanup();
-
     time.init();
-
     try audio.init();
-    defer audio.cleanup();
-
     try gpu.init(try window.getWindow());
-    defer gpu.cleanup();
-
     try text.init();
-    defer text.cleanup();
-
     box2d.initWorld();
-    defer box2d.destroyWorld();
-
     try debug.init();
-
-    defer viewport.cleanup();
-    defer camera.cleanup();
-    defer delay.cleanup();
-
-    defer sprite.deinit();
-
     try data.init();
-    defer data.cleanup();
-
     try rope.init();
-    defer rope.cleanup();
-
     try controller.init();
-    defer controller.cleanup();
-
     try keyboard.init();
-    defer keyboard.cleanup();
-
-    defer gamepad.cleanup();
-
     try camera.spawn(.{ .x = 0, .y = 0 });
     try gibbing.init();
-    defer gibbing.cleanup();
     try level.next();
-    defer level.cleanup();
-    defer particle.cleanup();
-    defer levelEditor.cleanup() catch |err| {
-        std.debug.print("Error cleaning up created level folders: {}\n", .{err});
-    };
 
     box2d.c.b2World_SetFrictionCallback(box2d.getWorldId(), &friction.callback);
 
     while (!state.quitGame) {
         time.frameBegin();
-
         try physics.step();
-
         try input.handle();
 
         if (state.editingLevel) {
@@ -197,10 +159,31 @@ pub fn main() !void {
         }
 
         try renderer.render();
-
-        // keep track of time spent per frame
         time.frameEnd();
     }
+
+    // Explicit shutdown in reverse init order
+    levelEditor.cleanup() catch |err| {
+        std.debug.print("Error cleaning up created level folders: {}\n", .{err});
+    };
+    particle.cleanup();
+    level.cleanup();
+    gibbing.cleanup();
+    gamepad.cleanup();
+    keyboard.cleanup();
+    controller.cleanup();
+    rope.cleanup();
+    data.cleanup();
+    sprite.deinit();
+    delay.cleanup();
+    camera.cleanup();
+    viewport.cleanup();
+    box2d.destroyWorld();
+    text.cleanup();
+    gpu.cleanup();
+    audio.cleanup();
+    window.cleanup();
+    allocator.deinit();
 }
 
 fn levelEditorLoop() void {
