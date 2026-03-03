@@ -48,7 +48,7 @@ const CrtUniforms = extern struct {
 // ============================================================
 
 const MAX_SPRITE_VERTICES = 64 * 1024; // 64K vertices = ~10K sprites
-const MAX_COLOR_VERTICES = 16 * 1024;
+const MAX_COLOR_VERTICES = 64 * 1024;
 const MAX_BATCH_RECORDS = 8192;
 const MAX_PENDING_DESTROYS = 256;
 

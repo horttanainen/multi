@@ -6,7 +6,7 @@ pub const window = .{
     .defaultHeight = 1200,
 };
 
-pub const debug = false;
+pub const debug = true;
 pub const debugLog = false;
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
