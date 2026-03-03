@@ -41,13 +41,8 @@ pub fn build(b: *std.Build) !void {
             "-DMA_ENABLE_MP3",
         },
     });
-    exe.addCSourceFiles(.{ .root = b.path("./triangle/"), .files = &[_][]const u8{
-        "triangle.c",
-    }, .flags = &[_][]const u8{
-        "-DTRILIBRARY=true",
-        "-DREAL=double",
-    } });
-    exe.addIncludePath(b.path("./triangle/"));
+    const triangle_dep = b.dependency("triangle", .{ .target = target, .optimize = optimize });
+    exe.linkLibrary(triangle_dep.artifact("triangle"));
 
     b.installArtifact(exe);
 

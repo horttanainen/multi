@@ -19,6 +19,10 @@
             .url = "git+https://github.com/allyourcodebase/box2d#0482245bf59bec743a7cb29961a480c3f7497f0c",
             .hash = "box2d-3.1.1-crFBk74aAAD-TJGY5mHVDB0sV5JntTq0MnlaHYxb5yl5",
         },
+        .triangle = .{
+            .url = "git+https://github.com/horttanainen/triangle#418d046cd07d96859ece5dd7c6f3aef496c35c93",
+            .hash = "triangle-0.0.0-AAAAAHFHCgApqeU5aW6uG4bEOC4i-4mkg7NTaeQ4VoSn",
+        },
     },
     .paths = .{
         "build.zig",
