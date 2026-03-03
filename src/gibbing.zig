@@ -121,7 +121,7 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
 
     const bodyDef = box2d.createDynamicBodyDef(variedPosM);
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.friction = 0.5;
+    shapeDef.material.friction = 0.5;
     shapeDef.density = 1.0;
     shapeDef.filter.categoryBits = collision.CATEGORY_GIBLET;
     shapeDef.filter.maskBits = collision.MASK_GIBLET;

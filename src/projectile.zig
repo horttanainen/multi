@@ -126,14 +126,7 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
     // Query for overlapping bodies
-    _ = box2d.c.b2World_OverlapCircle(
-        box2d.getWorldId(),
-        &circle,
-        transform,
-        filter,
-        overlapCallback,
-        &context,
-    );
+    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
 
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
@@ -204,8 +197,8 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
 
         var circleShapeDef = box2d.c.b2DefaultShapeDef();
         circleShapeDef.density = explosion.particleDensity;
-        circleShapeDef.friction = explosion.particleFriction;
-        circleShapeDef.restitution = explosion.particleRestitution;
+        circleShapeDef.material.friction = explosion.particleFriction;
+        circleShapeDef.material.restitution = explosion.particleRestitution;
         circleShapeDef.filter.groupIndex = -1; // Don't collide with each other
         circleShapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
         circleShapeDef.filter.maskBits = collision.MASK_EXPLOSION_SHRAPNEL;
@@ -423,7 +416,7 @@ fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2Shap
 }
 
 pub fn checkContacts() !void {
-    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
+    const contactEvents = box2d.getContactEvents();
 
     for (0..@intCast(contactEvents.beginCount)) |i| {
         const event = contactEvents.beginEvents[i];

@@ -100,7 +100,8 @@ fn loadByName(levelName: []const u8) !void {
 
     for (levelToDeserialize.entities) |e| {
         var shapeDef = box2d.c.b2DefaultShapeDef();
-        shapeDef.friction = e.friction;
+        shapeDef.material.friction = e.friction;
+        shapeDef.enableSensorEvents = true;
         const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
 
         const pos = conv.pixel2M(e.pos);

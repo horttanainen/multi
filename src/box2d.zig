@@ -21,15 +21,15 @@ const allocator = @import("allocator.zig").allocator;
 
 var world_id: ?c.b2WorldId = null;
 
+fn getWorldId() c.b2WorldId {
+    return world_id orelse @panic("box2d: world not initialized");
+}
+
 pub fn initWorld() void {
     const gravity = c.b2Vec2{ .x = 0.0, .y = 10 };
     var worldDef = c.b2DefaultWorldDef();
     worldDef.gravity = gravity;
     world_id = c.b2CreateWorld(&worldDef);
-}
-
-pub fn getWorldId() c.b2WorldId {
-    return world_id orelse @panic("box2d.getWorldId() called before box2d.initWorld()");
 }
 
 pub fn destroyWorld() void {
@@ -97,6 +97,15 @@ fn createPolygons(triangles: [][3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polygon {
 
         const hull = c.b2ComputeHull(&verts[0], 3);
 
+        if (hull.count < 3 or !c.b2ValidateHull(&hull)) {
+            std.debug.print("box2d: skipping degenerate triangle ({d},{d}) ({d},{d}) ({d},{d})\n", .{
+                verts[0].x, verts[0].y,
+                verts[1].x, verts[1].y,
+                verts[2].x, verts[2].y,
+            });
+            continue;
+        }
+
         const poly: c.b2Polygon = c.b2MakePolygon(&hull, 0.01);
 
         try polygons.append(poly);
@@ -134,4 +143,45 @@ pub fn add(a: c.b2Vec2, b: c.b2Vec2) c.b2Vec2 {
 
 pub fn mul(a: c.b2Vec2, b: f32) c.b2Vec2 {
     return .{ .x = a.x * b, .y = a.y * b };
+}
+
+// ============================================================
+// World-level wrappers (hide worldId)
+// ============================================================
+
+pub fn worldStep(dt: f32, subStepCount: c_int) void {
+    c.b2World_Step(getWorldId(), dt, subStepCount);
+}
+
+pub fn worldDraw(debugDraw: *c.b2DebugDraw) void {
+    c.b2World_Draw(getWorldId(), debugDraw);
+}
+
+pub fn getSensorEvents() c.b2SensorEvents {
+    return c.b2World_GetSensorEvents(getWorldId());
+}
+
+pub fn getContactEvents() c.b2ContactEvents {
+    return c.b2World_GetContactEvents(getWorldId());
+}
+
+pub fn setFrictionCallback(callback: ?*const c.b2FrictionCallback) void {
+    c.b2World_SetFrictionCallback(getWorldId(), callback);
+}
+
+pub fn overlapCircle(circle: *const c.b2Circle, transform: c.b2Transform, filter: c.b2QueryFilter, callback: ?*const c.b2OverlapResultFcn, userContext: ?*anyopaque) void {
+    const proxy = c.b2MakeOffsetProxy(&circle.center, 1, circle.radius, transform.p, transform.q);
+    _ = c.b2World_OverlapShape(getWorldId(), &proxy, filter, callback, userContext);
+}
+
+pub fn overlapAABB(aabb: c.b2AABB, filter: c.b2QueryFilter, callback: ?*const c.b2OverlapResultFcn, userContext: ?*anyopaque) void {
+    _ = c.b2World_OverlapAABB(getWorldId(), aabb, filter, callback, userContext);
+}
+
+pub fn castRayClosest(origin: c.b2Vec2, translation: c.b2Vec2, filter: c.b2QueryFilter) c.b2RayResult {
+    return c.b2World_CastRayClosest(getWorldId(), origin, translation, filter);
+}
+
+pub fn createWeldJoint(def: *const c.b2WeldJointDef) c.b2JointId {
+    return c.b2CreateWeldJoint(getWorldId(), def);
 }

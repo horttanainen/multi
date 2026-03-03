@@ -11,13 +11,13 @@ var dDraw: ?box2d.c.b2DebugDraw = null;
 pub fn init() !void {
     var debugDraw = box2d.c.b2DefaultDebugDraw();
     debugDraw.context = null;
-    debugDraw.DrawSolidPolygon = &drawSolidPolygon;
-    debugDraw.DrawPolygon = &drawPolygon;
-    debugDraw.DrawSegment = &drawSegment;
-    debugDraw.DrawPoint = &drawPoint;
-    debugDraw.DrawSolidCircle = &drawSolidCircle;
+    debugDraw.DrawSolidPolygonFcn = &drawSolidPolygon;
+    debugDraw.DrawPolygonFcn = &drawPolygon;
+    debugDraw.DrawSegmentFcn = &drawSegment;
+    debugDraw.DrawPointFcn = &drawPoint;
+    debugDraw.DrawSolidCircleFcn = &drawSolidCircle;
     debugDraw.drawShapes = true;
-    debugDraw.drawAABBs = false;
+    debugDraw.drawBounds = false;
     debugDraw.drawContacts = true;
     debugDraw.drawFrictionImpulses = false;
     dDraw = debugDraw;
@@ -152,6 +152,6 @@ pub fn drawSolidCircle(transform: box2d.c.b2Transform, radius: f32, color: box2d
 
 pub fn draw() !void {
     if (dDraw) |*debugDraw| {
-        box2d.c.b2World_Draw(box2d.getWorldId(), debugDraw);
+        box2d.worldDraw(debugDraw);
     }
 }

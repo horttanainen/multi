@@ -102,8 +102,8 @@ pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
 
         var boxShapeDef = box2d.c.b2DefaultShapeDef();
         boxShapeDef.density = cfg.density;
-        boxShapeDef.friction = cfg.friction;
-        boxShapeDef.restitution = cfg.restitution;
+        boxShapeDef.material.friction = cfg.friction;
+        boxShapeDef.material.restitution = cfg.restitution;
         boxShapeDef.filter.groupIndex = cfg.groupIndex;
         boxShapeDef.filter.categoryBits = collision.CATEGORY_BLOOD;
         boxShapeDef.filter.maskBits = collision.MASK_BLOOD;
@@ -186,14 +186,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
     filter.maskBits = collision.MASK_BLOOD_QUERY;
 
     // Query for overlapping bodies
-    _ = box2d.c.b2World_OverlapCircle(
-        box2d.getWorldId(),
-        &circle,
-        transform,
-        filter,
-        overlapCallback,
-        &context,
-    );
+    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
 
     // Stain all overlapping entities
     for (context.bodies[0..context.count]) |bodyId| {
@@ -227,7 +220,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 }
 
 pub fn checkContacts() !void {
-    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
+    const contactEvents = box2d.getContactEvents();
 
     // Check begin contact events for blood particles
     for (0..@intCast(contactEvents.beginCount)) |i| {

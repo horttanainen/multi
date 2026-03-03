@@ -35,6 +35,7 @@ pub fn drawGoal() !void {
 pub fn createGoalSensorFromImg(position: vec.Vec2, spriteUuid: u64) !void {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.isSensor = true;
+    shapeDef.enableSensorEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     shapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
     const bodyDef = box2d.createStaticBodyDef(position);
@@ -45,7 +46,7 @@ pub fn createGoalSensorFromImg(position: vec.Vec2, spriteUuid: u64) !void {
 
 pub fn checkGoal() !void {
     if (maybeGoalSensor) |goalSensor| {
-        const sensorEvents = box2d.c.b2World_GetSensorEvents(box2d.getWorldId());
+        const sensorEvents = box2d.getSensorEvents();
 
         // Check if any player touches the goal
         for (player.players.values()) |p| {

@@ -144,8 +144,9 @@ pub fn spawn(position: vec.IVec2) !usize {
     const dynamicBox = box2d.c.b2MakeOffsetBox(0.2, 0.6, .{ .x = 0, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.density = 0.45;
-    shapeDef.friction = config.player.movementFriction;
-    shapeDef.material = playerMaterialId;
+    shapeDef.material.friction = config.player.movementFriction;
+    shapeDef.material.userMaterialId = playerMaterialId;
+    shapeDef.enableSensorEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
     shapeDef.filter.maskBits = collision.MASK_PLAYER;
     const bodyShapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &dynamicBox);
@@ -159,8 +160,9 @@ pub fn spawn(position: vec.IVec2) !usize {
     };
     var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
     lowerBodyShapeDef.density = 0;
-    lowerBodyShapeDef.friction = config.player.movementFriction;
-    lowerBodyShapeDef.material = playerMaterialId;
+    lowerBodyShapeDef.material.friction = config.player.movementFriction;
+    lowerBodyShapeDef.material.userMaterialId = playerMaterialId;
+    lowerBodyShapeDef.enableSensorEvents = true;
     lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
     lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
@@ -168,6 +170,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const footBox = box2d.c.b2MakeOffsetBox(0.2, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
+    footShapeDef.enableSensorEvents = true;
     footShapeDef.density = 0;
     footShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     footShapeDef.filter.maskBits = collision.MASK_SENSOR_FOOT;
@@ -176,6 +179,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const leftWallBox = box2d.c.b2MakeOffsetBox(0.15, 0.4, .{ .x = -0.2, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var leftWallShapeDef = box2d.c.b2DefaultShapeDef();
     leftWallShapeDef.isSensor = true;
+    leftWallShapeDef.enableSensorEvents = true;
     leftWallShapeDef.density = 0;
     leftWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     leftWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
@@ -184,6 +188,7 @@ pub fn spawn(position: vec.IVec2) !usize {
     const rightWallBox = box2d.c.b2MakeOffsetBox(0.15, 0.4, .{ .x = 0.2, .y = -0.5 }, .{ .c = 1, .s = 0 });
     var rightWallShapeDef = box2d.c.b2DefaultShapeDef();
     rightWallShapeDef.isSensor = true;
+    rightWallShapeDef.enableSensorEvents = true;
     rightWallShapeDef.density = 0;
     rightWallShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
     rightWallShapeDef.filter.maskBits = collision.MASK_SENSOR_WALL;
@@ -387,7 +392,7 @@ pub fn getFrictionForPlayer(player: *Player) f32 {
 }
 
 pub fn checkSensors(player: *Player) !void {
-    const sensorEvents = box2d.c.b2World_GetSensorEvents(box2d.getWorldId());
+    const sensorEvents = box2d.getSensorEvents();
 
     for (0..@intCast(sensorEvents.beginCount)) |i| {
         const e = sensorEvents.beginEvents[i];
@@ -601,14 +606,7 @@ pub fn sprayPaint(p: *Player) !void {
         }
     }.cb;
 
-    _ = box2d.c.b2World_OverlapCircle(
-        box2d.getWorldId(),
-        &circle,
-        transform,
-        filter,
-        overlapCallback,
-        &context,
-    );
+    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
 
     // Get source sprite dimensions to compute natural world size
     const spraySprite = sprite.getSprite(sprayPaintSpriteUuid) orelse return;

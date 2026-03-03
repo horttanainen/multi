@@ -43,9 +43,9 @@ pub fn pasteSelection(position: vec.IVec2) !void {
 
             var shapes: [1]box2d.c.b2ShapeId = undefined;
             _ = box2d.c.b2Body_GetShapes(copiedBodyId, &shapes, 1);
-            shapeDef.friction = box2d.c.b2Shape_GetFriction(shapes[0]);
+            shapeDef.material.friction = box2d.c.b2Shape_GetFriction(shapes[0]);
             shapeDef.isSensor = box2d.c.b2Shape_IsSensor(shapes[0]);
-            shapeDef.material = box2d.c.b2Shape_GetMaterial(shapes[0]);
+            shapeDef.material.userMaterialId = box2d.c.b2Shape_GetMaterial(shapes[0]);
 
             std.debug.print("about to create\n", .{});
             const newEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, e.type);
@@ -180,7 +180,7 @@ pub fn selectEntityAt(pos: vec.IVec2) !void {
         .upperBound = box2d.add(posM, .{ .x = 0.1, .y = 0.1 }),
     };
     const filter = box2d.c.b2DefaultQueryFilter();
-    _ = box2d.c.b2World_OverlapAABB(box2d.getWorldId(), aabb, filter, &overlapAABBCallback, null);
+    box2d.overlapAABB(aabb, filter, overlapAABBCallback, null);
 }
 
 fn setSelection(bodyId: box2d.c.b2BodyId, select: bool) void {

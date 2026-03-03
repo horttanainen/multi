@@ -30,7 +30,7 @@ pub fn handleGameMouseInput() !void {
     if (currentMouseState & leftButtonMask == 1) {
         if (!delay.check("boxcreate")) {
             var shapeDef = box2d.c.b2DefaultShapeDef();
-            shapeDef.friction = 0.5;
+            shapeDef.material.friction = 0.5;
             shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
             shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
             const position = camera.relativePositionForCreating(.{

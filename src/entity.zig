@@ -112,7 +112,7 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
 
     const entity = Entity{
         .type = entityType,
-        .friction = shapeDef.friction,
+        .friction = shapeDef.material.friction,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -156,7 +156,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
 
     const entity = Entity{
         .type = entityType,
-        .friction = shapeDef.friction,
+        .friction = shapeDef.material.friction,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -278,7 +278,7 @@ pub fn regenerateColliders(entity: *Entity) !bool {
 
     // Create new shapes with same collision filter as original
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.friction = entity.friction;
+    shapeDef.material.friction = entity.friction;
     shapeDef.filter.categoryBits = entity.categoryBits;
     shapeDef.filter.maskBits = entity.maskBits;
 

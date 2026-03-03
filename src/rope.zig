@@ -43,7 +43,7 @@ pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {
     const hookSprite = try sprite.createCopy(spriteUuid);
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.friction = 1.0;
+    shapeDef.material.friction = 1.0;
     shapeDef.enableHitEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_HOOK;
     shapeDef.filter.maskBits = collision.MASK_HOOK | collision.otherPlayersMask(playerId);
@@ -90,7 +90,7 @@ pub fn releaseRope(playerId: usize) void {
 }
 
 pub fn checkHookContacts() !void {
-    const contactEvents = box2d.c.b2World_GetContactEvents(box2d.getWorldId());
+    const contactEvents = box2d.getContactEvents();
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
@@ -167,7 +167,7 @@ fn attach(r: *Rope, targetBodyId: box2d.c.b2BodyId) void {
         hookRot.c * targetRot.c + hookRot.s * targetRot.s,
     );
 
-    r.jointId = box2d.c.b2CreateWeldJoint(box2d.getWorldId(), &weldDef);
+    r.jointId = box2d.createWeldJoint(&weldDef);
 }
 
 pub fn applyTension() void {

@@ -14,7 +14,7 @@ pub fn step() !void {
         particle.updateStates();
         player.updateAllStates();
         camera.updateState();
-        box2d.c.b2World_Step(box2d.getWorldId(), config.physics.dt, config.physics.subStepCount);
+        box2d.worldStep(config.physics.dt, config.physics.subStepCount);
         time.accumulator -= config.physics.dt;
     }
     time.alpha = time.accumulator / config.physics.dt;

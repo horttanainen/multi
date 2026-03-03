@@ -77,7 +77,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     const proj = w.projectile.?;
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.friction = 0.5;
+    shapeDef.material.friction = 0.5;
     shapeDef.density = proj.density;
     shapeDef.enableHitEvents = true;
     shapeDef.enableContactEvents = true;
@@ -141,12 +141,7 @@ fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: u
     filter.categoryBits = collision.CATEGORY_PROJECTILE;
     filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
 
-    const result = box2d.c.b2World_CastRayClosest(
-        box2d.getWorldId(),
-        vec.toBox2d(origin),
-        vec.toBox2d(translation),
-        filter,
-    );
+    const result = box2d.castRayClosest(vec.toBox2d(origin), vec.toBox2d(translation), filter);
 
     var hitPoint = vec.add(origin, translation);
     if (result.hit) {
@@ -206,7 +201,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
 
         var shapeDef = box2d.c.b2DefaultShapeDef();
         shapeDef.density = pel.density;
-        shapeDef.friction = pel.friction;
+        shapeDef.material.friction = pel.friction;
         shapeDef.enableHitEvents = true;
         shapeDef.enableContactEvents = true;
         shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
@@ -230,7 +225,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
 
         try entity.entities.putLocking(bodyId, entity.Entity{
             .type = try allocator.dupe(u8, "projectile"),
-            .friction = shapeDef.friction,
+            .friction = shapeDef.material.friction,
             .bodyId = bodyId,
             .spriteUuids = spriteUuids,
             .shapeIds = shapeIds,

@@ -38,7 +38,7 @@ pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
     box2d.c.b2Body_SetLinearDamping(bodyId, 2);
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.friction = 1;
+    shapeDef.material.friction = 1;
     shapeDef.isSensor = true;
 
     const polygon = box2d.c.b2MakeSquare(0.5);

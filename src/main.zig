@@ -42,8 +42,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Small improvements
-//TODO: use allyourbase box2d instead of shitty submodule
-//TODO: wrap box2d calls so that we do not have to pass worldId
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
@@ -51,11 +49,11 @@ const Sprite = entity.Sprite;
 //TODO: refactor sensor stuff into regular entities
 
 //Gun ideas
-//TODO: add transparent smoke trail for the rocket
 //TODO: add rounds pistol with the glow and spark effect and heavy drop
 //TODO: enable ricochets for some slugs
 //TODO: make slug glow configurable
 //TODO: add green pixel to gun for bullet spawn anchor point
+//TODO: add transparent smoke trail for the rocket
 
 //TODO: rope combo: shoot rocket with rope attached and then shoot hook to attach the rocket to e.g. enemy player
 //TODO: chain rocket gun: shoots a rocket with a box2d chain attached to it. Detachhing causes a chain with a hook to fly behind the rocket. Hook can attach to player
@@ -143,7 +141,7 @@ pub fn main() !void {
     try gibbing.init();
     try level.next();
 
-    box2d.c.b2World_SetFrictionCallback(box2d.getWorldId(), &friction.callback);
+    box2d.setFrictionCallback(&friction.callback);
 
     while (!state.quitGame) {
         time.frameBegin();

@@ -26,49 +26,8 @@ pub fn build(b: *std.Build) !void {
     const sdl_ttf = sdl_ttf_dep.artifact("SDL3_ttf");
     exe.linkLibrary(sdl_ttf);
 
-    exe.addCSourceFiles(.{
-        .root = b.path("./box2d/src/"),
-        .files = &[_][]const u8{
-            "aabb.c",
-            "arena_allocator.c",
-            "array.c",
-            "bitset.c",
-            "body.c",
-            "broad_phase.c",
-            "constraint_graph.c",
-            "contact.c",
-            "contact_solver.c",
-            "core.c",
-            "distance.c",
-            "distance_joint.c",
-            "dynamic_tree.c",
-            "geometry.c",
-            "hull.c",
-            "id_pool.c",
-            "island.c",
-            "joint.c",
-            "manifold.c",
-            "math_functions.c",
-            "motor_joint.c",
-            "mouse_joint.c",
-            "prismatic_joint.c",
-            "revolute_joint.c",
-            "sensor.c",
-            "shape.c",
-            "solver.c",
-            "solver_set.c",
-            "table.c",
-            "timer.c",
-            "types.c",
-            "weld_joint.c",
-            "wheel_joint.c",
-            "world.c",
-        },
-        .flags = &[_][]const u8{
-            "-DNDEBUG",
-        },
-    });
-    exe.addIncludePath(b.path("./box2d/include/"));
+    const box2d_dep = b.dependency("box2d", .{ .target = target, .optimize = optimize });
+    exe.linkLibrary(box2d_dep.artifact("box2d"));
 
     exe.addIncludePath(b.path("./miniaudio/"));
 

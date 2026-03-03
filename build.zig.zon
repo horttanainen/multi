@@ -15,6 +15,10 @@
             .url = "git+https://github.com/allyourcodebase/SDL_ttf?ref=main#00bf02e44d486787034ccdc3eced6e455b125f56",
             .hash = "SDL_ttf-3.2.2-PNW5xNIRAADcUkA75pWizqojQE4hM75QjOequyw4aET6",
         },
+        .box2d = .{
+            .url = "git+https://github.com/allyourcodebase/box2d#0482245bf59bec743a7cb29961a480c3f7497f0c",
+            .hash = "box2d-3.1.1-crFBk74aAAD-TJGY5mHVDB0sV5JntTq0MnlaHYxb5yl5",
+        },
     },
     .paths = .{
         "build.zig",
