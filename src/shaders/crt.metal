@@ -13,6 +13,9 @@ struct CrtVertexOutput {
 
 struct CrtUniforms {
     float2 resolution;
+    float distortion_strength;
+    float aberration;
+    float zoom;
 };
 
 vertex CrtVertexOutput crt_vert(
@@ -40,9 +43,9 @@ fragment float4 crt_frag(
 ) {
     float2 uv = in.texcoord;
 
-    // Barrel distortion
-    float distortion_strength = 0.15;
-    float2 distorted_uv = barrel_distort(uv, distortion_strength);
+    // Barrel distortion + zoom to crop out black borders
+    float2 distorted_uv = barrel_distort(uv, uniforms.distortion_strength);
+    distorted_uv = (distorted_uv - 0.5) / uniforms.zoom + 0.5;
 
     // Discard pixels outside the screen after distortion
     if (distorted_uv.x < 0.0 || distorted_uv.x > 1.0 ||
@@ -55,11 +58,10 @@ fragment float4 crt_frag(
     float2 snapped_uv = pixel / uniforms.resolution;
 
     // Chromatic aberration - offset R/G/B channels slightly
-    float aberration = 0.002;
     float2 dir = snapped_uv - 0.5;
-    float r = scene_tex.sample(smp, snapped_uv + dir * aberration).r;
+    float r = scene_tex.sample(smp, snapped_uv + dir * uniforms.aberration).r;
     float g = scene_tex.sample(smp, snapped_uv).g;
-    float b = scene_tex.sample(smp, snapped_uv - dir * aberration).b;
+    float b = scene_tex.sample(smp, snapped_uv - dir * uniforms.aberration).b;
     float3 color = float3(r, g, b);
 
     // Scanlines - darken every other pixel row

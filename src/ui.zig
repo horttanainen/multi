@@ -21,8 +21,7 @@ pub fn drawMode() !void {
 
     const vp = viewport.activeViewport;
 
-    const xPos = @divFloor(vp.width, 2) - 30;
-    try text.writeAt(mode, .{ .x = xPos, .y = 2 });
+    try text.writeCenter(.small, mode, .{ .x = @divFloor(vp.width, 2), .y = 12 });
 }
 
 pub fn drawFps() !void {
@@ -33,8 +32,7 @@ pub fn drawFps() !void {
     const vp = viewport.activeViewport;
 
     const fpsText = try std.fmt.bufPrintZ(&fpsTextBuf, "FPS: {d}", .{fps});
-    const xPos = vp.width - 120;
-    try text.writeAt(fpsText, .{ .x = xPos, .y = 2 });
+    try text.writeCenter(.small, fpsText, .{ .x = vp.width - 60, .y = 12 });
 }
 
 pub fn drawPlayerHealth() !void {
@@ -48,12 +46,7 @@ pub fn drawPlayerHealth() !void {
             var buf: [32]u8 = undefined;
             const healthText = std.fmt.bufPrintZ(&buf, "{d}", .{@as(i32, @intFromFloat(p.health))}) catch return;
 
-            const textPos = vec.IVec2{
-                .x = playerPos.x - 30,
-                .y = playerPos.y + 50,
-            };
-
-            try text.writeAt(healthText, textPos);
+            try text.writeCenter(.small, healthText, .{ .x = playerPos.x, .y = playerPos.y + 50 });
         }
     }
 }
@@ -148,5 +141,5 @@ pub fn drawScoreboard() !void {
 
     var buf: [64]u8 = undefined;
     const scoreText = std.fmt.bufPrintZ(&buf, "Score: {d} - Kills: {d} - Suicides: {d} - Deaths: {d}", .{ totalScore, s.kills, s.suicides, s.deaths }) catch return;
-    try text.writeAt(scoreText, .{ .x = @divFloor(vp.width, 2) - 320, .y = vp.height - 40 });
+    try text.writeCenter(.small, scoreText, .{ .x = @divFloor(vp.width, 2), .y = vp.height - 20 });
 }

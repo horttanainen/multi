@@ -6,7 +6,7 @@ pub const window = .{
     .defaultHeight = 1200,
 };
 
-pub const debug = true;
+pub const debug = false;
 pub const debugLog = false;
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
@@ -106,6 +106,29 @@ pub const ropeToggleDelayMs = 300;
 pub const sprayPaintDelayMs = 2000;
 
 pub const sprayPaintWorldSize: f32 = 5;
+
+pub const CrtParams = struct {
+    distortion_strength: f32,
+    aberration: f32,
+    // zoom > 1 crops into the image to hide black borders from barrel distortion
+    zoom: f32,
+    // virtual CRT resolution for scanline/pixelation effect
+    resolution: [2]f32,
+};
+
+pub const crt = CrtParams{
+    .distortion_strength = 0.15,
+    .aberration = 0.004,
+    .zoom = 1.0,
+    .resolution = .{ 1280.0, 720.0 },
+};
+
+pub const crtMenu = CrtParams{
+    .distortion_strength = 5.0,
+    .aberration = 0.015,
+    .zoom = 2.0,
+    .resolution = .{ 640.0, 360.0 },
+};
 
 pub const rope = .{
     .hookImpulse = 1.0,

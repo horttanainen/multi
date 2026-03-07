@@ -4,7 +4,14 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const atlas = @import("atlas.zig");
 const texture = @import("texture.zig");
+const config = @import("config.zig");
 const c = sdl.c;
+
+var crt_params: config.CrtParams = config.crt;
+
+pub fn setCrtParams(params: config.CrtParams) void {
+    crt_params = params;
+}
 
 pub const Texture = texture.Texture;
 
@@ -41,6 +48,9 @@ const FullscreenVertex = extern struct {
 
 const CrtUniforms = extern struct {
     resolution: [2]f32,
+    distortion_strength: f32,
+    aberration: f32,
+    zoom: f32,
 };
 
 // ============================================================
@@ -270,34 +280,34 @@ const PipelineConfig = struct {
 fn createPipeline(
     device: *c.SDL_GPUDevice,
     swapchain_format: c.SDL_GPUTextureFormat,
-    config: PipelineConfig,
+    pipeline_config: PipelineConfig,
 ) !*c.SDL_GPUGraphicsPipeline {
     const vert_shader = try createShader(
         device,
-        config.shader_code.ptr,
-        config.shader_code.len,
-        config.vert_entry,
+        pipeline_config.shader_code.ptr,
+        pipeline_config.shader_code.len,
+        pipeline_config.vert_entry,
         c.SDL_GPU_SHADERSTAGE_VERTEX,
-        config.vert_samplers,
-        config.vert_uniforms,
+        pipeline_config.vert_samplers,
+        pipeline_config.vert_uniforms,
     );
     defer c.SDL_ReleaseGPUShader(device, vert_shader);
 
     const frag_shader = try createShader(
         device,
-        config.shader_code.ptr,
-        config.shader_code.len,
-        config.frag_entry,
+        pipeline_config.shader_code.ptr,
+        pipeline_config.shader_code.len,
+        pipeline_config.frag_entry,
         c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-        config.frag_samplers,
-        config.frag_uniforms,
+        pipeline_config.frag_samplers,
+        pipeline_config.frag_uniforms,
     );
     defer c.SDL_ReleaseGPUShader(device, frag_shader);
 
     const vertex_buffer_desc = [_]c.SDL_GPUVertexBufferDescription{
         .{
             .slot = 0,
-            .pitch = config.vertex_layout.pitch,
+            .pitch = pipeline_config.vertex_layout.pitch,
             .input_rate = c.SDL_GPU_VERTEXINPUTRATE_VERTEX,
             .instance_step_rate = 0,
         },
@@ -306,7 +316,7 @@ fn createPipeline(
     const color_target = [_]c.SDL_GPUColorTargetDescription{
         .{
             .format = swapchain_format,
-            .blend_state = config.blend_state,
+            .blend_state = pipeline_config.blend_state,
         },
     };
 
@@ -316,10 +326,10 @@ fn createPipeline(
         .vertex_input_state = .{
             .vertex_buffer_descriptions = &vertex_buffer_desc,
             .num_vertex_buffers = vertex_buffer_desc.len,
-            .vertex_attributes = config.vertex_layout.attrs.ptr,
-            .num_vertex_attributes = @intCast(config.vertex_layout.attrs.len),
+            .vertex_attributes = pipeline_config.vertex_layout.attrs.ptr,
+            .num_vertex_attributes = @intCast(pipeline_config.vertex_layout.attrs.len),
         },
-        .primitive_type = config.primitive_type,
+        .primitive_type = pipeline_config.primitive_type,
         .rasterizer_state = .{
             .fill_mode = c.SDL_GPU_FILLMODE_FILL,
             .cull_mode = c.SDL_GPU_CULLMODE_NONE,
@@ -1052,7 +1062,12 @@ fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.
         };
         c.SDL_BindGPUFragmentSamplers(cp, 0, &crt_sampler_binding, 1);
 
-        const crt_uniforms = CrtUniforms{ .resolution = .{ 1280.0, 720.0 } };
+        const crt_uniforms = CrtUniforms{
+            .resolution = crt_params.resolution,
+            .distortion_strength = crt_params.distortion_strength,
+            .aberration = crt_params.aberration,
+            .zoom = crt_params.zoom,
+        };
         c.SDL_PushGPUFragmentUniformData(cmd, 0, &crt_uniforms, @sizeOf(CrtUniforms));
 
         c.SDL_DrawGPUPrimitives(cp, 6, 1, 0, 0);

@@ -7,6 +7,7 @@ const config = @import("config.zig");
 const state = @import("state.zig");
 const window = @import("window.zig");
 const ui = @import("ui.zig");
+const menu = @import("menu.zig");
 const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -20,12 +21,18 @@ const weapon = @import("weapon.zig");
 const RendererError = error{RendererUninitialized};
 
 pub fn render() !void {
+    gpu.setCrtParams(if (menu.isOpen()) config.crtMenu else config.crt);
+
     // Clear entire window once
     try gpu.setRenderDrawColor(.{ .r = 255, .g = 0, .b = 0, .a = 255 });
     try gpu.renderClear();
 
     for (camera.cameras.keys()) |cameraId| {
         try renderCamera(cameraId);
+    }
+
+    if (menu.isOpen()) {
+        try menu.draw();
     }
 
     gpu.renderPresent();

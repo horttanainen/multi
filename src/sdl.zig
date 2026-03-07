@@ -75,6 +75,7 @@ pub const Scancode = enum(c_int) {
     rshift = c.SDL_SCANCODE_RSHIFT,
     lctrl = c.SDL_SCANCODE_LCTRL,
     escape = c.SDL_SCANCODE_ESCAPE,
+    return_ = c.SDL_SCANCODE_RETURN,
 };
 
 pub const GamepadAxis = enum(c_int) {
@@ -97,6 +98,7 @@ pub const GamepadButton = enum(c_int) {
     dpad_right = c.SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
     dpad_up = c.SDL_GAMEPAD_BUTTON_DPAD_UP,
     dpad_down = c.SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+    start = c.SDL_GAMEPAD_BUTTON_START,
 };
 
 pub const EventType = struct {

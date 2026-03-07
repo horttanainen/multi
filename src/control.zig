@@ -17,6 +17,7 @@ const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const data = @import("data.zig");
+const menu = @import("menu.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -62,18 +63,9 @@ pub fn handleGlobalHotkeys() void {
     }
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
-        if (!delay.check("quitGame")) {
-            state.quitGame = true;
-            delay.action("quitGame", config.quitGameDelayMs);
-        }
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)]) {
-        if (!delay.check("leveleditortoggle")) {
-            levelEditor.enter() catch |err| {
-                std.debug.print("Error entering level editor: {}\n", .{err});
-            };
-            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
+        if (!delay.check("menuToggle")) {
+            menu.openMenu("Game");
+            delay.action("menuToggle", 400);
         }
     }
 
@@ -200,16 +192,9 @@ pub fn handleLevelEditorKeyboardInput() void {
     }
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
-        if (!delay.check("leveleditortoggle")) {
-            levelEditor.exit();
-            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
-            delay.action("quitGame", config.quitGameDelayMs);
-        }
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.e)]) {
-        if (!delay.check("leveleditortoggle")) {
-            levelEditor.exit();
-            delay.action("leveleditortoggle", config.levelEditorToggleDelayMs);
+        if (!delay.check("menuToggle")) {
+            menu.openMenu("Level Editor");
+            delay.action("menuToggle", 400);
         }
     }
 }

@@ -10,6 +10,8 @@ pub fn check(name: [:0]const u8) bool {
 }
 
 pub fn action(name: [:0]const u8, delayMs: u32) void {
+    if (delayedActions.contains(name)) return;
+
     const nameCopy = allocator.dupe(u8, name) catch {
         return;
     };
