@@ -20,10 +20,22 @@ pub const Atlas = struct {
     height: u32 = ATLAS_SIZE,
     nodes: [MAX_SKYLINE_NODES]SkylineNode = undefined,
     node_count: u32 = 0,
+    checkpoint_nodes: [MAX_SKYLINE_NODES]SkylineNode = undefined,
+    checkpoint_node_count: u32 = 0,
 
     pub fn init(self: *Atlas) void {
         self.nodes[0] = .{ .x = 0, .y = 0, .width = self.width };
         self.node_count = 1;
+    }
+
+    pub fn saveCheckpoint(self: *Atlas) void {
+        @memcpy(&self.checkpoint_nodes, &self.nodes);
+        self.checkpoint_node_count = self.node_count;
+    }
+
+    pub fn restoreCheckpoint(self: *Atlas) void {
+        @memcpy(&self.nodes, &self.checkpoint_nodes);
+        self.node_count = self.checkpoint_node_count;
     }
 
     /// Check if a rectangle of (w x h) fits when placed starting at skyline node `index`.

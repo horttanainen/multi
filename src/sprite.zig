@@ -739,6 +739,14 @@ fn cleanupOne(s: Sprite) void {
     sdl.destroySurface(s.surface);
 }
 
+pub fn clearTextureCache() void {
+    var cacheIter = textureCache.keyIterator();
+    while (cacheIter.next()) |key_ptr| {
+        allocator.free(key_ptr.*);
+    }
+    textureCache.clearRetainingCapacity();
+}
+
 pub fn cleanupAll() void {
     spritesToCleanup.mutex.lock();
     spritesToCleanup.list.clearRetainingCapacity();

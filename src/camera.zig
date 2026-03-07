@@ -22,6 +22,12 @@ pub const Camera = struct {
 
 pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .{};
 var nextCameraId: usize = 0;
+// Camera 0 is the persistent pre-level camera spawned at startup; player cameras start at 1.
+const PLAYER_CAMERA_ID_START: usize = 1;
+
+pub fn resetPlayerCameraIds() void {
+    nextCameraId = PLAYER_CAMERA_ID_START;
+}
 pub var activeCameraId: usize = 0;
 
 pub fn spawn(position: vec.IVec2) !void {

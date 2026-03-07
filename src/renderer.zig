@@ -42,7 +42,7 @@ fn renderCamera(cameraId: usize) !void {
     try camera.setActiveCamera(cameraId);
 
     try background.draw();
-    try sensor.drawGoal();
+    try sensor.drawAllSensors();
     try player.drawAllWeaponsBehind();
     try player.drawAllLeftHandsBehind();
     try entity.drawAll();

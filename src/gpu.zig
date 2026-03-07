@@ -183,6 +183,14 @@ pub fn getAtlas() *atlas.Atlas {
     return &getGpu().atlas;
 }
 
+pub fn saveAtlasCheckpoint() void {
+    getGpu().atlas.saveCheckpoint();
+}
+
+pub fn resetAtlasToCheckpoint() void {
+    getGpu().atlas.restoreCheckpoint();
+}
+
 pub fn getAllocator() std.mem.Allocator {
     return mem_allocator;
 }

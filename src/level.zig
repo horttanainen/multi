@@ -10,6 +10,7 @@ const state = @import("state.zig");
 const player = @import("player.zig");
 const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
+const viewport = @import("viewport.zig");
 const sprite = @import("sprite.zig");
 const background = @import("background.zig");
 const animation = @import("animation.zig");
@@ -17,6 +18,7 @@ const controller = @import("controller.zig");
 const rope = @import("rope.zig");
 const weapon = @import("weapon.zig");
 
+const gpu = @import("gpu.zig");
 const conv = @import("conversion.zig");
 
 const vec = @import("vector.zig");
@@ -81,6 +83,15 @@ pub fn findLevels() ![][]const u8 {
     return fileList.toOwnedSlice();
 }
 
+fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
+    for (player.players.values()) |p| {
+        if (box2d.c.B2_ID_EQUALS(visitorShapeId, p.bodyShapeId)) {
+            state.goalReached = true;
+            return;
+        }
+    }
+}
+
 fn loadByName(levelName: []const u8) !void {
     var textBuf: [100]u8 = undefined;
     const levelP = try std.fmt.bufPrint(&textBuf, "levels/{s}", .{levelName});
@@ -143,7 +154,13 @@ fn loadByName(levelName: []const u8) !void {
                 sprite.cleanupLater(spriteUuid);
             }
         } else if (std.mem.eql(u8, e.type, "goal")) {
-            try sensor.createGoalSensorFromImg(pos, spriteUuid);
+            var goalShapeDef = box2d.c.b2DefaultShapeDef();
+            goalShapeDef.isSensor = true;
+            goalShapeDef.enableSensorEvents = true;
+            goalShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+            goalShapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
+            const goalBodyDef = box2d.createStaticBodyDef(pos);
+            try sensor.createSensorEntityFromImg(spriteUuid, goalShapeDef, goalBodyDef, "goal", onGoalBegin);
         } else if (std.mem.eql(u8, e.type, "spawn")) {
             const bodyDef = box2d.createStaticBodyDef(pos);
             shapeDef.isSensor = true;
@@ -157,16 +174,24 @@ fn loadByName(levelName: []const u8) !void {
     size = levelToDeserialize.size;
 
     const playerId1 = try player.spawn(spawnLocation);
-    const color1 = try controller.createControllerForPlayer(playerId1);
-    player.setColor(playerId1, color1);
+    if (!controller.controllers.contains(playerId1)) {
+        const color1 = try controller.createControllerForPlayer(playerId1);
+        player.setColor(playerId1, color1);
+    } else {
+        player.setColor(playerId1, controller.controllers.get(playerId1).?.color);
+    }
 
     const p2Position = vec.IVec2{
         .x = spawnLocation.x + 10,
         .y = spawnLocation.y,
     };
     const playerId2 = try player.spawn(p2Position);
-    const color2 = try controller.createControllerForPlayer(playerId2);
-    player.setColor(playerId2, color2);
+    if (!controller.controllers.contains(playerId2)) {
+        const color2 = try controller.createControllerForPlayer(playerId2);
+        player.setColor(playerId2, color2);
+    } else {
+        player.setColor(playerId2, controller.controllers.get(playerId2).?.color);
+    }
 }
 
 pub fn reload() !void {
@@ -183,6 +208,10 @@ pub fn cleanup() void {
     entity.cleanup();
     background.cleanup();
     animation.cleanup();
+    sprite.clearTextureCache();
+    gpu.resetAtlasToCheckpoint();
+    viewport.cleanup();
+    camera.resetPlayerCameraIds();
 }
 
 pub fn reset() void {

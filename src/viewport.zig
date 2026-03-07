@@ -76,6 +76,7 @@ pub fn getViewportForCamera(cameraId: usize) ?Viewport {
 
 pub fn cleanup() void {
     viewports.deinit(allocator);
+    viewports = .{};
 }
 
 pub fn setActiveViewport(cameraId: usize) !void {

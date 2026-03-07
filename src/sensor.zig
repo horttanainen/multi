@@ -1,75 +1,52 @@
-const box2d = @import("box2d.zig");
 const std = @import("std");
-const sdl = @import("sdl.zig");
-
-const state = @import("state.zig");
-const polygon = @import("polygon.zig");
-const player = @import("player.zig");
-
-const config = @import("config.zig");
-const collision = @import("collision.zig");
-
-const conv = @import("conversion.zig");
-
-const vec = @import("vector.zig");
+const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
-const sprite = @import("sprite.zig");
 const Entity = entity.Entity;
+const allocator = @import("allocator.zig").allocator;
 
-pub var maybeGoalSensor: ?Entity = null;
+pub const SensorEntity = struct {
+    entity: Entity,
+    onBegin: *const fn (visitorShapeId: box2d.c.b2ShapeId) anyerror!void,
+};
 
-const SensorError = error{GoalUninitialized};
+pub var sensorEntities = std.AutoArrayHashMap(box2d.c.b2BodyId, SensorEntity).init(allocator);
 
-pub fn getGoalSensor() !Entity {
-    if (maybeGoalSensor) |goalSensor| {
-        return goalSensor;
-    }
-    return SensorError.GoalUninitialized;
-}
-
-pub fn drawGoal() !void {
-    var goalSensor = try getGoalSensor();
-    try entity.draw(&goalSensor);
-}
-
-pub fn createGoalSensorFromImg(position: vec.Vec2, spriteUuid: u64) !void {
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.isSensor = true;
-    shapeDef.enableSensorEvents = true;
-    shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
-    shapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
-    const bodyDef = box2d.createStaticBodyDef(position);
+pub fn createSensorEntityFromImg(
+    spriteUuid: u64,
+    shapeDef: box2d.c.b2ShapeDef,
+    bodyDef: box2d.c.b2BodyDef,
+    entityType: []const u8,
+    onBegin: *const fn (box2d.c.b2ShapeId) anyerror!void,
+) !void {
     const bodyId = try box2d.createBody(bodyDef);
-    const e = try entity.createEntityForBody(bodyId, spriteUuid, shapeDef, "goal");
-    maybeGoalSensor = e;
+    const e = entity.createEntityForBody(bodyId, spriteUuid, shapeDef, entityType) catch |err| {
+        box2d.c.b2DestroyBody(bodyId);
+        return err;
+    };
+    try sensorEntities.put(bodyId, .{ .entity = e, .onBegin = onBegin });
 }
 
-pub fn checkGoal() !void {
-    if (maybeGoalSensor) |goalSensor| {
-        const sensorEvents = box2d.getSensorEvents();
+pub fn processSensorEvents() !void {
+    const sensorEvents = box2d.getSensorEvents();
+    for (0..@intCast(sensorEvents.beginCount)) |i| {
+        const ev = sensorEvents.beginEvents[i];
+        if (!box2d.c.b2Shape_IsValid(ev.sensorShapeId)) continue;
+        const bodyId = box2d.c.b2Shape_GetBody(ev.sensorShapeId);
+        const se = sensorEntities.get(bodyId) orelse continue;
+        try se.onBegin(ev.visitorShapeId);
+    }
+}
 
-        // Check if any player touches the goal
-        for (player.players.values()) |p| {
-            for (0..@intCast(sensorEvents.beginCount)) |i| {
-                const e = sensorEvents.beginEvents[i];
-
-                if (!box2d.c.B2_ID_EQUALS(e.visitorShapeId, p.bodyShapeId)) {
-                    continue;
-                }
-                for (goalSensor.shapeIds) |sensorId| {
-                    if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, sensorId)) {
-                        state.goalReached = true;
-                        return;
-                    }
-                }
-            }
-        }
+pub fn drawAllSensors() !void {
+    for (sensorEntities.values()) |*se| {
+        if (!se.entity.enabled) continue;
+        try entity.draw(&se.entity);
     }
 }
 
 pub fn cleanup() void {
-    if (maybeGoalSensor) |goalSensor| {
-        entity.cleanupOne(goalSensor);
+    for (sensorEntities.values()) |se| {
+        entity.cleanupOne(se.entity);
     }
-    maybeGoalSensor = null;
+    sensorEntities.clearAndFree();
 }

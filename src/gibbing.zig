@@ -69,6 +69,14 @@ pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void
         .meat = try coloredMeat.toOwnedSlice(),
     };
 
+    if (playerGiblets.get(playerId)) |old| {
+        for (old.heads) |s| sprite.cleanupLater(s);
+        allocator.free(old.heads);
+        for (old.legs) |s| sprite.cleanupLater(s);
+        allocator.free(old.legs);
+        for (old.meat) |s| sprite.cleanupLater(s);
+        allocator.free(old.meat);
+    }
     try playerGiblets.put(playerId, gibletSet);
 
     std.debug.print("Pre-colored giblets for player {}: {} heads, {} legs, {} meat\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len });

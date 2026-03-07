@@ -139,6 +139,7 @@ pub fn main() !void {
     try keyboard.init();
     try camera.spawn(.{ .x = 0, .y = 0 });
     try gibbing.init();
+    gpu.saveAtlasCheckpoint();
     try level.next();
 
     box2d.setFrictionCallback(&friction.callback);
@@ -209,7 +210,7 @@ fn gameLoop() !void {
     entity.cleanupEntities();
     sprite.cleanupSprites();
     try player.checkAllSensors();
-    try sensor.checkGoal();
+    try sensor.processSensorEvents();
 
     camera.followAllPlayers();
 }
