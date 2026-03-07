@@ -5,7 +5,7 @@ const text = @import("text.zig");
 const window = @import("window.zig");
 const delay = @import("delay.zig");
 const gamepad = @import("gamepad.zig");
-const levelEditor = @import("levelEditor.zig");
+const levelEditor = @import("level_editor.zig");
 const state = @import("state.zig");
 
 // ============================================================

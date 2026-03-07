@@ -10,7 +10,7 @@ const camera = @import("camera.zig");
 const state = @import("state.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
-const levelEditor = @import("leveleditor.zig");
+const levelEditor = @import("level_editor.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
@@ -18,6 +18,8 @@ const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const data = @import("data.zig");
 const menu = @import("menu.zig");
+const gamepad = @import("gamepad.zig");
+const cursor = @import("cursor.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -160,16 +162,16 @@ pub fn handleLevelEditorMouseInput() void {
 pub fn handleLevelEditorKeyboardInput() void {
     const currentKeyStates = sdl.getKeyboardState();
     if (currentKeyStates[@intFromEnum(sdl.Scancode.a)]) {
-        camera.moveLeft();
+        cursor.moveLeft();
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.d)]) {
-        camera.moveRight();
+        cursor.moveRight();
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.w)]) {
-        camera.moveUp();
+        cursor.moveUp();
     }
     if (currentKeyStates[@intFromEnum(sdl.Scancode.s)]) {
-        camera.moveDown();
+        cursor.moveDown();
     }
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and currentKeyStates[@intFromEnum(sdl.Scancode.c_)]) {
@@ -196,5 +198,20 @@ pub fn handleLevelEditorKeyboardInput() void {
             menu.openMenu("Level Editor");
             delay.action("menuToggle", 400);
         }
+    }
+
+}
+
+pub fn handleLevelEditorGamepadInput() void {
+    const deadzone: i16 = 3000;
+    var gpIt = gamepad.assignedGamepads.valueIterator();
+    while (gpIt.next()) |gp| {
+        const sdlGp = gp.gamepad orelse continue;
+        const axisX = sdl.getGamepadAxis(sdlGp, .leftx);
+        const axisY = sdl.getGamepadAxis(sdlGp, .lefty);
+        if (axisX > deadzone) cursor.moveRight();
+        if (axisX < -deadzone) cursor.moveLeft();
+        if (axisY > deadzone) cursor.moveDown();
+        if (axisY < -deadzone) cursor.moveUp();
     }
 }

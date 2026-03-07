@@ -31,7 +31,8 @@ const gamepad = @import("gamepad.zig");
 const rope = @import("rope.zig");
 
 const level = @import("level.zig");
-const levelEditor = @import("leveleditor.zig");
+const levelEditor = @import("level_editor.zig");
+const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
@@ -41,12 +42,14 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Menu
+//TODO: refactor levelMenu and menu to use same code. Maybe a data driven approach here as well?
+
 //Small improvements
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
-//TODO: refactor sensor stuff into regular entities
 
 //Gun ideas
 //TODO: add rounds pistol with the glow and spark effect and heavy drop
@@ -183,7 +186,8 @@ pub fn main() !void {
 }
 
 fn levelEditorLoop() void {
-    camera.followKeyboard();
+    cursor.updateState();
+    cursor.cameraFollow();
 }
 
 fn gameLoop() !void {

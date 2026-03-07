@@ -12,6 +12,8 @@ const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
+const levelConfigMenu = @import("levelConfigMenu.zig");
+const cursor = @import("cursor.zig");
 const level = @import("level.zig");
 const viewport = @import("viewport.zig");
 const particle = @import("particle.zig");
@@ -27,13 +29,21 @@ pub fn render() !void {
     try gpu.setRenderDrawColor(.{ .r = 255, .g = 0, .b = 0, .a = 255 });
     try gpu.renderClear();
 
-    for (camera.cameras.keys()) |cameraId| {
-        try renderCamera(cameraId);
+    if (state.editingLevel) {
+        try renderCamera(0);
+        try drawLevelBorder();
+        try cursor.draw();
+    } else {
+        for (camera.cameras.keys()) |cameraId| {
+            try renderCamera(cameraId);
+        }
     }
 
     if (menu.isOpen()) {
         try menu.draw();
     }
+
+    try levelConfigMenu.draw();
 
     gpu.renderPresent();
 }
@@ -64,6 +74,14 @@ fn renderCamera(cameraId: usize) !void {
     try ui.drawPlayerHealth();
     try ui.drawPlayerLocationsOnViewportBorder();
     try ui.drawScoreboard();
+}
+
+fn drawLevelBorder() !void {
+    const hw = @divFloor(level.size.x, 2);
+    const hh = @divFloor(level.size.y, 2);
+    const tl = camera.relativePosition(.{ .x = level.position.x - hw, .y = level.position.y - hh });
+    try gpu.setRenderDrawColor(.{ .r = 255, .g = 255, .b = 255, .a = 200 });
+    try gpu.renderDrawRect(.{ .x = tl.x, .y = tl.y, .w = level.size.x, .h = level.size.y });
 }
 
 fn drawHorizontalLine(height: i32) !void {

@@ -7,7 +7,8 @@ const IVec2 = @import("vector.zig").IVec2;
 const camera = @import("camera.zig");
 const viewport = @import("viewport.zig");
 const config = @import("config.zig");
-const m2Pixel = @import("conversion.zig").m2Pixel;
+const conv = @import("conversion.zig");
+const m2Pixel = conv.m2Pixel;
 
 var dDraw: ?box2d.c.b2DebugDraw = null;
 pub fn init() !void {
@@ -155,12 +156,11 @@ pub fn drawSolidCircle(transform: box2d.c.b2Transform, radius: f32, color: box2d
 pub fn draw() !void {
     if (dDraw) |*debugDraw| {
         if (camera.getActiveCamera()) |cam| {
-            const met2pix: f32 = @floatFromInt(config.met2pix);
             const vp = viewport.activeViewport;
-            const lx: f32 = @as(f32, @floatFromInt(cam.posPx.x)) / met2pix;
-            const ly: f32 = @as(f32, @floatFromInt(cam.posPx.y)) / met2pix;
-            const ux: f32 = @as(f32, @floatFromInt(cam.posPx.x + vp.width)) / met2pix;
-            const uy: f32 = @as(f32, @floatFromInt(cam.posPx.y + vp.height)) / met2pix;
+            const lx: f32 = @as(f32, @floatFromInt(cam.posPx.x)) / conv.met2pix;
+            const ly: f32 = @as(f32, @floatFromInt(cam.posPx.y)) / conv.met2pix;
+            const ux: f32 = @as(f32, @floatFromInt(cam.posPx.x + vp.width)) / conv.met2pix;
+            const uy: f32 = @as(f32, @floatFromInt(cam.posPx.y + vp.height)) / conv.met2pix;
             debugDraw.drawingBounds = .{
                 .lowerBound = .{ .x = lx, .y = ly },
                 .upperBound = .{ .x = ux, .y = uy },

@@ -350,7 +350,7 @@ fn iterateCircleOnSurface(
         .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / sprite.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
     };
 
-    const radiusPixels = (radiusWorld * config.met2pix) / sprite.scale.x;
+    const radiusPixels = (radiusWorld * conv.met2pix) / sprite.scale.x;
 
     // 4. Calculate bounding box for iteration efficiency
     const rawMinX: i32 = @intFromFloat(@floor(centerPixelF.x - radiusPixels));
@@ -459,8 +459,8 @@ pub fn paintSpriteOnSurface(
         .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / target.scale.y + @as(f32, @floatFromInt(targetHeight)) / 2.0,
     };
 
-    const halfWidthPixels = (sizeWorldX / 2.0 * config.met2pix) / target.scale.x;
-    const halfHeightPixels = (sizeWorldY / 2.0 * config.met2pix) / target.scale.y;
+    const halfWidthPixels = (sizeWorldX / 2.0 * conv.met2pix) / target.scale.x;
+    const halfHeightPixels = (sizeWorldY / 2.0 * conv.met2pix) / target.scale.y;
 
     // Bounding box in target pixels
     const minXi = @as(i32, @intFromFloat(@floor(centerPixelF.x - halfWidthPixels)));

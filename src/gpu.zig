@@ -1302,6 +1302,17 @@ pub fn renderFillRect(rect: sdl.Rect) !void {
     g.color_vertex_count += 6;
 }
 
+pub fn renderDrawRect(rect: sdl.Rect) !void {
+    const x0 = rect.x;
+    const y0 = rect.y;
+    const x1 = rect.x + rect.w;
+    const y1 = rect.y + rect.h;
+    try renderDrawLine(x0, y0, x1, y0);
+    try renderDrawLine(x1, y0, x1, y1);
+    try renderDrawLine(x1, y1, x0, y1);
+    try renderDrawLine(x0, y1, x0, y0);
+}
+
 // ============================================================
 // Viewport
 // ============================================================

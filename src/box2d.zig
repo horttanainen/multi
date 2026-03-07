@@ -32,6 +32,14 @@ pub fn initWorld() void {
     world_id = c.b2CreateWorld(&worldDef);
 }
 
+pub fn setGravity(y: f32) void {
+    c.b2World_SetGravity(getWorldId(), .{ .x = 0.0, .y = y });
+}
+
+pub fn getGravity() f32 {
+    return c.b2World_GetGravity(getWorldId()).y;
+}
+
 pub fn destroyWorld() void {
     if (world_id) |wid| {
         c.b2DestroyWorld(wid);

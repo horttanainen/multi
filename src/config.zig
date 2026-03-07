@@ -6,13 +6,12 @@ pub const window = .{
     .defaultHeight = 1200,
 };
 
-pub const debug = false;
+pub const debug = true;
 pub const debugLog = false;
 
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
-pub const met2pix = 80;
 
 pub const physics = .{
     .dt = 1.0 / 60.0,

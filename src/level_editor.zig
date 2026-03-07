@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
+const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const allocator = @import("allocator.zig").allocator;
 const state = @import("state.zig");
@@ -104,7 +105,10 @@ fn addEntityToLevel(serializableEntity: entity.SerializableEntity) !void {
             .options = .{ .whitespace = .indent_2 },
         };
         try s.write(serializableLevel);
+        try writer.interface.flush();
     }
+
+    try reloadForEditor();
 }
 
 fn createRandomAlphabeticalString(length: usize) ![]const u8 {
@@ -118,6 +122,53 @@ fn createRandomAlphabeticalString(length: usize) ![]const u8 {
     return buffer.toOwnedSlice();
 }
 
+pub fn getEditorLevelPath(buf: []u8) ![]const u8 {
+    return std.fmt.bufPrint(buf, "{s}/{d}.json", .{ editDirPath, currentVersion });
+}
+
+pub fn reloadForEditor() !void {
+    var pathBuf: [200]u8 = undefined;
+    const path = try getEditorLevelPath(&pathBuf);
+    try level.loadEditorLevel(path);
+    cursor.initSprite();
+}
+
+pub fn createNewLevel() !void {
+    // Create the drafts directory if it doesn't exist
+    std.fs.cwd().makeDir("drafts") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
+    const randomString = try createRandomAlphabeticalString(8);
+    defer allocator.free(randomString);
+
+    // Set up the versioned editing directory under drafts/ instead of levels/
+    // so the game's level loader never sees this unfinished level.
+    editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "drafts/{s}", .{randomString});
+    try std.fs.cwd().makeDir(editDirPath);
+
+    currentVersion = 0;
+
+    const emptyLevel =
+        \\{"size":{"x":1920,"y":1080},"parallaxEntities":[],"entities":[]}
+    ;
+
+    var editingD = try std.fs.cwd().openDir(editDirPath, .{});
+    defer editingD.close();
+
+    const versionFile = try editingD.createFile("0.json", .{});
+    try versionFile.writeAll(emptyLevel);
+    versionFile.close();
+
+    if (maybeCurrentlyOpenLevelFile) |f| f.close();
+    maybeCurrentlyOpenLevelFile = try editingD.openFile("0.json", .{ .mode = .read_write });
+
+    state.editingLevel = true;
+    try cursor.create();
+    try reloadForEditor();
+}
+
 pub fn enter() !void {
     state.editingLevel = true;
 
@@ -125,6 +176,9 @@ pub fn enter() !void {
         currentVersion = 0;
         try createCopyOfCurrentLevel();
     }
+
+    try cursor.create();
+    try reloadForEditor();
 }
 
 fn createCopyOfCurrentLevel() !void {
@@ -166,6 +220,7 @@ pub fn exit() void {
     if (maybeSelectedBodyId) |selectedBodyId| {
         setSelection(selectedBodyId, false);
     }
+    cursor.deinit();
     state.editingLevel = false;
 }
 
@@ -221,6 +276,46 @@ fn findTemporaryFolders() ![][]const u8 {
     return folderList.toOwnedSlice();
 }
 
+pub const Config = struct { gravity: f32, pixelsPerMeter: i32 };
+
+pub fn getConfig() !Config {
+    if (maybeCurrentlyOpenLevelFile) |*f| {
+        try f.seekTo(0);
+        const data = try f.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
+        defer allocator.free(data);
+        const parsed = try level.parseFromData(data);
+        defer parsed.deinit();
+        return Config{ .gravity = parsed.value.gravity, .pixelsPerMeter = parsed.value.pixelsPerMeter };
+    }
+    return Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
+}
+
+pub fn saveConfig(gravity: f32, pixelsPerMeter: i32) !void {
+    if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
+        try currentlyOpenLevelFile.seekTo(0);
+        const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
+        defer allocator.free(data);
+        const parsed = try level.parseFromData(data);
+        defer parsed.deinit();
+        var serializableLevel = parsed.value;
+
+        serializableLevel.gravity = gravity;
+        serializableLevel.pixelsPerMeter = pixelsPerMeter;
+
+        try currentlyOpenLevelFile.setEndPos(0);
+        try currentlyOpenLevelFile.seekTo(0);
+
+        var buf: [config.maxLevelSizeInBytes]u8 = undefined;
+        var writer = currentlyOpenLevelFile.writer(&buf);
+        var s = std.json.Stringify{
+            .writer = &writer.interface,
+            .options = .{ .whitespace = .indent_2 },
+        };
+        try s.write(serializableLevel);
+        try writer.interface.flush();
+    }
+}
+
 pub fn cleanup() !void {
     var dir = try std.fs.cwd().openDir("levels", .{});
     defer dir.close();
@@ -245,11 +340,20 @@ pub fn cleanup() !void {
     const folders = try findTemporaryFolders();
     defer allocator.free(folders);
 
+    // Capture before close so we can check it below
+    const wasDraft = maybeCurrentlyOpenLevelFile != null and
+        std.mem.startsWith(u8, editDirPath, "drafts/");
+
     if (maybeCurrentlyOpenLevelFile) |currentlyOpenFile| {
         currentlyOpenFile.close();
     }
 
     for (folders) |folder| {
         try dir.deleteTree(folder);
+    }
+
+    // Remove draft directory (lives outside levels/, so not covered above)
+    if (wasDraft) {
+        std.fs.cwd().deleteTree(editDirPath) catch {};
     }
 }

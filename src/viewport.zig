@@ -91,5 +91,8 @@ pub fn setActiveViewport(cameraId: usize) !void {
         };
         try gpu.renderSetViewport(&sdlVp);
         activeViewport = vp;
+    } else {
+        try gpu.renderSetViewport(null);
+        activeViewport = .{ .x = 0, .y = 0, .width = window.width, .height = window.height };
     }
 }

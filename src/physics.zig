@@ -13,7 +13,6 @@ pub fn step() !void {
         entity.updateStates();
         particle.updateStates();
         player.updateAllStates();
-        camera.updateState();
         box2d.worldStep(config.physics.dt, config.physics.subStepCount);
         time.accumulator -= config.physics.dt;
     }

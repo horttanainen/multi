@@ -619,8 +619,8 @@ pub fn sprayPaint(p: *Player) !void {
             if (e.spriteUuids.len == 0) continue;
 
             // Natural world size: source pixels at fixed met2pix ratio, then apply player scale
-            var sizeWorldX = @as(f32, @floatFromInt(spraySprite.surface.w)) / config.met2pix * spraySprite.scale.x;
-            var sizeWorldY = @as(f32, @floatFromInt(spraySprite.surface.h)) / config.met2pix * spraySprite.scale.y;
+            var sizeWorldX = @as(f32, @floatFromInt(spraySprite.surface.w)) / conv.met2pix * spraySprite.scale.x;
+            var sizeWorldY = @as(f32, @floatFromInt(spraySprite.surface.h)) / conv.met2pix * spraySprite.scale.y;
 
             // Scale down proportionally if either dimension exceeds the max
             const maxDim = @max(sizeWorldX, sizeWorldY);

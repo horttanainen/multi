@@ -3,7 +3,6 @@ const std = @import("std");
 const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const level = @import("level.zig");
-const config = @import("config.zig");
 const allocator = @import("allocator.zig").allocator;
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -16,8 +15,6 @@ pub const Camera = struct {
     id: usize,
     playerId: usize,
     posPx: vec.IVec2,
-    bodyId: box2d.c.b2BodyId,
-    state: ?box2d.State,
 };
 
 pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .{};
@@ -35,22 +32,6 @@ pub fn spawn(position: vec.IVec2) !void {
 }
 
 pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
-    const bodyDef = box2d.createDynamicBodyDef(.{
-        .x = @floatFromInt(position.x),
-        .y = @floatFromInt(position.y),
-    });
-    const bodyId = try box2d.createBody(bodyDef);
-    box2d.c.b2Body_SetGravityScale(bodyId, 0);
-    box2d.c.b2Body_SetLinearDamping(bodyId, 2);
-
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.material.friction = 1;
-    shapeDef.isSensor = true;
-
-    const polygon = box2d.c.b2MakeSquare(0.5);
-
-    _ = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
-
     const cameraId = nextCameraId;
     nextCameraId += 1;
 
@@ -58,8 +39,6 @@ pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
         .id = cameraId,
         .playerId = playerId,
         .posPx = position,
-        .bodyId = bodyId,
-        .state = null,
     };
 
     try cameras.put(allocator, cameraId, camera);
@@ -67,9 +46,7 @@ pub fn spawnForPlayer(playerId: usize, position: vec.IVec2) !usize {
 }
 
 pub fn destroyCamera(cameraId: usize) void {
-    if (cameras.fetchSwapRemove(cameraId)) |entry| {
-        box2d.c.b2DestroyBody(entry.value.bodyId);
-    }
+    _ = cameras.fetchSwapRemove(cameraId);
 }
 
 pub fn setActiveCamera(cameraId: usize) !void {
@@ -137,40 +114,8 @@ pub fn followAllPlayers() void {
     }
 }
 
-pub fn followKeyboard() void {
-    if (getActiveCamera()) |camera| {
-        const currentState = box2d.getState(camera.bodyId);
-        const state = box2d.getInterpolatedState(camera.state, currentState);
-        moveCamera(camera, conv.m2Pixel(state.pos));
-    }
-}
-
-pub fn moveLeft() void {
-    applyForce(box2d.c.b2Vec2{ .x = -config.levelEditorCameraMovementForce, .y = 0 });
-}
-
-pub fn moveRight() void {
-    applyForce(box2d.c.b2Vec2{ .x = config.levelEditorCameraMovementForce, .y = 0 });
-}
-
-pub fn moveUp() void {
-    applyForce(box2d.c.b2Vec2{ .x = 0, .y = -config.levelEditorCameraMovementForce });
-}
-
-pub fn moveDown() void {
-    applyForce(box2d.c.b2Vec2{ .x = 0, .y = config.levelEditorCameraMovementForce });
-}
-
-fn applyForce(force: box2d.c.b2Vec2) void {
-    if (getActiveCamera()) |camera| {
-        box2d.c.b2Body_ApplyForceToCenter(camera.bodyId, force, true);
-    }
-}
-
-pub fn updateState() void {
-    for (cameras.values()) |*cam| {
-        cam.state = box2d.getState(cam.bodyId);
-    }
+pub fn centerOn(worldPos: vec.IVec2) void {
+    if (getActiveCamera()) |cam| moveCamera(cam, worldPos);
 }
 
 fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
