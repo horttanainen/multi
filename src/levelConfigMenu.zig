@@ -12,7 +12,7 @@ var items = [_]menu.Item{
 pub fn open(gravity: f32, pixelsPerMeter: i32) void {
     items[0].kind.config.value = gravity;
     items[1].kind.config.value = @floatFromInt(pixelsPerMeter);
-    menu.open(&items);
+    menu.open(&items, .{});
 }
 
 fn getGravity() f32 {

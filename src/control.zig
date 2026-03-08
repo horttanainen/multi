@@ -20,6 +20,7 @@ const data = @import("data.zig");
 const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
 const levelConfigMenu = @import("levelConfigMenu.zig");
+const spritePicker = @import("spritePicker.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -179,6 +180,30 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                 levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter);
                 delay.action("levelConfigToggle", 300);
             }
+        },
+        .open_sprite_picker => {
+            if (!delay.check("pickerOpen")) {
+                spritePicker.open() catch |err| {
+                    std.debug.print("Error opening sprite picker: {}\n", .{err});
+                };
+                delay.action("pickerOpen", 300);
+            }
+        },
+        .place_sprite => {
+            if (!delay.check("placeSprite")) {
+                if (cursor.hasPendingSprite()) {
+                    if (cursor.getPendingImgPath()) |imgPath| {
+                        const pos = cursor.getWorldPos();
+                        levelEditor.placeSprite(imgPath, cursor.getPendingScale(), pos) catch |err| {
+                            std.debug.print("Error placing sprite: {}\n", .{err});
+                        };
+                    }
+                }
+                delay.action("placeSprite", 300);
+            }
+        },
+        .deactivate_sprite => {
+            cursor.detachSprite();
         },
     }
 }

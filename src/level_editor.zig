@@ -130,7 +130,7 @@ pub fn reloadForEditor() !void {
     var pathBuf: [200]u8 = undefined;
     const path = try getEditorLevelPath(&pathBuf);
     _ = try level.loadLevel(path);
-    cursor.initSprite();
+    cursor.refreshSprite();
 }
 
 pub fn createNewLevel() !void {
@@ -220,6 +220,19 @@ pub fn exit() void {
     }
     cursor.deinit();
     state.editingLevel = false;
+}
+
+pub fn placeSprite(imgPath: []const u8, scale: vec.Vec2, position: vec.IVec2) !void {
+    const serializedE = entity.SerializableEntity{
+        .type = "static",
+        .friction = 0.5,
+        .imgPath = imgPath,
+        .scale = scale,
+        .pos = position,
+        .breakable = false,
+    };
+    try createNewVersion();
+    try addEntityToLevel(serializedE);
 }
 
 pub fn selectEntityAt(pos: vec.IVec2) !void {

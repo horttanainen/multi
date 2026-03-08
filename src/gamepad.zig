@@ -1,5 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const config = @import("config.zig");
+const delay = @import("delay.zig");
 
 const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
@@ -51,6 +53,9 @@ pub const LevelEditorGamepadBindings = struct {
     cursorYAxis: sdl.GamepadAxis,
     moveThreshold: f32,
     configMenuButton: sdl.GamepadButton,
+    openPickerButton: sdl.GamepadButton,
+    placeButton: sdl.GamepadButton,
+    deactivateButton: sdl.GamepadButton,
 };
 
 pub const defaultEditorBindings = LevelEditorGamepadBindings{
@@ -58,6 +63,9 @@ pub const defaultEditorBindings = LevelEditorGamepadBindings{
     .cursorYAxis = .lefty,
     .moveThreshold = MOVEMENT_THRESHOLD,
     .configMenuButton = .y,
+    .openPickerButton = .x,
+    .placeButton = .a,
+    .deactivateButton = .b,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -207,6 +215,18 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
 
     if (sdl.getGamepadButton(sdlGp, bindings.configMenuButton)) {
         control.executeLevelEditorAction(.open_config_menu);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.openPickerButton) and !delay.check("pickerOpen")) {
+        control.executeLevelEditorAction(.open_sprite_picker);
+        delay.action("pickerOpen", 300);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.placeButton) and !delay.check("levelEditorClick")) {
+        control.executeLevelEditorAction(.place_sprite);
+        delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.deactivateButton) and !delay.check("levelEditorClick")) {
+        control.executeLevelEditorAction(.deactivate_sprite);
+        delay.action("levelEditorClick", config.levelEditorClickDelayMs);
     }
 }
 

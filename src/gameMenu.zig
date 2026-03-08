@@ -14,7 +14,7 @@ var level_editor_items = [_]menu.Item{
 };
 
 pub fn openGameMenu() void {
-    menu.open(&main_items);
+    menu.open(&main_items, .{});
 }
 
 fn actionClose() anyerror!void {
@@ -22,11 +22,11 @@ fn actionClose() anyerror!void {
 }
 
 fn actionOpenLevelEditorMenu() anyerror!void {
-    menu.open(&level_editor_items);
+    menu.open(&level_editor_items, .{});
 }
 
 fn actionOpenMainMenu() anyerror!void {
-    menu.open(&main_items);
+    menu.open(&main_items, .{});
 }
 
 fn actionQuitGame() anyerror!void {

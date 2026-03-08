@@ -62,6 +62,9 @@ pub const LevelEditorKeyBindings = struct {
     copy: MultiKey,
     paste: MultiKey,
     openMenu: sdl.Scancode,
+    openSpritePicker: sdl.Scancode,
+    placeSprite: sdl.Scancode,
+    deactivateSprite: sdl.Scancode,
 };
 
 pub const defaultEditorBindings = LevelEditorKeyBindings{
@@ -72,6 +75,9 @@ pub const defaultEditorBindings = LevelEditorKeyBindings{
     .copy = .{ .modifier = .lctrl, .key = .c_ },
     .paste = .{ .modifier = .lctrl, .key = .v },
     .openMenu = .escape,
+    .openSpritePicker = .e,
+    .placeSprite = .return_,
+    .deactivateSprite = .q,
 };
 
 pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .{};
@@ -122,6 +128,15 @@ pub fn handleLevelEditor(_: *const controller.Controller) void {
     }
     if (key(keyStates, bindings.openMenu)) {
         control.executeLevelEditorAction(.open_menu);
+    }
+    if (key(keyStates, bindings.openSpritePicker)) {
+        control.executeLevelEditorAction(.open_sprite_picker);
+    }
+    if (key(keyStates, bindings.placeSprite)) {
+        control.executeLevelEditorAction(.place_sprite);
+    }
+    if (key(keyStates, bindings.deactivateSprite)) {
+        control.executeLevelEditorAction(.deactivate_sprite);
     }
 }
 

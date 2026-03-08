@@ -82,7 +82,7 @@ pub const WeaponData = struct {
     directDamage: f32,
 };
 
-var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
+pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
 var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
 var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
