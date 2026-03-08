@@ -129,7 +129,7 @@ pub fn getEditorLevelPath(buf: []u8) ![]const u8 {
 pub fn reloadForEditor() !void {
     var pathBuf: [200]u8 = undefined;
     const path = try getEditorLevelPath(&pathBuf);
-    try level.loadEditorLevel(path);
+    _ = try level.loadLevel(path);
     cursor.initSprite();
 }
 
@@ -185,10 +185,9 @@ fn createCopyOfCurrentLevel() !void {
     const randomString = try createRandomAlphabeticalString(4);
     defer allocator.free(randomString);
 
-    var it = std.mem.splitSequence(u8, level.json, ".");
+    const basename = std.fs.path.basename(level.currentPath);
+    var it = std.mem.splitSequence(u8, basename, ".");
     const levelName = it.first();
-
-    std.debug.print("levelName: {s}\n", .{levelName});
 
     var textBuf1: [100]u8 = undefined;
     const levelToEditName = try std.fmt.bufPrint(&textBuf1, "{s}{s}", .{
@@ -196,22 +195,21 @@ fn createCopyOfCurrentLevel() !void {
         randomString,
     });
 
-    std.debug.print("levelToEditName: {s}\n", .{levelToEditName});
-
     editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "levels/{s}", .{levelToEditName});
-
-    std.debug.print("editDirPath: {s}\n", .{editDirPath});
 
     try std.fs.cwd().makeDir(editDirPath);
 
     var textBuf2: [100]u8 = undefined;
     const version = try std.fmt.bufPrint(&textBuf2, "{d}.json", .{currentVersion});
 
-    var levelsD = try std.fs.cwd().openDir("levels", std.fs.Dir.OpenOptions{});
-    defer levelsD.close();
+    const srcDir = std.fs.path.dirname(level.currentPath) orelse ".";
+    const srcFile = std.fs.path.basename(level.currentPath);
+
+    var srcD = try std.fs.cwd().openDir(srcDir, std.fs.Dir.OpenOptions{});
+    defer srcD.close();
     var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
     defer editingD.close();
-    try std.fs.Dir.copyFile(levelsD, level.json, editingD, version, .{});
+    try std.fs.Dir.copyFile(srcD, srcFile, editingD, version, .{});
 
     maybeCurrentlyOpenLevelFile = try editingD.openFile(version, .{ .mode = .read_write });
 }

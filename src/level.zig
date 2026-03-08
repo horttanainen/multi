@@ -20,6 +20,7 @@ const weapon = @import("weapon.zig");
 
 const gpu = @import("gpu.zig");
 const conv = @import("conversion.zig");
+const fs = @import("fs.zig");
 
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
@@ -29,8 +30,8 @@ const Entity = entity.Entity;
 
 var levelNumber: usize = 0;
 
-var jsonTextBuf: [100]u8 = undefined;
-pub var json: []const u8 = undefined;
+var currentPathBuf: [200]u8 = undefined;
+pub var currentPath: []const u8 = undefined;
 
 pub var position: vec.IVec2 = .{
     .x = 0,
@@ -51,6 +52,8 @@ const LevelError = error{
 
 pub const Level = struct {
     size: vec.IVec2,
+    gravity: f32 = 10.0,
+    pixelsPerMeter: i32 = 80,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
@@ -66,21 +69,10 @@ pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
     return parseFromData(data);
 }
 
-pub fn findLevels() ![][]const u8 {
-    var dir = try std.fs.cwd().openDir("levels", .{});
-    defer dir.close();
-
-    var fileList = std.array_list.Managed([]const u8).init(allocator);
-
-    var dirIterator = dir.iterate();
-
-    while (try dirIterator.next()) |dirContent| {
-        if (dirContent.kind == std.fs.File.Kind.file) {
-            try fileList.append(dirContent.name);
-        }
-    }
-
-    return fileList.toOwnedSlice();
+pub fn loadLevelPaths() !std.json.Parsed([][]const u8) {
+    var jsonBuf: [4096]u8 = undefined;
+    const data = try fs.readFile("levels.json", &jsonBuf);
+    return std.json.parseFromSlice([][]const u8, allocator, data, .{ .allocate = .alloc_always });
 }
 
 fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
@@ -92,24 +84,16 @@ fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
     }
 }
 
-fn loadByName(levelName: []const u8) !void {
-    var textBuf: [100]u8 = undefined;
-    const levelP = try std.fmt.bufPrint(&textBuf, "levels/{s}", .{levelName});
-    json = levelName;
+// Loads parallax backgrounds and entities from a parsed Level. Returns true if a spawn point was found.
+fn loadLevelContents(lev: Level) !bool {
+    var hasSpawn = false;
 
-    const parsed = try parseFromPath(levelP);
-    defer parsed.deinit();
-    const levelToDeserialize = parsed.value;
-
-    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
-
-    for (levelToDeserialize.parallaxEntities) |e| {
+    for (lev.parallaxEntities) |e| {
         const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
-
         try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
     }
 
-    for (levelToDeserialize.entities) |e| {
+    for (lev.entities) |e| {
         var shapeDef = box2d.c.b2DefaultShapeDef();
         shapeDef.material.friction = e.friction;
         shapeDef.enableSensorEvents = true;
@@ -123,7 +107,6 @@ fn loadByName(levelName: []const u8) !void {
             shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
         } else if (std.mem.eql(u8, e.type, "static")) {
-            // Split large static terrain into tiles for better performance
             const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
             defer allocator.free(tiles);
 
@@ -131,7 +114,6 @@ fn loadByName(levelName: []const u8) !void {
             const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
 
             for (tiles) |tile| {
-                // Calculate position for this tile (original position + tile offset)
                 const tilePos = vec.Vec2{
                     .x = pos.x + tile.offsetPos.x,
                     .y = pos.y + tile.offsetPos.y,
@@ -141,7 +123,6 @@ fn loadByName(levelName: []const u8) !void {
                 shapeDef.filter.maskBits = maskBits;
                 _ = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
                     if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-                        // Clean up the tile sprite since entity creation failed
                         sprite.cleanupLater(tile.spriteUuid);
                     } else {
                         return err;
@@ -149,7 +130,6 @@ fn loadByName(levelName: []const u8) !void {
                 };
             }
 
-            // Clean up the original sprite if it was split
             if (tiles.len > 1) {
                 sprite.cleanupLater(spriteUuid);
             }
@@ -168,11 +148,15 @@ fn loadByName(levelName: []const u8) !void {
             shapeDef.filter.maskBits = collision.MASK_SENSOR_SPAWN;
             _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "spawn");
             spawnLocation = e.pos;
+            hasSpawn = true;
         }
     }
 
-    size = levelToDeserialize.size;
+    size = lev.size;
+    return hasSpawn;
+}
 
+fn spawnTwoPlayers() !void {
     const playerId1 = try player.spawn(spawnLocation);
     if (!controller.controllers.contains(playerId1)) {
         const color1 = try controller.createControllerForPlayer(playerId1);
@@ -194,9 +178,35 @@ fn loadByName(levelName: []const u8) !void {
     }
 }
 
+// Load a level from any path without spawning players (for level editor view).
+pub fn loadLevel(path: []const u8) !bool {
+    reset();
+    const parsed = try parseFromPath(path);
+    defer parsed.deinit();
+    const lev = parsed.value;
+
+    box2d.setGravity(lev.gravity);
+    conv.met2pix = @floatFromInt(lev.pixelsPerMeter);
+    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    const hasSpawn = try loadLevelContents(lev);
+    return hasSpawn;
+}
+
+// Load a level from any path as a playable game level. Spawns players only if a spawn point exists.
+pub fn tryEditorLevel(path: []const u8) !void {
+    const hasSpawn = try loadLevel(path);
+    if (hasSpawn) {
+        try spawnTwoPlayers();
+    }
+    state.editingLevel = false;
+}
+
 pub fn reload() !void {
     reset();
-    try loadByName(json);
+    const hasSpawn = try loadLevel(currentPath);
+    if (hasSpawn) {
+        try spawnTwoPlayers();
+    }
 }
 
 pub fn cleanup() void {
@@ -222,12 +232,14 @@ pub fn reset() void {
 pub fn next() !void {
     reset();
 
-    const levels = try findLevels();
-    defer allocator.free(levels);
-    levelNumber = @mod(levelNumber + 1, levels.len);
+    const parsed = try loadLevelPaths();
+    defer parsed.deinit();
+    levelNumber = @mod(levelNumber + 1, parsed.value.len);
 
-    const levelName = levels[levelNumber];
+    currentPath = try std.fmt.bufPrint(&currentPathBuf, "{s}", .{parsed.value[levelNumber]});
 
-    const j = try std.fmt.bufPrint(&jsonTextBuf, "{s}", .{levelName});
-    try loadByName(j);
+    const hasSpawn = try loadLevel(currentPath);
+    if (hasSpawn) {
+        try spawnTwoPlayers();
+    }
 }
