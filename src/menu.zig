@@ -35,13 +35,19 @@ pub const Item = struct {
 var is_open: bool = false;
 var active_items: []Item = &.{};
 var focused_index: usize = 0;
+var scroll_offset: usize = 0;
+var scroll_anim: f32 = 0.0;
 var editing_index: ?usize = null;
 var editing_value: f32 = 0.0;
+
+const LERP_SPEED: f32 = 0.2;
 
 pub fn open(items: []Item) void {
     is_open = true;
     active_items = items;
     focused_index = 0;
+    scroll_offset = 0;
+    scroll_anim = 0.0;
     editing_index = null;
 }
 
@@ -65,16 +71,39 @@ pub fn handleInput() !void {
     }
 }
 
+fn navUp() void {
+    const n = active_items.len;
+    if (focused_index == 0) {
+        focused_index = n - 1;
+        scroll_offset = if (n > VISIBLE) n - VISIBLE else 0;
+        scroll_anim = @floatFromInt(scroll_offset); // teleport on wrap
+    } else {
+        focused_index -= 1;
+        if (focused_index < scroll_offset) scroll_offset -= 1;
+    }
+}
+
+fn navDown() void {
+    const n = active_items.len;
+    if (focused_index + 1 >= n) {
+        focused_index = 0;
+        scroll_offset = 0;
+        scroll_anim = @floatFromInt(scroll_offset); // teleport on wrap
+    } else {
+        focused_index += 1;
+        if (focused_index >= scroll_offset + VISIBLE) scroll_offset += 1;
+    }
+}
+
 fn handleBrowseInput() !void {
     const keys = sdl.getKeyboardState();
-    const n = active_items.len;
 
     if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
-        focused_index = (focused_index + n - 1) % n;
+        navUp();
         delay.action("menuNav", 150);
     }
     if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
-        focused_index = (focused_index + 1) % n;
+        navDown();
         delay.action("menuNav", 150);
     }
     if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
@@ -90,11 +119,11 @@ fn handleBrowseInput() !void {
     while (it.next()) |gp| {
         const sdlGp = gp.gamepad orelse continue;
         if (sdl.getGamepadButton(sdlGp, .dpad_up) and !delay.check("menuNav")) {
-            focused_index = (focused_index + n - 1) % n;
+            navUp();
             delay.action("menuNav", 150);
         }
         if (sdl.getGamepadButton(sdlGp, .dpad_down) and !delay.check("menuNav")) {
-            focused_index = (focused_index + 1) % n;
+            navDown();
             delay.action("menuNav", 150);
         }
         if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
@@ -171,34 +200,57 @@ fn activate(idx: usize) !void {
 // Drawing
 // ============================================================
 
+const VISIBLE: usize = 3;
 const BTN_H: i32 = 80;
 const BTN_GAP: i32 = 12;
 const COLOR_NORMAL = sdl.Color{ .r = 40, .g = 40, .b = 40, .a = 200 };
 const COLOR_FOCUSED = sdl.Color{ .r = 220, .g = 60, .b = 140, .a = 220 };
 const COLOR_EDITING = sdl.Color{ .r = 60, .g = 140, .b = 220, .a = 220 };
 const COLOR_OVERLAY = sdl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 };
+const COLOR_SIDE = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 };
 
 pub fn draw() !void {
     if (!is_open) return;
+
+    // Advance scroll animation
+    const target: f32 = @floatFromInt(scroll_offset);
+    scroll_anim += (target - scroll_anim) * LERP_SPEED;
+    if (@abs(target - scroll_anim) < 0.001) scroll_anim = target;
 
     try gpu.renderSetViewport(null);
     try gpu.setRenderDrawColor(COLOR_OVERLAY);
     try gpu.renderFillRect(sdl.Rect{ .x = 0, .y = 0, .w = window.width, .h = window.height });
 
-    const n: i32 = @intCast(active_items.len);
     const btn_w: i32 = @divFloor(window.width * 5, 10);
-    const total_h: i32 = n * BTN_H + (n - 1) * BTN_GAP;
     const btn_x: i32 = @divFloor(window.width - btn_w, 2);
-    const btn_y_start: i32 = @divFloor(window.height - total_h, 2);
+    const step: f32 = @floatFromInt(BTN_H + BTN_GAP);
+
+    // Item i is offset from screen center by (i - center_item) steps.
+    // center_item is the middle index of the VISIBLE window.
+    const center_item: f32 = scroll_anim + @as(f32, VISIBLE - 1) / 2.0;
+    const screen_cy: i32 = @divFloor(window.height, 2);
+
+    var hint_y: i32 = screen_cy;
 
     for (active_items, 0..) |item, i| {
-        const y: i32 = btn_y_start + @as(i32, @intCast(i)) * (BTN_H + BTN_GAP);
-        const rect = sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H };
+        const fi: f32 = @floatFromInt(i);
+        const y: i32 = screen_cy - @divFloor(BTN_H, 2) + @as(i32, @intFromFloat(@round((fi - center_item) * step)));
 
+        if (y + BTN_H < 0 or y > window.height) continue;
+
+        const in_window = i >= scroll_offset and i < scroll_offset + VISIBLE;
         const is_editing = if (editing_index) |ei| ei == i else false;
-        const color = if (is_editing) COLOR_EDITING else if (i == focused_index) COLOR_FOCUSED else COLOR_NORMAL;
+        const color = if (is_editing)
+            COLOR_EDITING
+        else if (i == focused_index)
+            COLOR_FOCUSED
+        else if (in_window)
+            COLOR_NORMAL
+        else
+            COLOR_SIDE;
+
         try gpu.setRenderDrawColor(color);
-        try gpu.renderFillRect(rect);
+        try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H });
 
         var label_buf: [64]u8 = undefined;
         const label: [:0]const u8 = switch (item.kind) {
@@ -213,14 +265,14 @@ pub fn draw() !void {
             .x = btn_x + @divFloor(btn_w, 2),
             .y = y + @divFloor(BTN_H, 2),
         });
+
+        if (in_window) hint_y = y + BTN_H;
     }
 
     if (editing_index != null) {
-        const hint_y = btn_y_start + n * (BTN_H + BTN_GAP) + 8;
         try text.writeCenter(.small, "Enter: Apply  Esc: Cancel", .{
             .x = @divFloor(window.width, 2),
-            .y = hint_y,
+            .y = hint_y + BTN_GAP + 8,
         });
     }
 }
-
