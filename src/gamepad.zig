@@ -206,7 +206,7 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
     if (axisY < -bindings.moveThreshold) control.executeLevelEditorAction(.cursor_up);
 
     if (sdl.getGamepadButton(sdlGp, bindings.configMenuButton)) {
-        control.executeLevelEditorAction(.toggle_config_menu);
+        control.executeLevelEditorAction(.open_config_menu);
     }
 }
 

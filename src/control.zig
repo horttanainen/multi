@@ -17,7 +17,7 @@ const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const data = @import("data.zig");
-const menu = @import("menu.zig");
+const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
 const levelConfigMenu = @import("levelConfigMenu.zig");
 
@@ -66,7 +66,7 @@ pub fn handleGlobalHotkeys() void {
 
     if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
         if (!delay.check("menuToggle")) {
-            menu.openMenu("Game");
+            gameMenu.openGameMenu();
             delay.action("menuToggle", 400);
         }
     }
@@ -169,18 +169,14 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         },
         .open_menu => {
             if (!delay.check("menuToggle")) {
-                menu.openMenu("Level Editor");
+                gameMenu.openGameMenu();
                 delay.action("menuToggle", 400);
             }
         },
-        .toggle_config_menu => {
+        .open_config_menu => {
             if (!delay.check("levelConfigToggle")) {
-                if (levelConfigMenu.isOpen()) {
-                    levelConfigMenu.close();
-                } else {
-                    const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
-                    levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter);
-                }
+                const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
+                levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter);
                 delay.action("levelConfigToggle", 300);
             }
         },

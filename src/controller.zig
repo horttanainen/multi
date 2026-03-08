@@ -35,7 +35,7 @@ pub const LevelEditorAction = enum {
     copy,
     paste,
     open_menu,
-    toggle_config_menu,
+    open_config_menu,
 };
 
 pub var availableColors: std.ArrayList(sprite.Color) = .{};

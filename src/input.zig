@@ -7,8 +7,8 @@ const keyboard = @import("keyboard.zig");
 const gamepad = @import("gamepad.zig");
 const window = @import("window.zig");
 const menu = @import("menu.zig");
+const gameMenu = @import("gameMenu.zig");
 const delay = @import("delay.zig");
-const levelConfigMenu = @import("levelConfigMenu.zig");
 
 pub fn handle() !void {
     // Event handling
@@ -31,19 +31,19 @@ pub fn handle() !void {
         }
     }
 
-    // Menu takes priority over all other input
+    // Any open menu (game menu or config menu) takes priority
     if (menu.isOpen()) {
         try menu.handleInput();
         return;
     }
 
-    // Gamepad Options/Start button triggers the menu from any mode
+    // Gamepad Start button opens the game menu from any mode
     {
         var it = gamepad.assignedGamepads.valueIterator();
         while (it.next()) |gp| {
             const sdlGp = gp.gamepad orelse continue;
             if (sdl.getGamepadButton(sdlGp, .start) and !delay.check("menuToggle")) {
-                menu.openMenu(if (state.editingLevel) "Level Editor" else "Game");
+                gameMenu.openGameMenu();
                 delay.action("menuToggle", 400);
                 return;
             }
@@ -51,19 +51,15 @@ pub fn handle() !void {
     }
 
     if (state.editingLevel) {
-        if (levelConfigMenu.isOpen()) {
-            try levelConfigMenu.handleInput();
-        } else {
-            var it = controller.controllers.iterator();
-            while (it.next()) |kv| {
-                const ctrl = kv.value_ptr;
-                switch (ctrl.inputType) {
-                    .keyboard => keyboard.handleLevelEditor(ctrl),
-                    .gamepad => gamepad.handleLevelEditor(ctrl),
-                }
+        var it = controller.controllers.iterator();
+        while (it.next()) |kv| {
+            const ctrl = kv.value_ptr;
+            switch (ctrl.inputType) {
+                .keyboard => keyboard.handleLevelEditor(ctrl),
+                .gamepad => gamepad.handleLevelEditor(ctrl),
             }
-            control.handleLevelEditorMouseInput();
         }
+        control.handleLevelEditorMouseInput();
     } else {
         control.handleGlobalHotkeys();
 

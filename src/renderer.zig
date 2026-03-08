@@ -12,7 +12,6 @@ const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
-const levelConfigMenu = @import("levelConfigMenu.zig");
 const cursor = @import("cursor.zig");
 const level = @import("level.zig");
 const viewport = @import("viewport.zig");
@@ -39,11 +38,7 @@ pub fn render() !void {
         }
     }
 
-    if (menu.isOpen()) {
-        try menu.draw();
-    }
-
-    try levelConfigMenu.draw();
+    try menu.draw();
 
     gpu.renderPresent();
 }
