@@ -44,6 +44,7 @@ const Sprite = entity.Sprite;
 
 //Menu
 //TODO: refactor levelMenu and menu to use same code. Maybe a data driven approach here as well?
+//TODO: refactor menu.handleInput functions
 
 //Small improvements
 //TODO: investigate if it would be simpler to migrate to sdl_audio

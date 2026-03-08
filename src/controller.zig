@@ -27,6 +27,17 @@ pub const GameAction = enum {
     weapon_prev,
 };
 
+pub const LevelEditorAction = enum {
+    cursor_left,
+    cursor_right,
+    cursor_up,
+    cursor_down,
+    copy,
+    paste,
+    open_menu,
+    toggle_config_menu,
+};
+
 pub var availableColors: std.ArrayList(sprite.Color) = .{};
 
 pub const Controller = struct {

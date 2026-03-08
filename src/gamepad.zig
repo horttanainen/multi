@@ -46,6 +46,20 @@ pub const GamepadBindings = struct {
     weaponPrevButton: sdl.GamepadButton,
 };
 
+pub const LevelEditorGamepadBindings = struct {
+    cursorXAxis: sdl.GamepadAxis,
+    cursorYAxis: sdl.GamepadAxis,
+    moveThreshold: f32,
+    configMenuButton: sdl.GamepadButton,
+};
+
+pub const defaultEditorBindings = LevelEditorGamepadBindings{
+    .cursorXAxis = .leftx,
+    .cursorYAxis = .lefty,
+    .moveThreshold = MOVEMENT_THRESHOLD,
+    .configMenuButton = .y,
+};
+
 pub const defaultBindings = GamepadBindings{
     .moveLeftAxis = .leftx,
     .moveRightAxis = .leftx,
@@ -178,6 +192,22 @@ pub fn createController(playerId: usize, color: sprite.Color) ?controller.Contro
         .keyBindings = null,
         .gamepadBindings = defaultBindings,
     };
+}
+
+pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
+    const bindings = defaultEditorBindings;
+    const gp = assignedGamepads.get(ctrl.playerId) orelse return;
+    const sdlGp = gp.gamepad orelse return;
+    const axisX = normalizeAxis(sdl.getGamepadAxis(sdlGp, bindings.cursorXAxis));
+    const axisY = normalizeAxis(sdl.getGamepadAxis(sdlGp, bindings.cursorYAxis));
+    if (axisX > bindings.moveThreshold) control.executeLevelEditorAction(.cursor_right);
+    if (axisX < -bindings.moveThreshold) control.executeLevelEditorAction(.cursor_left);
+    if (axisY > bindings.moveThreshold) control.executeLevelEditorAction(.cursor_down);
+    if (axisY < -bindings.moveThreshold) control.executeLevelEditorAction(.cursor_up);
+
+    if (sdl.getGamepadButton(sdlGp, bindings.configMenuButton)) {
+        control.executeLevelEditorAction(.toggle_config_menu);
+    }
 }
 
 pub fn handle(ctrl: *const controller.Controller) void {

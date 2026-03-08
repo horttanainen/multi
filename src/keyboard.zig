@@ -49,6 +49,31 @@ pub const player2Bindings = KeyboardBindings{
     .sprayPaint = .k,
 };
 
+pub const MultiKey = struct {
+    modifier: sdl.Scancode,
+    key: sdl.Scancode,
+};
+
+pub const LevelEditorKeyBindings = struct {
+    cursorLeft: sdl.Scancode,
+    cursorRight: sdl.Scancode,
+    cursorUp: sdl.Scancode,
+    cursorDown: sdl.Scancode,
+    copy: MultiKey,
+    paste: MultiKey,
+    openMenu: sdl.Scancode,
+};
+
+pub const defaultEditorBindings = LevelEditorKeyBindings{
+    .cursorLeft = .a,
+    .cursorRight = .d,
+    .cursorUp = .w,
+    .cursorDown = .s,
+    .copy = .{ .modifier = .lctrl, .key = .c_ },
+    .paste = .{ .modifier = .lctrl, .key = .v },
+    .openMenu = .escape,
+};
+
 pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .{};
 
 pub fn init() !void {
@@ -78,6 +103,26 @@ pub fn createController(playerId: usize, color: sprite.Color) ?controller.Contro
 
 fn key(keyStates: []const bool, scancode: sdl.Scancode) bool {
     return keyStates[@as(usize, @intCast(@intFromEnum(scancode)))];
+}
+
+pub fn handleLevelEditor(_: *const controller.Controller) void {
+    const bindings = defaultEditorBindings;
+    const keyStates = sdl.getKeyboardState();
+
+    if (key(keyStates, bindings.cursorLeft)) control.executeLevelEditorAction(.cursor_left);
+    if (key(keyStates, bindings.cursorRight)) control.executeLevelEditorAction(.cursor_right);
+    if (key(keyStates, bindings.cursorUp)) control.executeLevelEditorAction(.cursor_up);
+    if (key(keyStates, bindings.cursorDown)) control.executeLevelEditorAction(.cursor_down);
+
+    if (key(keyStates, bindings.copy.modifier) and key(keyStates, bindings.copy.key)) {
+        control.executeLevelEditorAction(.copy);
+    }
+    if (key(keyStates, bindings.paste.modifier) and key(keyStates, bindings.paste.key)) {
+        control.executeLevelEditorAction(.paste);
+    }
+    if (key(keyStates, bindings.openMenu)) {
+        control.executeLevelEditorAction(.open_menu);
+    }
 }
 
 pub fn handle(ctrl: *const controller.Controller) void {

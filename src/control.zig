@@ -18,8 +18,8 @@ const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const data = @import("data.zig");
 const menu = @import("menu.zig");
-const gamepad = @import("gamepad.zig");
 const cursor = @import("cursor.zig");
+const levelConfigMenu = @import("levelConfigMenu.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -144,6 +144,49 @@ pub fn executeZoomRelease(playerId: usize) void {
     }
 }
 
+pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
+    switch (action) {
+        .cursor_left => cursor.moveLeft(),
+        .cursor_right => cursor.moveRight(),
+        .cursor_up => cursor.moveUp(),
+        .cursor_down => cursor.moveDown(),
+        .copy => {
+            if (!delay.check("levelEditorClick")) {
+                levelEditor.copySelection();
+                delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+            }
+        },
+        .paste => {
+            if (!delay.check("levelEditorClick")) {
+                var x: i32 = 0;
+                var y: i32 = 0;
+                _ = sdl.getMouseState(&x, &y);
+                levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch |err| {
+                    std.debug.print("Error pasting selection: {}\n", .{err});
+                };
+                delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+            }
+        },
+        .open_menu => {
+            if (!delay.check("menuToggle")) {
+                menu.openMenu("Level Editor");
+                delay.action("menuToggle", 400);
+            }
+        },
+        .toggle_config_menu => {
+            if (!delay.check("levelConfigToggle")) {
+                if (levelConfigMenu.isOpen()) {
+                    levelConfigMenu.close();
+                } else {
+                    const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
+                    levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter);
+                }
+                delay.action("levelConfigToggle", 300);
+            }
+        },
+    }
+}
+
 pub fn handleLevelEditorMouseInput() void {
     var x: i32 = 0;
     var y: i32 = 0;
@@ -159,59 +202,3 @@ pub fn handleLevelEditorMouseInput() void {
     }
 }
 
-pub fn handleLevelEditorKeyboardInput() void {
-    const currentKeyStates = sdl.getKeyboardState();
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.a)]) {
-        cursor.moveLeft();
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.d)]) {
-        cursor.moveRight();
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.w)]) {
-        cursor.moveUp();
-    }
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.s)]) {
-        cursor.moveDown();
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and currentKeyStates[@intFromEnum(sdl.Scancode.c_)]) {
-        if (!delay.check("levelEditorClick")) {
-            levelEditor.copySelection();
-            delay.action("levelEditorClick", config.levelEditorClickDelayMs);
-        }
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.lctrl)] and currentKeyStates[@intFromEnum(sdl.Scancode.v)]) {
-        if (!delay.check("levelEditorClick")) {
-            var x: i32 = 0;
-            var y: i32 = 0;
-            _ = sdl.getMouseState(&x, &y);
-            levelEditor.pasteSelection(camera.relativePositionForCreating(.{ .x = x, .y = y })) catch |err| {
-                std.debug.print("Error pasteing selection: {}\n", .{err});
-            };
-            delay.action("levelEditorClick", config.levelEditorClickDelayMs);
-        }
-    }
-
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.escape)]) {
-        if (!delay.check("menuToggle")) {
-            menu.openMenu("Level Editor");
-            delay.action("menuToggle", 400);
-        }
-    }
-
-}
-
-pub fn handleLevelEditorGamepadInput() void {
-    const deadzone: i16 = 3000;
-    var gpIt = gamepad.assignedGamepads.valueIterator();
-    while (gpIt.next()) |gp| {
-        const sdlGp = gp.gamepad orelse continue;
-        const axisX = sdl.getGamepadAxis(sdlGp, .leftx);
-        const axisY = sdl.getGamepadAxis(sdlGp, .lefty);
-        if (axisX > deadzone) cursor.moveRight();
-        if (axisX < -deadzone) cursor.moveLeft();
-        if (axisY > deadzone) cursor.moveDown();
-        if (axisY < -deadzone) cursor.moveUp();
-    }
-}

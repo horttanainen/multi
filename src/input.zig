@@ -8,6 +8,7 @@ const gamepad = @import("gamepad.zig");
 const window = @import("window.zig");
 const menu = @import("menu.zig");
 const delay = @import("delay.zig");
+const levelConfigMenu = @import("levelConfigMenu.zig");
 
 pub fn handle() !void {
     // Event handling
@@ -50,8 +51,19 @@ pub fn handle() !void {
     }
 
     if (state.editingLevel) {
-        control.handleLevelEditorKeyboardInput();
-        control.handleLevelEditorMouseInput();
+        if (levelConfigMenu.isOpen()) {
+            try levelConfigMenu.handleInput();
+        } else {
+            var it = controller.controllers.iterator();
+            while (it.next()) |kv| {
+                const ctrl = kv.value_ptr;
+                switch (ctrl.inputType) {
+                    .keyboard => keyboard.handleLevelEditor(ctrl),
+                    .gamepad => gamepad.handleLevelEditor(ctrl),
+                }
+            }
+            control.handleLevelEditorMouseInput();
+        }
     } else {
         control.handleGlobalHotkeys();
 
