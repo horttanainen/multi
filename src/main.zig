@@ -42,10 +42,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//Menu
-//TODO: refactor levelMenu and menu to use same code. Maybe a data driven approach here as well?
-//TODO: refactor menu.handleInput functions
-
 //Small improvements
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
