@@ -361,21 +361,35 @@ fn findTemporaryFolders() ![][]const u8 {
     return folderList.toOwnedSlice();
 }
 
-pub const Config = struct { gravity: f32, pixelsPerMeter: i32, splitscreen: bool };
+pub const Config = struct { gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCamera: bool };
 
-pub fn getConfig() !Config {
-    if (maybeCurrentlyOpenLevelFile) |*f| {
-        try f.seekTo(0);
-        const data = try f.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
-        defer allocator.free(data);
-        const parsed = try level.parseFromData(data);
-        defer parsed.deinit();
-        return Config{ .gravity = parsed.value.gravity, .pixelsPerMeter = parsed.value.pixelsPerMeter, .splitscreen = parsed.value.splitscreen };
-    }
-    return Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true };
+const default_config = Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true, .fixedCamera = false };
+
+pub fn getConfig() Config {
+    const f = &(maybeCurrentlyOpenLevelFile orelse return default_config);
+    f.seekTo(0) catch {
+        std.log.warn("getConfig: failed to seek level file", .{});
+        return default_config;
+    };
+    const data = f.readToEndAlloc(allocator, config.maxLevelSizeInBytes) catch {
+        std.log.warn("getConfig: failed to read level file", .{});
+        return default_config;
+    };
+    defer allocator.free(data);
+    const parsed = level.parseFromData(data) catch {
+        std.log.warn("getConfig: failed to parse level data", .{});
+        return default_config;
+    };
+    defer parsed.deinit();
+    return Config{
+        .gravity = parsed.value.gravity,
+        .pixelsPerMeter = parsed.value.pixelsPerMeter,
+        .splitscreen = parsed.value.splitscreen,
+        .fixedCamera = parsed.value.fixedCamera,
+    };
 }
 
-pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool) !void {
+pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCamera: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -387,6 +401,7 @@ pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool) !void {
         serializableLevel.gravity = gravity;
         serializableLevel.pixelsPerMeter = pixelsPerMeter;
         serializableLevel.splitscreen = splitscreen;
+        serializableLevel.fixedCamera = fixedCamera;
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);

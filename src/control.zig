@@ -177,8 +177,8 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         },
         .open_config_menu => {
             if (!delay.check("levelConfigToggle")) {
-                const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true };
-                levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter, cfg.splitscreen);
+                const cfg = levelEditor.getConfig();
+                levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter, cfg.splitscreen, cfg.fixedCamera);
                 delay.action("levelConfigToggle", 300);
             }
         },
