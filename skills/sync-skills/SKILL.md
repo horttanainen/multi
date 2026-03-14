@@ -1,50 +1,42 @@
 ---
 name: sync-skills
-description: Use this skill whenever a skill in the project's skills/ folder has been created or modified. Copies all project-owned skill files to the skill-creator plugin cache so the changes take effect immediately.
+description: Use this skill whenever a skill in the project's skills/ folder has been created or modified. Copies all project-owned skill files to the agent's skill cache so the changes take effect immediately.
 ---
 
 # Sync Skills
 
-The project's `skills/` directory is the source of truth for all project-owned skills. The skill-creator plugin loads skills from its cache at:
+The project's `skills/` directory is the source of truth for all project-owned skills. The AI coding agent you are running in loads skills from a cache or skills directory specific to that agent.
 
-```
-~/.claude/plugins/cache/claude-plugins-official/skill-creator/{hash}/skills/
-```
-
-Whenever a skill in `skills/` is created or modified, copy it to the cache so the updated version is used in the current session.
+Whenever a skill in `skills/` is created or modified, copy each skill's SKILL.md to the agent's skill cache so the updated version is used.
 
 ## Steps
 
-### 1. Find the current cache path
+### 1. Discover the agent's skill cache location
 
-```bash
-ls ~/.claude/plugins/cache/claude-plugins-official/skill-creator/
-```
+Find where the current agent stores and reads its skills from. This varies by agent:
 
-This prints the current hash directory (e.g. `d5c15b861cd2`). Use it in the next step.
+- **Claude Code (skill-creator plugin):** `~/.claude/plugins/cache/claude-plugins-official/skill-creator/<hash>/skills/<skill-name>/SKILL.md` — list the hash directory first with `ls ~/.claude/plugins/cache/claude-plugins-official/skill-creator/`
+- **Codex:** `~/.codex/skills/<skill-name>/SKILL.md`
+- **Other agents:** Check the agent's documentation or configuration for its skill storage path.
 
 ### 2. Sync all project skills to the cache
 
-For each skill directory under `skills/`, copy the SKILL.md to the corresponding location in the cache. Example:
+For each skill directory under `skills/`, copy its SKILL.md to the corresponding location in the agent's cache. Create destination directories with `mkdir -p` if they don't exist.
+
+Example (adjust paths for your agent):
 
 ```bash
-cp skills/build-and-smoke-test/SKILL.md ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/build-and-smoke-test/SKILL.md
-cp skills/zig-guard-clause/SKILL.md ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/zig-guard-clause/SKILL.md
-cp skills/zig-defensive-logging/SKILL.md ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/zig-defensive-logging/SKILL.md
-cp skills/code-style/SKILL.md ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/code-style/SKILL.md
-cp skills/sync-skills/SKILL.md ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/sync-skills/SKILL.md
+for skill_dir in skills/*/; do
+  skill_name=$(basename "$skill_dir")
+  mkdir -p "<agent-cache-path>/skills/$skill_name"
+  cp "$skill_dir/SKILL.md" "<agent-cache-path>/skills/$skill_name/SKILL.md"
+done
 ```
 
-If new skills have been added to `skills/`, include them here and also create the destination directory if needed (`mkdir -p`).
-
-### 3. Update the hash if needed
-
-If the hash from step 1 differs from the one above, update the `cp` commands in this skill file to use the new hash, then re-sync.
-
-### 4. Confirm
+### 3. Confirm
 
 List the cache skills directory to confirm all files are present:
 
 ```bash
-ls ~/.claude/plugins/cache/claude-plugins-official/skill-creator/d5c15b861cd2/skills/
+ls <agent-cache-path>/skills/
 ```
