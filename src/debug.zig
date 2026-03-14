@@ -157,10 +157,14 @@ pub fn draw() !void {
     if (dDraw) |*debugDraw| {
         if (camera.getActiveCamera()) |cam| {
             const vp = viewport.activeViewport;
+            // Use effective viewport size (physical / zoom) so zoomed-out cameras
+            // draw debug shapes across the full visible area.
+            const effW = @as(f32, @floatFromInt(vp.width)) / cam.zoom;
+            const effH = @as(f32, @floatFromInt(vp.height)) / cam.zoom;
             const lx: f32 = @as(f32, @floatFromInt(cam.posPx.x)) / conv.met2pix;
             const ly: f32 = @as(f32, @floatFromInt(cam.posPx.y)) / conv.met2pix;
-            const ux: f32 = @as(f32, @floatFromInt(cam.posPx.x + vp.width)) / conv.met2pix;
-            const uy: f32 = @as(f32, @floatFromInt(cam.posPx.y + vp.height)) / conv.met2pix;
+            const ux: f32 = (@as(f32, @floatFromInt(cam.posPx.x)) + effW) / conv.met2pix;
+            const uy: f32 = (@as(f32, @floatFromInt(cam.posPx.y)) + effH) / conv.met2pix;
             debugDraw.drawingBounds = .{
                 .lowerBound = .{ .x = lx, .y = ly },
                 .upperBound = .{ .x = ux, .y = uy },
