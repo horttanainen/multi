@@ -17,6 +17,7 @@ const controller = @import("controller.zig");
 const score = @import("score.zig");
 
 pub fn drawMode() !void {
+    gpu.setZoom(1.0);
     const mode = if (state.editingLevel) "LEVEL EDITOR" else "PLAY";
 
     const vp = viewport.activeViewport;
@@ -25,6 +26,7 @@ pub fn drawMode() !void {
 }
 
 pub fn drawFps() !void {
+    gpu.setZoom(1.0);
     var fpsTextBuf: [100]u8 = undefined;
 
     const fps = time.calculateFps();
@@ -131,6 +133,7 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
 }
 
 pub fn drawScoreboard() !void {
+    gpu.setZoom(1.0);
     const vp = viewport.activeViewport;
 
     const activeCamera = camera.getActiveCamera() orelse return;

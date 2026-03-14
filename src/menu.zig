@@ -276,6 +276,8 @@ const COLOR_SIDE = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 };
 pub fn draw() !void {
     if (!is_open) return;
 
+    gpu.setZoom(1.0);
+
     // Advance scroll animation
     const target: f32 = @floatFromInt(scroll_offset);
     scroll_anim += (target - scroll_anim) * LERP_SPEED;
