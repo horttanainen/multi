@@ -82,3 +82,23 @@ pub fn damage(playerId: usize, amount: f32) void { ... }
 ## One component, one file
 
 Each logical component lives in its own file. The file is the namespace. Don't split a single component across multiple files, and don't merge two unrelated components into one file.
+
+## Imports at the top of the file
+
+All `@import` calls go at the top of the file alongside the other imports. Never use inline imports inside function bodies.
+
+```zig
+// BAD — inline import buried in a function
+pub fn main() !void {
+    try @import("background_paint.zig").init();
+}
+
+// GOOD — imported at the top like everything else
+const background_paint = @import("background_paint.zig");
+
+pub fn main() !void {
+    try background_paint.init();
+}
+```
+
+Name the import after the module it represents (e.g. `background_paint` for `background_paint.zig`). Keep names consistent with how other modules in the project are imported.
