@@ -55,11 +55,13 @@ pub const Level = struct {
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = 80,
     splitscreen: bool = true,
+    fixedCamera: bool = false,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
 
 pub var splitscreen: bool = true;
+pub var fixedCamera: bool = false;
 
 pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
     const parsed = try std.json.parseFromSlice(Level, allocator, data, .{ .allocate = .alloc_always });
@@ -157,6 +159,7 @@ fn loadLevelContents(lev: Level) !bool {
 
     size = lev.size;
     splitscreen = lev.splitscreen;
+    fixedCamera = lev.fixedCamera;
     return hasSpawn;
 }
 
