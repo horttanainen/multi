@@ -43,6 +43,15 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Level editor
+//TODO: make level editor not generate the level everytime we make changes
+//TODO: allow for slecting if entity is breakable or not
+//TODO: allow for setting the scale of entity
+//TODO: allow for copying existing entities j
+
+//splitscreen
+//TODO: make camera zoom out so that whole level is visible 
+
 //Small improvements
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
@@ -71,6 +80,7 @@ const Sprite = entity.Sprite;
 //TODO: breakfloor: all stuff dangle and you can shoot boxes in the ropes to make the platforms fall down
 //TODO: e.g. different levels can have different camera distances
 //TODO: create a rounds style 1v1 level with single camera
+//TODO: level where two balls hang via rope that can be broken via bullet Each players spawn is on the each ball
 
 //Quake style:
 //TODO: add item.zig that spawns items on the map
