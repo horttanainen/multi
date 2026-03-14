@@ -51,7 +51,6 @@ pub fn destroyCamera(cameraId: usize) void {
 
 pub fn setActiveCamera(cameraId: usize) !void {
     activeCameraId = cameraId;
-
     try viewport.setActiveViewport(cameraId);
 }
 
@@ -86,9 +85,9 @@ pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
     return vec.isubtract(pos, camPos);
 }
 
-pub fn followAllPlayers() void {
-    if (!level.splitscreen) {
-        followSharedCamera();
+pub fn followAllPlayers(zoom: f32) void {
+    if (level.fixedCamera) {
+        followSharedCamera(zoom);
         return;
     }
     for (player.players.values()) |*p| {
@@ -112,13 +111,13 @@ pub fn followAllPlayers() void {
                 pos.x += @intFromFloat(p.zoomOffset.x);
                 pos.y += @intFromFloat(p.zoomOffset.y);
 
-                moveCamera(cam, pos);
+                moveCamera(cam, pos, zoom);
             }
         }
     }
 }
 
-fn followSharedCamera() void {
+fn followSharedCamera(zoom: f32) void {
     const values = player.players.values();
     if (values.len == 0) {
         std.log.warn("followSharedCamera: no players found, skipping", .{});
@@ -130,15 +129,16 @@ fn followSharedCamera() void {
         return;
     }
     const cam = cameras.getPtr(p.cameraId).?;
-    // In shared camera mode the camera stays centered on the level origin, not any individual player.
-    moveCamera(cam, level.position);
+
+    // Keep the camera centered on the level.
+    moveCamera(cam, level.position, zoom);
 }
 
 pub fn centerOn(worldPos: vec.IVec2) void {
-    if (getActiveCamera()) |cam| moveCamera(cam, worldPos);
+    if (getActiveCamera()) |cam| moveCamera(cam, worldPos, 1.0);
 }
 
-fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
+fn moveCamera(cam: *Camera, pos: vec.IVec2, zoom: f32) void {
     // Get viewport dimensions, or fall back to full window
     const vp = viewport.getViewportForCamera(cam.id) orelse viewport.Viewport{
         .x = 0,
@@ -147,8 +147,12 @@ fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
         .height = window.height,
     };
 
-    cam.posPx.x = pos.x - @divFloor(vp.width, 2);
-    cam.posPx.y = pos.y - @divFloor(vp.height, 2);
+    // Effective viewport: how many world pixels are visible at this zoom level.
+    const effW: i32 = @intFromFloat(@as(f32, @floatFromInt(vp.width)) / zoom);
+    const effH: i32 = @intFromFloat(@as(f32, @floatFromInt(vp.height)) / zoom);
+
+    cam.posPx.x = pos.x - @divFloor(effW, 2);
+    cam.posPx.y = pos.y - @divFloor(effH, 2);
 
     const levelSize = level.size;
     const levelPos = level.position;
@@ -156,23 +160,23 @@ fn moveCamera(cam: *Camera, pos: vec.IVec2) void {
     const levelWidthHalf = @divFloor(levelSize.x, 2);
     const levelHeightHalf = @divFloor(levelSize.y, 2);
 
-    if (vp.width < levelSize.x) {
+    if (effW < levelSize.x) {
         if (cam.posPx.x < levelPos.x - levelWidthHalf) {
             cam.posPx.x = levelPos.x - levelWidthHalf;
-        } else if (cam.posPx.x >= levelPos.x + levelWidthHalf - vp.width) {
-            cam.posPx.x = levelPos.x + levelWidthHalf - vp.width;
+        } else if (cam.posPx.x >= levelPos.x + levelWidthHalf - effW) {
+            cam.posPx.x = levelPos.x + levelWidthHalf - effW;
         }
     } else {
-        cam.posPx.x = -@divFloor(vp.width, 2);
+        cam.posPx.x = levelPos.x - @divFloor(effW, 2);
     }
-    if (vp.height < levelSize.y) {
+    if (effH < levelSize.y) {
         if (cam.posPx.y < levelPos.y - levelHeightHalf) {
             cam.posPx.y = levelPos.y - levelHeightHalf;
-        } else if (cam.posPx.y >= levelPos.y + levelHeightHalf - vp.height) {
-            cam.posPx.y = levelPos.y + levelHeightHalf - vp.height;
+        } else if (cam.posPx.y >= levelPos.y + levelHeightHalf - effH) {
+            cam.posPx.y = levelPos.y + levelHeightHalf - effH;
         }
     } else {
-        cam.posPx.y = -@divFloor(vp.height, 2);
+        cam.posPx.y = levelPos.y - @divFloor(effH, 2);
     }
 }
 

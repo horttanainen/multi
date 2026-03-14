@@ -13,6 +13,20 @@ pub fn setCrtParams(params: config.CrtParams) void {
     crt_params = params;
 }
 
+// Camera zoom: values < 1.0 zoom out (show more of the world). Recorded as a batch
+// command so it interleaves correctly with draw calls during playback.
+pub fn setZoom(z: f32) void {
+    const g = getGpu();
+
+    // Finalize current batch before zoom change so the draw record
+    // appears before this set_zoom in the playback sequence.
+    finalizeBatch(g);
+
+    if (g.batch_count >= MAX_BATCH_RECORDS) return;
+    g.batch_records[g.batch_count] = .{ .set_zoom = .{ .zoom = z } };
+    g.batch_count += 1;
+}
+
 pub const Texture = texture.Texture;
 
 // ============================================================
@@ -88,6 +102,9 @@ const BatchRecord = union(enum) {
         y: f32,
         w: f32,
         h: f32,
+    },
+    set_zoom: struct {
+        zoom: f32,
     },
 };
 
@@ -958,6 +975,7 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
 
     var current_vp_w: f32 = g.swapchain_w;
     var current_vp_h: f32 = g.swapchain_h;
+    var current_zoom: f32 = 1.0;
     var last_pipeline: ?PipelineType = null;
     var last_texture: ?*c.SDL_GPUTexture = null;
     var uniforms_dirty: bool = true;
@@ -968,6 +986,10 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 setGpuViewport(rp, vp.x, vp.y, vp.w, vp.h);
                 current_vp_w = vp.w;
                 current_vp_h = vp.h;
+                uniforms_dirty = true;
+            },
+            .set_zoom => |z| {
+                current_zoom = z.zoom;
                 uniforms_dirty = true;
             },
             .draw_sprites => |batch| {
@@ -983,7 +1005,7 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 }
 
                 if (uniforms_dirty) {
-                    const uniforms = ViewportUniforms{ .viewport_size = .{ current_vp_w, current_vp_h } };
+                    const uniforms = ViewportUniforms{ .viewport_size = .{ current_vp_w / current_zoom, current_vp_h / current_zoom } };
                     c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(ViewportUniforms));
                     uniforms_dirty = false;
                 }
@@ -1019,7 +1041,7 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 }
 
                 if (uniforms_dirty) {
-                    const uniforms = ViewportUniforms{ .viewport_size = .{ current_vp_w, current_vp_h } };
+                    const uniforms = ViewportUniforms{ .viewport_size = .{ current_vp_w / current_zoom, current_vp_h / current_zoom } };
                     c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(ViewportUniforms));
                     uniforms_dirty = false;
                 }

@@ -19,14 +19,29 @@ const particle = @import("particle.zig");
 const rope = @import("rope.zig");
 const weapon = @import("weapon.zig");
 
+const background_paint = @import("background_paint.zig");
+
 const RendererError = error{RendererUninitialized};
+
+pub var zoom: f32 = 1.0;
+
+pub fn updateZoom() void {
+    if (!level.fixedCamera) {
+        zoom = 1.0;
+        return;
+    }
+    const scaleX = @as(f32, @floatFromInt(window.width)) / @as(f32, @floatFromInt(level.size.x));
+    const scaleY = @as(f32, @floatFromInt(window.height)) / @as(f32, @floatFromInt(level.size.y));
+    zoom = @min(scaleX, scaleY);
+}
 
 pub fn render() !void {
     gpu.setCrtParams(if (menu.isOpen()) config.crtMenu else config.crt);
 
-    // Clear entire window once
-    try gpu.setRenderDrawColor(.{ .r = 255, .g = 0, .b = 0, .a = 255 });
+    // Clear to black then draw the paint-swirl background.
+    try gpu.setRenderDrawColor(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
     try gpu.renderClear();
+    try background_paint.draw();
 
     if (state.editingLevel) {
         try renderCamera(0);
@@ -34,6 +49,7 @@ pub fn render() !void {
         try cursor.draw();
     } else {
         for (camera.cameras.keys()) |cameraId| {
+            if (viewport.getViewportForCamera(cameraId) == null) continue;
             try renderCamera(cameraId);
         }
     }
@@ -45,6 +61,7 @@ pub fn render() !void {
 
 fn renderCamera(cameraId: usize) !void {
     try camera.setActiveCamera(cameraId);
+    gpu.setZoom(zoom);
 
     try background.draw();
     try sensor.drawAllSensors();
