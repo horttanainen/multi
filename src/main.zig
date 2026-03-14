@@ -235,5 +235,6 @@ fn gameLoop() !void {
     try player.checkAllSensors();
     try sensor.processSensorEvents();
 
-    camera.followAllPlayers();
+    renderer.updateZoom();
+    camera.followAllPlayers(renderer.zoom);
 }
