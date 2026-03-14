@@ -92,6 +92,16 @@ pub const bloodParticle: BloodParticle = .{
     .groupIndex = -3, // Don't collide with each other
 };
 
+pub const sdl = @import("sdl.zig");
+
+pub const menu = .{
+    .colorNormal = sdl.Color{ .r = 40, .g = 40, .b = 40, .a = 200 },
+    .colorFocused = sdl.Color{ .r = 220, .g = 60, .b = 140, .a = 220 },
+    .colorEditing = sdl.Color{ .r = 60, .g = 140, .b = 220, .a = 220 },
+    .colorOverlay = sdl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 },
+    .colorSide = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 },
+};
+
 pub const levelEditorCameraMovementForce = 10;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;

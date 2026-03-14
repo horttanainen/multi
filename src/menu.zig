@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
+const config = @import("config.zig");
 const text = @import("text.zig");
 const window = @import("window.zig");
 const delay = @import("delay.zig");
@@ -267,11 +268,11 @@ const VISIBLE: usize = 3;
 const BTN_H: i32 = 80;
 const BTN_GAP: i32 = 12;
 const IMG_PAD: i32 = 4;
-const COLOR_NORMAL = sdl.Color{ .r = 40, .g = 40, .b = 40, .a = 200 };
-const COLOR_FOCUSED = sdl.Color{ .r = 220, .g = 60, .b = 140, .a = 220 };
-const COLOR_EDITING = sdl.Color{ .r = 60, .g = 140, .b = 220, .a = 220 };
-const COLOR_OVERLAY = sdl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 };
-const COLOR_SIDE = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 };
+const COLOR_NORMAL = config.menu.colorNormal;
+const COLOR_FOCUSED = config.menu.colorFocused;
+const COLOR_EDITING = config.menu.colorEditing;
+const COLOR_OVERLAY = config.menu.colorOverlay;
+const COLOR_SIDE = config.menu.colorSide;
 
 pub fn draw() !void {
     if (!is_open) return;
