@@ -87,6 +87,10 @@ pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
 }
 
 pub fn followAllPlayers() void {
+    if (!level.splitscreen) {
+        followSharedCamera();
+        return;
+    }
     for (player.players.values()) |*p| {
         if (cameras.getPtr(p.cameraId)) |cam| {
             const maybeEntity = entity.getEntity(p.bodyId);
@@ -112,6 +116,22 @@ pub fn followAllPlayers() void {
             }
         }
     }
+}
+
+fn followSharedCamera() void {
+    const values = player.players.values();
+    if (values.len == 0) {
+        std.log.warn("followSharedCamera: no players found, skipping", .{});
+        return;
+    }
+    const p = values[0];
+    if (cameras.getPtr(p.cameraId) == null) {
+        std.log.warn("followSharedCamera: camera {d} not found for player {d}", .{ p.cameraId, p.id });
+        return;
+    }
+    const cam = cameras.getPtr(p.cameraId).?;
+    // In shared camera mode the camera stays centered on the level origin, not any individual player.
+    moveCamera(cam, level.position);
 }
 
 pub fn centerOn(worldPos: vec.IVec2) void {

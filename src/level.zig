@@ -54,9 +54,12 @@ pub const Level = struct {
     size: vec.IVec2,
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = 80,
+    splitscreen: bool = true,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
+
+pub var splitscreen: bool = true;
 
 pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
     const parsed = try std.json.parseFromSlice(Level, allocator, data, .{ .allocate = .alloc_always });
@@ -153,6 +156,7 @@ fn loadLevelContents(lev: Level) !bool {
     }
 
     size = lev.size;
+    splitscreen = lev.splitscreen;
     return hasSpawn;
 }
 
@@ -169,7 +173,10 @@ fn spawnTwoPlayers() !void {
         .x = spawnLocation.x + 10,
         .y = spawnLocation.y,
     };
-    const playerId2 = try player.spawn(p2Position);
+    const playerId2 = if (splitscreen)
+        try player.spawn(p2Position)
+    else
+        try player.spawnWithSharedCamera(p2Position, player.players.get(playerId1).?.cameraId);
     if (!controller.controllers.contains(playerId2)) {
         const color2 = try controller.createControllerForPlayer(playerId2);
         player.setColor(playerId2, color2);

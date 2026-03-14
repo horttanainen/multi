@@ -1,5 +1,6 @@
 const box2d = @import("box2d.zig");
 const std = @import("std");
+const sdl = @import("sdl.zig");
 
 const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
@@ -125,6 +126,11 @@ const Sprite = entity.Sprite;
 //Bugs:
 //TODO: Level json creation broke during 0.15 update
 
+fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
+    std.log.info("Ran successfully for 5 seconds", .{});
+    return 0;
+}
+
 pub fn main() !void {
     try window.init();
     time.init();
@@ -143,6 +149,7 @@ pub fn main() !void {
     try level.next();
 
     box2d.setFrictionCallback(&friction.callback);
+    _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
 
     while (!state.quitGame) {
         time.frameBegin();

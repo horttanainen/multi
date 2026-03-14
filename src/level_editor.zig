@@ -235,6 +235,80 @@ pub fn placeSprite(imgPath: []const u8, scale: vec.Vec2, position: vec.IVec2) !v
     try addEntityToLevel(serializedE);
 }
 
+pub fn selectEntityAtCursor() ?box2d.c.b2BodyId {
+    const worldPos = cursor.getWorldPos();
+    const posM = conv.p2m(worldPos);
+    const aabb = box2d.c.b2AABB{
+        .lowerBound = box2d.subtract(posM, .{ .x = 0.5, .y = 0.5 }),
+        .upperBound = box2d.add(posM, .{ .x = 0.5, .y = 0.5 }),
+    };
+    const filter = box2d.c.b2DefaultQueryFilter();
+    var result: ?box2d.c.b2BodyId = null;
+    box2d.overlapAABB(aabb, filter, cursorOverlapCallback, &result);
+    return result;
+}
+
+fn cursorOverlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
+    const result: *?box2d.c.b2BodyId = @ptrCast(@alignCast(context.?));
+    const bodyId = box2d.c.b2Shape_GetBody(shapeId);
+    if (entity.getEntity(bodyId) == null) return true; // skip cursor body
+    result.* = bodyId;
+    return false;
+}
+
+pub fn changeEntityType(bodyId: box2d.c.b2BodyId, newType: []const u8) !void {
+    if (maybeCurrentlyOpenLevelFile == null) {
+        std.log.warn("changeEntityType: no level file open, skipping", .{});
+        return;
+    }
+    const currentlyOpenLevelFile = &maybeCurrentlyOpenLevelFile.?;
+
+    const bodyState = box2d.getState(bodyId);
+    const pixelPos = conv.m2Pixel(bodyState.pos);
+
+    try currentlyOpenLevelFile.seekTo(0);
+    const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
+    defer allocator.free(data);
+    const parsed = try level.parseFromData(data);
+    defer parsed.deinit();
+    var serializableLevel = parsed.value;
+
+    // Find the JSON entity closest to the selected body's pixel position
+    var bestIdx: ?usize = null;
+    var bestDist: u64 = std.math.maxInt(u64);
+    for (serializableLevel.entities, 0..) |e, i| {
+        const dx: i64 = @as(i64, e.pos.x) - @as(i64, pixelPos.x);
+        const dy: i64 = @as(i64, e.pos.y) - @as(i64, pixelPos.y);
+        const dist: u64 = @abs(dx) + @abs(dy);
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+        }
+    }
+
+    if (bestIdx == null) {
+        std.log.warn("changeEntityType: no entity found near pixel pos ({d}, {d})", .{ pixelPos.x, pixelPos.y });
+        return;
+    }
+    const idx = bestIdx.?;
+
+    serializableLevel.entities[idx].type = newType;
+
+    try currentlyOpenLevelFile.setEndPos(0);
+    try currentlyOpenLevelFile.seekTo(0);
+
+    var buf: [config.maxLevelSizeInBytes]u8 = undefined;
+    var writer = currentlyOpenLevelFile.writer(&buf);
+    var s = std.json.Stringify{
+        .writer = &writer.interface,
+        .options = .{ .whitespace = .indent_2 },
+    };
+    try s.write(serializableLevel);
+    try writer.interface.flush();
+
+    try reloadForEditor();
+}
+
 pub fn selectEntityAt(pos: vec.IVec2) !void {
     if (maybeSelectedBodyId) |selectedBodyId| {
         setSelection(selectedBodyId, false);
@@ -287,7 +361,7 @@ fn findTemporaryFolders() ![][]const u8 {
     return folderList.toOwnedSlice();
 }
 
-pub const Config = struct { gravity: f32, pixelsPerMeter: i32 };
+pub const Config = struct { gravity: f32, pixelsPerMeter: i32, splitscreen: bool };
 
 pub fn getConfig() !Config {
     if (maybeCurrentlyOpenLevelFile) |*f| {
@@ -296,12 +370,12 @@ pub fn getConfig() !Config {
         defer allocator.free(data);
         const parsed = try level.parseFromData(data);
         defer parsed.deinit();
-        return Config{ .gravity = parsed.value.gravity, .pixelsPerMeter = parsed.value.pixelsPerMeter };
+        return Config{ .gravity = parsed.value.gravity, .pixelsPerMeter = parsed.value.pixelsPerMeter, .splitscreen = parsed.value.splitscreen };
     }
-    return Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
+    return Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true };
 }
 
-pub fn saveConfig(gravity: f32, pixelsPerMeter: i32) !void {
+pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -312,6 +386,7 @@ pub fn saveConfig(gravity: f32, pixelsPerMeter: i32) !void {
 
         serializableLevel.gravity = gravity;
         serializableLevel.pixelsPerMeter = pixelsPerMeter;
+        serializableLevel.splitscreen = splitscreen;
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);

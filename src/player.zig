@@ -132,7 +132,15 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
     return vec.izero;
 }
 
+pub fn spawnWithSharedCamera(position: vec.IVec2, cameraId: usize) !usize {
+    return spawnImpl(position, cameraId);
+}
+
 pub fn spawn(position: vec.IVec2) !usize {
+    return spawnImpl(position, null);
+}
+
+fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     const pos = conv.pixel2M(position);
 
     const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
@@ -257,9 +265,12 @@ pub fn spawn(position: vec.IVec2) !usize {
 
     const crosshairUuid = data.createSpriteFrom("crosshair") orelse return error.SpriteNotFound;
 
-    // Create camera for this player
-    const cameraId = try camera.spawnForPlayer(playerId, position);
-    try viewport.addViewportForCamera(cameraId);
+    // Create camera for this player (or reuse shared camera in non-splitscreen mode)
+    const cameraId = if (existingCameraId) |id| id else blk: {
+        const id = try camera.spawnForPlayer(playerId, position);
+        try viewport.addViewportForCamera(id);
+        break :blk id;
+    };
 
     try players.put(allocator, playerId, Player{
         .id = playerId,

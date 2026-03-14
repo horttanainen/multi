@@ -21,6 +21,7 @@ const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
 const levelConfigMenu = @import("levelConfigMenu.zig");
 const spritePicker = @import("spritePicker.zig");
+const entityConfigMenu = @import("entityConfigMenu.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -176,8 +177,8 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         },
         .open_config_menu => {
             if (!delay.check("levelConfigToggle")) {
-                const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80 };
-                levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter);
+                const cfg = levelEditor.getConfig() catch levelEditor.Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true };
+                levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter, cfg.splitscreen);
                 delay.action("levelConfigToggle", 300);
             }
         },
@@ -197,6 +198,10 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                         levelEditor.placeSprite(imgPath, cursor.getPendingScale(), pos) catch |err| {
                             std.debug.print("Error placing sprite: {}\n", .{err});
                         };
+                    }
+                } else {
+                    if (levelEditor.selectEntityAtCursor()) |bodyId| {
+                        entityConfigMenu.open(bodyId);
                     }
                 }
                 delay.action("placeSprite", 300);
