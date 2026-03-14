@@ -37,6 +37,7 @@ const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const background_paint = @import("background_paint.zig");
 const gibbing = @import("gibbing.zig");
 const data = @import("data.zig");
 const window = @import("window.zig");
@@ -146,6 +147,7 @@ pub fn main() !void {
     time.init();
     try audio.init();
     try gpu.init(try window.getWindow());
+    try background_paint.init();
     try text.init();
     box2d.initWorld();
     try debug.init();
