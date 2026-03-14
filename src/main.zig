@@ -44,6 +44,9 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Menu:
+//TODO: hide the game and show the nice background swirl instead
+
 //Level editor
 //TODO: make level editor not generate the level everytime we make changes
 //TODO: allow for slecting if entity is breakable or not
