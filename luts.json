@@ -1,0 +1,19 @@
+[
+  { "name": "Warm", "path": "luts/warm.png" },
+  { "name": "Cool", "path": "luts/cool.png" },
+  { "name": "Noir", "path": "luts/noir.png" },
+  { "name": "Vibrant", "path": "luts/vibrant.png" },
+  { "name": "Teal Orange", "path": "luts/teal_orange.png" },
+  { "name": "Bleach Bypass", "path": "luts/bleach_bypass.png" },
+  { "name": "Faded Film", "path": "luts/faded_film.png" },
+  { "name": "Golden Hour", "path": "luts/golden_hour.png" },
+  { "name": "Winter Mood", "path": "luts/winter_mood.png" },
+  { "name": "Technicolor", "path": "luts/technicolor.png" },
+  { "name": "Vintage", "path": "luts/vintage.png" },
+  { "name": "Cyberpunk", "path": "luts/cyberpunk.png" },
+  { "name": "Retro", "path": "luts/retro.png" },
+  { "name": "Pixel", "path": "luts/pixel.png" },
+  { "name": "Arcade", "path": "luts/arcade.png" },
+  { "name": "Silent Hill 2", "path": "luts/silent_hill_2.png" },
+  { "name": "Mario", "path": "luts/mario.png" }
+]

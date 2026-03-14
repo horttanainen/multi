@@ -96,6 +96,29 @@ pub fn isOpen() bool {
     return is_open;
 }
 
+pub fn focusedIndex() usize {
+    return focused_index;
+}
+
+pub fn setFocusedIndex(index: usize) void {
+    if (active_items.len == 0) {
+        std.log.warn("menu.setFocusedIndex: cannot focus index {d} with no active items", .{index});
+        return;
+    }
+    if (index >= active_items.len) {
+        std.log.warn("menu.setFocusedIndex: index {d} is out of bounds for {d} items", .{ index, active_items.len });
+        return;
+    }
+
+    focused_index = index;
+    if (focused_index < scroll_offset) {
+        scroll_offset = focused_index;
+    } else if (focused_index >= scroll_offset + VISIBLE) {
+        scroll_offset = focused_index - (VISIBLE - 1);
+    }
+    scroll_anim = @floatFromInt(scroll_offset);
+}
+
 // ============================================================
 // Input handling
 // ============================================================

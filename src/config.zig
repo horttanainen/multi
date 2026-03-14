@@ -104,10 +104,12 @@ pub const menu = .{
 
 pub const LutParams = struct {
     strength: f32,
+    regenerate_builtin_luts_on_startup: bool,
 };
 
 pub const lut = LutParams{
     .strength = 1.0,
+    .regenerate_builtin_luts_on_startup = false,
 };
 
 pub const levelEditorCameraMovementForce = 10;

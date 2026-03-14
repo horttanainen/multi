@@ -1361,18 +1361,19 @@ pub fn loadLutFromFile(path: [*:0]const u8) !void {
         c.SDL_ReleaseGPUFence(g.device, f);
     }
 
-    // Swap old texture for new one
-    c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
+    // Keep the previous LUT alive until submitted frames are done with it.
+    queueTextureDestroy(g.lut_texture);
     g.lut_texture = new_tex;
 }
 
-pub fn loadLutFromIdentity() void {
+pub fn loadLutFromIdentity() !void {
     const g = getGpu();
-    const new_tex = createIdentityLut(g.device) catch {
-        std.log.warn("loadLutFromIdentity: failed to create identity LUT", .{});
-        return;
+    const new_tex = createIdentityLut(g.device) catch |err| {
+        std.log.warn("loadLutFromIdentity: failed to create identity LUT: {}", .{err});
+        return err;
     };
-    c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
+    // Keep the previous LUT alive until submitted frames are done with it.
+    queueTextureDestroy(g.lut_texture);
     g.lut_texture = new_tex;
 }
 
