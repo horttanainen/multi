@@ -8,13 +8,16 @@ const config = @import("config.zig");
 const c = sdl.c;
 
 var crt_params: config.CrtParams = config.crt;
-var lut_params: config.LutParams = config.lut;
+pub const LutParams = struct {
+    strength: f32,
+};
+var lut_params: LutParams = .{ .strength = 1.0 };
 
 pub fn setCrtParams(params: config.CrtParams) void {
     crt_params = params;
 }
 
-pub fn setLutParams(params: config.LutParams) void {
+pub fn setLutParams(params: LutParams) void {
     lut_params = params;
 }
 

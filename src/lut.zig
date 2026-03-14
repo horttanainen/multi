@@ -2,7 +2,6 @@ const std = @import("std");
 const config = @import("config.zig");
 const fs = @import("fs.zig");
 const gpu = @import("gpu.zig");
-const settings = @import("settings.zig");
 const allocator = @import("allocator.zig").allocator;
 const sdl = @import("sdl.zig");
 const c = sdl.c;
@@ -61,8 +60,6 @@ pub fn init() !void {
         };
         std.debug.print("Loaded LUT '{s}'\n", .{name});
     }
-
-    applyPreferredFromSettings();
 }
 
 pub fn cleanup() void {
@@ -168,13 +165,6 @@ fn applyLut(index: usize) bool {
         return false;
     };
     return true;
-}
-
-fn applyPreferredFromSettings() void {
-    const preferred = settings.preferredColorGrading() orelse return;
-    if (!selectByName(preferred)) {
-        std.log.warn("applyPreferredFromSettings: preferred LUT '{s}' was not found", .{preferred});
-    }
 }
 
 var path_buf: [256:0]u8 = undefined;

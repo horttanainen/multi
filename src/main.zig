@@ -34,6 +34,7 @@ const rope = @import("rope.zig");
 const level = @import("level.zig");
 const levelEditor = @import("level_editor.zig");
 const lut = @import("lut.zig");
+const settings = @import("settings.zig");
 const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
@@ -156,7 +157,9 @@ pub fn main() !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    try settings.init();
     try lut.init();
+    settings.apply();
     try rope.init();
     try controller.init();
     try keyboard.init();
@@ -194,6 +197,7 @@ pub fn main() !void {
     controller.cleanup();
     rope.cleanup();
     lut.cleanup();
+    settings.cleanup();
     data.cleanup();
     sprite.deinit();
     delay.cleanup();

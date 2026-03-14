@@ -43,6 +43,12 @@ pub fn readFile(path: []const u8, buf: []u8) ![]const u8 {
     return buf[0..bytesRead];
 }
 
+pub fn writeFile(path: []const u8, contents: []const u8) !void {
+    const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(contents);
+}
+
 pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]u64 {
     const fileNames = try listFiles(folderPath);
     defer {

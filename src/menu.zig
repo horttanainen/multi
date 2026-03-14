@@ -18,11 +18,12 @@ pub const ConfigData = struct {
     step: f32,
     min: f32,
     max: f32,
+    repeat_delay_ms: u32 = 150,
 };
 
 pub const ItemKind = union(enum) {
     button: *const fn () anyerror!void,
-    config: ConfigData,
+    config: *ConfigData,
     sprite_pick: []const u8,
 };
 
@@ -55,6 +56,7 @@ var scroll_offset: usize = 0;
 var scroll_anim: f32 = 0.0;
 var editing_index: ?usize = null;
 var editing_value: f32 = 0.0;
+var pre_edit_value: f32 = 0.0;
 var close_fn: ?*const fn () void = null;
 var current_layout: Layout = .vertical;
 var current_item_height: i32 = BTN_H;
@@ -221,50 +223,57 @@ fn handleBrowseInput() !void {
 
 fn handleEditInput() void {
     const ei = editing_index orelse return;
-    switch (active_items[ei].kind) {
-        .config => |*cfg| {
-            const keys = sdl.getKeyboardState();
-            if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
-                editing_value = @min(cfg.max, editing_value + cfg.step);
-                delay.action("menuNav", 150);
-            }
-            if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
-                editing_value = @max(cfg.min, editing_value - cfg.step);
-                delay.action("menuNav", 150);
-            }
-            if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
-                cfg.value = editing_value;
-                editing_index = null;
-                delay.action("menuConfirm", 200);
-            }
-            if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
-                editing_index = null;
-                delay.action("menuToggle", 200);
-            }
-
-            var it = gamepad.assignedGamepads.valueIterator();
-            while (it.next()) |gp| {
-                const sdlGp = gp.gamepad orelse continue;
-                if (sdl.getGamepadButton(sdlGp, .dpad_up) and !delay.check("menuNav")) {
-                    editing_value = @min(cfg.max, editing_value + cfg.step);
-                    delay.action("menuNav", 150);
-                }
-                if (sdl.getGamepadButton(sdlGp, .dpad_down) and !delay.check("menuNav")) {
-                    editing_value = @max(cfg.min, editing_value - cfg.step);
-                    delay.action("menuNav", 150);
-                }
-                if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
-                    cfg.value = editing_value;
-                    editing_index = null;
-                    delay.action("menuConfirm", 200);
-                }
-                if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
-                    editing_index = null;
-                    delay.action("menuToggle", 200);
-                }
-            }
+    const cfg = switch (active_items[ei].kind) {
+        .config => |cfg| cfg,
+        else => {
+            editing_index = null;
+            return;
         },
-        else => editing_index = null,
+    };
+
+    const keys = sdl.getKeyboardState();
+    if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
+        editing_value = @min(cfg.max, editing_value + cfg.step);
+        cfg.value = editing_value;
+        delay.action("menuNav", cfg.repeat_delay_ms);
+    }
+    if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
+        editing_value = @max(cfg.min, editing_value - cfg.step);
+        cfg.value = editing_value;
+        delay.action("menuNav", cfg.repeat_delay_ms);
+    }
+    if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
+        editing_index = null;
+        delay.action("menuConfirm", 200);
+    }
+    if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
+        cfg.value = pre_edit_value;
+        editing_index = null;
+        delay.action("menuToggle", 200);
+    }
+
+    var it = gamepad.assignedGamepads.valueIterator();
+    while (it.next()) |gp| {
+        const sdlGp = gp.gamepad orelse continue;
+        if (sdl.getGamepadButton(sdlGp, .dpad_up) and !delay.check("menuNav")) {
+            editing_value = @min(cfg.max, editing_value + cfg.step);
+            cfg.value = editing_value;
+            delay.action("menuNav", cfg.repeat_delay_ms);
+        }
+        if (sdl.getGamepadButton(sdlGp, .dpad_down) and !delay.check("menuNav")) {
+            editing_value = @max(cfg.min, editing_value - cfg.step);
+            cfg.value = editing_value;
+            delay.action("menuNav", cfg.repeat_delay_ms);
+        }
+        if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
+            editing_index = null;
+            delay.action("menuConfirm", 200);
+        }
+        if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
+            cfg.value = pre_edit_value;
+            editing_index = null;
+            delay.action("menuToggle", 200);
+        }
     }
 }
 
@@ -274,6 +283,7 @@ fn activate(idx: usize) !void {
         .config => |cfg| {
             editing_index = idx;
             editing_value = cfg.value;
+            pre_edit_value = cfg.value;
         },
         .sprite_pick => |key| {
             cursor.attachSprite(key);
@@ -372,8 +382,7 @@ fn drawVertical() !void {
             const label: [:0]const u8 = switch (item.kind) {
                 .button, .sprite_pick => item.label,
                 .config => |cfg| blk: {
-                    const val = if (editing_index != null and editing_index.? == i) editing_value else cfg.value;
-                    break :blk try std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, val });
+                    break :blk try std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, cfg.value });
                 },
             };
             try text.writeCenter(item.font, label, .{

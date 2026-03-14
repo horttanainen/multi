@@ -102,13 +102,7 @@ pub const menu = .{
     .colorSide = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 },
 };
 
-pub const LutParams = struct {
-    strength: f32,
-    regenerate_builtin_luts_on_startup: bool,
-};
-
-pub const lut = LutParams{
-    .strength = 1.0,
+pub const lut = .{
     .regenerate_builtin_luts_on_startup = false,
 };
 

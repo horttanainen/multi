@@ -8,6 +8,7 @@ const state = @import("state.zig");
 const window = @import("window.zig");
 const ui = @import("ui.zig");
 const menu = @import("menu.zig");
+const settingsMenu = @import("settingsMenu.zig");
 const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -37,7 +38,7 @@ pub fn updateZoom() void {
 
 pub fn render() !void {
     gpu.setCrtParams(if (menu.isOpen()) config.crtMenu else config.crt);
-    gpu.setLutParams(config.lut);
+    gpu.setLutParams(.{ .strength = settingsMenu.lutStrength() });
 
     // Clear to black then draw the paint-swirl background.
     try gpu.setRenderDrawColor(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
