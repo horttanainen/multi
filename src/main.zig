@@ -55,9 +55,6 @@ const Sprite = entity.Sprite;
 //TODO: allow for setting the scale of entity
 //TODO: allow for copying existing entities j
 
-//splitscreen
-//TODO: make camera zoom out so that whole level is visible 
-
 //Small improvements
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
