@@ -3,6 +3,7 @@ const sprite = @import("sprite.zig");
 const vec = @import("vector.zig");
 const allocator = @import("allocator.zig").allocator;
 const camera = @import("camera.zig");
+const level = @import("level.zig");
 
 pub const SerializableParallaxEntity = struct {
     parallaxDistance: f32,
@@ -26,10 +27,13 @@ pub fn draw() !void {
     for (parallaxEntities.items) |parallaxEntity| {
         const parallaxSprite = sprite.getSprite(parallaxEntity.spriteUuid) orelse continue;
 
-        const relativePos = camera.parallaxAdjustedRelativePosition(
-            parallaxEntity.pos,
-            parallaxEntity.parallaxDistance,
-        );
+        const relativePos = if (level.splitscreen)
+            camera.parallaxAdjustedRelativePosition(
+                parallaxEntity.pos,
+                parallaxEntity.parallaxDistance,
+            )
+        else
+            camera.relativePosition(parallaxEntity.pos);
 
         try sprite.drawWithOptions(
             parallaxSprite,
