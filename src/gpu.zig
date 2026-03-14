@@ -102,6 +102,10 @@ pub const PaintUniforms = extern struct {
     _pad2: f32 = 0,
     colour_3: [3]f32,
     _pad3: f32 = 0,
+    swirl_type: f32 = 0,
+    noise_type: f32 = 0,
+    color_mode: f32 = 0,
+    _pad4: f32 = 0,
 };
 
 // ============================================================

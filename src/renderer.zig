@@ -37,7 +37,7 @@ pub fn updateZoom() void {
 }
 
 pub fn render() !void {
-    gpu.setCrtParams(if (menu.isOpen()) config.crtMenu else config.crt);
+    gpu.setCrtParams(if (menu.isOpen() and !menu.isMinimalEditing()) config.crtMenu else config.crt);
     gpu.setLutParams(.{ .strength = settingsMenu.lutStrength() });
 
     // Clear to black then draw the paint-swirl background.
@@ -45,7 +45,7 @@ pub fn render() !void {
     try gpu.renderClear();
     background_paint.draw();
 
-    if (!menu.isOpen()) {
+    if (!menu.isOpen() and !state.editingBackground) {
         if (state.editingLevel) {
             try renderCamera(0);
             try drawLevelBorder();

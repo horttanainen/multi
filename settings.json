@@ -1,4 +1,23 @@
 {
-  "lut_strength": 1.00,
-  "preferred_color_grading": "Mario"
+  "lut_strength": 0.9999992251396179,
+  "preferred_color_grading": null,
+  "bg_spin_rotation": 3.7206790447235107,
+  "bg_spin_speed": 0.3456440567970276,
+  "bg_contrast": 2.3463211059570312,
+  "bg_spin_amount": 0.4492049217224121,
+  "bg_pixel_filter": 800,
+  "bg_offset_x": -0.07383939623832703,
+  "bg_offset_y": 0.0071758390404284,
+  "bg_colour_1_r": 0.1703900247812271,
+  "bg_colour_1_g": 0.41032400727272034,
+  "bg_colour_1_b": 0.5842510461807251,
+  "bg_colour_2_r": 0.1703900247812271,
+  "bg_colour_2_g": 0.20542259514331818,
+  "bg_colour_2_b": 0.5842510461807251,
+  "bg_colour_3_r": 0.6718887090682983,
+  "bg_colour_3_g": 0.5637286901473999,
+  "bg_colour_3_b": 0.2673394978046417,
+  "bg_swirl_type": 0,
+  "bg_noise_type": 3,
+  "bg_color_mode": 3
 }

@@ -2,10 +2,12 @@ const state = @import("state.zig");
 const menu = @import("menu.zig");
 const levelEditor = @import("level_editor.zig");
 const settingsMenu = @import("settingsMenu.zig");
+const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 
 var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionClose } },
     .{ .label = "Settings", .kind = .{ .button = actionOpenSettings } },
+    .{ .label = "Background Editor", .kind = .{ .button = actionOpenBackgroundEditor } },
     .{ .label = "Level Editor", .kind = .{ .button = actionOpenLevelEditorMenu } },
     .{ .label = "Quit Game", .kind = .{ .button = actionQuitGame } },
 };
@@ -37,6 +39,13 @@ fn actionOpenMainMenu() anyerror!void {
 
 fn openMainMenu() void {
     menu.open(&main_items, .{});
+}
+
+fn actionOpenBackgroundEditor() anyerror!void {
+    state.editingBackground = true;
+    state.editingLevel = false;
+    menu.close();
+    backgroundConfigMenu.open();
 }
 
 fn actionQuitGame() anyerror!void {

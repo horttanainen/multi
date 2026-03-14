@@ -5,15 +5,36 @@ const gpu = @import("gpu.zig");
 const time = @import("time.zig");
 const window = @import("window.zig");
 
-var uniforms: gpu.PaintUniforms = undefined;
+pub var uniforms: gpu.PaintUniforms = .{
+    .resolution = .{ 0, 0 },
+    .spin_rotation = 0,
+    .spin_speed = 0,
+    .offset = .{ 0, 0 },
+    .contrast = 2,
+    .spin_amount = 0.4,
+    .pixel_filter = 250,
+    .time = 0,
+    .colour_1 = .{ 0.5, 0.3, 0.3 },
+    .colour_2 = .{ 0.3, 0.5, 0.3 },
+    .colour_3 = .{ 0.3, 0.3, 0.5 },
+};
 
 pub fn init() void {
+    randomize();
+}
+
+pub fn randomize() void {
     const rng = std.crypto.random;
 
     const base_hue: f32 = rng.float(f32);
     const hue_step: f32 = 0.08 + rng.float(f32) * 0.15;
     const sat: f32 = 0.55 + rng.float(f32) * 0.3;
     const val: f32 = 0.40 + rng.float(f32) * 0.35;
+
+    // Preserve algorithm selections across randomization
+    const prev_swirl = uniforms.swirl_type;
+    const prev_noise = uniforms.noise_type;
+    const prev_color = uniforms.color_mode;
 
     uniforms = .{
         .resolution = .{ @floatFromInt(window.width), @floatFromInt(window.height) },
@@ -27,6 +48,9 @@ pub fn init() void {
         .colour_1 = hsvToRgb(base_hue, sat, val),
         .colour_2 = hsvToRgb(@mod(base_hue + hue_step, 1.0), sat, val),
         .colour_3 = hsvToRgb(@mod(base_hue + 0.45 + rng.float(f32) * 0.15, 1.0), sat * 0.85, val * 1.15),
+        .swirl_type = prev_swirl,
+        .noise_type = prev_noise,
+        .color_mode = prev_color,
     };
 
     std.log.info("background_paint: GPU shader (pixel_filter={d:.0})", .{uniforms.pixel_filter});
@@ -38,7 +62,7 @@ pub fn draw() void {
     gpu.drawPaintBackground(uniforms);
 }
 
-fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {
+pub fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {
     const i: u32 = @intFromFloat(@mod(@floor(h * 6.0), 6.0));
     const f: f32 = h * 6.0 - @floor(h * 6.0);
     const p: f32 = v * (1.0 - s);
@@ -52,4 +76,28 @@ fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {
         4 => .{ t, p, v },
         else => .{ v, p, q },
     };
+}
+
+pub fn rgbToHsv(rgb: [3]f32) [3]f32 {
+    const r = rgb[0];
+    const g = rgb[1];
+    const b = rgb[2];
+    const max_c = @max(r, @max(g, b));
+    const min_c = @min(r, @min(g, b));
+    const delta = max_c - min_c;
+
+    var h: f32 = 0;
+    if (delta > 0.00001) {
+        if (max_c == r) {
+            h = @mod((g - b) / delta, 6.0) / 6.0;
+        } else if (max_c == g) {
+            h = ((b - r) / delta + 2.0) / 6.0;
+        } else {
+            h = ((r - g) / delta + 4.0) / 6.0;
+        }
+        if (h < 0) h += 1.0;
+    }
+
+    const s: f32 = if (max_c > 0.00001) delta / max_c else 0;
+    return .{ h, s, max_c };
 }

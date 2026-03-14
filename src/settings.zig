@@ -1,7 +1,9 @@
 const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const fs = @import("fs.zig");
+const gpu = @import("gpu.zig");
 const lut = @import("lut.zig");
+const background_paint = @import("background_paint.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
@@ -9,14 +11,36 @@ const DEFAULT_LUT_STRENGTH: f32 = 1.0;
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
     preferred_color_grading: ?[]const u8 = null,
+    bg_spin_rotation: ?f32 = null,
+    bg_spin_speed: ?f32 = null,
+    bg_contrast: ?f32 = null,
+    bg_spin_amount: ?f32 = null,
+    bg_pixel_filter: ?f32 = null,
+    bg_offset_x: ?f32 = null,
+    bg_offset_y: ?f32 = null,
+    bg_colour_1_r: ?f32 = null,
+    bg_colour_1_g: ?f32 = null,
+    bg_colour_1_b: ?f32 = null,
+    bg_colour_2_r: ?f32 = null,
+    bg_colour_2_g: ?f32 = null,
+    bg_colour_2_b: ?f32 = null,
+    bg_colour_3_r: ?f32 = null,
+    bg_colour_3_g: ?f32 = null,
+    bg_colour_3_b: ?f32 = null,
+    bg_swirl_type: ?f32 = null,
+    bg_noise_type: ?f32 = null,
+    bg_color_mode: ?f32 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
 var preferred_color_grading: ?[]u8 = null;
+var has_bg_preset: bool = false;
+var bg_preset: gpu.PaintUniforms = undefined;
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
     freePreferredColorGrading();
+    has_bg_preset = false;
 
     var json_buf: [16384]u8 = undefined;
     const json_data = fs.readFile(SETTINGS_PATH, &json_buf) catch |err| switch (err) {
@@ -46,6 +70,30 @@ pub fn init() !void {
             return;
         };
     }
+
+    loadBgPreset(parsed.value);
+}
+
+fn loadBgPreset(s: StoredSettings) void {
+    const spin_rotation = s.bg_spin_rotation orelse return;
+    const spin_speed = s.bg_spin_speed orelse return;
+    has_bg_preset = true;
+    bg_preset = .{
+        .resolution = .{ 0, 0 },
+        .spin_rotation = spin_rotation,
+        .spin_speed = spin_speed,
+        .offset = .{ s.bg_offset_x orelse 0, s.bg_offset_y orelse 0 },
+        .contrast = s.bg_contrast orelse 2.0,
+        .spin_amount = s.bg_spin_amount orelse 0.4,
+        .pixel_filter = s.bg_pixel_filter orelse 250,
+        .time = 0,
+        .colour_1 = .{ s.bg_colour_1_r orelse 0.5, s.bg_colour_1_g orelse 0.3, s.bg_colour_1_b orelse 0.3 },
+        .colour_2 = .{ s.bg_colour_2_r orelse 0.3, s.bg_colour_2_g orelse 0.5, s.bg_colour_2_b orelse 0.3 },
+        .colour_3 = .{ s.bg_colour_3_r orelse 0.3, s.bg_colour_3_g orelse 0.3, s.bg_colour_3_b orelse 0.5 },
+        .swirl_type = s.bg_swirl_type orelse 0,
+        .noise_type = s.bg_noise_type orelse 0,
+        .color_mode = s.bg_color_mode orelse 0,
+    };
 }
 
 pub fn cleanup() void {
@@ -81,12 +129,52 @@ pub fn apply() void {
     }
 }
 
+pub fn applyBackgroundPreset() void {
+    if (!has_bg_preset) return;
+    const prev_res = background_paint.uniforms.resolution;
+    const prev_time = background_paint.uniforms.time;
+    background_paint.uniforms = bg_preset;
+    background_paint.uniforms.resolution = prev_res;
+    background_paint.uniforms.time = prev_time;
+    std.log.info("settings: applied saved background preset", .{});
+}
+
+pub fn saveBackgroundPreset(u: gpu.PaintUniforms) !void {
+    has_bg_preset = true;
+    bg_preset = u;
+    try save();
+}
+
 pub fn save() !void {
-    var buf: [512]u8 = undefined;
-    const contents = std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(StoredSettings{
+    var buf: [4096]u8 = undefined;
+    var stored = StoredSettings{
         .lut_strength = lut_strength,
         .preferred_color_grading = if (preferred_color_grading) |p| @as(?[]const u8, p) else null,
-    }, .{ .whitespace = .indent_2 })}) catch |err| {
+    };
+
+    if (has_bg_preset) {
+        stored.bg_spin_rotation = bg_preset.spin_rotation;
+        stored.bg_spin_speed = bg_preset.spin_speed;
+        stored.bg_contrast = bg_preset.contrast;
+        stored.bg_spin_amount = bg_preset.spin_amount;
+        stored.bg_pixel_filter = bg_preset.pixel_filter;
+        stored.bg_offset_x = bg_preset.offset[0];
+        stored.bg_offset_y = bg_preset.offset[1];
+        stored.bg_colour_1_r = bg_preset.colour_1[0];
+        stored.bg_colour_1_g = bg_preset.colour_1[1];
+        stored.bg_colour_1_b = bg_preset.colour_1[2];
+        stored.bg_colour_2_r = bg_preset.colour_2[0];
+        stored.bg_colour_2_g = bg_preset.colour_2[1];
+        stored.bg_colour_2_b = bg_preset.colour_2[2];
+        stored.bg_colour_3_r = bg_preset.colour_3[0];
+        stored.bg_colour_3_g = bg_preset.colour_3[1];
+        stored.bg_colour_3_b = bg_preset.colour_3[2];
+        stored.bg_swirl_type = bg_preset.swirl_type;
+        stored.bg_noise_type = bg_preset.noise_type;
+        stored.bg_color_mode = bg_preset.color_mode;
+    }
+
+    const contents = std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(stored, .{ .whitespace = .indent_2 })}) catch |err| {
         std.log.warn("settings.save: failed to serialize: {}", .{err});
         return err;
     };

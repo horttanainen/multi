@@ -40,11 +40,22 @@ const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const background_paint = @import("background_paint.zig");
+const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const gibbing = @import("gibbing.zig");
 const data = @import("data.zig");
 const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
+
+//Background ideas
+//TODO: add more spiral centers
+//TODO: ability to zoom out (to see more details)
+//TODO: tunnel does not work with sine noise
+//TODO: ability to change noise values
+
+//Menu ideas:
+//TODO: gerhard richter style paint mixing
+//TODO: Norther lights
 
 //Menu:
 //TODO: hide the game and show the nice background swirl instead
@@ -157,6 +168,7 @@ pub fn main() !void {
     try settings.init();
     try lut.init();
     settings.apply();
+    settings.applyBackgroundPreset();
     try rope.init();
     try controller.init();
     try keyboard.init();
@@ -173,7 +185,9 @@ pub fn main() !void {
         try physics.step();
         try input.handle();
 
-        if (state.editingLevel) {
+        if (state.editingBackground) {
+            backgroundConfigMenu.sync();
+        } else if (state.editingLevel) {
             levelEditorLoop();
         } else {
             try gameLoop();

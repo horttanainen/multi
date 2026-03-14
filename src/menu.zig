@@ -43,6 +43,7 @@ pub const Layout = enum { vertical, horizontal };
 pub const OpenOptions = struct {
     layout: Layout = .vertical,
     item_height: i32 = BTN_H,
+    minimal_edit: bool = false,
 };
 
 // ============================================================
@@ -60,6 +61,7 @@ var pre_edit_value: f32 = 0.0;
 var close_fn: ?*const fn () void = null;
 var current_layout: Layout = .vertical;
 var current_item_height: i32 = BTN_H;
+var current_minimal_edit: bool = false;
 
 const LERP_SPEED: f32 = 0.2;
 
@@ -85,6 +87,7 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions) vo
     editing_index = null;
     current_layout = options.layout;
     current_item_height = options.item_height;
+    current_minimal_edit = options.minimal_edit;
 }
 
 pub fn close() void {
@@ -96,6 +99,10 @@ pub fn close() void {
 
 pub fn isOpen() bool {
     return is_open;
+}
+
+pub fn isMinimalEditing() bool {
+    return is_open and current_minimal_edit and editing_index != null;
 }
 
 pub fn focusedIndex() usize {
@@ -127,7 +134,7 @@ pub fn setFocusedIndex(index: usize) void {
 
 pub fn handleInput() !void {
     if (editing_index != null) {
-        handleEditInput();
+        try handleEditInput();
     } else {
         try handleBrowseInput();
     }
@@ -221,16 +228,19 @@ fn handleBrowseInput() !void {
     }
 }
 
-fn handleEditInput() void {
+fn handleEditInput() !void {
     const ei = editing_index orelse return;
-    const cfg = switch (active_items[ei].kind) {
-        .config => |cfg| cfg,
+
+    switch (active_items[ei].kind) {
+        .config => |cfg| handleEditConfig(cfg),
+        .button => |action| try handleEditButton(action),
         else => {
             editing_index = null;
-            return;
         },
-    };
+    }
+}
 
+fn handleEditConfig(cfg: *ConfigData) void {
     const keys = sdl.getKeyboardState();
     if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
         editing_value = @min(cfg.max, editing_value + cfg.step);
@@ -277,9 +287,40 @@ fn handleEditInput() void {
     }
 }
 
+fn handleEditButton(action: *const fn () anyerror!void) !void {
+    const keys = sdl.getKeyboardState();
+    if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
+        try action();
+        delay.action("menuConfirm", 200);
+    }
+    if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
+        editing_index = null;
+        delay.action("menuToggle", 200);
+    }
+
+    var it = gamepad.assignedGamepads.valueIterator();
+    while (it.next()) |gp| {
+        const sdlGp = gp.gamepad orelse continue;
+        if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
+            try action();
+            delay.action("menuConfirm", 200);
+        }
+        if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
+            editing_index = null;
+            delay.action("menuToggle", 200);
+        }
+    }
+}
+
 fn activate(idx: usize) !void {
     switch (active_items[idx].kind) {
-        .button => |action| try action(),
+        .button => |action| {
+            const was_minimal = current_minimal_edit;
+            try action();
+            if (was_minimal and current_minimal_edit) {
+                editing_index = idx;
+            }
+        },
         .config => |cfg| {
             editing_index = idx;
             editing_value = cfg.value;
@@ -318,6 +359,13 @@ pub fn draw() !void {
     if (@abs(target - scroll_anim) < 0.001) scroll_anim = target;
 
     try gpu.renderSetViewport(null);
+
+    // In minimal edit mode, skip overlay and full menu when editing
+    if (current_minimal_edit and editing_index != null) {
+        try drawMinimalEdit();
+        return;
+    }
+
     try gpu.setRenderDrawColor(COLOR_OVERLAY);
     try gpu.renderFillRect(sdl.Rect{ .x = 0, .y = 0, .w = window.width, .h = window.height });
 
@@ -400,6 +448,36 @@ fn drawVertical() !void {
             .y = hint_y + BTN_GAP + 8,
         });
     }
+}
+
+fn drawMinimalEdit() !void {
+    const ei = editing_index orelse return;
+    const item = active_items[ei];
+
+    const btn_w: i32 = @divFloor(window.width * 5, 10);
+    const btn_x: i32 = @divFloor(window.width - btn_w, 2);
+    const bottom_margin: i32 = 200;
+    const y: i32 = window.height - BTN_H - bottom_margin;
+
+    try gpu.setRenderDrawColor(COLOR_EDITING);
+    try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H });
+
+    var label_buf: [64]u8 = undefined;
+    const label: [:0]const u8 = switch (item.kind) {
+        .config => |cfg| blk: {
+            break :blk std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, cfg.value }) catch item.label;
+        },
+        else => item.label,
+    };
+    try text.writeCenter(item.font, label, .{
+        .x = btn_x + @divFloor(btn_w, 2),
+        .y = y + @divFloor(BTN_H, 2),
+    });
+
+    try text.writeCenter(.small, "Enter: Apply  Esc: Cancel", .{
+        .x = @divFloor(window.width, 2),
+        .y = y + BTN_H + BTN_GAP + 4,
+    });
 }
 
 fn drawHorizontal() !void {

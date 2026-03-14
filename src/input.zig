@@ -8,6 +8,7 @@ const gamepad = @import("gamepad.zig");
 const window = @import("window.zig");
 const menu = @import("menu.zig");
 const gameMenu = @import("gameMenu.zig");
+const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const delay = @import("delay.zig");
 
 pub fn handle() !void {
@@ -48,6 +49,27 @@ pub fn handle() !void {
                 return;
             }
         }
+    }
+
+    if (state.editingBackground) {
+        // Y/triangle button or T key opens background config menu
+        {
+            var it = gamepad.assignedGamepads.valueIterator();
+            while (it.next()) |gp| {
+                const sdlGp = gp.gamepad orelse continue;
+                if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("bgConfigToggle")) {
+                    backgroundConfigMenu.open();
+                    delay.action("bgConfigToggle", 400);
+                    return;
+                }
+            }
+        }
+        const keys = sdl.getKeyboardState();
+        if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("bgConfigToggle")) {
+            backgroundConfigMenu.open();
+            delay.action("bgConfigToggle", 400);
+        }
+        return;
     }
 
     if (state.editingLevel) {
