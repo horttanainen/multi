@@ -43,7 +43,7 @@ pub fn render() !void {
     // Clear to black then draw the paint-swirl background.
     try gpu.setRenderDrawColor(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
     try gpu.renderClear();
-    try background_paint.draw();
+    background_paint.draw();
 
     if (!menu.isOpen()) {
         if (state.editingLevel) {

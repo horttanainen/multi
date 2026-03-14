@@ -149,7 +149,7 @@ pub fn main() !void {
     time.init();
     try audio.init();
     try gpu.init(try window.getWindow());
-    try background_paint.init();
+    background_paint.init();
     try text.init();
     box2d.initWorld();
     try debug.init();

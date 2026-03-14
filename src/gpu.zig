@@ -35,6 +35,14 @@ pub fn setZoom(z: f32) void {
     g.batch_count += 1;
 }
 
+pub fn drawPaintBackground(uniforms: PaintUniforms) void {
+    const g = getGpu();
+    finalizeBatch(g);
+    if (g.batch_count >= MAX_BATCH_RECORDS) return;
+    g.batch_records[g.batch_count] = .{ .draw_paint_background = .{ .uniforms = uniforms } };
+    g.batch_count += 1;
+}
+
 pub const Texture = texture.Texture;
 
 // ============================================================
@@ -79,6 +87,23 @@ const LutUniforms = extern struct {
     strength: f32,
 };
 
+pub const PaintUniforms = extern struct {
+    resolution: [2]f32,
+    spin_rotation: f32,
+    spin_speed: f32,
+    offset: [2]f32,
+    contrast: f32,
+    spin_amount: f32,
+    pixel_filter: f32,
+    time: f32,
+    colour_1: [3]f32,
+    _pad1: f32 = 0,
+    colour_2: [3]f32,
+    _pad2: f32 = 0,
+    colour_3: [3]f32,
+    _pad3: f32 = 0,
+};
+
 // ============================================================
 // GPU Batch Renderer State (deferred rendering)
 // ============================================================
@@ -118,6 +143,9 @@ const BatchRecord = union(enum) {
     set_zoom: struct {
         zoom: f32,
     },
+    draw_paint_background: struct {
+        uniforms: PaintUniforms,
+    },
 };
 
 const GpuState = struct {
@@ -141,6 +169,9 @@ const GpuState = struct {
     crt_pipeline: *c.SDL_GPUGraphicsPipeline,
     fullscreen_quad_buffer: *c.SDL_GPUBuffer,
     crt_sampler: *c.SDL_GPUSampler,
+
+    // Paint background
+    paint_pipeline: *c.SDL_GPUGraphicsPipeline,
 
     // LUT color grading
     lut_enabled: bool = true,
@@ -251,6 +282,7 @@ const colored_vert_msl = @embedFile("shaders/colored.metal");
 const colored_frag_msl = @embedFile("shaders/colored.metal");
 const crt_msl = @embedFile("shaders/crt.metal");
 const lut_msl = @embedFile("shaders/lut.metal");
+const paint_msl = @embedFile("shaders/background_paint.metal");
 
 fn createShader(
     device: *c.SDL_GPUDevice,
@@ -646,6 +678,15 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .vertex_layout = fullscreen_vertex_layout,
     });
 
+    // Paint background pipeline (no samplers - purely procedural)
+    const paint_pipe = try createPipeline(device, swapchain_format, .{
+        .shader_code = paint_msl,
+        .vert_entry = "paint_vert",
+        .frag_entry = "paint_frag",
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
+    });
+
     // Linear sampler for CRT post-processing
     const crt_sampler_info = c.SDL_GPUSamplerCreateInfo{
         .min_filter = c.SDL_GPU_FILTER_LINEAR,
@@ -726,6 +767,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .offscreen_texture = offscreen_tex,
         .offscreen_w = ow,
         .offscreen_h = oh,
+        .paint_pipeline = paint_pipe,
         .crt_pipeline = crt_pipe,
         .fullscreen_quad_buffer = quad_buffer,
         .crt_sampler = crt_samp,
@@ -748,6 +790,7 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
         c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.paint_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.lut_pipeline);
         c.SDL_ReleaseGPUBuffer(g.device, g.fullscreen_quad_buffer);
@@ -1074,6 +1117,19 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 }
 
                 c.SDL_DrawGPUPrimitives(rp, batch.vertex_count, 1, 0, 0);
+            },
+            .draw_paint_background => |paint| {
+                c.SDL_BindGPUGraphicsPipeline(rp, g.paint_pipeline);
+                const quad_binding = c.SDL_GPUBufferBinding{
+                    .buffer = g.fullscreen_quad_buffer,
+                    .offset = 0,
+                };
+                c.SDL_BindGPUVertexBuffers(rp, 0, &quad_binding, 1);
+                c.SDL_PushGPUFragmentUniformData(cmd, 0, &paint.uniforms, @sizeOf(PaintUniforms));
+                c.SDL_DrawGPUPrimitives(rp, 6, 1, 0, 0);
+                last_pipeline = null;
+                last_texture = null;
+                uniforms_dirty = true;
             },
             .draw_colored => |batch| {
                 if (last_pipeline != batch.pipeline) {
