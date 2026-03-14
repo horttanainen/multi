@@ -102,6 +102,14 @@ pub const menu = .{
     .colorSide = sdl.Color{ .r = 20, .g = 20, .b = 20, .a = 140 },
 };
 
+pub const LutParams = struct {
+    strength: f32,
+};
+
+pub const lut = LutParams{
+    .strength = 1.0,
+};
+
 pub const levelEditorCameraMovementForce = 10;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;

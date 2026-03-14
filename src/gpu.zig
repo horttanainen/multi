@@ -8,9 +8,14 @@ const config = @import("config.zig");
 const c = sdl.c;
 
 var crt_params: config.CrtParams = config.crt;
+var lut_params: config.LutParams = config.lut;
 
 pub fn setCrtParams(params: config.CrtParams) void {
     crt_params = params;
+}
+
+pub fn setLutParams(params: config.LutParams) void {
+    lut_params = params;
 }
 
 // Camera zoom: values < 1.0 zoom out (show more of the world). Recorded as a batch
@@ -65,6 +70,10 @@ const CrtUniforms = extern struct {
     distortion_strength: f32,
     aberration: f32,
     zoom: f32,
+};
+
+const LutUniforms = extern struct {
+    strength: f32,
 };
 
 // ============================================================
@@ -129,6 +138,12 @@ const GpuState = struct {
     crt_pipeline: *c.SDL_GPUGraphicsPipeline,
     fullscreen_quad_buffer: *c.SDL_GPUBuffer,
     crt_sampler: *c.SDL_GPUSampler,
+
+    // LUT color grading
+    lut_enabled: bool = true,
+    lut_pipeline: *c.SDL_GPUGraphicsPipeline,
+    lut_texture: *c.SDL_GPUTexture,
+    offscreen_texture_b: *c.SDL_GPUTexture,
 
     // Sampler
     sampler: *c.SDL_GPUSampler,
@@ -232,6 +247,7 @@ const sprite_frag_msl = @embedFile("shaders/sprite.metal");
 const colored_vert_msl = @embedFile("shaders/colored.metal");
 const colored_frag_msl = @embedFile("shaders/colored.metal");
 const crt_msl = @embedFile("shaders/crt.metal");
+const lut_msl = @embedFile("shaders/lut.metal");
 
 fn createShader(
     device: *c.SDL_GPUDevice,
@@ -656,6 +672,16 @@ pub fn createRenderer(window: *sdl.Window) !void {
     }) orelse return error.CreateBufferFailed;
     uploadFullscreenQuad(device, quad_buffer);
 
+    // LUT pipeline
+    const lut_pipe = try createPipeline(device, swapchain_format, .{
+        .shader_code = lut_msl,
+        .vert_entry = "lut_vert",
+        .frag_entry = "lut_frag",
+        .frag_samplers = 2,
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
+    });
+
     // Offscreen texture for scene rendering (initial size from window)
     var init_w: c_int = 0;
     var init_h: c_int = 0;
@@ -663,6 +689,10 @@ pub fn createRenderer(window: *sdl.Window) !void {
     const ow: u32 = if (init_w > 0) @intCast(init_w) else 640;
     const oh: u32 = if (init_h > 0) @intCast(init_h) else 480;
     const offscreen_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
+    const offscreen_tex_b = try createOffscreenTexture(device, ow, oh, swapchain_format);
+
+    // Generate and upload identity LUT (32x32x32 stored as 1024x32 RGBA)
+    const lut_tex = try createIdentityLut(device);
 
     // Create atlas GPU texture
     const atlas_tex_info = c.SDL_GPUTextureCreateInfo{
@@ -696,6 +726,9 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .crt_pipeline = crt_pipe,
         .fullscreen_quad_buffer = quad_buffer,
         .crt_sampler = crt_samp,
+        .lut_pipeline = lut_pipe,
+        .lut_texture = lut_tex,
+        .offscreen_texture_b = offscreen_tex_b,
         .sampler = gpu_sampler,
         .sprite_gpu_buffer = sprite_vb,
         .color_gpu_buffer = color_vb,
@@ -710,7 +743,10 @@ pub fn createRenderer(window: *sdl.Window) !void {
 pub fn destroyRenderer() void {
     if (gpu) |g| {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
+        c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
+        c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.lut_pipeline);
         c.SDL_ReleaseGPUBuffer(g.device, g.fullscreen_quad_buffer);
         c.SDL_ReleaseGPUSampler(g.device, g.crt_sampler);
         c.SDL_ReleaseGPUTexture(g.device, g.atlas.gpu_texture);
@@ -850,10 +886,12 @@ pub fn renderClear() !void {
     g.swapchain_w = @floatFromInt(sw_w);
     g.swapchain_h = @floatFromInt(sw_h);
 
-    // Recreate offscreen texture if window was resized (only needed for post-processing)
-    if (g.crt_enabled and (sw_w != g.offscreen_w or sw_h != g.offscreen_h)) {
+    // Recreate offscreen textures if window was resized (needed for post-processing)
+    if ((g.crt_enabled or g.lut_enabled) and (sw_w != g.offscreen_w or sw_h != g.offscreen_h)) {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
+        c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
         g.offscreen_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
+        g.offscreen_texture_b = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
         g.offscreen_w = sw_w;
         g.offscreen_h = sw_h;
     }
@@ -884,7 +922,14 @@ pub fn renderPresent() void {
 
     uploadVertexData(g, cmd);
 
-    if (g.crt_enabled) {
+    if (g.lut_enabled and g.crt_enabled) {
+        renderScene(g, cmd, g.offscreen_texture);
+        applyLutEffect(g, cmd, g.offscreen_texture, g.offscreen_texture_b);
+        applyCrtEffect(g, cmd, g.offscreen_texture_b, swapchain_tex);
+    } else if (g.lut_enabled) {
+        renderScene(g, cmd, g.offscreen_texture);
+        applyLutEffect(g, cmd, g.offscreen_texture, swapchain_tex);
+    } else if (g.crt_enabled) {
         renderScene(g, cmd, g.offscreen_texture);
         applyCrtEffect(g, cmd, g.offscreen_texture, swapchain_tex);
     } else {
@@ -1103,6 +1148,232 @@ fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.
         c.SDL_DrawGPUPrimitives(cp, 6, 1, 0, 0);
         c.SDL_EndGPURenderPass(cp);
     }
+}
+
+fn applyLutEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.SDL_GPUTexture, output_texture: *c.SDL_GPUTexture) void {
+    const lut_target = c.SDL_GPUColorTargetInfo{
+        .texture = output_texture,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+        .load_op = c.SDL_GPU_LOADOP_DONT_CARE,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const lut_pass = c.SDL_BeginGPURenderPass(cmd, &lut_target, 1, null);
+    if (lut_pass) |lp| {
+        c.SDL_BindGPUGraphicsPipeline(lp, g.lut_pipeline);
+
+        const quad_binding = c.SDL_GPUBufferBinding{
+            .buffer = g.fullscreen_quad_buffer,
+            .offset = 0,
+        };
+        c.SDL_BindGPUVertexBuffers(lp, 0, &quad_binding, 1);
+
+        const sampler_bindings = [2]c.SDL_GPUTextureSamplerBinding{
+            .{ .texture = input_texture, .sampler = g.crt_sampler },
+            .{ .texture = g.lut_texture, .sampler = g.crt_sampler },
+        };
+        c.SDL_BindGPUFragmentSamplers(lp, 0, &sampler_bindings, 2);
+
+        const lut_uniforms = LutUniforms{
+            .strength = lut_params.strength,
+        };
+        c.SDL_PushGPUFragmentUniformData(cmd, 0, &lut_uniforms, @sizeOf(LutUniforms));
+
+        c.SDL_DrawGPUPrimitives(lp, 6, 1, 0, 0);
+        c.SDL_EndGPURenderPass(lp);
+    }
+}
+
+fn createIdentityLut(device: *c.SDL_GPUDevice) !*c.SDL_GPUTexture {
+    const LUT_SIZE: u32 = 32;
+    const TEX_W: u32 = LUT_SIZE * LUT_SIZE; // 1024
+    const TEX_H: u32 = LUT_SIZE; // 32
+
+    // Generate identity LUT pixel data
+    var pixels: [TEX_W * TEX_H * 4]u8 = undefined;
+    for (0..TEX_H) |y| {
+        for (0..TEX_W) |x| {
+            const blue_slice = x / LUT_SIZE;
+            const red = x % LUT_SIZE;
+            const green = y;
+
+            const idx = (y * TEX_W + x) * 4;
+            pixels[idx + 0] = @intCast((red * 255 + 15) / 31);
+            pixels[idx + 1] = @intCast((green * 255 + 15) / 31);
+            pixels[idx + 2] = @intCast((blue_slice * 255 + 15) / 31);
+            pixels[idx + 3] = 255;
+        }
+    }
+
+    // Create GPU texture
+    const tex_info = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width = TEX_W,
+        .height = TEX_H,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    const gpu_tex = c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+
+    // Upload via transfer buffer
+    const data_size: u32 = TEX_W * TEX_H * 4;
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = data_size,
+        .props = 0,
+    }) orelse return error.CreateBufferFailed;
+    defer c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+
+    const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse return error.MapBufferFailed;
+    const dst: [*]u8 = @ptrCast(mapped);
+    @memcpy(dst[0..data_size], &pixels);
+    c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+
+    const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse return error.AcquireCommandBufferFailed;
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse return error.BeginCopyPassFailed;
+    c.SDL_UploadToGPUTexture(copy_pass, &c.SDL_GPUTextureTransferInfo{
+        .transfer_buffer = transfer_buf,
+        .offset = 0,
+        .pixels_per_row = TEX_W,
+        .rows_per_layer = TEX_H,
+    }, &c.SDL_GPUTextureRegion{
+        .texture = gpu_tex,
+        .mip_level = 0,
+        .layer = 0,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .w = TEX_W,
+        .h = TEX_H,
+        .d = 1,
+    }, false);
+    c.SDL_EndGPUCopyPass(copy_pass);
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    if (fence) |f| {
+        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
+        c.SDL_ReleaseGPUFence(device, f);
+    }
+
+    return gpu_tex;
+}
+
+pub fn loadLutFromFile(path: [*:0]const u8) !void {
+    const g = getGpu();
+
+    const surface = c.IMG_Load(path) orelse {
+        std.log.warn("loadLutFromFile: failed to load '{s}'", .{path});
+        return error.LoadLutFailed;
+    };
+    defer c.SDL_DestroySurface(surface);
+
+    const rgba = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888) orelse {
+        std.log.warn("loadLutFromFile: failed to convert surface for '{s}'", .{path});
+        return error.ConvertSurfaceFailed;
+    };
+    defer c.SDL_DestroySurface(rgba);
+
+    const w: u32 = @intCast(rgba.*.w);
+    const h: u32 = @intCast(rgba.*.h);
+
+    if (w != 1024 or h != 32) {
+        std.log.warn("loadLutFromFile: expected 1024x32, got {d}x{d} for '{s}'", .{ w, h, path });
+        return error.InvalidLutDimensions;
+    }
+
+    const tex_info = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width = w,
+        .height = h,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    const new_tex = c.SDL_CreateGPUTexture(g.device, &tex_info) orelse return error.CreateGPUTextureFailed;
+
+    const pitch: u32 = @intCast(rgba.*.pitch);
+    const data_size: u32 = pitch * h;
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(g.device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = data_size,
+        .props = 0,
+    }) orelse {
+        c.SDL_ReleaseGPUTexture(g.device, new_tex);
+        return error.CreateBufferFailed;
+    };
+    defer c.SDL_ReleaseGPUTransferBuffer(g.device, transfer_buf);
+
+    const mapped = c.SDL_MapGPUTransferBuffer(g.device, transfer_buf, false) orelse {
+        c.SDL_ReleaseGPUTexture(g.device, new_tex);
+        return error.MapBufferFailed;
+    };
+    const pixels: [*]const u8 = @ptrCast(rgba.*.pixels orelse {
+        c.SDL_UnmapGPUTransferBuffer(g.device, transfer_buf);
+        c.SDL_ReleaseGPUTexture(g.device, new_tex);
+        return error.NoPixelData;
+    });
+    const dst: [*]u8 = @ptrCast(mapped);
+    @memcpy(dst[0..data_size], pixels[0..data_size]);
+    c.SDL_UnmapGPUTransferBuffer(g.device, transfer_buf);
+
+    const cmd = c.SDL_AcquireGPUCommandBuffer(g.device) orelse {
+        c.SDL_ReleaseGPUTexture(g.device, new_tex);
+        return error.AcquireCommandBufferFailed;
+    };
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        c.SDL_ReleaseGPUTexture(g.device, new_tex);
+        return error.BeginCopyPassFailed;
+    };
+    c.SDL_UploadToGPUTexture(copy_pass, &c.SDL_GPUTextureTransferInfo{
+        .transfer_buffer = transfer_buf,
+        .offset = 0,
+        .pixels_per_row = pitch / 4,
+        .rows_per_layer = h,
+    }, &c.SDL_GPUTextureRegion{
+        .texture = new_tex,
+        .mip_level = 0,
+        .layer = 0,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .w = w,
+        .h = h,
+        .d = 1,
+    }, false);
+    c.SDL_EndGPUCopyPass(copy_pass);
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    if (fence) |f| {
+        _ = c.SDL_WaitForGPUFences(g.device, true, @ptrCast(&f), 1);
+        c.SDL_ReleaseGPUFence(g.device, f);
+    }
+
+    // Swap old texture for new one
+    c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
+    g.lut_texture = new_tex;
+}
+
+pub fn loadLutFromIdentity() void {
+    const g = getGpu();
+    const new_tex = createIdentityLut(g.device) catch {
+        std.log.warn("loadLutFromIdentity: failed to create identity LUT", .{});
+        return;
+    };
+    c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
+    g.lut_texture = new_tex;
 }
 
 fn submitFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {

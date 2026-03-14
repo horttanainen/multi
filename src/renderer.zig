@@ -37,20 +37,23 @@ pub fn updateZoom() void {
 
 pub fn render() !void {
     gpu.setCrtParams(if (menu.isOpen()) config.crtMenu else config.crt);
+    gpu.setLutParams(config.lut);
 
     // Clear to black then draw the paint-swirl background.
     try gpu.setRenderDrawColor(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
     try gpu.renderClear();
     try background_paint.draw();
 
-    if (state.editingLevel) {
-        try renderCamera(0);
-        try drawLevelBorder();
-        try cursor.draw();
-    } else {
-        for (camera.cameras.keys()) |cameraId| {
-            if (viewport.getViewportForCamera(cameraId) == null) continue;
-            try renderCamera(cameraId);
+    if (!menu.isOpen()) {
+        if (state.editingLevel) {
+            try renderCamera(0);
+            try drawLevelBorder();
+            try cursor.draw();
+        } else {
+            for (camera.cameras.keys()) |cameraId| {
+                if (viewport.getViewportForCamera(cameraId) == null) continue;
+                try renderCamera(cameraId);
+            }
         }
     }
 
