@@ -134,8 +134,8 @@ fn followSharedCamera(zoom: f32) void {
     moveCamera(cam, level.position, zoom);
 }
 
-pub fn centerOn(worldPos: vec.IVec2) void {
-    if (getActiveCamera()) |cam| moveCamera(cam, worldPos, 1.0);
+pub fn centerOn(worldPos: vec.IVec2, zoom: f32) void {
+    if (getActiveCamera()) |cam| moveCamera(cam, worldPos, zoom);
 }
 
 fn moveCamera(cam: *Camera, pos: vec.IVec2, zoom: f32) void {

@@ -6,6 +6,7 @@ const camera = @import("camera.zig");
 const vec = @import("vector.zig");
 const level = @import("level.zig");
 const config = @import("config.zig");
+const renderer = @import("renderer.zig");
 
 var bodyId: box2d.c.b2BodyId = undefined;
 var bodyCreated: bool = false;
@@ -78,7 +79,7 @@ pub fn cameraFollow() void {
     if (!bodyCreated) return;
     const currentState = box2d.getState(bodyId);
     const state = box2d.getInterpolatedState(prevState, currentState);
-    camera.centerOn(conv.m2Pixel(state.pos));
+    camera.centerOn(conv.m2Pixel(state.pos), renderer.zoom);
 }
 
 pub fn attachSprite(key: []const u8) void {
