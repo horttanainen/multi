@@ -38,16 +38,24 @@ pub fn handle() !void {
         return;
     }
 
-    // Gamepad Start button opens the game menu from any mode
+    // Start button or Escape key opens the game menu from any mode
     {
-        var it = gamepad.assignedGamepads.valueIterator();
-        while (it.next()) |gp| {
-            const sdlGp = gp.gamepad orelse continue;
-            if (sdl.getGamepadButton(sdlGp, .start) and !delay.check("menuToggle")) {
-                gameMenu.openGameMenu();
-                delay.action("menuToggle", 400);
-                return;
+        const keys = sdl.getKeyboardState();
+        var start_pressed = keys[@intFromEnum(sdl.Scancode.escape)];
+        if (!start_pressed) {
+            var it = gamepad.assignedGamepads.valueIterator();
+            while (it.next()) |gp| {
+                const sdlGp = gp.gamepad orelse continue;
+                if (sdl.getGamepadButton(sdlGp, .start)) {
+                    start_pressed = true;
+                    break;
+                }
             }
+        }
+        if (start_pressed and !delay.check("menuToggle")) {
+            gameMenu.openGameMenu();
+            delay.action("menuToggle", 400);
+            return;
         }
     }
 
@@ -57,17 +65,17 @@ pub fn handle() !void {
             var it = gamepad.assignedGamepads.valueIterator();
             while (it.next()) |gp| {
                 const sdlGp = gp.gamepad orelse continue;
-                if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("bgConfigToggle")) {
+                if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
                     backgroundConfigMenu.open();
-                    delay.action("bgConfigToggle", 400);
+                    delay.action("menuToggle", 400);
                     return;
                 }
             }
         }
         const keys = sdl.getKeyboardState();
-        if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("bgConfigToggle")) {
+        if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
             backgroundConfigMenu.open();
-            delay.action("bgConfigToggle", 400);
+            delay.action("menuToggle", 400);
         }
         return;
     }

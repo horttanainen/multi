@@ -32,6 +32,9 @@ pub const Item = struct {
     kind: ItemKind,
     font: text.Font = .large,
     image: ?u64 = null,
+    cycle_names: ?[]const [:0]const u8 = null,
+    cycle_index: ?*u8 = null,
+    on_cycle: ?*const fn () void = null,
 };
 
 // ============================================================
@@ -44,6 +47,7 @@ pub const OpenOptions = struct {
     layout: Layout = .vertical,
     item_height: i32 = BTN_H,
     minimal_edit: bool = false,
+    back_fn: ?*const fn () anyerror!void = null,
 };
 
 // ============================================================
@@ -58,10 +62,12 @@ var scroll_anim: f32 = 0.0;
 var editing_index: ?usize = null;
 var editing_value: f32 = 0.0;
 var pre_edit_value: f32 = 0.0;
+var pre_edit_cycle_index: u8 = 0;
 var close_fn: ?*const fn () void = null;
 var current_layout: Layout = .vertical;
 var current_item_height: i32 = BTN_H;
 var current_minimal_edit: bool = false;
+var current_back_fn: ?*const fn () anyerror!void = null;
 
 const LERP_SPEED: f32 = 0.2;
 
@@ -88,6 +94,7 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions) vo
     current_layout = options.layout;
     current_item_height = options.item_height;
     current_minimal_edit = options.minimal_edit;
+    current_back_fn = options.back_fn;
 }
 
 pub fn close() void {
@@ -191,6 +198,10 @@ fn handleBrowseInput() !void {
         delay.action("menuConfirm", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
+        try goBack();
+        delay.action("menuToggle", 400);
+    }
+    if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
         close();
         delay.action("menuToggle", 400);
     }
@@ -222,9 +233,21 @@ fn handleBrowseInput() !void {
             delay.action("menuConfirm", 200);
         }
         if ((sdl.getGamepadButton(sdlGp, .start) or sdl.getGamepadButton(sdlGp, .b)) and !delay.check("menuToggle")) {
+            try goBack();
+            delay.action("menuToggle", 400);
+        }
+        if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
             close();
             delay.action("menuToggle", 400);
         }
+    }
+}
+
+fn goBack() !void {
+    if (current_back_fn) |back| {
+        try back();
+    } else {
+        close();
     }
 }
 
@@ -261,6 +284,12 @@ fn handleEditConfig(cfg: *ConfigData) void {
         editing_index = null;
         delay.action("menuToggle", 200);
     }
+    if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
+        cfg.value = pre_edit_value;
+        editing_index = null;
+        close();
+        delay.action("menuToggle", 400);
+    }
 
     var it = gamepad.assignedGamepads.valueIterator();
     while (it.next()) |gp| {
@@ -279,6 +308,12 @@ fn handleEditConfig(cfg: *ConfigData) void {
             editing_index = null;
             delay.action("menuConfirm", 200);
         }
+        if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
+            cfg.value = pre_edit_value;
+            editing_index = null;
+            close();
+            delay.action("menuToggle", 400);
+        }
         if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
             cfg.value = pre_edit_value;
             editing_index = null;
@@ -288,37 +323,111 @@ fn handleEditConfig(cfg: *ConfigData) void {
 }
 
 fn handleEditButton(action: *const fn () anyerror!void) !void {
+    const ei = editing_index orelse return;
+    const item = &active_items[ei];
     const keys = sdl.getKeyboardState();
+
+    if (item.cycle_names != null and item.cycle_index != null) {
+        if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
+            cycleItem(item, 1);
+            delay.action("menuNav", 200);
+        }
+        if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
+            cycleItem(item, -1);
+            delay.action("menuNav", 200);
+        }
+    }
+
     if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
-        try action();
+        if (item.cycle_names != null) {
+            editing_index = null;
+        } else {
+            try action();
+        }
         delay.action("menuConfirm", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
+        revertCycleEdit(item);
         editing_index = null;
         delay.action("menuToggle", 200);
+    }
+    if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
+        revertCycleEdit(item);
+        editing_index = null;
+        close();
+        delay.action("menuToggle", 400);
     }
 
     var it = gamepad.assignedGamepads.valueIterator();
     while (it.next()) |gp| {
         const sdlGp = gp.gamepad orelse continue;
+
+        if (item.cycle_names != null and item.cycle_index != null) {
+            if (sdl.getGamepadButton(sdlGp, .dpad_up) and !delay.check("menuNav")) {
+                cycleItem(item, 1);
+                delay.action("menuNav", 200);
+            }
+            if (sdl.getGamepadButton(sdlGp, .dpad_down) and !delay.check("menuNav")) {
+                cycleItem(item, -1);
+                delay.action("menuNav", 200);
+            }
+        }
+
         if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
-            try action();
+            if (item.cycle_names != null) {
+                editing_index = null;
+            } else {
+                try action();
+            }
             delay.action("menuConfirm", 200);
         }
+        if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
+            revertCycleEdit(item);
+            editing_index = null;
+            close();
+            delay.action("menuToggle", 400);
+        }
         if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
+            revertCycleEdit(item);
             editing_index = null;
             delay.action("menuToggle", 200);
         }
     }
 }
 
+fn revertCycleEdit(item: *Item) void {
+    const names = item.cycle_names orelse return;
+    const idx = item.cycle_index orelse return;
+    idx.* = pre_edit_cycle_index;
+    item.label = names[idx.*];
+    if (item.on_cycle) |cb| cb();
+}
+
+fn cycleItem(item: *Item, direction: i2) void {
+    const names = item.cycle_names orelse return;
+    const idx = item.cycle_index orelse return;
+    const count: u8 = @intCast(names.len);
+    if (direction > 0) {
+        idx.* = (idx.* + 1) % count;
+    } else {
+        idx.* = if (idx.* == 0) count - 1 else idx.* - 1;
+    }
+    item.label = names[idx.*];
+    if (item.on_cycle) |cb| cb();
+}
+
 fn activate(idx: usize) !void {
     switch (active_items[idx].kind) {
         .button => |action| {
-            const was_minimal = current_minimal_edit;
-            try action();
-            if (was_minimal and current_minimal_edit) {
+            if (current_minimal_edit and active_items[idx].cycle_names != null) {
+                // Cycle buttons enter minimal edit view on first press;
+                // up/down cycling handled by handleEditButton.
                 editing_index = idx;
+                if (active_items[idx].cycle_index) |ci| {
+                    pre_edit_cycle_index = ci.*;
+                }
+            } else {
+                try action();
             }
         },
         .config => |cfg| {
@@ -456,10 +565,45 @@ fn drawMinimalEdit() !void {
 
     const btn_w: i32 = @divFloor(window.width * 5, 10);
     const btn_x: i32 = @divFloor(window.width - btn_w, 2);
+    const center_x: i32 = btn_x + @divFloor(btn_w, 2);
     const bottom_margin: i32 = 200;
     const y: i32 = window.height - BTN_H - bottom_margin;
+    const adj_y_step: i32 = BTN_H + BTN_GAP;
 
-    try gpu.setRenderDrawColor(COLOR_EDITING);
+    const current_alpha: u8 = 160;
+    const adjacent_alpha: u8 = 60;
+    const current_text_alpha: u8 = 230;
+    const adjacent_text_alpha: u8 = 50;
+
+    // Draw faded previous/next items for cycle buttons
+    if (item.cycle_names) |names| {
+        if (item.cycle_index) |idx| {
+            const count: u8 = @intCast(names.len);
+            const prev_idx = if (idx.* == 0) count - 1 else idx.* - 1;
+            const next_idx = (idx.* + 1) % count;
+
+            // Previous item box + text
+            const prev_y = y - adj_y_step;
+            try gpu.setRenderDrawColor(.{ .r = COLOR_EDITING.r, .g = COLOR_EDITING.g, .b = COLOR_EDITING.b, .a = adjacent_alpha });
+            try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = prev_y, .w = btn_w, .h = BTN_H });
+            try text.writeCenterWithAlpha(item.font, names[prev_idx], .{
+                .x = center_x,
+                .y = prev_y + @divFloor(BTN_H, 2),
+            }, adjacent_text_alpha);
+
+            // Next item box + text
+            const next_y = y + adj_y_step;
+            try gpu.setRenderDrawColor(.{ .r = COLOR_EDITING.r, .g = COLOR_EDITING.g, .b = COLOR_EDITING.b, .a = adjacent_alpha });
+            try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = next_y, .w = btn_w, .h = BTN_H });
+            try text.writeCenterWithAlpha(item.font, names[next_idx], .{
+                .x = center_x,
+                .y = next_y + @divFloor(BTN_H, 2),
+            }, adjacent_text_alpha);
+        }
+    }
+
+    // Current item box
+    try gpu.setRenderDrawColor(.{ .r = COLOR_EDITING.r, .g = COLOR_EDITING.g, .b = COLOR_EDITING.b, .a = current_alpha });
     try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H });
 
     var label_buf: [64]u8 = undefined;
@@ -469,14 +613,15 @@ fn drawMinimalEdit() !void {
         },
         else => item.label,
     };
-    try text.writeCenter(item.font, label, .{
-        .x = btn_x + @divFloor(btn_w, 2),
+    try text.writeCenterWithAlpha(item.font, label, .{
+        .x = center_x,
         .y = y + @divFloor(BTN_H, 2),
-    });
+    }, current_text_alpha);
 
-    try text.writeCenter(.small, "Enter: Apply  Esc: Cancel", .{
+    const hint = if (item.cycle_names != null) "Up/Down: Cycle  Enter: Confirm  Esc: Back" else "Enter: Apply  Esc: Cancel";
+    try text.writeCenter(.small, hint, .{
         .x = @divFloor(window.width, 2),
-        .y = y + BTN_H + BTN_GAP + 4,
+        .y = y + adj_y_step + BTN_H + BTN_GAP + 4,
     });
 }
 

@@ -6,6 +6,7 @@ const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 
 var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionClose } },
+    .{ .label = "Play", .kind = .{ .button = actionPlay } },
     .{ .label = "Settings", .kind = .{ .button = actionOpenSettings } },
     .{ .label = "Background Editor", .kind = .{ .button = actionOpenBackgroundEditor } },
     .{ .label = "Level Editor", .kind = .{ .button = actionOpenLevelEditorMenu } },
@@ -39,6 +40,12 @@ fn actionOpenMainMenu() anyerror!void {
 
 fn openMainMenu() void {
     menu.open(&main_items, .{});
+}
+
+fn actionPlay() anyerror!void {
+    state.editingBackground = false;
+    state.editingLevel = false;
+    menu.close();
 }
 
 fn actionOpenBackgroundEditor() anyerror!void {

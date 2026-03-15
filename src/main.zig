@@ -48,14 +48,19 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Background ideas
-//TODO: add more spiral centers
-//TODO: ability to zoom out (to see more details)
+//TODO: separate noise speed from spin speed
 //TODO: tunnel does not work with sine noise
-//TODO: ability to change noise values
+//TODO: remove flaky index approac
+//TODO: make it possible to tweak crt effect (own menu)
+//TODO: make it possible to turn crt effect off in the settings.
+//TODO: make it possible to randomize only the algorithms
+//TODO: make it possible to randomize everything except the selected algorithm
+//TODO: ask if values in each category are so that they have an effect on each of the algorithms in that section
 
 //Menu ideas:
 //TODO: gerhard richter style paint mixing
 //TODO: Norther lights
+
 
 //Menu:
 //TODO: hide the game and show the nice background swirl instead

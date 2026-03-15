@@ -55,12 +55,18 @@ pub fn write(size: Font, t: [:0]const u8, position: IVec2) !void {
 }
 
 pub fn writeCenter(size: Font, t: [:0]const u8, center: IVec2) !void {
+    try writeCenterWithAlpha(size, t, center, 255);
+}
+
+pub fn writeCenterWithAlpha(size: Font, t: [:0]const u8, center: IVec2, alpha: u8) !void {
     const color = sdl.Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
     const surface = try sdl.ttf.renderTextSolid(getFont(size), t, color);
     defer sdl.destroySurface(surface);
 
     const texture = try tex.createStandaloneTexture(surface);
     defer tex.destroyTexture(texture);
+
+    try tex.setTextureAlphaMod(texture, alpha);
 
     const rect = sdl.Rect{
         .x = center.x - @divFloor(surface.*.w, 2),

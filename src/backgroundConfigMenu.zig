@@ -14,7 +14,7 @@ var offset_x_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = -0.5, .m
 var offset_y_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = -0.5, .max = 0.5, .repeat_delay_ms = 75 };
 var offset_z_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .max = 5.0, .repeat_delay_ms = 75 };
 
-// New shared controls
+// Shared controls
 var noise_scale_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .max = 4.0, .repeat_delay_ms = 75 };
 var noise_octaves_config = menu.ConfigData{ .value = 5.0, .step = 1.0, .min = 1.0, .max = 16.0, .repeat_delay_ms = 150 };
 var color_intensity_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .max = 3.0, .repeat_delay_ms = 75 };
@@ -80,15 +80,41 @@ const color_names = [COLOR_COUNT][:0]const u8{
     "Color: Posterize",
 };
 
-// Indices for algorithm label items (update if items array changes)
-const IDX_SWIRL: usize = 1;
-const IDX_NOISE: usize = 16;
-const IDX_COLOR: usize = 20;
+// ============================================================
+// Top-level menu
+// ============================================================
 
-var items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
+const IDX_MAIN_SWIRL: usize = 1;
+const IDX_MAIN_NOISE: usize = 4;
+const IDX_MAIN_COLOR: usize = 7;
+
+var main_items = [_]menu.Item{
+    .{ .label = "Exit Editor", .kind = .{ .button = actionExitEditor }, .font = .medium },
     // --- Swirl ---
-    .{ .label = "Swirl: Paint Mix", .kind = .{ .button = actionCycleSwirl }, .font = .medium }, // 1
+    .{ .label = "Swirl: Paint Mix", .kind = .{ .button = actionCycleSwirl }, .font = .medium, .cycle_names = &swirl_names, .cycle_index = &swirl_type_value, .on_cycle = onCycleSync },
+    .{ .label = "Tweak Swirl", .kind = .{ .button = actionOpenSwirlMenu }, .font = .medium },
+    .{ .label = "Randomize Swirl", .kind = .{ .button = actionRandomizeSwirl }, .font = .medium },
+    // --- Noise ---
+    .{ .label = "Noise: Sine Turbulence", .kind = .{ .button = actionCycleNoise }, .font = .medium, .cycle_names = &noise_names, .cycle_index = &noise_type_value, .on_cycle = onCycleSync },
+    .{ .label = "Tweak Noise", .kind = .{ .button = actionOpenNoiseMenu }, .font = .medium },
+    .{ .label = "Randomize Noise", .kind = .{ .button = actionRandomizeNoise }, .font = .medium },
+    // --- Color ---
+    .{ .label = "Color: Distance Blend", .kind = .{ .button = actionCycleColorMode }, .font = .medium, .cycle_names = &color_names, .cycle_index = &color_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "Tweak Colors", .kind = .{ .button = actionOpenColorMenu }, .font = .medium },
+    .{ .label = "Randomize Colors", .kind = .{ .button = actionRandomizeColors }, .font = .medium },
+    // --- Global ---
+    .{ .label = "Tweak Global", .kind = .{ .button = actionOpenGlobalMenu }, .font = .medium },
+    .{ .label = "Randomize", .kind = .{ .button = actionRandomize }, .font = .medium },
+    .{ .label = "Randomize All", .kind = .{ .button = actionRandomizeAll }, .font = .medium },
+    .{ .label = "Save Preset", .kind = .{ .button = actionSavePreset }, .font = .medium },
+};
+
+// ============================================================
+// Sub-menus
+// ============================================================
+
+var swirl_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Spin Rotation", .kind = .{ .config = &spin_rotation_config }, .font = .medium },
     .{ .label = "Spin Speed", .kind = .{ .config = &spin_speed_config }, .font = .medium },
     .{ .label = "Spin Amount", .kind = .{ .config = &spin_amount_config }, .font = .medium },
@@ -102,14 +128,16 @@ var items = [_]menu.Item{
     .{ .label = "Center 3 Y", .kind = .{ .config = &swirl_c3_y_config }, .font = .medium },
     .{ .label = "Center 4 X", .kind = .{ .config = &swirl_c4_x_config }, .font = .medium },
     .{ .label = "Center 4 Y", .kind = .{ .config = &swirl_c4_y_config }, .font = .medium },
-    .{ .label = "Randomize Swirl", .kind = .{ .button = actionRandomizeSwirl }, .font = .medium },
-    // --- Noise ---
-    .{ .label = "Noise: Sine Turbulence", .kind = .{ .button = actionCycleNoise }, .font = .medium }, // 17 (was split, now IDX_NOISE = 17 - count: Back(1) + Swirl(16) = 17)
+};
+
+var noise_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Noise Scale", .kind = .{ .config = &noise_scale_config }, .font = .medium },
     .{ .label = "Noise Octaves", .kind = .{ .config = &noise_octaves_config }, .font = .medium },
-    .{ .label = "Randomize Noise", .kind = .{ .button = actionRandomizeNoise }, .font = .medium },
-    // --- Color ---
-    .{ .label = "Color: Distance Blend", .kind = .{ .button = actionCycleColorMode }, .font = .medium }, // 21
+};
+
+var color_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Color Intensity", .kind = .{ .config = &color_intensity_config }, .font = .medium },
     .{ .label = "Contrast", .kind = .{ .config = &contrast_config }, .font = .medium },
     .{ .label = "Colour 1 Hue", .kind = .{ .config = &c1_h_config }, .font = .medium },
@@ -121,22 +149,23 @@ var items = [_]menu.Item{
     .{ .label = "Colour 3 Hue", .kind = .{ .config = &c3_h_config }, .font = .medium },
     .{ .label = "Colour 3 Sat", .kind = .{ .config = &c3_s_config }, .font = .medium },
     .{ .label = "Colour 3 Val", .kind = .{ .config = &c3_v_config }, .font = .medium },
-    .{ .label = "Randomize Colors", .kind = .{ .button = actionRandomizeColors }, .font = .medium },
-    // --- Global ---
+};
+
+var global_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Offset X", .kind = .{ .config = &offset_x_config }, .font = .medium },
     .{ .label = "Offset Y", .kind = .{ .config = &offset_y_config }, .font = .medium },
     .{ .label = "Zoom", .kind = .{ .config = &offset_z_config }, .font = .medium },
     .{ .label = "Pixel Filter", .kind = .{ .config = &pixel_filter_config }, .font = .medium },
-    // --- Actions ---
-    .{ .label = "Randomize", .kind = .{ .button = actionRandomize }, .font = .medium },
-    .{ .label = "Randomize All", .kind = .{ .button = actionRandomizeAll }, .font = .medium },
-    .{ .label = "Save Preset", .kind = .{ .button = actionSavePreset }, .font = .medium },
-    .{ .label = "Exit Editor", .kind = .{ .button = actionExitEditor }, .font = .medium },
 };
+
+// ============================================================
+// Public API
+// ============================================================
 
 pub fn open() void {
     loadFromUniforms();
-    menu.open(&items, .{ .minimal_edit = true });
+    menu.open(&main_items, .{ .minimal_edit = true });
 }
 
 pub fn sync() void {
@@ -166,6 +195,10 @@ pub fn sync() void {
     background_paint.uniforms.noise_type = @floatFromInt(noise_type_value);
     background_paint.uniforms.color_mode = @floatFromInt(color_mode_value);
 }
+
+// ============================================================
+// Internal helpers
+// ============================================================
 
 fn loadFromUniforms() void {
     const u = background_paint.uniforms;
@@ -209,15 +242,44 @@ fn loadHsvFromRgb(rgb: [3]f32, h_cfg: *menu.ConfigData, s_cfg: *menu.ConfigData,
     v_cfg.value = hsv[2];
 }
 
-fn updateAlgorithmLabels() void {
-    items[IDX_SWIRL].label = swirl_names[swirl_type_value];
-    items[IDX_NOISE].label = noise_names[noise_type_value];
-    items[IDX_COLOR].label = color_names[color_mode_value];
+fn onCycleSync() void {
+    updateAlgorithmLabels();
+    sync();
 }
 
-fn actionBack() anyerror!void {
-    menu.close();
+fn updateAlgorithmLabels() void {
+    main_items[IDX_MAIN_SWIRL].label = swirl_names[swirl_type_value];
+    main_items[IDX_MAIN_NOISE].label = noise_names[noise_type_value];
+    main_items[IDX_MAIN_COLOR].label = color_names[color_mode_value];
 }
+
+// ============================================================
+// Navigation actions
+// ============================================================
+
+fn actionBackToMain() anyerror!void {
+    menu.open(&main_items, .{ .minimal_edit = true });
+}
+
+fn actionOpenSwirlMenu() anyerror!void {
+    menu.open(&swirl_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+}
+
+fn actionOpenNoiseMenu() anyerror!void {
+    menu.open(&noise_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+}
+
+fn actionOpenColorMenu() anyerror!void {
+    menu.open(&color_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+}
+
+fn actionOpenGlobalMenu() anyerror!void {
+    menu.open(&global_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+}
+
+// ============================================================
+// Algorithm cycling actions
+// ============================================================
 
 fn actionCycleSwirl() anyerror!void {
     swirl_type_value = (swirl_type_value + 1) % SWIRL_COUNT;
@@ -236,6 +298,10 @@ fn actionCycleColorMode() anyerror!void {
     updateAlgorithmLabels();
     sync();
 }
+
+// ============================================================
+// Randomize actions
+// ============================================================
 
 fn actionRandomizeSwirl() anyerror!void {
     const rng = std.crypto.random;
@@ -292,7 +358,6 @@ fn actionRandomizeAll() anyerror!void {
     background_paint.uniforms.swirl_type = @floatFromInt(rng.intRangeAtMost(u8, 0, SWIRL_COUNT - 1));
     background_paint.uniforms.noise_type = @floatFromInt(rng.intRangeAtMost(u8, 0, NOISE_COUNT - 1));
     background_paint.uniforms.color_mode = @floatFromInt(rng.intRangeAtMost(u8, 0, COLOR_COUNT - 1));
-    // Randomize values that background_paint.randomize() preserves
     background_paint.uniforms.swirl_segments = @floatFromInt(rng.intRangeAtMost(u8, 2, 12));
     background_paint.uniforms.swirl_count = @floatFromInt(rng.intRangeAtMost(u8, 1, 4));
     background_paint.uniforms.offset_z = 0.3 + rng.float(f32) * 2.5;
@@ -302,6 +367,10 @@ fn actionRandomizeAll() anyerror!void {
     background_paint.uniforms.swirl_center_4 = .{ (rng.float(f32) - 0.5) * 0.6, (rng.float(f32) - 0.5) * 0.6 };
     loadFromUniforms();
 }
+
+// ============================================================
+// Persistence / exit
+// ============================================================
 
 fn actionSavePreset() anyerror!void {
     sync();

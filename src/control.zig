@@ -176,10 +176,10 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
             }
         },
         .open_config_menu => {
-            if (!delay.check("levelConfigToggle")) {
+            if (!delay.check("menuToggle")) {
                 const cfg = levelEditor.getConfig();
                 levelConfigMenu.open(cfg.gravity, cfg.pixelsPerMeter, cfg.splitscreen, cfg.fixedCamera);
-                delay.action("levelConfigToggle", 300);
+                delay.action("menuToggle", 300);
             }
         },
         .open_sprite_picker => {
