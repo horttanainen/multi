@@ -105,7 +105,17 @@ pub const PaintUniforms = extern struct {
     swirl_type: f32 = 0,
     noise_type: f32 = 0,
     color_mode: f32 = 0,
-    _pad4: f32 = 0,
+    noise_scale: f32 = 1.0,
+    noise_octaves: f32 = 5.0,
+    offset_z: f32 = 1.0,
+    color_intensity: f32 = 1.0,
+    swirl_segments: f32 = 6.0,
+    swirl_count: f32 = 1.0,
+    swirl_center_1: [2]f32 = .{ 0.0, 0.0 },
+    swirl_center_2: [2]f32 = .{ 0.25, 0.0 },
+    swirl_center_3: [2]f32 = .{ -0.25, 0.2 },
+    swirl_center_4: [2]f32 = .{ 0.0, -0.25 },
+    _pad5: [2]f32 = .{ 0, 0 },
 };
 
 // ============================================================

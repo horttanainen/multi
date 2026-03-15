@@ -30,6 +30,20 @@ const StoredSettings = struct {
     bg_swirl_type: ?f32 = null,
     bg_noise_type: ?f32 = null,
     bg_color_mode: ?f32 = null,
+    bg_offset_z: ?f32 = null,
+    bg_noise_scale: ?f32 = null,
+    bg_noise_octaves: ?f32 = null,
+    bg_color_intensity: ?f32 = null,
+    bg_swirl_segments: ?f32 = null,
+    bg_swirl_count: ?f32 = null,
+    bg_swirl_c1_x: ?f32 = null,
+    bg_swirl_c1_y: ?f32 = null,
+    bg_swirl_c2_x: ?f32 = null,
+    bg_swirl_c2_y: ?f32 = null,
+    bg_swirl_c3_x: ?f32 = null,
+    bg_swirl_c3_y: ?f32 = null,
+    bg_swirl_c4_x: ?f32 = null,
+    bg_swirl_c4_y: ?f32 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -93,6 +107,16 @@ fn loadBgPreset(s: StoredSettings) void {
         .swirl_type = s.bg_swirl_type orelse 0,
         .noise_type = s.bg_noise_type orelse 0,
         .color_mode = s.bg_color_mode orelse 0,
+        .offset_z = s.bg_offset_z orelse 1.0,
+        .noise_scale = s.bg_noise_scale orelse 1.0,
+        .noise_octaves = s.bg_noise_octaves orelse 5.0,
+        .color_intensity = s.bg_color_intensity orelse 1.0,
+        .swirl_segments = s.bg_swirl_segments orelse 6.0,
+        .swirl_count = s.bg_swirl_count orelse 1.0,
+        .swirl_center_1 = .{ s.bg_swirl_c1_x orelse 0.0, s.bg_swirl_c1_y orelse 0.0 },
+        .swirl_center_2 = .{ s.bg_swirl_c2_x orelse 0.25, s.bg_swirl_c2_y orelse 0.0 },
+        .swirl_center_3 = .{ s.bg_swirl_c3_x orelse -0.25, s.bg_swirl_c3_y orelse 0.2 },
+        .swirl_center_4 = .{ s.bg_swirl_c4_x orelse 0.0, s.bg_swirl_c4_y orelse -0.25 },
     };
 }
 
@@ -172,6 +196,20 @@ pub fn save() !void {
         stored.bg_swirl_type = bg_preset.swirl_type;
         stored.bg_noise_type = bg_preset.noise_type;
         stored.bg_color_mode = bg_preset.color_mode;
+        stored.bg_offset_z = bg_preset.offset_z;
+        stored.bg_noise_scale = bg_preset.noise_scale;
+        stored.bg_noise_octaves = bg_preset.noise_octaves;
+        stored.bg_color_intensity = bg_preset.color_intensity;
+        stored.bg_swirl_segments = bg_preset.swirl_segments;
+        stored.bg_swirl_count = bg_preset.swirl_count;
+        stored.bg_swirl_c1_x = bg_preset.swirl_center_1[0];
+        stored.bg_swirl_c1_y = bg_preset.swirl_center_1[1];
+        stored.bg_swirl_c2_x = bg_preset.swirl_center_2[0];
+        stored.bg_swirl_c2_y = bg_preset.swirl_center_2[1];
+        stored.bg_swirl_c3_x = bg_preset.swirl_center_3[0];
+        stored.bg_swirl_c3_y = bg_preset.swirl_center_3[1];
+        stored.bg_swirl_c4_x = bg_preset.swirl_center_4[0];
+        stored.bg_swirl_c4_y = bg_preset.swirl_center_4[1];
     }
 
     const contents = std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(stored, .{ .whitespace = .indent_2 })}) catch |err| {

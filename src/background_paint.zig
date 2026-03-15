@@ -31,10 +31,17 @@ pub fn randomize() void {
     const sat: f32 = 0.55 + rng.float(f32) * 0.3;
     const val: f32 = 0.40 + rng.float(f32) * 0.35;
 
-    // Preserve algorithm selections across randomization
+    // Preserve algorithm selections and structure across randomization
     const prev_swirl = uniforms.swirl_type;
     const prev_noise = uniforms.noise_type;
     const prev_color = uniforms.color_mode;
+    const prev_offset_z = uniforms.offset_z;
+    const prev_swirl_count = uniforms.swirl_count;
+    const prev_swirl_segments = uniforms.swirl_segments;
+    const prev_c1 = uniforms.swirl_center_1;
+    const prev_c2 = uniforms.swirl_center_2;
+    const prev_c3 = uniforms.swirl_center_3;
+    const prev_c4 = uniforms.swirl_center_4;
 
     uniforms = .{
         .resolution = .{ @floatFromInt(window.width), @floatFromInt(window.height) },
@@ -51,6 +58,16 @@ pub fn randomize() void {
         .swirl_type = prev_swirl,
         .noise_type = prev_noise,
         .color_mode = prev_color,
+        .noise_scale = 0.5 + rng.float(f32) * 2.0,
+        .noise_octaves = @floatFromInt(rng.intRangeAtMost(u8, 2, 10)),
+        .offset_z = prev_offset_z,
+        .color_intensity = 0.5 + rng.float(f32) * 1.5,
+        .swirl_segments = prev_swirl_segments,
+        .swirl_count = prev_swirl_count,
+        .swirl_center_1 = prev_c1,
+        .swirl_center_2 = prev_c2,
+        .swirl_center_3 = prev_c3,
+        .swirl_center_4 = prev_c4,
     };
 
     std.log.info("background_paint: GPU shader (pixel_filter={d:.0})", .{uniforms.pixel_filter});
