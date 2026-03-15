@@ -19,6 +19,7 @@ const camera = @import("camera.zig");
 const animation = @import("animation.zig");
 
 const audio = @import("audio.zig");
+const music = @import("music.zig");
 const delay = @import("delay.zig");
 const viewport = @import("viewport.zig");
 const friction = @import("friction.zig");
@@ -41,29 +42,37 @@ const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
 const background_paint = @import("background_paint.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
+const musicConfigMenu = @import("musicConfigMenu.zig");
 const gibbing = @import("gibbing.zig");
 const data = @import("data.zig");
 const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Coupling music into the background:
+// Yes, absolutely. The basic approach:
+// 1. Audio analysis on CPU each frame — tap into miniaudio's playback output (e.g., via a custom ma_node in the node graph, or a loopback capture device) to get PCM samples. Compute a few features:
+//   - RMS volume (overall energy)
+//   - Band-split energy (bass / mid / treble) via simple bandpass filters or a small FFT
+//   - Beat detection (track energy spikes in the bass band)
+// 2. Pass as uniforms — add a few floats to PaintUniforms like audio_bass, audio_mid, audio_treble, audio_beat. Push them each frame alongside the existing uniforms.
+// 3. Use in shader — modulate existing params: pulse spin_speed or contrast with bass energy, shift colors with treble, spike spin_amount on beats, etc.
+
+// Considerations:
+// - miniaudio doesn't include FFT, so you'd either implement a small radix-2 FFT (~50 lines), use a tiny lib, or just do simple RMS with biquad bandpass filters (miniaudio has ma_biquad) which is simpler and
+// sufficient for bass/mid/treble splits
+// - Latency: the data callback runs on a separate thread, so you'd write the analysis results to a shared atomic/volatile variable that the main thread reads each frame
+// - Smoothing: you'd want to lerp/decay the values so they don't flicker — something like value = max(new_sample, value * 0.92)
+
+// It's very doable with what you already have in the project.
+
 //Background ideas
-//TODO: separate noise speed from spin speed
-//TODO: tunnel does not work with sine noise
 //TODO: remove flaky index approac
 //TODO: make it possible to tweak crt effect (own menu)
 //TODO: make it possible to turn crt effect off in the settings.
 //TODO: make it possible to randomize only the algorithms
 //TODO: make it possible to randomize everything except the selected algorithm
 //TODO: ask if values in each category are so that they have an effect on each of the algorithms in that section
-
-//Menu ideas:
-//TODO: gerhard richter style paint mixing
-//TODO: Norther lights
-
-
-//Menu:
-//TODO: hide the game and show the nice background swirl instead
 
 //Level editor
 //TODO: make level editor not generate the level everytime we make changes
@@ -72,6 +81,7 @@ const Sprite = entity.Sprite;
 //TODO: allow for copying existing entities j
 
 //Small improvements
+//TODO: make settings.zig use data.zig to read the json
 //TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
@@ -128,10 +138,10 @@ const Sprite = entity.Sprite;
 //TODO: try if movement vector should be to the direction of slope character is standing on
 
 //Character
-//TODO: Create jumping animation 
+//TODO: Create jumping animation
 //TODO: Create landing animation
 //TODO: Create sliding animation
-//TODO: Create wall slide animation that is played when player touches wall 
+//TODO: Create wall slide animation that is played when player touches wall
 
 //Items to pick up
 //TODO: jetpack
@@ -164,6 +174,7 @@ pub fn main() !void {
     try window.init();
     time.init();
     try audio.init();
+    try music.init();
     try gpu.init(try window.getWindow());
     background_paint.init();
     try text.init();
@@ -171,6 +182,7 @@ pub fn main() !void {
     try debug.init();
     try data.init();
     try settings.init();
+    settings.applyMusic();
     try lut.init();
     settings.apply();
     settings.applyBackgroundPreset();
@@ -222,6 +234,7 @@ pub fn main() !void {
     box2d.destroyWorld();
     text.cleanup();
     gpu.cleanup();
+    music.cleanup();
     audio.cleanup();
     window.cleanup();
     allocator.deinit();

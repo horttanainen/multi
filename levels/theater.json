@@ -3,6 +3,8 @@
         "x": 4096,
         "y": 4096
     },
+    "splitscreen": true,
+    "fixedCamera": false,
     "parallaxEntities": [
         {
             "parallaxDistance": 2,

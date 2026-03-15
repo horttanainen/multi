@@ -1,0 +1,249 @@
+const std = @import("std");
+const menu = @import("menu.zig");
+const settings = @import("settings.zig");
+
+// ============================================================
+// Style selection
+// ============================================================
+
+const STYLE_COUNT = 5;
+var style_value: u8 = 0;
+
+const style_names = [STYLE_COUNT][:0]const u8{
+    "Style: Ambient",
+    "Style: House",
+    "Style: Piano",
+    "Style: Choir",
+    "Style: Minecraft",
+};
+
+// ============================================================
+// Shared configs (all styles)
+// ============================================================
+
+// zig fmt: off
+var reverb_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var bpm_config    = menu.ConfigData{ .value = 0.36, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 30.0, .shader_scale = 170.0, .repeat_delay_ms = 75 };
+
+// --- Ambient-specific ---
+var amb_drone_vol_config  = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
+var amb_pad_vol_config    = menu.ConfigData{ .value = 0.53, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.15, .repeat_delay_ms = 75 };
+var amb_melody_vol_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.12, .repeat_delay_ms = 75 };
+var amb_arp_vol_config    = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.05, .repeat_delay_ms = 75 };
+
+// --- House-specific ---
+var house_kick_vol_config  = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.5,  .repeat_delay_ms = 75 };
+var house_hihat_vol_config = menu.ConfigData{ .value = 0.48, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
+var house_bass_vol_config  = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.4,  .repeat_delay_ms = 75 };
+var house_pad_vol_config   = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.12, .repeat_delay_ms = 75 };
+var house_stab_config      = menu.ConfigData{ .value = 0.4, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+
+// --- Piano-specific ---
+var piano_note_vol_config    = menu.ConfigData{ .value = 0.48, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
+var piano_rest_config        = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var piano_brightness_config  = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+
+// --- Choir-specific ---
+var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
+var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+// zig fmt: on
+
+// ============================================================
+// Menu items
+// ============================================================
+
+var stored_back_fn: ?*const fn () anyerror!void = null;
+
+const IDX_STYLE: usize = 1;
+
+var main_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
+    .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
+    .{ .label = "Tweak", .kind = .{ .button = actionOpenTweak }, .font = .medium },
+    .{ .label = "BPM", .kind = .{ .config = &bpm_config }, .font = .medium },
+    .{ .label = "Reverb", .kind = .{ .config = &reverb_config }, .font = .medium },
+};
+
+// --- Ambient sub-menu ---
+var ambient_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Drone Volume", .kind = .{ .config = &amb_drone_vol_config }, .font = .medium },
+    .{ .label = "Pad Volume", .kind = .{ .config = &amb_pad_vol_config }, .font = .medium },
+    .{ .label = "Melody Volume", .kind = .{ .config = &amb_melody_vol_config }, .font = .medium },
+    .{ .label = "Arp Volume", .kind = .{ .config = &amb_arp_vol_config }, .font = .medium },
+};
+
+// --- House sub-menu ---
+var house_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Kick Volume", .kind = .{ .config = &house_kick_vol_config }, .font = .medium },
+    .{ .label = "Hi-hat Volume", .kind = .{ .config = &house_hihat_vol_config }, .font = .medium },
+    .{ .label = "Bass Volume", .kind = .{ .config = &house_bass_vol_config }, .font = .medium },
+    .{ .label = "Pad Volume", .kind = .{ .config = &house_pad_vol_config }, .font = .medium },
+    .{ .label = "Stab Chance", .kind = .{ .config = &house_stab_config }, .font = .medium },
+};
+
+// --- Piano sub-menu ---
+var piano_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Note Volume", .kind = .{ .config = &piano_note_vol_config }, .font = .medium },
+    .{ .label = "Rest Chance", .kind = .{ .config = &piano_rest_config }, .font = .medium },
+    .{ .label = "Brightness", .kind = .{ .config = &piano_brightness_config }, .font = .medium },
+};
+
+// --- Choir sub-menu ---
+var choir_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Choir Volume", .kind = .{ .config = &choir_vol_config }, .font = .medium },
+    .{ .label = "Breathiness", .kind = .{ .config = &choir_breathiness_config }, .font = .medium },
+};
+
+// ============================================================
+// Public API
+// ============================================================
+
+pub fn open(back_fn: ?*const fn () anyerror!void) void {
+    stored_back_fn = back_fn;
+    loadFromParams();
+    menu.open(&main_items, .{ .minimal_edit = true, .back_fn = back_fn });
+}
+
+// ============================================================
+// Internal helpers
+// ============================================================
+
+fn loadFromParams() void {
+    style_value = @intFromEnum(settings.music_style);
+    updateStyleLabel();
+
+    fromShader(&bpm_config, settings.music_bpm);
+    reverb_config.value = settings.music_reverb_mix;
+
+    switch (settings.music_style) {
+        .ambient => {
+            fromShader(&amb_drone_vol_config, settings.music_ambient_drone_vol);
+            fromShader(&amb_pad_vol_config, settings.music_ambient_pad_vol);
+            fromShader(&amb_melody_vol_config, settings.music_ambient_melody_vol);
+            fromShader(&amb_arp_vol_config, settings.music_ambient_arp_vol);
+        },
+        .house => {
+            fromShader(&house_kick_vol_config, settings.music_house_kick_vol);
+            fromShader(&house_hihat_vol_config, settings.music_house_hihat_vol);
+            fromShader(&house_bass_vol_config, settings.music_house_bass_vol);
+            fromShader(&house_pad_vol_config, settings.music_house_pad_vol);
+            house_stab_config.value = settings.music_house_stab_chance;
+        },
+        .piano => {
+            fromShader(&piano_note_vol_config, settings.music_piano_note_vol);
+            piano_rest_config.value = settings.music_piano_rest_chance;
+            piano_brightness_config.value = settings.music_piano_brightness;
+        },
+        .choir => {
+            fromShader(&choir_vol_config, settings.music_choir_vol);
+            choir_breathiness_config.value = settings.music_choir_breathiness;
+        },
+        .minecraft => {
+            fromShader(&piano_note_vol_config, settings.music_piano_note_vol);
+            piano_rest_config.value = settings.music_piano_rest_chance;
+            piano_brightness_config.value = settings.music_piano_brightness;
+        },
+    }
+}
+
+fn updateStyleLabel() void {
+    main_items[IDX_STYLE].label = style_names[style_value];
+}
+
+fn toShader(cfg: *const menu.ConfigData) f32 {
+    return cfg.shader_offset + cfg.value * cfg.shader_scale;
+}
+
+fn fromShader(cfg: *menu.ConfigData, val: f32) void {
+    if (cfg.shader_scale == 0) return;
+    cfg.value = std.math.clamp((val - cfg.shader_offset) / cfg.shader_scale, 0.0, 1.0);
+}
+
+fn applyMenuToSettings(save_changes: bool) !void {
+    settings.music_style = @enumFromInt(style_value);
+    settings.music_bpm = toShader(&bpm_config);
+    settings.music_reverb_mix = reverb_config.value;
+
+    switch (settings.music_style) {
+        .ambient => {
+            settings.music_ambient_drone_vol = toShader(&amb_drone_vol_config);
+            settings.music_ambient_pad_vol = toShader(&amb_pad_vol_config);
+            settings.music_ambient_melody_vol = toShader(&amb_melody_vol_config);
+            settings.music_ambient_arp_vol = toShader(&amb_arp_vol_config);
+        },
+        .house => {
+            settings.music_house_kick_vol = toShader(&house_kick_vol_config);
+            settings.music_house_hihat_vol = toShader(&house_hihat_vol_config);
+            settings.music_house_bass_vol = toShader(&house_bass_vol_config);
+            settings.music_house_pad_vol = toShader(&house_pad_vol_config);
+            settings.music_house_stab_chance = house_stab_config.value;
+        },
+        .piano => {
+            settings.music_piano_note_vol = toShader(&piano_note_vol_config);
+            settings.music_piano_rest_chance = piano_rest_config.value;
+            settings.music_piano_brightness = piano_brightness_config.value;
+        },
+        .choir => {
+            settings.music_choir_vol = toShader(&choir_vol_config);
+            settings.music_choir_breathiness = choir_breathiness_config.value;
+        },
+        .minecraft => {
+            settings.music_piano_note_vol = toShader(&piano_note_vol_config);
+            settings.music_piano_rest_chance = piano_rest_config.value;
+            settings.music_piano_brightness = piano_brightness_config.value;
+        },
+    }
+
+    settings.applyMusic();
+    if (!save_changes) return;
+    try settings.save();
+}
+
+// ============================================================
+// Actions
+// ============================================================
+
+fn actionBack() anyerror!void {
+    try applyMenuToSettings(true);
+    if (stored_back_fn) |back| {
+        try back();
+    } else {
+        menu.close();
+    }
+}
+
+fn actionBackToMain() anyerror!void {
+    try applyMenuToSettings(false);
+    menu.open(&main_items, .{ .minimal_edit = true, .back_fn = stored_back_fn });
+}
+
+fn actionCycleStyle() anyerror!void {
+    style_value = (style_value + 1) % STYLE_COUNT;
+    updateStyleLabel();
+    try applyMenuToSettings(false);
+    loadFromParams();
+}
+
+fn onCycleStyle() void {
+    updateStyleLabel();
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleStyle: failed to apply settings: {}", .{err});
+        return;
+    };
+    loadFromParams();
+}
+
+fn actionOpenTweak() anyerror!void {
+    try applyMenuToSettings(false);
+    switch (settings.music_style) {
+        .ambient => menu.open(&ambient_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .house => menu.open(&house_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .piano => menu.open(&piano_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .choir => menu.open(&choir_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .minecraft => menu.open(&piano_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+    }
+}

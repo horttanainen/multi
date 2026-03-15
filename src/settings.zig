@@ -4,9 +4,32 @@ const fs = @import("fs.zig");
 const gpu = @import("gpu.zig");
 const lut = @import("lut.zig");
 const background_paint = @import("background_paint.zig");
+const music = @import("music.zig");
+const procedural_music = @import("procedural_music.zig");
+const procedural_house = @import("procedural_house.zig");
+const piano_generator = @import("piano_generator.zig");
+const minecraft_piano = @import("minecraft_piano.zig");
+const procedural_choir = @import("procedural_choir.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
+const DEFAULT_MUSIC_STYLE: music.Style = .house;
+const DEFAULT_MUSIC_BPM: f32 = 120.0;
+const DEFAULT_MUSIC_REVERB_MIX: f32 = 0.35;
+const DEFAULT_AMBIENT_DRONE_VOL: f32 = 0.15;
+const DEFAULT_AMBIENT_PAD_VOL: f32 = 0.08;
+const DEFAULT_AMBIENT_MELODY_VOL: f32 = 0.06;
+const DEFAULT_AMBIENT_ARP_VOL: f32 = 0.025;
+const DEFAULT_HOUSE_KICK_VOL: f32 = 0.25;
+const DEFAULT_HOUSE_HIHAT_VOL: f32 = 0.12;
+const DEFAULT_HOUSE_BASS_VOL: f32 = 0.2;
+const DEFAULT_HOUSE_PAD_VOL: f32 = 0.06;
+const DEFAULT_HOUSE_STAB_CHANCE: f32 = 0.4;
+const DEFAULT_PIANO_NOTE_VOL: f32 = 0.12;
+const DEFAULT_PIANO_REST_CHANCE: f32 = 0.5;
+const DEFAULT_PIANO_BRIGHTNESS: f32 = 0.5;
+const DEFAULT_CHOIR_VOL: f32 = 0.15;
+const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
@@ -48,17 +71,52 @@ const StoredSettings = struct {
     bg_noise_amplitude: ?f32 = null,
     bg_color_speed: ?f32 = null,
     bg_swirl_falloff: ?f32 = null,
+    music_style: ?u8 = null,
+    music_bpm: ?f32 = null,
+    music_reverb_mix: ?f32 = null,
+    music_ambient_drone_vol: ?f32 = null,
+    music_ambient_pad_vol: ?f32 = null,
+    music_ambient_melody_vol: ?f32 = null,
+    music_ambient_arp_vol: ?f32 = null,
+    music_house_kick_vol: ?f32 = null,
+    music_house_hihat_vol: ?f32 = null,
+    music_house_bass_vol: ?f32 = null,
+    music_house_pad_vol: ?f32 = null,
+    music_house_stab_chance: ?f32 = null,
+    music_piano_note_vol: ?f32 = null,
+    music_piano_rest_chance: ?f32 = null,
+    music_piano_brightness: ?f32 = null,
+    music_choir_vol: ?f32 = null,
+    music_choir_breathiness: ?f32 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
 var preferred_color_grading: ?[]u8 = null;
 var has_bg_preset: bool = false;
 var bg_preset: gpu.PaintUniforms = undefined;
+pub var music_style: music.Style = DEFAULT_MUSIC_STYLE;
+pub var music_bpm: f32 = DEFAULT_MUSIC_BPM;
+pub var music_reverb_mix: f32 = DEFAULT_MUSIC_REVERB_MIX;
+pub var music_ambient_drone_vol: f32 = DEFAULT_AMBIENT_DRONE_VOL;
+pub var music_ambient_pad_vol: f32 = DEFAULT_AMBIENT_PAD_VOL;
+pub var music_ambient_melody_vol: f32 = DEFAULT_AMBIENT_MELODY_VOL;
+pub var music_ambient_arp_vol: f32 = DEFAULT_AMBIENT_ARP_VOL;
+pub var music_house_kick_vol: f32 = DEFAULT_HOUSE_KICK_VOL;
+pub var music_house_hihat_vol: f32 = DEFAULT_HOUSE_HIHAT_VOL;
+pub var music_house_bass_vol: f32 = DEFAULT_HOUSE_BASS_VOL;
+pub var music_house_pad_vol: f32 = DEFAULT_HOUSE_PAD_VOL;
+pub var music_house_stab_chance: f32 = DEFAULT_HOUSE_STAB_CHANCE;
+pub var music_piano_note_vol: f32 = DEFAULT_PIANO_NOTE_VOL;
+pub var music_piano_rest_chance: f32 = DEFAULT_PIANO_REST_CHANCE;
+pub var music_piano_brightness: f32 = DEFAULT_PIANO_BRIGHTNESS;
+pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
+pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
     freePreferredColorGrading();
     has_bg_preset = false;
+    resetMusicSettings();
 
     var json_buf: [16384]u8 = undefined;
     const json_data = fs.readFile(SETTINGS_PATH, &json_buf) catch |err| switch (err) {
@@ -90,6 +148,7 @@ pub fn init() !void {
     }
 
     loadBgPreset(parsed.value);
+    loadMusicSettings(parsed.value);
 }
 
 fn loadBgPreset(s: StoredSettings) void {
@@ -161,6 +220,45 @@ pub fn apply() void {
     }
 }
 
+pub fn applyMusic() void {
+    const style_changed = music.current_style != music_style;
+
+    procedural_music.bpm = music_bpm;
+    procedural_music.reverb_mix = music_reverb_mix;
+    procedural_music.drone_vol = music_ambient_drone_vol;
+    procedural_music.pad_vol = music_ambient_pad_vol;
+    procedural_music.melody_vol = music_ambient_melody_vol;
+    procedural_music.arp_vol = music_ambient_arp_vol;
+
+    procedural_house.bpm = music_bpm;
+    procedural_house.reverb_mix = music_reverb_mix;
+    procedural_house.kick_vol = music_house_kick_vol;
+    procedural_house.hihat_vol = music_house_hihat_vol;
+    procedural_house.bass_vol = music_house_bass_vol;
+    procedural_house.pad_vol = music_house_pad_vol;
+    procedural_house.stab_chance = music_house_stab_chance;
+
+    piano_generator.bpm = music_bpm;
+    piano_generator.reverb_mix = music_reverb_mix;
+    piano_generator.note_vol = music_piano_note_vol;
+    piano_generator.rest_chance = music_piano_rest_chance;
+    piano_generator.brightness = music_piano_brightness;
+
+    minecraft_piano.bpm = music_bpm;
+    minecraft_piano.reverb_mix = music_reverb_mix;
+    minecraft_piano.note_vol = music_piano_note_vol;
+    minecraft_piano.rest_chance = music_piano_rest_chance;
+    minecraft_piano.brightness = music_piano_brightness;
+
+    procedural_choir.bpm = music_bpm;
+    procedural_choir.reverb_mix = music_reverb_mix;
+    procedural_choir.choir_vol = music_choir_vol;
+    procedural_choir.breathiness = music_choir_breathiness;
+
+    if (!style_changed) return;
+    music.playStyle(music_style);
+}
+
 pub fn applyBackgroundPreset() void {
     if (!has_bg_preset) return;
     const prev_res = background_paint.uniforms.resolution;
@@ -182,6 +280,23 @@ pub fn save() !void {
     var stored = StoredSettings{
         .lut_strength = lut_strength,
         .preferred_color_grading = if (preferred_color_grading) |p| @as(?[]const u8, p) else null,
+        .music_style = @intFromEnum(music_style),
+        .music_bpm = music_bpm,
+        .music_reverb_mix = music_reverb_mix,
+        .music_ambient_drone_vol = music_ambient_drone_vol,
+        .music_ambient_pad_vol = music_ambient_pad_vol,
+        .music_ambient_melody_vol = music_ambient_melody_vol,
+        .music_ambient_arp_vol = music_ambient_arp_vol,
+        .music_house_kick_vol = music_house_kick_vol,
+        .music_house_hihat_vol = music_house_hihat_vol,
+        .music_house_bass_vol = music_house_bass_vol,
+        .music_house_pad_vol = music_house_pad_vol,
+        .music_house_stab_chance = music_house_stab_chance,
+        .music_piano_note_vol = music_piano_note_vol,
+        .music_piano_rest_chance = music_piano_rest_chance,
+        .music_piano_brightness = music_piano_brightness,
+        .music_choir_vol = music_choir_vol,
+        .music_choir_breathiness = music_choir_breathiness,
     };
 
     if (has_bg_preset) {
@@ -239,4 +354,49 @@ fn freePreferredColorGrading() void {
         allocator.free(name);
         preferred_color_grading = null;
     }
+}
+
+fn resetMusicSettings() void {
+    music_style = DEFAULT_MUSIC_STYLE;
+    music_bpm = DEFAULT_MUSIC_BPM;
+    music_reverb_mix = DEFAULT_MUSIC_REVERB_MIX;
+    music_ambient_drone_vol = DEFAULT_AMBIENT_DRONE_VOL;
+    music_ambient_pad_vol = DEFAULT_AMBIENT_PAD_VOL;
+    music_ambient_melody_vol = DEFAULT_AMBIENT_MELODY_VOL;
+    music_ambient_arp_vol = DEFAULT_AMBIENT_ARP_VOL;
+    music_house_kick_vol = DEFAULT_HOUSE_KICK_VOL;
+    music_house_hihat_vol = DEFAULT_HOUSE_HIHAT_VOL;
+    music_house_bass_vol = DEFAULT_HOUSE_BASS_VOL;
+    music_house_pad_vol = DEFAULT_HOUSE_PAD_VOL;
+    music_house_stab_chance = DEFAULT_HOUSE_STAB_CHANCE;
+    music_piano_note_vol = DEFAULT_PIANO_NOTE_VOL;
+    music_piano_rest_chance = DEFAULT_PIANO_REST_CHANCE;
+    music_piano_brightness = DEFAULT_PIANO_BRIGHTNESS;
+    music_choir_vol = DEFAULT_CHOIR_VOL;
+    music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
+}
+
+fn loadMusicSettings(s: StoredSettings) void {
+    if (s.music_style) |style_int| {
+        if (style_int < 5) {
+            music_style = @enumFromInt(style_int);
+        }
+    }
+
+    music_bpm = std.math.clamp(s.music_bpm orelse DEFAULT_MUSIC_BPM, 30.0, 200.0);
+    music_reverb_mix = std.math.clamp(s.music_reverb_mix orelse DEFAULT_MUSIC_REVERB_MIX, 0.0, 1.0);
+    music_ambient_drone_vol = std.math.clamp(s.music_ambient_drone_vol orelse DEFAULT_AMBIENT_DRONE_VOL, 0.0, 1.0);
+    music_ambient_pad_vol = std.math.clamp(s.music_ambient_pad_vol orelse DEFAULT_AMBIENT_PAD_VOL, 0.0, 1.0);
+    music_ambient_melody_vol = std.math.clamp(s.music_ambient_melody_vol orelse DEFAULT_AMBIENT_MELODY_VOL, 0.0, 1.0);
+    music_ambient_arp_vol = std.math.clamp(s.music_ambient_arp_vol orelse DEFAULT_AMBIENT_ARP_VOL, 0.0, 1.0);
+    music_house_kick_vol = std.math.clamp(s.music_house_kick_vol orelse DEFAULT_HOUSE_KICK_VOL, 0.0, 1.0);
+    music_house_hihat_vol = std.math.clamp(s.music_house_hihat_vol orelse DEFAULT_HOUSE_HIHAT_VOL, 0.0, 1.0);
+    music_house_bass_vol = std.math.clamp(s.music_house_bass_vol orelse DEFAULT_HOUSE_BASS_VOL, 0.0, 1.0);
+    music_house_pad_vol = std.math.clamp(s.music_house_pad_vol orelse DEFAULT_HOUSE_PAD_VOL, 0.0, 1.0);
+    music_house_stab_chance = std.math.clamp(s.music_house_stab_chance orelse DEFAULT_HOUSE_STAB_CHANCE, 0.0, 1.0);
+    music_piano_note_vol = std.math.clamp(s.music_piano_note_vol orelse DEFAULT_PIANO_NOTE_VOL, 0.0, 1.0);
+    music_piano_rest_chance = std.math.clamp(s.music_piano_rest_chance orelse DEFAULT_PIANO_REST_CHANCE, 0.0, 1.0);
+    music_piano_brightness = std.math.clamp(s.music_piano_brightness orelse DEFAULT_PIANO_BRIGHTNESS, 0.0, 1.0);
+    music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
+    music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
 }

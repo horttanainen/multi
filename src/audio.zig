@@ -21,7 +21,7 @@ const SoundEntry = struct {
     len: u32,
 };
 
-var device_id: c.SDL_AudioDeviceID = 0;
+pub var device_id: c.SDL_AudioDeviceID = 0;
 var activeSounds = std.AutoHashMap(usize, *SoundEntry).init(allocator);
 var nextId: usize = 1;
 
