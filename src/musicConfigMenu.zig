@@ -4,6 +4,7 @@ const settings = @import("settings.zig");
 const state = @import("state.zig");
 const minecraft_piano = @import("minecraft_piano.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
+const procedural_choir = @import("procedural_choir.zig");
 
 // ============================================================
 // Style selection
@@ -38,6 +39,15 @@ const rock80s_cue_names = [ROCK80S_CUE_COUNT][:0]const u8{
     "Cue: Night Drive",
     "Cue: Power Ballad",
     "Cue: Combat",
+};
+
+const CHOIR_CUE_COUNT = 4;
+var choir_cue_value: u8 = 0;
+const choir_cue_names = [CHOIR_CUE_COUNT][:0]const u8{
+    "Cue: Cathedral",
+    "Cue: Procession",
+    "Cue: Vigil",
+    "Cue: Crusade",
 };
 
 // ============================================================
@@ -90,6 +100,8 @@ var rock80s_gate_config     = menu.ConfigData{ .value = 0.45, .step = 0.01, .min
 // --- Choir-specific ---
 var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
 var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var choir_drone_mix_config   = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var choir_chant_mix_config   = menu.ConfigData{ .value = 0.58, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 // zig fmt: on
 
 // ============================================================
@@ -167,8 +179,12 @@ var rock80s_items = [_]menu.Item{
 // --- Choir sub-menu ---
 var choir_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerChoirCue }, .font = .medium },
+    .{ .label = "Cue: Cathedral", .kind = .{ .button = actionCycleChoirCue }, .font = .medium, .cycle_names = &choir_cue_names, .cycle_index = &choir_cue_value, .on_cycle = onCycleChoirCue },
     .{ .label = "Choir Volume", .kind = .{ .config = &choir_vol_config }, .font = .medium },
     .{ .label = "Breathiness", .kind = .{ .config = &choir_breathiness_config }, .font = .medium },
+    .{ .label = "Drone Presence", .kind = .{ .config = &choir_drone_mix_config }, .font = .medium },
+    .{ .label = "Chant Presence", .kind = .{ .config = &choir_chant_mix_config }, .font = .medium },
 };
 
 // ============================================================
@@ -227,6 +243,9 @@ fn loadFromParams() void {
         .choir => {
             fromShader(&choir_vol_config, settings.music_choir_vol);
             choir_breathiness_config.value = settings.music_choir_breathiness;
+            choir_drone_mix_config.value = settings.music_choir_drone_mix;
+            choir_chant_mix_config.value = settings.music_choir_chant_mix;
+            choir_cue_value = settings.music_choir_cue;
         },
         .minecraft => {
             fromShader(&piano_note_vol_config, settings.music_piano_note_vol);
@@ -295,6 +314,9 @@ fn applyMenuToSettings(save_changes: bool) !void {
         .choir => {
             settings.music_choir_vol = toShader(&choir_vol_config);
             settings.music_choir_breathiness = choir_breathiness_config.value;
+            settings.music_choir_drone_mix = choir_drone_mix_config.value;
+            settings.music_choir_chant_mix = choir_chant_mix_config.value;
+            settings.music_choir_cue = choir_cue_value;
         },
         .minecraft => {
             settings.music_piano_note_vol = toShader(&piano_note_vol_config);
@@ -409,4 +431,23 @@ fn onCycleRock80sCue() void {
         return;
     };
     procedural_80s_rock.triggerCue();
+}
+
+fn actionTriggerChoirCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_choir.triggerCue();
+}
+
+fn actionCycleChoirCue() anyerror!void {
+    choir_cue_value = (choir_cue_value + 1) % CHOIR_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_choir.triggerCue();
+}
+
+fn onCycleChoirCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleChoirCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_choir.triggerCue();
 }

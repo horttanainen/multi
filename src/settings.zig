@@ -50,6 +50,9 @@ const DEFAULT_ROCK80S_GATE: f32 = 0.45;
 const DEFAULT_ROCK80S_CUE: u8 = @intFromEnum(procedural_80s_rock.CuePreset.arena);
 const DEFAULT_CHOIR_VOL: f32 = 0.15;
 const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
+const DEFAULT_CHOIR_DRONE_MIX: f32 = 0.55;
+const DEFAULT_CHOIR_CHANT_MIX: f32 = 0.58;
+const DEFAULT_CHOIR_CUE: u8 = @intFromEnum(procedural_choir.CuePreset.cathedral);
 
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
@@ -127,6 +130,9 @@ const StoredSettings = struct {
     music_rock80s_cue: ?u8 = null,
     music_choir_vol: ?f32 = null,
     music_choir_breathiness: ?f32 = null,
+    music_choir_drone_mix: ?f32 = null,
+    music_choir_chant_mix: ?f32 = null,
+    music_choir_cue: ?u8 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -169,6 +175,9 @@ pub var music_rock80s_gate: f32 = DEFAULT_ROCK80S_GATE;
 pub var music_rock80s_cue: u8 = DEFAULT_ROCK80S_CUE;
 pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
 pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
+pub var music_choir_drone_mix: f32 = DEFAULT_CHOIR_DRONE_MIX;
+pub var music_choir_chant_mix: f32 = DEFAULT_CHOIR_CHANT_MIX;
+pub var music_choir_cue: u8 = DEFAULT_CHOIR_CUE;
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
@@ -334,6 +343,9 @@ pub fn applyMusic() void {
     procedural_choir.reverb_mix = music_reverb_mix;
     procedural_choir.choir_vol = music_choir_vol;
     procedural_choir.breathiness = music_choir_breathiness;
+    procedural_choir.drone_mix = music_choir_drone_mix;
+    procedural_choir.chant_mix = music_choir_chant_mix;
+    procedural_choir.selected_cue = @enumFromInt(music_choir_cue);
 
     if (!style_changed) return;
     music.playStyle(music_style);
@@ -396,6 +408,9 @@ pub fn save() !void {
         .music_rock80s_cue = music_rock80s_cue,
         .music_choir_vol = music_choir_vol,
         .music_choir_breathiness = music_choir_breathiness,
+        .music_choir_drone_mix = music_choir_drone_mix,
+        .music_choir_chant_mix = music_choir_chant_mix,
+        .music_choir_cue = music_choir_cue,
     };
 
     if (has_bg_preset) {
@@ -492,6 +507,9 @@ fn resetMusicSettings() void {
     music_rock80s_cue = DEFAULT_ROCK80S_CUE;
     music_choir_vol = DEFAULT_CHOIR_VOL;
     music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
+    music_choir_drone_mix = DEFAULT_CHOIR_DRONE_MIX;
+    music_choir_chant_mix = DEFAULT_CHOIR_CHANT_MIX;
+    music_choir_cue = DEFAULT_CHOIR_CUE;
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
@@ -536,4 +554,7 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_rock80s_cue = std.math.clamp(s.music_rock80s_cue orelse DEFAULT_ROCK80S_CUE, 0, 3);
     music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
     music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
+    music_choir_drone_mix = std.math.clamp(s.music_choir_drone_mix orelse DEFAULT_CHOIR_DRONE_MIX, 0.0, 1.0);
+    music_choir_chant_mix = std.math.clamp(s.music_choir_chant_mix orelse DEFAULT_CHOIR_CHANT_MIX, 0.0, 1.0);
+    music_choir_cue = std.math.clamp(s.music_choir_cue orelse DEFAULT_CHOIR_CUE, 0, 3);
 }

@@ -134,10 +134,13 @@ pub fn CombFilter(comptime size: usize) type {
         buf: [size]f32 = [_]f32{0} ** size,
         pos: usize = 0,
         feedback: f32,
+        filter_store: f32 = 0,
+        damp: f32 = 0.3,
 
         pub fn process(self: *@This(), input: f32) f32 {
             const out = self.buf[self.pos];
-            self.buf[self.pos] = input + out * self.feedback;
+            self.filter_store += (out - self.filter_store) * (1.0 - self.damp);
+            self.buf[self.pos] = input + self.filter_store * self.feedback;
             self.pos = (self.pos + 1) % size;
             return out;
         }
@@ -152,7 +155,7 @@ pub fn AllpassFilter(comptime size: usize) type {
 
         pub fn process(self: *@This(), input: f32) f32 {
             const buffered = self.buf[self.pos];
-            const out = -input + buffered;
+            const out = -input * self.feedback + buffered;
             self.buf[self.pos] = input + buffered * self.feedback;
             self.pos = (self.pos + 1) % size;
             return out;
@@ -161,6 +164,7 @@ pub fn AllpassFilter(comptime size: usize) type {
 }
 
 pub fn StereoReverb(comptime comb_sizes: [4]usize, comptime allpass_sizes: [2]usize) type {
+    const PREDELAY_SAMPLES = 1200;
     const MonoState = struct {
         comb0: CombFilter(comb_sizes[0]) = .{ .feedback = 0.5 },
         comb1: CombFilter(comb_sizes[1]) = .{ .feedback = 0.5 },
@@ -168,6 +172,9 @@ pub fn StereoReverb(comptime comb_sizes: [4]usize, comptime allpass_sizes: [2]us
         comb3: CombFilter(comb_sizes[3]) = .{ .feedback = 0.5 },
         ap0: AllpassFilter(allpass_sizes[0]) = .{},
         ap1: AllpassFilter(allpass_sizes[1]) = .{},
+        predelay_buf: [PREDELAY_SAMPLES]f32 = [_]f32{0} ** PREDELAY_SAMPLES,
+        predelay_pos: usize = 0,
+        wet_lpf: LPF = LPF.init(4200.0),
     };
 
     return struct {
@@ -200,9 +207,14 @@ pub fn StereoReverb(comptime comb_sizes: [4]usize, comptime allpass_sizes: [2]us
         }
 
         fn processMono(state: *MonoState, input: f32) f32 {
-            const c = state.comb0.process(input) + state.comb1.process(input) +
-                state.comb2.process(input) + state.comb3.process(input);
-            return state.ap1.process(state.ap0.process(c * 0.25));
+            const delayed_input = state.predelay_buf[state.predelay_pos];
+            state.predelay_buf[state.predelay_pos] = input;
+            state.predelay_pos = (state.predelay_pos + 1) % PREDELAY_SAMPLES;
+
+            const c = state.comb0.process(delayed_input) + state.comb1.process(delayed_input) +
+                state.comb2.process(delayed_input) + state.comb3.process(delayed_input);
+            const diffused = state.ap1.process(state.ap0.process(c * 0.18));
+            return state.wet_lpf.process(diffused);
         }
     };
 }
