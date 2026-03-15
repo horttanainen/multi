@@ -2,6 +2,7 @@ const std = @import("std");
 const menu = @import("menu.zig");
 const settings = @import("settings.zig");
 const state = @import("state.zig");
+const minecraft_piano = @import("minecraft_piano.zig");
 
 // ============================================================
 // Style selection
@@ -16,6 +17,16 @@ const style_names = [STYLE_COUNT][:0]const u8{
     "Style: Piano",
     "Style: Choir",
     "Style: Minecraft",
+};
+
+const MINECRAFT_CUE_COUNT = 5;
+var minecraft_cue_value: u8 = 0;
+const minecraft_cue_names = [MINECRAFT_CUE_COUNT][:0]const u8{
+    "Cue: Washed Open",
+    "Cue: Warm Suspended",
+    "Cue: Bright Air",
+    "Cue: Lonely Sparse",
+    "Cue: Combat",
 };
 
 // ============================================================
@@ -51,6 +62,12 @@ var minecraft_cloud_mix_config  = menu.ConfigData{ .value = 0.7,  .step = 0.01, 
 var minecraft_harmony_mix_config = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var minecraft_bell_amount_config = menu.ConfigData{ .value = 0.45, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var minecraft_hammer_mix_config  = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_cue_gap_config      = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 4.0, .shader_scale = 116.0, .repeat_delay_ms = 75 };
+var minecraft_cue_length_config   = menu.ConfigData{ .value = 0.22, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 8.0, .shader_scale = 112.0, .repeat_delay_ms = 75 };
+var minecraft_cue_density_config  = menu.ConfigData{ .value = 0.45, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_wow_config          = menu.ConfigData{ .value = 0.2, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_blur_config         = menu.ConfigData{ .value = 0.4, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_attack_softness_config = menu.ConfigData{ .value = 0.35, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 
 // --- Choir-specific ---
 var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
@@ -102,6 +119,8 @@ var piano_items = [_]menu.Item{
 
 var minecraft_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerMinecraftCue }, .font = .medium },
+    .{ .label = "Cue: Washed Open", .kind = .{ .button = actionCycleMinecraftCue }, .font = .medium, .cycle_names = &minecraft_cue_names, .cycle_index = &minecraft_cue_value, .on_cycle = onCycleMinecraftCue },
     .{ .label = "Note Volume", .kind = .{ .config = &piano_note_vol_config }, .font = .medium },
     .{ .label = "Rest Chance", .kind = .{ .config = &piano_rest_config }, .font = .medium },
     .{ .label = "Brightness", .kind = .{ .config = &piano_brightness_config }, .font = .medium },
@@ -110,6 +129,10 @@ var minecraft_items = [_]menu.Item{
     .{ .label = "Harmony Presence", .kind = .{ .config = &minecraft_harmony_mix_config }, .font = .medium },
     .{ .label = "Bell Amount", .kind = .{ .config = &minecraft_bell_amount_config }, .font = .medium },
     .{ .label = "Hammer Noise", .kind = .{ .config = &minecraft_hammer_mix_config }, .font = .medium },
+    .{ .label = "Cue Density", .kind = .{ .config = &minecraft_cue_density_config }, .font = .medium },
+    .{ .label = "Wow", .kind = .{ .config = &minecraft_wow_config }, .font = .medium },
+    .{ .label = "Blur", .kind = .{ .config = &minecraft_blur_config }, .font = .medium },
+    .{ .label = "Attack Softness", .kind = .{ .config = &minecraft_attack_softness_config }, .font = .medium },
 };
 
 // --- Choir sub-menu ---
@@ -131,6 +154,11 @@ pub fn open(back_fn: ?*const fn () anyerror!void) void {
 }
 
 pub fn sync() void {
+    if (!menu.isOpen()) {
+        state.editingMusic = false;
+        return;
+    }
+
     applyMenuToSettings(false) catch |err| {
         std.log.warn("musicConfigMenu.sync: failed to apply live preview: {}", .{err});
     };
@@ -180,6 +208,11 @@ fn loadFromParams() void {
             minecraft_harmony_mix_config.value = settings.music_minecraft_harmony_mix;
             minecraft_bell_amount_config.value = settings.music_minecraft_bell_amount;
             minecraft_hammer_mix_config.value = settings.music_minecraft_hammer_mix;
+            minecraft_cue_value = settings.music_minecraft_cue;
+            minecraft_cue_density_config.value = settings.music_minecraft_cue_density;
+            minecraft_wow_config.value = settings.music_minecraft_wow;
+            minecraft_blur_config.value = settings.music_minecraft_blur;
+            minecraft_attack_softness_config.value = settings.music_minecraft_attack_softness;
         },
     }
 }
@@ -235,6 +268,11 @@ fn applyMenuToSettings(save_changes: bool) !void {
             settings.music_minecraft_harmony_mix = minecraft_harmony_mix_config.value;
             settings.music_minecraft_bell_amount = minecraft_bell_amount_config.value;
             settings.music_minecraft_hammer_mix = minecraft_hammer_mix_config.value;
+            settings.music_minecraft_cue = minecraft_cue_value;
+            settings.music_minecraft_cue_density = minecraft_cue_density_config.value;
+            settings.music_minecraft_wow = minecraft_wow_config.value;
+            settings.music_minecraft_blur = minecraft_blur_config.value;
+            settings.music_minecraft_attack_softness = minecraft_attack_softness_config.value;
         },
     }
 
@@ -287,4 +325,23 @@ fn actionOpenTweak() anyerror!void {
         .choir => menu.open(&choir_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
         .minecraft => menu.open(&minecraft_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
     }
+}
+
+fn actionTriggerMinecraftCue() anyerror!void {
+    try applyMenuToSettings(false);
+    minecraft_piano.triggerCue();
+}
+
+fn actionCycleMinecraftCue() anyerror!void {
+    minecraft_cue_value = (minecraft_cue_value + 1) % MINECRAFT_CUE_COUNT;
+    try applyMenuToSettings(false);
+    minecraft_piano.triggerCue();
+}
+
+fn onCycleMinecraftCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleMinecraftCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    minecraft_piano.triggerCue();
 }

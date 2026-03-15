@@ -34,6 +34,13 @@ const DEFAULT_MINECRAFT_CLOUD_MIX: f32 = 0.7;
 const DEFAULT_MINECRAFT_HARMONY_MIX: f32 = 0.55;
 const DEFAULT_MINECRAFT_BELL_AMOUNT: f32 = 0.45;
 const DEFAULT_MINECRAFT_HAMMER_MIX: f32 = 0.25;
+const DEFAULT_MINECRAFT_CUE: u8 = @intFromEnum(minecraft_piano.CuePreset.washed_open);
+const DEFAULT_MINECRAFT_CUE_GAP: f32 = 28.0;
+const DEFAULT_MINECRAFT_CUE_LENGTH: f32 = 32.0;
+const DEFAULT_MINECRAFT_CUE_DENSITY: f32 = 0.45;
+const DEFAULT_MINECRAFT_WOW: f32 = 0.2;
+const DEFAULT_MINECRAFT_BLUR: f32 = 0.4;
+const DEFAULT_MINECRAFT_ATTACK_SOFTNESS: f32 = 0.35;
 const DEFAULT_CHOIR_VOL: f32 = 0.15;
 const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 
@@ -98,6 +105,13 @@ const StoredSettings = struct {
     music_minecraft_harmony_mix: ?f32 = null,
     music_minecraft_bell_amount: ?f32 = null,
     music_minecraft_hammer_mix: ?f32 = null,
+    music_minecraft_cue: ?u8 = null,
+    music_minecraft_cue_gap: ?f32 = null,
+    music_minecraft_cue_length: ?f32 = null,
+    music_minecraft_cue_density: ?f32 = null,
+    music_minecraft_wow: ?f32 = null,
+    music_minecraft_blur: ?f32 = null,
+    music_minecraft_attack_softness: ?f32 = null,
     music_choir_vol: ?f32 = null,
     music_choir_breathiness: ?f32 = null,
 };
@@ -127,6 +141,13 @@ pub var music_minecraft_cloud_mix: f32 = DEFAULT_MINECRAFT_CLOUD_MIX;
 pub var music_minecraft_harmony_mix: f32 = DEFAULT_MINECRAFT_HARMONY_MIX;
 pub var music_minecraft_bell_amount: f32 = DEFAULT_MINECRAFT_BELL_AMOUNT;
 pub var music_minecraft_hammer_mix: f32 = DEFAULT_MINECRAFT_HAMMER_MIX;
+pub var music_minecraft_cue: u8 = DEFAULT_MINECRAFT_CUE;
+pub var music_minecraft_cue_gap: f32 = DEFAULT_MINECRAFT_CUE_GAP;
+pub var music_minecraft_cue_length: f32 = DEFAULT_MINECRAFT_CUE_LENGTH;
+pub var music_minecraft_cue_density: f32 = DEFAULT_MINECRAFT_CUE_DENSITY;
+pub var music_minecraft_wow: f32 = DEFAULT_MINECRAFT_WOW;
+pub var music_minecraft_blur: f32 = DEFAULT_MINECRAFT_BLUR;
+pub var music_minecraft_attack_softness: f32 = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
 pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
 pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 
@@ -273,6 +294,13 @@ pub fn applyMusic() void {
     minecraft_piano.harmony_mix = music_minecraft_harmony_mix;
     minecraft_piano.bell_amount = music_minecraft_bell_amount;
     minecraft_piano.hammer_mix = music_minecraft_hammer_mix;
+    minecraft_piano.selected_cue = @enumFromInt(music_minecraft_cue);
+    minecraft_piano.cue_gap = music_minecraft_cue_gap;
+    minecraft_piano.cue_length = music_minecraft_cue_length;
+    minecraft_piano.cue_density = music_minecraft_cue_density;
+    minecraft_piano.wow = music_minecraft_wow;
+    minecraft_piano.blur = music_minecraft_blur;
+    minecraft_piano.attack_softness = music_minecraft_attack_softness;
 
     procedural_choir.bpm = music_bpm;
     procedural_choir.reverb_mix = music_reverb_mix;
@@ -325,6 +353,13 @@ pub fn save() !void {
         .music_minecraft_harmony_mix = music_minecraft_harmony_mix,
         .music_minecraft_bell_amount = music_minecraft_bell_amount,
         .music_minecraft_hammer_mix = music_minecraft_hammer_mix,
+        .music_minecraft_cue = music_minecraft_cue,
+        .music_minecraft_cue_gap = music_minecraft_cue_gap,
+        .music_minecraft_cue_length = music_minecraft_cue_length,
+        .music_minecraft_cue_density = music_minecraft_cue_density,
+        .music_minecraft_wow = music_minecraft_wow,
+        .music_minecraft_blur = music_minecraft_blur,
+        .music_minecraft_attack_softness = music_minecraft_attack_softness,
         .music_choir_vol = music_choir_vol,
         .music_choir_breathiness = music_choir_breathiness,
     };
@@ -408,6 +443,13 @@ fn resetMusicSettings() void {
     music_minecraft_harmony_mix = DEFAULT_MINECRAFT_HARMONY_MIX;
     music_minecraft_bell_amount = DEFAULT_MINECRAFT_BELL_AMOUNT;
     music_minecraft_hammer_mix = DEFAULT_MINECRAFT_HAMMER_MIX;
+    music_minecraft_cue = DEFAULT_MINECRAFT_CUE;
+    music_minecraft_cue_gap = DEFAULT_MINECRAFT_CUE_GAP;
+    music_minecraft_cue_length = DEFAULT_MINECRAFT_CUE_LENGTH;
+    music_minecraft_cue_density = DEFAULT_MINECRAFT_CUE_DENSITY;
+    music_minecraft_wow = DEFAULT_MINECRAFT_WOW;
+    music_minecraft_blur = DEFAULT_MINECRAFT_BLUR;
+    music_minecraft_attack_softness = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
     music_choir_vol = DEFAULT_CHOIR_VOL;
     music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
 }
@@ -439,6 +481,13 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_minecraft_harmony_mix = std.math.clamp(s.music_minecraft_harmony_mix orelse DEFAULT_MINECRAFT_HARMONY_MIX, 0.0, 1.0);
     music_minecraft_bell_amount = std.math.clamp(s.music_minecraft_bell_amount orelse DEFAULT_MINECRAFT_BELL_AMOUNT, 0.0, 1.0);
     music_minecraft_hammer_mix = std.math.clamp(s.music_minecraft_hammer_mix orelse DEFAULT_MINECRAFT_HAMMER_MIX, 0.0, 1.0);
+    music_minecraft_cue = std.math.clamp(s.music_minecraft_cue orelse DEFAULT_MINECRAFT_CUE, 0, 4);
+    music_minecraft_cue_gap = std.math.clamp(s.music_minecraft_cue_gap orelse DEFAULT_MINECRAFT_CUE_GAP, 4.0, 120.0);
+    music_minecraft_cue_length = std.math.clamp(s.music_minecraft_cue_length orelse DEFAULT_MINECRAFT_CUE_LENGTH, 8.0, 120.0);
+    music_minecraft_cue_density = std.math.clamp(s.music_minecraft_cue_density orelse DEFAULT_MINECRAFT_CUE_DENSITY, 0.0, 1.0);
+    music_minecraft_wow = std.math.clamp(s.music_minecraft_wow orelse DEFAULT_MINECRAFT_WOW, 0.0, 1.0);
+    music_minecraft_blur = std.math.clamp(s.music_minecraft_blur orelse DEFAULT_MINECRAFT_BLUR, 0.0, 1.0);
+    music_minecraft_attack_softness = std.math.clamp(s.music_minecraft_attack_softness orelse DEFAULT_MINECRAFT_ATTACK_SOFTNESS, 0.0, 1.0);
     music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
     music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
 }
