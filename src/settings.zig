@@ -44,6 +44,10 @@ const StoredSettings = struct {
     bg_swirl_c3_y: ?f32 = null,
     bg_swirl_c4_x: ?f32 = null,
     bg_swirl_c4_y: ?f32 = null,
+    bg_noise_speed: ?f32 = null,
+    bg_noise_amplitude: ?f32 = null,
+    bg_color_speed: ?f32 = null,
+    bg_swirl_falloff: ?f32 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -117,6 +121,10 @@ fn loadBgPreset(s: StoredSettings) void {
         .swirl_center_2 = .{ s.bg_swirl_c2_x orelse 0.25, s.bg_swirl_c2_y orelse 0.0 },
         .swirl_center_3 = .{ s.bg_swirl_c3_x orelse -0.25, s.bg_swirl_c3_y orelse 0.2 },
         .swirl_center_4 = .{ s.bg_swirl_c4_x orelse 0.0, s.bg_swirl_c4_y orelse -0.25 },
+        .noise_speed = s.bg_noise_speed orelse 0.5,
+        .noise_amplitude = s.bg_noise_amplitude orelse 1.0,
+        .color_speed = s.bg_color_speed orelse 0.0,
+        .swirl_falloff = s.bg_swirl_falloff orelse 5.0,
     };
 }
 
@@ -210,6 +218,10 @@ pub fn save() !void {
         stored.bg_swirl_c3_y = bg_preset.swirl_center_3[1];
         stored.bg_swirl_c4_x = bg_preset.swirl_center_4[0];
         stored.bg_swirl_c4_y = bg_preset.swirl_center_4[1];
+        stored.bg_noise_speed = bg_preset.noise_speed;
+        stored.bg_noise_amplitude = bg_preset.noise_amplitude;
+        stored.bg_color_speed = bg_preset.color_speed;
+        stored.bg_swirl_falloff = bg_preset.swirl_falloff;
     }
 
     const contents = std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(stored, .{ .whitespace = .indent_2 })}) catch |err| {

@@ -68,6 +68,10 @@ pub fn randomize() void {
         .swirl_center_2 = prev_c2,
         .swirl_center_3 = prev_c3,
         .swirl_center_4 = prev_c4,
+        .noise_speed = 0.1 + rng.float(f32) * 1.0,
+        .noise_amplitude = 0.5 + rng.float(f32) * 1.5,
+        .color_speed = rng.float(f32) * 0.5,
+        .swirl_falloff = 1.0 + rng.float(f32) * 4.0,
     };
 
     std.log.info("background_paint: GPU shader (pixel_filter={d:.0})", .{uniforms.pixel_filter});

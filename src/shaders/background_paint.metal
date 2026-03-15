@@ -39,6 +39,10 @@ struct PaintUniforms {
     packed_float2 swirl_center_2;
     packed_float2 swirl_center_3;
     packed_float2 swirl_center_4;
+    float  noise_speed;
+    float  noise_amplitude;
+    float  color_speed;
+    float  swirl_falloff;
     packed_float2 _pad5;
 };
 
@@ -106,7 +110,7 @@ fragment float4 paint_frag(
 
             if (swirl == 1) {
                 // Paint Mix swirl
-                float speed = u.spin_rotation * 0.2 + 302.2;
+                float speed = u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed;
                 float new_angle = atan2(cuv.y, cuv.x) + speed - 20.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
                 swirled = float2(cuv_len * cos(new_angle) + mid.x, cuv_len * sin(new_angle) + mid.y) - mid;
             } else if (swirl == 2) {
@@ -127,8 +131,8 @@ fragment float4 paint_frag(
             } else if (swirl == 4) {
                 // Double spiral
                 float angle = atan2(cuv.y, cuv.x);
-                float spiral1 = u.spin_rotation * 0.2 + 302.2 - 15.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
-                float spiral2 = -u.spin_rotation * 0.15 + 150.0 + 12.0 * (u.spin_amount * cuv_len);
+                float spiral1 = u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 15.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
+                float spiral2 = -u.spin_rotation * 0.15 + 150.0 - u.time * u.spin_speed * 0.7 + 12.0 * (u.spin_amount * cuv_len);
                 float blend = 0.5 + 0.5 * sin(angle * 3.0 + u.time * u.spin_speed);
                 float new_angle = angle + mix(spiral1, spiral2, blend);
                 swirled = float2(cuv_len * cos(new_angle) + mid.x, cuv_len * sin(new_angle) + mid.y) - mid;
@@ -137,7 +141,7 @@ fragment float4 paint_frag(
                 float2 abs_cuv = abs(cuv);
                 float diamond_dist = abs_cuv.x + abs_cuv.y;
                 float angle = atan2(cuv.y, cuv.x);
-                angle += u.spin_rotation * 0.2 + 302.2 - 18.0 * (u.spin_amount * diamond_dist + (1.0 - u.spin_amount));
+                angle += u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 18.0 * (u.spin_amount * diamond_dist + (1.0 - u.spin_amount));
                 float r = mix(cuv_len, diamond_dist, 0.6 * u.spin_amount);
                 swirled = float2(r * cos(angle) + mid.x, r * sin(angle) + mid.y) - mid;
             } else if (swirl == 6) {
@@ -156,7 +160,8 @@ fragment float4 paint_frag(
                 swirled = cuv + wobble + centers[ci];
             }
 
-            total_displacement += (swirled - uv);
+            float falloff = exp(-cuv_len * cuv_len / (u.swirl_falloff * u.swirl_falloff));
+            total_displacement += (swirled - uv) * falloff;
         }
         uv += total_displacement / float(num_centers);
     }
@@ -164,7 +169,7 @@ fragment float4 paint_frag(
 
     // ===== Noise section (0=None, 1..7) =====
     int noise = int(u.noise_type);
-    float anim_speed = u.time * u.spin_speed;
+    float anim_speed = u.time * u.noise_speed;
     float contrast_mod = 0.25 * u.contrast + 0.5 * u.spin_amount + 1.2;
     float nscale = u.noise_scale;
     int noct = clamp(int(u.noise_octaves), 1, 16);
@@ -282,7 +287,12 @@ fragment float4 paint_frag(
         paint_angle = atan2(uv.y, uv.x);
     }
 
+    paint_val *= u.noise_amplitude;
+
     // ===== Color mapping section (0=None, 1..7) =====
+    float color_time = u.time * u.color_speed;
+    paint_angle += color_time;
+    paint_val = clamp(paint_val + sin(color_time * 0.7) * 0.3 * min(u.color_speed, 1.0), 0.0, 2.0);
     int cmode = int(u.color_mode);
     float3 col;
 

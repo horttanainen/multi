@@ -17,7 +17,11 @@ var offset_z_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .
 // Shared controls
 var noise_scale_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .max = 4.0, .repeat_delay_ms = 75 };
 var noise_octaves_config = menu.ConfigData{ .value = 5.0, .step = 1.0, .min = 1.0, .max = 16.0, .repeat_delay_ms = 150 };
+var noise_speed_config = menu.ConfigData{ .value = 0.5, .step = 0.05, .min = 0.0, .max = 2.0, .repeat_delay_ms = 75 };
+var noise_amplitude_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.0, .max = 3.0, .repeat_delay_ms = 75 };
 var color_intensity_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.1, .max = 3.0, .repeat_delay_ms = 75 };
+var color_speed_config = menu.ConfigData{ .value = 0.0, .step = 0.05, .min = 0.0, .max = 2.0, .repeat_delay_ms = 75 };
+var swirl_falloff_config = menu.ConfigData{ .value = 5.0, .step = 0.1, .min = 0.1, .max = 5.0, .repeat_delay_ms = 75 };
 var swirl_segments_config = menu.ConfigData{ .value = 6.0, .step = 1.0, .min = 2.0, .max = 16.0, .repeat_delay_ms = 150 };
 var swirl_count_config = menu.ConfigData{ .value = 1.0, .step = 1.0, .min = 1.0, .max = 4.0, .repeat_delay_ms = 200 };
 var swirl_c1_x_config = menu.ConfigData{ .value = 0.0, .step = 0.01, .min = -0.5, .max = 0.5, .repeat_delay_ms = 75 };
@@ -118,6 +122,7 @@ var swirl_items = [_]menu.Item{
     .{ .label = "Spin Rotation", .kind = .{ .config = &spin_rotation_config }, .font = .medium },
     .{ .label = "Spin Speed", .kind = .{ .config = &spin_speed_config }, .font = .medium },
     .{ .label = "Spin Amount", .kind = .{ .config = &spin_amount_config }, .font = .medium },
+    .{ .label = "Swirl Falloff", .kind = .{ .config = &swirl_falloff_config }, .font = .medium },
     .{ .label = "Swirl Segments", .kind = .{ .config = &swirl_segments_config }, .font = .medium },
     .{ .label = "Swirl Centers", .kind = .{ .config = &swirl_count_config }, .font = .medium },
     .{ .label = "Center 1 X", .kind = .{ .config = &swirl_c1_x_config }, .font = .medium },
@@ -133,12 +138,15 @@ var swirl_items = [_]menu.Item{
 var noise_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Noise Scale", .kind = .{ .config = &noise_scale_config }, .font = .medium },
+    .{ .label = "Noise Speed", .kind = .{ .config = &noise_speed_config }, .font = .medium },
+    .{ .label = "Noise Amplitude", .kind = .{ .config = &noise_amplitude_config }, .font = .medium },
     .{ .label = "Noise Octaves", .kind = .{ .config = &noise_octaves_config }, .font = .medium },
 };
 
 var color_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
     .{ .label = "Color Intensity", .kind = .{ .config = &color_intensity_config }, .font = .medium },
+    .{ .label = "Color Speed", .kind = .{ .config = &color_speed_config }, .font = .medium },
     .{ .label = "Contrast", .kind = .{ .config = &contrast_config }, .font = .medium },
     .{ .label = "Colour 1 Hue", .kind = .{ .config = &c1_h_config }, .font = .medium },
     .{ .label = "Colour 1 Sat", .kind = .{ .config = &c1_s_config }, .font = .medium },
@@ -178,8 +186,12 @@ pub fn sync() void {
 
     background_paint.uniforms.offset_z = offset_z_config.value;
     background_paint.uniforms.noise_scale = noise_scale_config.value;
+    background_paint.uniforms.noise_speed = noise_speed_config.value;
+    background_paint.uniforms.noise_amplitude = noise_amplitude_config.value;
     background_paint.uniforms.noise_octaves = noise_octaves_config.value;
     background_paint.uniforms.color_intensity = color_intensity_config.value;
+    background_paint.uniforms.color_speed = color_speed_config.value;
+    background_paint.uniforms.swirl_falloff = swirl_falloff_config.value;
     background_paint.uniforms.swirl_segments = swirl_segments_config.value;
     background_paint.uniforms.swirl_count = swirl_count_config.value;
     background_paint.uniforms.swirl_center_1 = .{ swirl_c1_x_config.value, swirl_c1_y_config.value };
@@ -212,8 +224,12 @@ fn loadFromUniforms() void {
 
     offset_z_config.value = u.offset_z;
     noise_scale_config.value = u.noise_scale;
+    noise_speed_config.value = u.noise_speed;
+    noise_amplitude_config.value = u.noise_amplitude;
     noise_octaves_config.value = u.noise_octaves;
     color_intensity_config.value = u.color_intensity;
+    color_speed_config.value = u.color_speed;
+    swirl_falloff_config.value = u.swirl_falloff;
     swirl_segments_config.value = u.swirl_segments;
     swirl_count_config.value = u.swirl_count;
     swirl_c1_x_config.value = u.swirl_center_1[0];
@@ -309,12 +325,15 @@ fn actionRandomizeSwirl() anyerror!void {
     spin_speed_config.value = 0.1 + rng.float(f32) * 1.5;
     spin_amount_config.value = rng.float(f32) * 0.8;
     swirl_segments_config.value = @floatFromInt(rng.intRangeAtMost(u8, 2, 12));
+    swirl_falloff_config.value = 1.0 + rng.float(f32) * 4.0;
     sync();
 }
 
 fn actionRandomizeNoise() anyerror!void {
     const rng = std.crypto.random;
     noise_scale_config.value = 0.2 + rng.float(f32) * 3.0;
+    noise_speed_config.value = 0.1 + rng.float(f32) * 1.0;
+    noise_amplitude_config.value = 0.5 + rng.float(f32) * 1.5;
     noise_octaves_config.value = @floatFromInt(rng.intRangeAtMost(u8, 2, 10));
     sync();
 }
@@ -335,6 +354,7 @@ fn actionRandomizeColors() anyerror!void {
     c3_s_config.value = sat * 0.85;
     c3_v_config.value = @min(val * 1.15, 1.0);
     color_intensity_config.value = 0.5 + rng.float(f32) * 1.5;
+    color_speed_config.value = rng.float(f32) * 0.5;
     contrast_config.value = 1.5 + rng.float(f32) * 1.5;
     sync();
 }
