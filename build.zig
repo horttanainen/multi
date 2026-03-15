@@ -29,18 +29,6 @@ pub fn build(b: *std.Build) !void {
     const box2d_dep = b.dependency("box2d", .{ .target = target, .optimize = optimize });
     exe.linkLibrary(box2d_dep.artifact("box2d"));
 
-    exe.addIncludePath(b.path("./miniaudio/"));
-
-    exe.addCSourceFiles(.{
-        .root = b.path("./miniaudio/"),
-        .files = &[_][]const u8{
-            "miniaudio.c",
-        },
-        .flags = &[_][]const u8{
-            "-DMINIAUDIO_IMPLEMENTATION",
-            "-DMA_ENABLE_MP3",
-        },
-    });
     const triangle_dep = b.dependency("triangle", .{ .target = target, .optimize = optimize });
     exe.linkLibrary(triangle_dep.artifact("triangle"));
 
