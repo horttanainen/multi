@@ -18,6 +18,10 @@ pub const ConfigData = struct {
     step: f32,
     min: f32,
     max: f32,
+    rand_min: ?f32 = null,
+    rand_max: ?f32 = null,
+    shader_offset: f32 = 0.0,
+    shader_scale: f32 = 1.0,
     repeat_delay_ms: u32 = 150,
 };
 
@@ -403,6 +407,14 @@ fn revertCycleEdit(item: *Item) void {
     if (item.on_cycle) |cb| cb();
 }
 
+fn fmtConfigLabel(buf: []u8, label: [:0]const u8, cfg: *const ConfigData) [:0]const u8 {
+    if (cfg.step < 0.095) {
+        return std.fmt.bufPrintZ(buf, "{s}: {d:.2}", .{ label, cfg.value }) catch label;
+    } else {
+        return std.fmt.bufPrintZ(buf, "{s}: {d:.1}", .{ label, cfg.value }) catch label;
+    }
+}
+
 fn cycleItem(item: *Item, direction: i2) void {
     const names = item.cycle_names orelse return;
     const idx = item.cycle_index orelse return;
@@ -538,9 +550,7 @@ fn drawVertical() !void {
             var label_buf: [64]u8 = undefined;
             const label: [:0]const u8 = switch (item.kind) {
                 .button, .sprite_pick => item.label,
-                .config => |cfg| blk: {
-                    break :blk try std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, cfg.value });
-                },
+                .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
             };
             try text.writeCenter(item.font, label, .{
                 .x = btn_x + @divFloor(btn_w, 2),
@@ -608,9 +618,7 @@ fn drawMinimalEdit() !void {
 
     var label_buf: [64]u8 = undefined;
     const label: [:0]const u8 = switch (item.kind) {
-        .config => |cfg| blk: {
-            break :blk std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, cfg.value }) catch item.label;
-        },
+        .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
         else => item.label,
     };
     try text.writeCenterWithAlpha(item.font, label, .{
@@ -674,9 +682,7 @@ fn drawHorizontal() !void {
             var label_buf: [64]u8 = undefined;
             const label: [:0]const u8 = switch (item.kind) {
                 .button, .sprite_pick => item.label,
-                .config => |cfg| blk: {
-                    break :blk try std.fmt.bufPrintZ(&label_buf, "{s}: {d:.1}", .{ item.label, cfg.value });
-                },
+                .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
             };
             try text.writeCenter(item.font, label, .{
                 .x = x + @divFloor(btn_w, 2),

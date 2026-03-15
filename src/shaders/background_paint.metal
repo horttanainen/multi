@@ -111,7 +111,7 @@ fragment float4 paint_frag(
             if (swirl == 1) {
                 // Paint Mix swirl
                 float speed = u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed;
-                float new_angle = atan2(cuv.y, cuv.x) + speed - 20.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
+                float new_angle = atan2(cuv.y, cuv.x) + speed - 8.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
                 swirled = float2(cuv_len * cos(new_angle) + mid.x, cuv_len * sin(new_angle) + mid.y) - mid;
             } else if (swirl == 2) {
                 // Kaleidoscope
@@ -119,20 +119,20 @@ fragment float4 paint_frag(
                 float sector = 3.14159265 / u.swirl_segments;
                 angle = fmod(abs(angle), 2.0 * sector);
                 if (angle > sector) angle = 2.0 * sector - angle;
-                angle += u.spin_rotation * 0.2 + u.time * u.spin_speed * 0.3;
+                angle += u.spin_rotation * 0.2 + u.time * u.spin_speed;
                 swirled = float2(cuv_len * cos(angle) + mid.x, cuv_len * sin(angle) + mid.y) - mid;
             } else if (swirl == 3) {
                 // Radial ripple
                 float angle = atan2(cuv.y, cuv.x);
-                float ripple = sin(cuv_len * 40.0 + u.time * u.spin_speed * 2.0) * u.spin_amount * 0.15;
+                float ripple = sin(cuv_len * 40.0 + u.time * u.spin_speed) * u.spin_amount * 0.06;
                 float new_len = cuv_len + ripple;
-                angle += u.spin_rotation * 0.2 + 5.0 * u.spin_amount * sin(cuv_len * 20.0 - u.time * u.spin_speed);
+                angle += u.spin_rotation * 0.2 + 3.0 * u.spin_amount * sin(cuv_len * 20.0 - u.time * u.spin_speed);
                 swirled = float2(new_len * cos(angle) + mid.x, new_len * sin(angle) + mid.y) - mid;
             } else if (swirl == 4) {
                 // Double spiral
                 float angle = atan2(cuv.y, cuv.x);
-                float spiral1 = u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 15.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
-                float spiral2 = -u.spin_rotation * 0.15 + 150.0 - u.time * u.spin_speed * 0.7 + 12.0 * (u.spin_amount * cuv_len);
+                float spiral1 = u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 8.0 * (u.spin_amount * cuv_len + (1.0 - u.spin_amount));
+                float spiral2 = -u.spin_rotation * 0.15 + 150.0 - u.time * u.spin_speed * 0.7 + 6.0 * (u.spin_amount * cuv_len);
                 float blend = 0.5 + 0.5 * sin(angle * 3.0 + u.time * u.spin_speed);
                 float new_angle = angle + mix(spiral1, spiral2, blend);
                 swirled = float2(cuv_len * cos(new_angle) + mid.x, cuv_len * sin(new_angle) + mid.y) - mid;
@@ -141,21 +141,25 @@ fragment float4 paint_frag(
                 float2 abs_cuv = abs(cuv);
                 float diamond_dist = abs_cuv.x + abs_cuv.y;
                 float angle = atan2(cuv.y, cuv.x);
-                angle += u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 18.0 * (u.spin_amount * diamond_dist + (1.0 - u.spin_amount));
+                angle += u.spin_rotation * 0.2 + 302.2 + u.time * u.spin_speed - 8.0 * (u.spin_amount * diamond_dist + (1.0 - u.spin_amount));
                 float r = mix(cuv_len, diamond_dist, 0.6 * u.spin_amount);
                 swirled = float2(r * cos(angle) + mid.x, r * sin(angle) + mid.y) - mid;
             } else if (swirl == 6) {
-                // Tunnel
+                // Tunnel — inverse-distance mapping with fract to keep UV bounded
+                // Uses sin/cos of angle instead of raw angle to avoid atan2 seam
                 float angle = atan2(cuv.y, cuv.x) + u.spin_rotation * 0.1;
-                float tunnel_r = 0.1 / (cuv_len + 0.05);
-                tunnel_r += u.time * u.spin_speed * 0.5;
-                swirled = float2(tunnel_r * cos(angle), tunnel_r * sin(angle) + angle * u.spin_amount * 0.3);
+                float tunnel_r = 0.1 / (cuv_len + 0.05) + u.time * u.spin_speed;
+                float2 tunnel_uv = float2(
+                    fract(tunnel_r) - 0.5 + sin(angle) * 0.15 * u.spin_amount,
+                    cos(angle) * 0.3 + u.spin_amount * sin(tunnel_r * 2.0) * 0.3
+                );
+                swirled = tunnel_uv;
             } else {
                 // Wobble
                 float t = u.time * u.spin_speed;
                 float2 wobble = float2(
-                    sin(cuv.y * 15.0 + t * 1.3 + u.spin_rotation) * u.spin_amount * 0.08,
-                    sin(cuv.x * 12.0 - t * 0.9 + u.spin_rotation * 0.7) * u.spin_amount * 0.08
+                    sin(cuv.y * 15.0 + t + u.spin_rotation) * u.spin_amount * 0.2,
+                    sin(cuv.x * 12.0 - t * 0.7 + u.spin_rotation * 0.7) * u.spin_amount * 0.2
                 );
                 swirled = cuv + wobble + centers[ci];
             }
@@ -178,19 +182,19 @@ fragment float4 paint_frag(
 
     if (noise == 1) {
         // Sine turbulence (original Balatro)
-        float2 tuv = uv * 30.0 * nscale;
+        float2 tuv = uv * 12.0 * nscale;
         float2 uv2 = float2(tuv.x + tuv.y);
         for (int i = 0; i < noct; i++) {
             uv2 += sin(max(tuv.x, tuv.y)) + tuv;
-            tuv += 0.5 * float2(cos(5.1123314 + 0.353 * uv2.y + anim_speed * 0.131121),
-                                sin(uv2.x - 0.113 * anim_speed));
+            tuv += 0.5 * float2(cos(5.1123314 + 0.353 * uv2.y + anim_speed * 0.2),
+                                sin(uv2.x - 0.17 * anim_speed));
             tuv -= cos(tuv.x + tuv.y) - sin(tuv.x * 0.711 - tuv.y);
         }
         paint_val = clamp(length(tuv) * 0.035 * contrast_mod, 0.0, 2.0);
         paint_angle = atan2(tuv.y, tuv.x);
     } else if (noise == 2) {
         // Domain warp
-        float2 p = uv * 4.0 * nscale;
+        float2 p = uv * 6.0 * nscale;
         float2 t_offset = float2(anim_speed * 0.2, anim_speed * 0.15);
         float2 q = float2(
             fbm(p + t_offset, noct),
@@ -206,7 +210,7 @@ fragment float4 paint_frag(
     } else if (noise == 3) {
         // Cellular/Voronoi
         float2 p = uv * 6.0 * nscale;
-        float2 t_offset = float2(anim_speed * 0.15, -anim_speed * 0.1);
+        float2 t_offset = float2(anim_speed * 0.2, -anim_speed * 0.15);
         float min_dist = 10.0;
         float second_dist = 10.0;
         float2 closest_cell = float2(0.0);
@@ -234,8 +238,8 @@ fragment float4 paint_frag(
         paint_angle = fract(sin(dot(closest_cell, float2(127.1, 311.7))) * 43758.5453) * 6.28318 - 3.14159;
     } else if (noise == 4) {
         // Marble
-        float2 p = uv * 5.0 * nscale;
-        float2 t_offset = float2(anim_speed * 0.12, anim_speed * 0.08);
+        float2 p = uv * 6.0 * nscale;
+        float2 t_offset = float2(anim_speed * 0.2, anim_speed * 0.15);
         float n = fbm(p + t_offset, noct);
         float marble = sin((p.x + p.y) * 3.0 + n * 8.0 * u.spin_amount + anim_speed * 0.2);
         marble = marble * 0.5 + 0.5;
@@ -243,8 +247,8 @@ fragment float4 paint_frag(
         paint_angle = atan2(p.y + n * 2.0, p.x + n * 2.0);
     } else if (noise == 5) {
         // Plasma
-        float2 p = uv * 10.0 * nscale;
-        float t = anim_speed * 0.5;
+        float2 p = uv * 6.0 * nscale;
+        float t = anim_speed * 0.2;
         float v1 = sin(p.x * 1.1 + t);
         float v2 = sin(p.y * 1.3 - t * 0.7);
         float v3 = sin((p.x * 0.7 + p.y * 1.1) + t * 0.5);
@@ -254,8 +258,8 @@ fragment float4 paint_frag(
         paint_angle = atan2(v1 + v3, v2 + v4);
     } else if (noise == 6) {
         // Ridged
-        float2 p = uv * 5.0 * nscale;
-        float2 t_offset = float2(anim_speed * 0.15, anim_speed * 0.1);
+        float2 p = uv * 6.0 * nscale;
+        float2 t_offset = float2(anim_speed * 0.2, anim_speed * 0.15);
         float value = 0.0;
         float amp = 1.0;
         float freq = 1.0;
@@ -274,11 +278,11 @@ fragment float4 paint_frag(
         );
     } else if (noise == 7) {
         // Wood grain
-        float2 p = uv * 8.0 * nscale;
-        float2 t_offset = float2(anim_speed * 0.08, anim_speed * 0.06);
+        float2 p = uv * 6.0 * nscale;
+        float2 t_offset = float2(anim_speed * 0.2, anim_speed * 0.15);
         float n = fbm(p * 0.5 + t_offset, max(noct - 1, 1));
         float grain = length(p + float2(n * 3.0, n * 2.5));
-        grain = fract(grain * 0.5 + anim_speed * 0.05);
+        grain = fract(grain * 0.5 + anim_speed * 0.1);
         paint_val = clamp(grain * contrast_mod, 0.0, 2.0);
         paint_angle = atan2(p.y + n, p.x + n);
     } else {
