@@ -206,6 +206,8 @@ pub fn main() !void {
             backgroundConfigMenu.sync();
         } else if (state.editingLevel) {
             levelEditorLoop();
+        } else if (state.editingMusic) {
+            musicConfigMenu.sync();
         } else {
             try gameLoop();
         }

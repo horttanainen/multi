@@ -24,6 +24,11 @@ pub var reverb_mix: f32 = 0.65;
 pub var note_vol: f32 = 0.12;
 pub var rest_chance: f32 = 0.5;
 pub var brightness: f32 = 0.5;
+pub var bed_mix: f32 = 0.8;
+pub var cloud_mix: f32 = 0.7;
+pub var harmony_mix: f32 = 0.55;
+pub var bell_amount: f32 = 0.45;
+pub var hammer_mix: f32 = 0.25;
 
 fn samplesPerBeat() f32 {
     return SAMPLE_RATE * 60.0 / bpm;
@@ -169,7 +174,8 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             voice_mod_phase[voice_idx] += mod_freq * INV_SR * TAU;
             if (voice_mod_phase[voice_idx] > TAU) voice_mod_phase[voice_idx] -= TAU;
 
-            const mod_signal = @sin(voice_mod_phase[voice_idx]) * voice_mod_depth[voice_idx] * env_val;
+            const fm_amount = 0.2 + bell_amount * 1.3;
+            const mod_signal = @sin(voice_mod_phase[voice_idx]) * voice_mod_depth[voice_idx] * env_val * fm_amount;
 
             voice_carrier_phase[voice_idx] += carrier_freq * INV_SR * TAU;
             if (voice_carrier_phase[voice_idx] > TAU) voice_carrier_phase[voice_idx] -= TAU;
@@ -180,6 +186,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             var body = @sin(voice_carrier_phase[voice_idx] + mod_signal);
             body += @sin(voice_detune_phase[voice_idx] + mod_signal * 0.65) * 0.42;
             body += @sin(voice_carrier_phase[voice_idx] * 0.5) * 0.12;
+            body += @sin(voice_carrier_phase[voice_idx] * 2.0 + mod_signal * 0.35) * (0.03 + bell_amount * 0.17);
             body = voice_lpf[voice_idx].process(body);
 
             var hammer: f32 = 0;
@@ -190,7 +197,8 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                 voice_hammer_age[voice_idx] += 1;
             }
 
-            var sample = (body + hammer * (0.25 + brightness * 0.25)) * env_val * note_vol * voice_velocity[voice_idx];
+            const voice_gain = if (voice_idx == MOTIF_VOICE) 1.0 else harmony_mix;
+            var sample = (body + hammer * hammer_mix * (0.25 + brightness * 0.25)) * env_val * note_vol * voice_velocity[voice_idx] * voice_gain;
             sample *= 0.9;
 
             const stereo = panStereo(sample, voice_pan[voice_idx]);
@@ -626,7 +634,7 @@ fn processResonance() f32 {
         sample += (@sin(cloud_phase[idx][0]) * 0.7 + @sin(cloud_phase[idx][1]) * 0.3) * cloud_energy[idx];
     }
 
-    return sample * (0.02 + brightness * 0.01);
+    return sample * ((0.012 + brightness * 0.006) + cloud_mix * 0.012);
 }
 
 fn exciteResonance(note_idx: u8) void {
@@ -656,7 +664,7 @@ fn processAmbientBed() [2]f32 {
             sample += @sin(bed_phase[idx][osc_idx]) * amp;
         }
 
-        sample *= bed_gain[idx];
+        sample *= bed_gain[idx] * bed_mix;
         const pan: f32 = switch (idx) {
             0 => -0.35,
             1 => 0.35,

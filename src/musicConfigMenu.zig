@@ -1,6 +1,7 @@
 const std = @import("std");
 const menu = @import("menu.zig");
 const settings = @import("settings.zig");
+const state = @import("state.zig");
 
 // ============================================================
 // Style selection
@@ -22,6 +23,7 @@ const style_names = [STYLE_COUNT][:0]const u8{
 // ============================================================
 
 // zig fmt: off
+var volume_config = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var reverb_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var bpm_config    = menu.ConfigData{ .value = 0.36, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 30.0, .shader_scale = 170.0, .repeat_delay_ms = 75 };
 
@@ -43,6 +45,13 @@ var piano_note_vol_config    = menu.ConfigData{ .value = 0.48, .step = 0.01, .mi
 var piano_rest_config        = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var piano_brightness_config  = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 
+// --- Minecraft-specific ---
+var minecraft_bed_mix_config    = menu.ConfigData{ .value = 0.8,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_cloud_mix_config  = menu.ConfigData{ .value = 0.7,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_harmony_mix_config = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_bell_amount_config = menu.ConfigData{ .value = 0.45, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var minecraft_hammer_mix_config  = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+
 // --- Choir-specific ---
 var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
 var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
@@ -53,13 +62,13 @@ var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .mi
 // ============================================================
 
 var stored_back_fn: ?*const fn () anyerror!void = null;
-
 const IDX_STYLE: usize = 1;
 
 var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
     .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
     .{ .label = "Tweak", .kind = .{ .button = actionOpenTweak }, .font = .medium },
+    .{ .label = "Volume", .kind = .{ .config = &volume_config }, .font = .medium },
     .{ .label = "BPM", .kind = .{ .config = &bpm_config }, .font = .medium },
     .{ .label = "Reverb", .kind = .{ .config = &reverb_config }, .font = .medium },
 };
@@ -91,6 +100,18 @@ var piano_items = [_]menu.Item{
     .{ .label = "Brightness", .kind = .{ .config = &piano_brightness_config }, .font = .medium },
 };
 
+var minecraft_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Note Volume", .kind = .{ .config = &piano_note_vol_config }, .font = .medium },
+    .{ .label = "Rest Chance", .kind = .{ .config = &piano_rest_config }, .font = .medium },
+    .{ .label = "Brightness", .kind = .{ .config = &piano_brightness_config }, .font = .medium },
+    .{ .label = "Ambient Bed", .kind = .{ .config = &minecraft_bed_mix_config }, .font = .medium },
+    .{ .label = "Resonance Cloud", .kind = .{ .config = &minecraft_cloud_mix_config }, .font = .medium },
+    .{ .label = "Harmony Presence", .kind = .{ .config = &minecraft_harmony_mix_config }, .font = .medium },
+    .{ .label = "Bell Amount", .kind = .{ .config = &minecraft_bell_amount_config }, .font = .medium },
+    .{ .label = "Hammer Noise", .kind = .{ .config = &minecraft_hammer_mix_config }, .font = .medium },
+};
+
 // --- Choir sub-menu ---
 var choir_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
@@ -104,8 +125,15 @@ var choir_items = [_]menu.Item{
 
 pub fn open(back_fn: ?*const fn () anyerror!void) void {
     stored_back_fn = back_fn;
+    state.editingMusic = true;
     loadFromParams();
     menu.open(&main_items, .{ .minimal_edit = true, .back_fn = back_fn });
+}
+
+pub fn sync() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.sync: failed to apply live preview: {}", .{err});
+    };
 }
 
 // ============================================================
@@ -116,6 +144,7 @@ fn loadFromParams() void {
     style_value = @intFromEnum(settings.music_style);
     updateStyleLabel();
 
+    volume_config.value = settings.music_volume;
     fromShader(&bpm_config, settings.music_bpm);
     reverb_config.value = settings.music_reverb_mix;
 
@@ -146,6 +175,11 @@ fn loadFromParams() void {
             fromShader(&piano_note_vol_config, settings.music_piano_note_vol);
             piano_rest_config.value = settings.music_piano_rest_chance;
             piano_brightness_config.value = settings.music_piano_brightness;
+            minecraft_bed_mix_config.value = settings.music_minecraft_bed_mix;
+            minecraft_cloud_mix_config.value = settings.music_minecraft_cloud_mix;
+            minecraft_harmony_mix_config.value = settings.music_minecraft_harmony_mix;
+            minecraft_bell_amount_config.value = settings.music_minecraft_bell_amount;
+            minecraft_hammer_mix_config.value = settings.music_minecraft_hammer_mix;
         },
     }
 }
@@ -165,6 +199,7 @@ fn fromShader(cfg: *menu.ConfigData, val: f32) void {
 
 fn applyMenuToSettings(save_changes: bool) !void {
     settings.music_style = @enumFromInt(style_value);
+    settings.music_volume = volume_config.value;
     settings.music_bpm = toShader(&bpm_config);
     settings.music_reverb_mix = reverb_config.value;
 
@@ -195,6 +230,11 @@ fn applyMenuToSettings(save_changes: bool) !void {
             settings.music_piano_note_vol = toShader(&piano_note_vol_config);
             settings.music_piano_rest_chance = piano_rest_config.value;
             settings.music_piano_brightness = piano_brightness_config.value;
+            settings.music_minecraft_bed_mix = minecraft_bed_mix_config.value;
+            settings.music_minecraft_cloud_mix = minecraft_cloud_mix_config.value;
+            settings.music_minecraft_harmony_mix = minecraft_harmony_mix_config.value;
+            settings.music_minecraft_bell_amount = minecraft_bell_amount_config.value;
+            settings.music_minecraft_hammer_mix = minecraft_hammer_mix_config.value;
         },
     }
 
@@ -209,6 +249,7 @@ fn applyMenuToSettings(save_changes: bool) !void {
 
 fn actionBack() anyerror!void {
     try applyMenuToSettings(true);
+    state.editingMusic = false;
     if (stored_back_fn) |back| {
         try back();
     } else {
@@ -244,6 +285,6 @@ fn actionOpenTweak() anyerror!void {
         .house => menu.open(&house_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
         .piano => menu.open(&piano_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
         .choir => menu.open(&choir_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .minecraft => menu.open(&piano_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .minecraft => menu.open(&minecraft_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
     }
 }

@@ -28,6 +28,12 @@ const DEFAULT_HOUSE_STAB_CHANCE: f32 = 0.4;
 const DEFAULT_PIANO_NOTE_VOL: f32 = 0.12;
 const DEFAULT_PIANO_REST_CHANCE: f32 = 0.5;
 const DEFAULT_PIANO_BRIGHTNESS: f32 = 0.5;
+const DEFAULT_MUSIC_VOLUME: f32 = 0.5;
+const DEFAULT_MINECRAFT_BED_MIX: f32 = 0.8;
+const DEFAULT_MINECRAFT_CLOUD_MIX: f32 = 0.7;
+const DEFAULT_MINECRAFT_HARMONY_MIX: f32 = 0.55;
+const DEFAULT_MINECRAFT_BELL_AMOUNT: f32 = 0.45;
+const DEFAULT_MINECRAFT_HAMMER_MIX: f32 = 0.25;
 const DEFAULT_CHOIR_VOL: f32 = 0.15;
 const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 
@@ -72,6 +78,7 @@ const StoredSettings = struct {
     bg_color_speed: ?f32 = null,
     bg_swirl_falloff: ?f32 = null,
     music_style: ?u8 = null,
+    music_volume: ?f32 = null,
     music_bpm: ?f32 = null,
     music_reverb_mix: ?f32 = null,
     music_ambient_drone_vol: ?f32 = null,
@@ -86,6 +93,11 @@ const StoredSettings = struct {
     music_piano_note_vol: ?f32 = null,
     music_piano_rest_chance: ?f32 = null,
     music_piano_brightness: ?f32 = null,
+    music_minecraft_bed_mix: ?f32 = null,
+    music_minecraft_cloud_mix: ?f32 = null,
+    music_minecraft_harmony_mix: ?f32 = null,
+    music_minecraft_bell_amount: ?f32 = null,
+    music_minecraft_hammer_mix: ?f32 = null,
     music_choir_vol: ?f32 = null,
     music_choir_breathiness: ?f32 = null,
 };
@@ -95,6 +107,7 @@ var preferred_color_grading: ?[]u8 = null;
 var has_bg_preset: bool = false;
 var bg_preset: gpu.PaintUniforms = undefined;
 pub var music_style: music.Style = DEFAULT_MUSIC_STYLE;
+pub var music_volume: f32 = DEFAULT_MUSIC_VOLUME;
 pub var music_bpm: f32 = DEFAULT_MUSIC_BPM;
 pub var music_reverb_mix: f32 = DEFAULT_MUSIC_REVERB_MIX;
 pub var music_ambient_drone_vol: f32 = DEFAULT_AMBIENT_DRONE_VOL;
@@ -109,6 +122,11 @@ pub var music_house_stab_chance: f32 = DEFAULT_HOUSE_STAB_CHANCE;
 pub var music_piano_note_vol: f32 = DEFAULT_PIANO_NOTE_VOL;
 pub var music_piano_rest_chance: f32 = DEFAULT_PIANO_REST_CHANCE;
 pub var music_piano_brightness: f32 = DEFAULT_PIANO_BRIGHTNESS;
+pub var music_minecraft_bed_mix: f32 = DEFAULT_MINECRAFT_BED_MIX;
+pub var music_minecraft_cloud_mix: f32 = DEFAULT_MINECRAFT_CLOUD_MIX;
+pub var music_minecraft_harmony_mix: f32 = DEFAULT_MINECRAFT_HARMONY_MIX;
+pub var music_minecraft_bell_amount: f32 = DEFAULT_MINECRAFT_BELL_AMOUNT;
+pub var music_minecraft_hammer_mix: f32 = DEFAULT_MINECRAFT_HAMMER_MIX;
 pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
 pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 
@@ -222,6 +240,7 @@ pub fn apply() void {
 
 pub fn applyMusic() void {
     const style_changed = music.current_style != music_style;
+    music.setVolume(music_volume);
 
     procedural_music.bpm = music_bpm;
     procedural_music.reverb_mix = music_reverb_mix;
@@ -249,6 +268,11 @@ pub fn applyMusic() void {
     minecraft_piano.note_vol = music_piano_note_vol;
     minecraft_piano.rest_chance = music_piano_rest_chance;
     minecraft_piano.brightness = music_piano_brightness;
+    minecraft_piano.bed_mix = music_minecraft_bed_mix;
+    minecraft_piano.cloud_mix = music_minecraft_cloud_mix;
+    minecraft_piano.harmony_mix = music_minecraft_harmony_mix;
+    minecraft_piano.bell_amount = music_minecraft_bell_amount;
+    minecraft_piano.hammer_mix = music_minecraft_hammer_mix;
 
     procedural_choir.bpm = music_bpm;
     procedural_choir.reverb_mix = music_reverb_mix;
@@ -281,6 +305,7 @@ pub fn save() !void {
         .lut_strength = lut_strength,
         .preferred_color_grading = if (preferred_color_grading) |p| @as(?[]const u8, p) else null,
         .music_style = @intFromEnum(music_style),
+        .music_volume = music_volume,
         .music_bpm = music_bpm,
         .music_reverb_mix = music_reverb_mix,
         .music_ambient_drone_vol = music_ambient_drone_vol,
@@ -295,6 +320,11 @@ pub fn save() !void {
         .music_piano_note_vol = music_piano_note_vol,
         .music_piano_rest_chance = music_piano_rest_chance,
         .music_piano_brightness = music_piano_brightness,
+        .music_minecraft_bed_mix = music_minecraft_bed_mix,
+        .music_minecraft_cloud_mix = music_minecraft_cloud_mix,
+        .music_minecraft_harmony_mix = music_minecraft_harmony_mix,
+        .music_minecraft_bell_amount = music_minecraft_bell_amount,
+        .music_minecraft_hammer_mix = music_minecraft_hammer_mix,
         .music_choir_vol = music_choir_vol,
         .music_choir_breathiness = music_choir_breathiness,
     };
@@ -358,6 +388,7 @@ fn freePreferredColorGrading() void {
 
 fn resetMusicSettings() void {
     music_style = DEFAULT_MUSIC_STYLE;
+    music_volume = DEFAULT_MUSIC_VOLUME;
     music_bpm = DEFAULT_MUSIC_BPM;
     music_reverb_mix = DEFAULT_MUSIC_REVERB_MIX;
     music_ambient_drone_vol = DEFAULT_AMBIENT_DRONE_VOL;
@@ -372,6 +403,11 @@ fn resetMusicSettings() void {
     music_piano_note_vol = DEFAULT_PIANO_NOTE_VOL;
     music_piano_rest_chance = DEFAULT_PIANO_REST_CHANCE;
     music_piano_brightness = DEFAULT_PIANO_BRIGHTNESS;
+    music_minecraft_bed_mix = DEFAULT_MINECRAFT_BED_MIX;
+    music_minecraft_cloud_mix = DEFAULT_MINECRAFT_CLOUD_MIX;
+    music_minecraft_harmony_mix = DEFAULT_MINECRAFT_HARMONY_MIX;
+    music_minecraft_bell_amount = DEFAULT_MINECRAFT_BELL_AMOUNT;
+    music_minecraft_hammer_mix = DEFAULT_MINECRAFT_HAMMER_MIX;
     music_choir_vol = DEFAULT_CHOIR_VOL;
     music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
 }
@@ -383,6 +419,7 @@ fn loadMusicSettings(s: StoredSettings) void {
         }
     }
 
+    music_volume = std.math.clamp(s.music_volume orelse DEFAULT_MUSIC_VOLUME, 0.0, 1.0);
     music_bpm = std.math.clamp(s.music_bpm orelse DEFAULT_MUSIC_BPM, 30.0, 200.0);
     music_reverb_mix = std.math.clamp(s.music_reverb_mix orelse DEFAULT_MUSIC_REVERB_MIX, 0.0, 1.0);
     music_ambient_drone_vol = std.math.clamp(s.music_ambient_drone_vol orelse DEFAULT_AMBIENT_DRONE_VOL, 0.0, 1.0);
@@ -397,6 +434,11 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_piano_note_vol = std.math.clamp(s.music_piano_note_vol orelse DEFAULT_PIANO_NOTE_VOL, 0.0, 1.0);
     music_piano_rest_chance = std.math.clamp(s.music_piano_rest_chance orelse DEFAULT_PIANO_REST_CHANCE, 0.0, 1.0);
     music_piano_brightness = std.math.clamp(s.music_piano_brightness orelse DEFAULT_PIANO_BRIGHTNESS, 0.0, 1.0);
+    music_minecraft_bed_mix = std.math.clamp(s.music_minecraft_bed_mix orelse DEFAULT_MINECRAFT_BED_MIX, 0.0, 1.0);
+    music_minecraft_cloud_mix = std.math.clamp(s.music_minecraft_cloud_mix orelse DEFAULT_MINECRAFT_CLOUD_MIX, 0.0, 1.0);
+    music_minecraft_harmony_mix = std.math.clamp(s.music_minecraft_harmony_mix orelse DEFAULT_MINECRAFT_HARMONY_MIX, 0.0, 1.0);
+    music_minecraft_bell_amount = std.math.clamp(s.music_minecraft_bell_amount orelse DEFAULT_MINECRAFT_BELL_AMOUNT, 0.0, 1.0);
+    music_minecraft_hammer_mix = std.math.clamp(s.music_minecraft_hammer_mix orelse DEFAULT_MINECRAFT_HAMMER_MIX, 0.0, 1.0);
     music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
     music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
 }

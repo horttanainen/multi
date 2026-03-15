@@ -47,16 +47,21 @@ fn openMainMenu() void {
 fn actionPlay() anyerror!void {
     state.editingBackground = false;
     state.editingLevel = false;
+    state.editingMusic = false;
     menu.close();
 }
 
 fn actionOpenMusic() anyerror!void {
+    state.editingBackground = false;
+    state.editingLevel = false;
+    state.editingMusic = true;
     musicConfigMenu.open(actionOpenMainMenu);
 }
 
 fn actionOpenBackgroundEditor() anyerror!void {
     state.editingBackground = true;
     state.editingLevel = false;
+    state.editingMusic = false;
     menu.close();
     backgroundConfigMenu.open();
 }
