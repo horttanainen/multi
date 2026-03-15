@@ -9,6 +9,7 @@ const procedural_music = @import("procedural_music.zig");
 const procedural_house = @import("procedural_house.zig");
 const piano_generator = @import("piano_generator.zig");
 const minecraft_piano = @import("minecraft_piano.zig");
+const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 
 const SETTINGS_PATH = "settings.json";
@@ -41,6 +42,12 @@ const DEFAULT_MINECRAFT_CUE_DENSITY: f32 = 0.45;
 const DEFAULT_MINECRAFT_WOW: f32 = 0.2;
 const DEFAULT_MINECRAFT_BLUR: f32 = 0.4;
 const DEFAULT_MINECRAFT_ATTACK_SOFTNESS: f32 = 0.35;
+const DEFAULT_ROCK80S_LEAD_MIX: f32 = 0.5;
+const DEFAULT_ROCK80S_DRIVE: f32 = 0.55;
+const DEFAULT_ROCK80S_DRUM_MIX: f32 = 0.8;
+const DEFAULT_ROCK80S_BASS_MIX: f32 = 0.7;
+const DEFAULT_ROCK80S_GATE: f32 = 0.45;
+const DEFAULT_ROCK80S_CUE: u8 = @intFromEnum(procedural_80s_rock.CuePreset.arena);
 const DEFAULT_CHOIR_VOL: f32 = 0.15;
 const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 
@@ -112,6 +119,12 @@ const StoredSettings = struct {
     music_minecraft_wow: ?f32 = null,
     music_minecraft_blur: ?f32 = null,
     music_minecraft_attack_softness: ?f32 = null,
+    music_rock80s_lead_mix: ?f32 = null,
+    music_rock80s_drive: ?f32 = null,
+    music_rock80s_drum_mix: ?f32 = null,
+    music_rock80s_bass_mix: ?f32 = null,
+    music_rock80s_gate: ?f32 = null,
+    music_rock80s_cue: ?u8 = null,
     music_choir_vol: ?f32 = null,
     music_choir_breathiness: ?f32 = null,
 };
@@ -148,6 +161,12 @@ pub var music_minecraft_cue_density: f32 = DEFAULT_MINECRAFT_CUE_DENSITY;
 pub var music_minecraft_wow: f32 = DEFAULT_MINECRAFT_WOW;
 pub var music_minecraft_blur: f32 = DEFAULT_MINECRAFT_BLUR;
 pub var music_minecraft_attack_softness: f32 = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
+pub var music_rock80s_lead_mix: f32 = DEFAULT_ROCK80S_LEAD_MIX;
+pub var music_rock80s_drive: f32 = DEFAULT_ROCK80S_DRIVE;
+pub var music_rock80s_drum_mix: f32 = DEFAULT_ROCK80S_DRUM_MIX;
+pub var music_rock80s_bass_mix: f32 = DEFAULT_ROCK80S_BASS_MIX;
+pub var music_rock80s_gate: f32 = DEFAULT_ROCK80S_GATE;
+pub var music_rock80s_cue: u8 = DEFAULT_ROCK80S_CUE;
 pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
 pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 
@@ -302,6 +321,15 @@ pub fn applyMusic() void {
     minecraft_piano.blur = music_minecraft_blur;
     minecraft_piano.attack_softness = music_minecraft_attack_softness;
 
+    procedural_80s_rock.bpm = music_bpm;
+    procedural_80s_rock.reverb_mix = music_reverb_mix;
+    procedural_80s_rock.lead_mix = music_rock80s_lead_mix;
+    procedural_80s_rock.drive = music_rock80s_drive;
+    procedural_80s_rock.drum_mix = music_rock80s_drum_mix;
+    procedural_80s_rock.bass_mix = music_rock80s_bass_mix;
+    procedural_80s_rock.gate = music_rock80s_gate;
+    procedural_80s_rock.selected_cue = @enumFromInt(music_rock80s_cue);
+
     procedural_choir.bpm = music_bpm;
     procedural_choir.reverb_mix = music_reverb_mix;
     procedural_choir.choir_vol = music_choir_vol;
@@ -360,6 +388,12 @@ pub fn save() !void {
         .music_minecraft_wow = music_minecraft_wow,
         .music_minecraft_blur = music_minecraft_blur,
         .music_minecraft_attack_softness = music_minecraft_attack_softness,
+        .music_rock80s_lead_mix = music_rock80s_lead_mix,
+        .music_rock80s_drive = music_rock80s_drive,
+        .music_rock80s_drum_mix = music_rock80s_drum_mix,
+        .music_rock80s_bass_mix = music_rock80s_bass_mix,
+        .music_rock80s_gate = music_rock80s_gate,
+        .music_rock80s_cue = music_rock80s_cue,
         .music_choir_vol = music_choir_vol,
         .music_choir_breathiness = music_choir_breathiness,
     };
@@ -450,13 +484,19 @@ fn resetMusicSettings() void {
     music_minecraft_wow = DEFAULT_MINECRAFT_WOW;
     music_minecraft_blur = DEFAULT_MINECRAFT_BLUR;
     music_minecraft_attack_softness = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
+    music_rock80s_lead_mix = DEFAULT_ROCK80S_LEAD_MIX;
+    music_rock80s_drive = DEFAULT_ROCK80S_DRIVE;
+    music_rock80s_drum_mix = DEFAULT_ROCK80S_DRUM_MIX;
+    music_rock80s_bass_mix = DEFAULT_ROCK80S_BASS_MIX;
+    music_rock80s_gate = DEFAULT_ROCK80S_GATE;
+    music_rock80s_cue = DEFAULT_ROCK80S_CUE;
     music_choir_vol = DEFAULT_CHOIR_VOL;
     music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
     if (s.music_style) |style_int| {
-        if (style_int < 5) {
+        if (style_int < 6) {
             music_style = @enumFromInt(style_int);
         }
     }
@@ -488,6 +528,12 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_minecraft_wow = std.math.clamp(s.music_minecraft_wow orelse DEFAULT_MINECRAFT_WOW, 0.0, 1.0);
     music_minecraft_blur = std.math.clamp(s.music_minecraft_blur orelse DEFAULT_MINECRAFT_BLUR, 0.0, 1.0);
     music_minecraft_attack_softness = std.math.clamp(s.music_minecraft_attack_softness orelse DEFAULT_MINECRAFT_ATTACK_SOFTNESS, 0.0, 1.0);
+    music_rock80s_lead_mix = std.math.clamp(s.music_rock80s_lead_mix orelse DEFAULT_ROCK80S_LEAD_MIX, 0.0, 1.0);
+    music_rock80s_drive = std.math.clamp(s.music_rock80s_drive orelse DEFAULT_ROCK80S_DRIVE, 0.0, 1.0);
+    music_rock80s_drum_mix = std.math.clamp(s.music_rock80s_drum_mix orelse DEFAULT_ROCK80S_DRUM_MIX, 0.0, 1.0);
+    music_rock80s_bass_mix = std.math.clamp(s.music_rock80s_bass_mix orelse DEFAULT_ROCK80S_BASS_MIX, 0.0, 1.0);
+    music_rock80s_gate = std.math.clamp(s.music_rock80s_gate orelse DEFAULT_ROCK80S_GATE, 0.0, 1.0);
+    music_rock80s_cue = std.math.clamp(s.music_rock80s_cue orelse DEFAULT_ROCK80S_CUE, 0, 3);
     music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
     music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
 }

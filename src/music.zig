@@ -6,6 +6,7 @@ const procedural_music = @import("procedural_music.zig");
 const procedural_house = @import("procedural_house.zig");
 const piano_generator = @import("piano_generator.zig");
 const minecraft_piano = @import("minecraft_piano.zig");
+const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const allocator = @import("allocator.zig").allocator;
 
@@ -15,6 +16,7 @@ pub const Style = enum {
     piano,
     choir,
     minecraft,
+    rock80s,
 };
 
 pub const Source = enum {
@@ -139,6 +141,7 @@ fn resetCurrentStyle() void {
         .piano => piano_generator.reset(),
         .choir => procedural_choir.reset(),
         .minecraft => minecraft_piano.reset(),
+        .rock80s => procedural_80s_rock.reset(),
     }
 }
 
@@ -186,6 +189,7 @@ fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_in
                     .piano => piano_generator.fillBuffer(&buf, chunk_frames),
                     .choir => procedural_choir.fillBuffer(&buf, chunk_frames),
                     .minecraft => minecraft_piano.fillBuffer(&buf, chunk_frames),
+                    .rock80s => procedural_80s_rock.fillBuffer(&buf, chunk_frames),
                 }
 
                 if (!c.SDL_PutAudioStreamData(stream_ptr, &buf, @intCast(chunk_bytes))) {
