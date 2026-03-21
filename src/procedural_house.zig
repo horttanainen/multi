@@ -1,6 +1,6 @@
 // Procedural chill house music style.
-// ~120 BPM with synthesized kick, hi-hats, bouncy bass, and Vangelis-style pads.
-// All DSP primitives imported from synth.zig.
+// ~120 BPM with synthesized kick, hi-hats, phrase-based bass,
+// unison FM pads, and stab chords. Uses synth engine types.
 const std = @import("std");
 const synth = @import("synth.zig");
 
@@ -28,10 +28,6 @@ pub var bass_vol: f32 = 0.2;
 pub var pad_vol: f32 = 0.06;
 pub var stab_chance: f32 = 0.4;
 
-fn samplesPerBeat() f32 {
-    return SAMPLE_RATE * 60.0 / bpm;
-}
-
 // ============================================================
 // Reverb (shorter/tighter for house)
 // ============================================================
@@ -39,11 +35,13 @@ fn samplesPerBeat() f32 {
 const HouseReverb = StereoReverb(.{ 1117, 1049, 983, 907 }, .{ 197, 419 });
 var reverb: HouseReverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
 
+var rng: synth.Rng = synth.Rng.init(54321);
+
 // ============================================================
-// PRNG
+// Arc controller for dynamics
 // ============================================================
 
-var rng: synth.Rng = synth.Rng.init(54321);
+var arc: synth.ArcController = .{ .section_beats = 32, .shape = .rise_fall };
 
 // ============================================================
 // Kick drum: sine sweep 150Hz → 50Hz with fast decay
@@ -107,15 +105,21 @@ fn processHihat() f32 {
 }
 
 // ============================================================
-// Bass: bouncy pentatonic with thick low end
+// Bass: bouncy pentatonic with thick low end (phrase-driven)
 // ============================================================
 
 var bass_phase: f32 = 0;
 var bass_freq: f32 = midiToFreq(36);
 var bass_env: Envelope = Envelope.init(0.005, 0.15, 0.6, 0.1);
 var bass_lpf: LPF = LPF.init(400.0);
-var bass_note_idx: u8 = 0;
-var bass_beat_counter: f32 = 0;
+var bass_phrase: synth.PhraseGenerator = .{
+    .anchor = 0,
+    .region_low = 0,
+    .region_high = 4,
+    .rest_chance = 0.15,
+    .min_notes = 4,
+    .max_notes = 8,
+};
 const bass_pattern = [8]bool{ true, false, false, true, true, false, true, false };
 var bass_pattern_idx: u8 = 0;
 
@@ -133,62 +137,46 @@ fn processBass() f32 {
 }
 
 // ============================================================
-// Pad: Vangelis-style FM with slow filter sweep
+// Pad: FM with unison for lush Vangelis-style pads
 // ============================================================
 
+const PadVoice = synth.Voice(3, 1);
 const PAD_COUNT = 3;
-var pad_carrier_phase: [PAD_COUNT]f32 = .{0} ** PAD_COUNT;
-var pad_mod_phase: [PAD_COUNT]f32 = .{0} ** PAD_COUNT;
-var pad_freq: [PAD_COUNT]f32 = .{ midiToFreq(60), midiToFreq(63), midiToFreq(67) };
-var pad_env: [PAD_COUNT]Envelope = .{
-    Envelope.init(2.0, 0.5, 0.7, 3.0),
-    Envelope.init(2.5, 0.5, 0.6, 3.5),
-    Envelope.init(2.2, 0.5, 0.65, 3.2),
+
+var pads: [PAD_COUNT]PadVoice = .{
+    .{ .fm_ratio = 1.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(2000.0), .pan = -0.6 },
+    .{ .fm_ratio = 2.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(1800.0), .pan = 0.0 },
+    .{ .fm_ratio = 3.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(1900.0), .pan = 0.6 },
 };
-var pad_lpf: [PAD_COUNT]LPF = .{ LPF.init(2000.0), LPF.init(1800.0), LPF.init(1900.0) };
 var pad_beat_counter: [PAD_COUNT]f32 = .{ 0, 0, 0 };
 const pad_beat_len: [PAD_COUNT]f32 = .{ 16.0, 12.0, 14.0 };
-var pad_note_idx: [PAD_COUNT]u8 = .{ 10, 11, 13 };
-
-fn processPad(idx: usize) [2]f32 {
-    const freq = pad_freq[idx];
-    const mod_ratios = [PAD_COUNT]f32{ 1.0, 2.0, 3.0 };
-    const mod_freq = freq * mod_ratios[idx];
-
-    pad_mod_phase[idx] += mod_freq * INV_SR * TAU;
-    if (pad_mod_phase[idx] > TAU) pad_mod_phase[idx] -= TAU;
-
-    const env_val = pad_env[idx].process();
-    const mod_depth = 0.8 + env_val * 0.5;
-    const mod_signal = mod_depth * @sin(pad_mod_phase[idx]);
-
-    pad_carrier_phase[idx] += freq * INV_SR * TAU;
-    if (pad_carrier_phase[idx] > TAU) pad_carrier_phase[idx] -= TAU;
-
-    var s = @sin(pad_carrier_phase[idx] + mod_signal);
-    s += @sin(pad_carrier_phase[idx] * 0.5) * 0.3;
-    s = pad_lpf[idx].process(s);
-    s *= env_val * pad_vol;
-
-    const pan_positions = [PAD_COUNT]f32{ -0.6, 0.0, 0.6 };
-    return panStereo(s, pan_positions[idx]);
-}
+var pad_phrases: [PAD_COUNT]synth.PhraseGenerator = .{
+    .{ .anchor = 10, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+    .{ .anchor = 11, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+    .{ .anchor = 13, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+};
 
 // ============================================================
-// Stab: short chord hits for rhythmic interest
+// Stab: short chord hits
 // ============================================================
 
-var stab_phase: [3]f32 = .{0} ** 3;
-var stab_freq: [3]f32 = .{ midiToFreq(60), midiToFreq(63), midiToFreq(67) };
+const StabVoice = synth.Voice(2, 1);
+var stab_voices: [3]StabVoice = .{
+    .{ .unison_spread = 0.004, .pan = -0.3 },
+    .{ .unison_spread = 0.004, .pan = 0.0 },
+    .{ .unison_spread = 0.004, .pan = 0.3 },
+};
 var stab_env: Envelope = Envelope.init(0.002, 0.08, 0.0, 0.05);
 
 fn triggerStab() void {
     const root_idx = rng.nextScaleNote(10, 10, 14);
-    stab_freq[0] = midiToFreq(scale[root_idx]);
     const second = @min(root_idx + 2, 14);
-    stab_freq[1] = midiToFreq(scale[second]);
     const third = @min(root_idx + 4, 19);
-    stab_freq[2] = midiToFreq(scale[third]);
+    const freqs = [3]f32{ midiToFreq(scale[root_idx]), midiToFreq(scale[second]), midiToFreq(scale[third]) };
+    for (0..3) |v| {
+        stab_voices[v].freq = freqs[v];
+    }
+    stab_env = Envelope.init(0.002, 0.08, 0.0, 0.05);
     stab_env.trigger();
 }
 
@@ -199,13 +187,17 @@ fn processStab() [2]f32 {
     var l: f32 = 0;
     var r: f32 = 0;
     for (0..3) |v| {
-        stab_phase[v] += stab_freq[v] * INV_SR * TAU;
-        if (stab_phase[v] > TAU) stab_phase[v] -= TAU;
-        var s = @sin(stab_phase[v]);
-        s += @sin(stab_phase[v] * 2.0) * 0.3;
-        s *= env_val * 0.04;
-        const pans = [3]f32{ -0.3, 0.0, 0.3 };
-        const stereo = panStereo(s, pans[v]);
+        // Use Voice oscillators but shared stab envelope
+        stab_voices[v].env = .{
+            .state = .sustain,
+            .level = env_val,
+            .attack_rate = 0,
+            .decay_rate = 0,
+            .sustain_level = env_val,
+            .release_rate = 0,
+        };
+        const sample = stab_voices[v].process() * 0.04;
+        const stereo = panStereo(sample, stab_voices[v].pan);
         l += stereo[0];
         r += stereo[1];
     }
@@ -223,10 +215,13 @@ var pattern_step: u8 = 0;
 var hihat_scheduled: bool = false;
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spb = samplesPerBeat();
+    const spb = synth.samplesPerBeat(bpm);
 
     for (0..frames) |i| {
         global_sample += 1;
+        arc.advanceSample(bpm);
+        const t = arc.tension();
+
         beat_counter += 1.0 / spb;
 
         // New beat
@@ -238,11 +233,12 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             // Kick: four-on-the-floor
             triggerKick();
 
-            // Bass: pattern-driven
+            // Bass: pattern-driven with phrase generation
             if (bass_pattern[bass_pattern_idx]) {
-                bass_note_idx = rng.nextScaleNote(bass_note_idx, 0, 4);
-                bass_freq = midiToFreq(scale[bass_note_idx]);
-                bass_env.trigger();
+                if (bass_phrase.advance(&rng)) |note_idx| {
+                    bass_freq = midiToFreq(scale[note_idx]);
+                    bass_env.trigger();
+                }
             }
             bass_pattern_idx = (bass_pattern_idx + 1) % 8;
 
@@ -251,14 +247,17 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                 pad_beat_counter[p] += 1.0;
                 if (pad_beat_counter[p] >= pad_beat_len[p]) {
                     pad_beat_counter[p] = 0;
-                    pad_note_idx[p] = rng.nextScaleNote(pad_note_idx[p], 10, 14);
-                    pad_freq[p] = midiToFreq(scale[pad_note_idx[p]]);
-                    pad_env[p].trigger();
+                    if (pad_phrases[p].advance(&rng)) |note_idx| {
+                        const freq = midiToFreq(scale[note_idx]);
+                        // Arc opens pad filter at high tension
+                        pads[p].filter = LPF.init(1200.0 + t * 1200.0);
+                        pads[p].trigger(freq, Envelope.init(2.0, 0.5, 0.7, 3.0));
+                    }
                 }
             }
 
-            // Stab: every 4 beats, 40% probability
-            if (beat_number % 4 == 0 and rng.float() < stab_chance) {
+            // Stab: every 4 beats, probability modulated by arc
+            if (beat_number % 4 == 0 and rng.float() < stab_chance * (0.7 + t * 0.6)) {
                 triggerStab();
             }
 
@@ -276,45 +275,37 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var left: f32 = 0;
         var right: f32 = 0;
 
-        // Kick (center)
         const kick = processKick();
         left += kick;
         right += kick;
 
-        // Hi-hat (slightly right)
         const hat = processHihat();
         left += hat * 0.4;
         right += hat * 0.6;
 
-        // Bass (center)
         const bass = processBass();
         left += bass;
         right += bass;
 
-        // Pads (stereo)
         for (0..PAD_COUNT) |p| {
-            const pad_out = processPad(p);
-            left += pad_out[0];
-            right += pad_out[1];
+            const sample = pads[p].process() * pad_vol;
+            const stereo = panStereo(sample, pads[p].pan);
+            left += stereo[0];
+            right += stereo[1];
         }
 
-        // Stab (stereo)
         const stab_out = processStab();
         left += stab_out[0];
         right += stab_out[1];
 
         // Reverb
         const dry = 1.0 - reverb_mix;
-        const wet = reverb_mix;
         const rev = reverb.process(.{ left, right });
-        left = left * dry + rev[0] * wet;
-        right = right * dry + rev[1] * wet;
+        left = left * dry + rev[0] * reverb_mix;
+        right = right * dry + rev[1] * reverb_mix;
 
-        left = softClip(left);
-        right = softClip(right);
-
-        buf[i * 2] = left;
-        buf[i * 2 + 1] = right;
+        buf[i * 2] = softClip(left);
+        buf[i * 2 + 1] = softClip(right);
     }
 }
 
@@ -340,21 +331,28 @@ pub fn reset() void {
     bass_freq = midiToFreq(36);
     bass_env = Envelope.init(0.005, 0.15, 0.6, 0.1);
     bass_lpf = LPF.init(400.0);
-    bass_note_idx = 0;
-    bass_beat_counter = 0;
+    bass_phrase = .{ .anchor = 0, .region_low = 0, .region_high = 4, .rest_chance = 0.15, .min_notes = 4, .max_notes = 8 };
     bass_pattern_idx = 0;
 
-    pad_carrier_phase = .{0} ** PAD_COUNT;
-    pad_mod_phase = .{0} ** PAD_COUNT;
-    pad_freq = .{ midiToFreq(60), midiToFreq(63), midiToFreq(67) };
-    pad_env = .{ Envelope.init(2.0, 0.5, 0.7, 3.0), Envelope.init(2.5, 0.5, 0.6, 3.5), Envelope.init(2.2, 0.5, 0.65, 3.2) };
-    pad_lpf = .{ LPF.init(2000.0), LPF.init(1800.0), LPF.init(1900.0) };
+    pads = .{
+        .{ .fm_ratio = 1.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(2000.0), .pan = -0.6 },
+        .{ .fm_ratio = 2.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(1800.0), .pan = 0.0 },
+        .{ .fm_ratio = 3.0, .fm_depth = 0.8, .fm_env_depth = 0.5, .unison_spread = 0.005, .filter = LPF.init(1900.0), .pan = 0.6 },
+    };
     pad_beat_counter = .{ 0, 0, 0 };
-    pad_note_idx = .{ 10, 11, 13 };
+    pad_phrases = .{
+        .{ .anchor = 10, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+        .{ .anchor = 11, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+        .{ .anchor = 13, .region_low = 10, .region_high = 14, .rest_chance = 0.05, .min_notes = 2, .max_notes = 4 },
+    };
 
-    stab_phase = .{0} ** 3;
-    stab_freq = .{ midiToFreq(60), midiToFreq(63), midiToFreq(67) };
+    stab_voices = .{
+        .{ .unison_spread = 0.004, .pan = -0.3 },
+        .{ .unison_spread = 0.004, .pan = 0.0 },
+        .{ .unison_spread = 0.004, .pan = 0.3 },
+    };
     stab_env = Envelope.init(0.002, 0.08, 0.0, 0.05);
 
+    arc = .{ .section_beats = 32, .shape = .rise_fall };
     reverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
 }

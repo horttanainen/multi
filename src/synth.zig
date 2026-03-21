@@ -329,9 +329,13 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
             return self.env.state == .idle;
         }
 
-        pub fn process(self: *Self) f32 {
+        pub const RawOutput = struct { osc: f32, env_val: f32 };
+
+        /// Returns raw oscillator sum (pre-filter) and envelope value.
+        /// Use when you need custom filtering (e.g. formant filters for choir).
+        pub fn processRaw(self: *Self) RawOutput {
             const env_val = self.env.process();
-            if (env_val <= 0.0001) return 0;
+            if (env_val <= 0.0001) return .{ .osc = 0, .env_val = 0 };
 
             var sample: f32 = 0;
             const use_fm = self.fm_ratio > 0;
@@ -370,8 +374,14 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
                 sample /= @as(f32, @floatFromInt(n_unison));
             }
 
-            sample = self.filter.process(sample);
-            return sample * env_val;
+            return .{ .osc = sample, .env_val = env_val };
+        }
+
+        /// Full processing: oscillators → filter → envelope.
+        pub fn process(self: *Self) f32 {
+            const raw = self.processRaw();
+            if (raw.env_val <= 0.0001) return 0;
+            return self.filter.process(raw.osc) * raw.env_val;
         }
     };
 }
