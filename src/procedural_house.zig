@@ -5,17 +5,11 @@
 // instead of looping a static bar forever.
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
-const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
 const layers = @import("music/layers.zig");
 
-const Envelope = dsp.Envelope;
-const LPF = dsp.LPF;
 const StereoReverb = dsp.StereoReverb;
-const midiToFreq = dsp.midiToFreq;
 const softClip = dsp.softClip;
-const panStereo = dsp.panStereo;
-const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 pub const CuePreset = enum(u8) {
     deep_night,
@@ -65,11 +59,15 @@ const DRUM_LAYER = 0;
 const BASS_LAYER = 1;
 const PAD_LAYER = 2;
 const STAB_LAYER = 3;
-const KICK_MAIN_MASK: u16 = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12);
-const KICK_FILL_MASK: u16 = (1 << 10) | (1 << 15);
-const BASS_TRIGGER_MASK: u16 = (1 << 0) | (1 << 3) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 14);
+const HOUSE_DRUM_PATTERN: layers.DrumPatternSpec = .{
+    .kick_main_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+    .kick_fill_mask = (1 << 10) | (1 << 15),
+    .kick_fill_velocity = 0.55,
+    .kick_fill_density = 0.36,
+};
+const HOUSE_BASS_TRIGGER_MASK: u16 = (1 << 0) | (1 << 3) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 14);
 const HOUSE_BASS_LAYER_SPEC: layers.StepBassSpec = .{
-    .trigger_mask = BASS_TRIGGER_MASK,
+    .trigger_mask = HOUSE_BASS_TRIGGER_MASK,
     .base_rest_chance = 0.06,
     .meso_rest_spread = 0.08,
     .filter_base_hz = 300.0,
@@ -85,10 +83,7 @@ const HOUSE_LAYER_CURVES: [4]composition.LayerCurve = .{
 
 const LAYER_FADE_RATE: f32 = 0.00006;
 
-var kick: instruments.Kick = .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 };
-var hat: instruments.HiHat = .{ .volume = 0.7 };
-var bass: instruments.SawBass = .{ .drive = 0.42, .sub_mix = 0.48, .volume = 0.72 };
-var bass_phrase: composition.PhraseGenerator = .{
+const HOUSE_BASS_PHRASE: composition.PhraseGenerator = .{
     .anchor = 0,
     .region_low = 0,
     .region_high = 7,
@@ -97,24 +92,6 @@ var bass_phrase: composition.PhraseGenerator = .{
     .max_notes = 8,
     .gravity = 3.2,
 };
-
-const PadVoice = dsp.Voice(3, 1);
-const PAD_COUNT = 3;
-var pads: [PAD_COUNT]PadVoice = .{
-    .{ .fm_ratio = 1.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1600.0), .pan = -0.55 },
-    .{ .fm_ratio = 2.0, .fm_depth = 0.75, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1500.0), .pan = 0.0 },
-    .{ .fm_ratio = 3.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1550.0), .pan = 0.55 },
-};
-
-const StabVoice = dsp.Voice(2, 1);
-var stab_voices: [3]StabVoice = .{
-    .{ .unison_spread = 0.004, .pan = -0.3 },
-    .{ .unison_spread = 0.004, .pan = 0.0 },
-    .{ .unison_spread = 0.004, .pan = 0.3 },
-};
-var stab_env: Envelope = Envelope.init(0.002, 0.08, 0.0, 0.05);
-
-var beat_number: u32 = 0;
 const CHORD_CHANGE_BEATS: f32 = 8.0;
 const HouseCueSpec = struct {
     root: u8,
@@ -187,35 +164,19 @@ const STYLE: HouseStyleSpec = .{
 };
 const HouseRunner = composition.StepStyleRunner(HouseCueSpec, 4);
 var runner: HouseRunner = .{};
+var drums: layers.DrumKitLayer = .{};
+var bass_layer: layers.StepBassLayer = .{};
+var pad_layer: layers.PadChordLayer = .{};
+var stab_layer: layers.StabChordLayer = .{};
 
 pub fn reset() void {
     rng = dsp.Rng.init(54321);
     lfo_filter = .{ .period_beats = 48, .depth = 0.07 };
 
-    kick = .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 };
-    hat = .{ .volume = 0.7 };
-    bass = .{ .drive = 0.42, .sub_mix = 0.48, .volume = 0.72 };
-    bass_phrase = .{
-        .anchor = 0,
-        .region_low = 0,
-        .region_high = 7,
-        .rest_chance = 0.08,
-        .min_notes = 4,
-        .max_notes = 8,
-        .gravity = 3.2,
-    };
-    pads = .{
-        .{ .fm_ratio = 1.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1600.0), .pan = -0.55 },
-        .{ .fm_ratio = 2.0, .fm_depth = 0.75, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1500.0), .pan = 0.0 },
-        .{ .fm_ratio = 3.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1550.0), .pan = 0.55 },
-    };
-    stab_voices = .{
-        .{ .unison_spread = 0.004, .pan = -0.3 },
-        .{ .unison_spread = 0.004, .pan = 0.0 },
-        .{ .unison_spread = 0.004, .pan = 0.3 },
-    };
-    stab_env = Envelope.init(0.002, 0.08, 0.0, 0.05);
-    beat_number = 0;
+    layers.resetDrumKitLayer(&drums, .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 }, .{}, .{ .volume = 0.7 });
+    layers.resetStepBassLayer(&bass_layer, .{ .drive = 0.42, .sub_mix = 0.48, .volume = 0.72 }, HOUSE_BASS_PHRASE);
+    layers.resetPadChordLayer(&pad_layer);
+    layers.resetStabChordLayer(&stab_layer);
 
     reverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
     runner.reset(&STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .mixed, .{ 1.0, 0.9, 0.45, 0.25 }, .{ 1.0, 0.8, 0.2, 0.0 });
@@ -243,28 +204,28 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var left: f32 = 0.0;
         var right: f32 = 0.0;
 
-        const kick_s = kick.process() * kick_vol * runner.layer_levels[DRUM_LAYER];
-        left += kick_s;
-        right += kick_s;
+        const drums_out = layers.mixDrumKitLayer(&drums, &rng, runner.layer_levels[DRUM_LAYER], .{
+            .kick_left = kick_vol,
+            .kick_right = kick_vol,
+            .snare_left = 0.0,
+            .snare_right = 0.0,
+            .hat_left = hihat_vol * 0.42,
+            .hat_right = hihat_vol * 0.62,
+        });
+        left += drums_out[0];
+        right += drums_out[1];
 
-        const hat_s = hat.process(&rng) * hihat_vol * runner.layer_levels[DRUM_LAYER];
-        left += hat_s * 0.42;
-        right += hat_s * 0.62;
+        const bass_out = layers.mixStepBassLayer(&bass_layer, bass_vol * runner.layer_levels[BASS_LAYER], 0.9, 0.84);
+        left += bass_out[0];
+        right += bass_out[1];
 
-        const bass_s = bass.process() * bass_vol * runner.layer_levels[BASS_LAYER];
-        left += bass_s * 0.9;
-        right += bass_s * 0.84;
+        const pad_out = layers.mixPadChordLayer(&pad_layer, pad_vol * runner.layer_levels[PAD_LAYER]);
+        left += pad_out[0];
+        right += pad_out[1];
 
-        for (0..PAD_COUNT) |p| {
-            const sample = pads[p].process() * pad_vol * runner.layer_levels[PAD_LAYER];
-            const stereo = panStereo(sample, pads[p].pan);
-            left += stereo[0];
-            right += stereo[1];
-        }
-
-        const stab_out = processStab();
-        left += stab_out[0] * runner.layer_levels[STAB_LAYER];
-        right += stab_out[1] * runner.layer_levels[STAB_LAYER];
+        const stab_out = layers.mixStabChordLayer(&stab_layer, runner.layer_levels[STAB_LAYER]);
+        left += stab_out[0];
+        right += stab_out[1];
 
         const rev = reverb.process(.{ left, right });
         const wet = reverb_mix + frame.tick.meso * 0.05;
@@ -278,33 +239,21 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 }
 
 fn advanceChord() void {
-    composition.applyChordTonesToPhrases(&runner.engine.harmony, runner.engine.key.scale_type, .{ &bass_phrase });
-
     const chord = runner.engine.harmony.chords[runner.engine.harmony.current];
-    var freqs: [PAD_COUNT]f32 = undefined;
-    layers.fillChordFrequencies(PAD_COUNT, &freqs, runner.engine.key.root, chord, 1);
-    const filter_mod = lfo_filter.modulate();
-    for (0..PAD_COUNT) |idx| {
-        pads[idx].filter = LPF.init((1100.0 + filter_mod * 900.0) + @as(f32, @floatFromInt(idx)) * 120.0);
-        pads[idx].trigger(freqs[idx], Envelope.init(0.8, 0.5, 0.72, 2.8));
-        stab_voices[idx].freq = freqs[idx];
-    }
-
-    bass.freq = midiToFreq(runner.engine.key.root + chord.offsets[0]);
+    const freqs = layers.applyPadChord(&pad_layer, runner.engine.key.root, chord, lfo_filter.modulate());
+    layers.applyStabChord(&stab_layer, &freqs);
+    layers.applyStepBassChord(&bass_layer, &runner.engine.harmony, runner.engine.key.scale_type, runner.engine.key.root);
 }
 
 fn advanceStep(step: u8, meso: f32, micro: f32) void {
-    beat_number += 1;
-
-    const drum_events = layers.drumStepEvents(step, meso, &rng, .{
-        .kick_main_mask = KICK_MAIN_MASK,
-        .kick_fill_mask = KICK_FILL_MASK,
-        .kick_fill_velocity = 0.55,
-        .kick_fill_density = 0.36,
+    layers.advanceDrumKitLayer(&drums, step, meso, &rng, .{
+        .kick_main_mask = HOUSE_DRUM_PATTERN.kick_main_mask,
+        .kick_fill_mask = HOUSE_DRUM_PATTERN.kick_fill_mask,
+        .kick_fill_velocity = HOUSE_DRUM_PATTERN.kick_fill_velocity,
+        .kick_fill_density = HOUSE_DRUM_PATTERN.kick_fill_density,
         .hat_onbeat_chance = 0.0,
         .hat_offbeat_chance = 0.0,
     });
-    layers.applyDrumStep(drum_events, &kick, null, null);
 
     const hat_chance = if (step % 2 == 1)
         0.92
@@ -313,20 +262,11 @@ fn advanceStep(step: u8, meso: f32, micro: f32) void {
     else
         0.15 + meso * 0.3;
     if (rng.float() < hat_chance) {
-        hat.trigger();
+        drums.hat.trigger();
     }
 
-    layers.triggerStepBass(step, micro, meso, lfo_filter.modulate(), &rng, &runner.engine.key, &bass_phrase, &bass, HOUSE_BASS_LAYER_SPEC);
-
-    const stab_trigger = switch (step) {
-        3, 11 => true,
-        7, 15 => rng.float() < stab_chance * (0.35 + meso * 0.45),
-        else => false,
-    };
-    if (stab_trigger and rng.float() < stab_chance * (0.55 + meso * 0.55)) {
-        stab_env = Envelope.init(0.002, 0.05 + micro * 0.06, 0.0, 0.04 + meso * 0.04);
-        stab_env.trigger();
-    }
+    layers.advanceStepBassLayer(&bass_layer, step, micro, meso, lfo_filter.modulate(), &rng, &runner.engine.key, HOUSE_BASS_LAYER_SPEC);
+    layers.maybeTriggerStabChordLayer(&stab_layer, step, micro, meso, &rng, stab_chance);
 }
 
 fn applyCueParams() void {
@@ -337,33 +277,10 @@ fn applyCueParams() void {
     runner.engine.chord_change_beats = spec.chord_change_beats;
     runner.engine.modulation_mode = spec.modulation_mode;
     lfo_filter = spec.lfo_filter;
-    composition.applyPhraseConfig(spec.bass_phrase, &bass_phrase);
-    kick.base_freq = spec.kick_base_freq;
-    kick.sweep = spec.kick_sweep;
-    hat.volume = spec.hat_volume;
-    bass.drive = spec.bass_drive;
+    composition.applyPhraseConfig(spec.bass_phrase, &bass_layer.phrase);
+    drums.kick.base_freq = spec.kick_base_freq;
+    drums.kick.sweep = spec.kick_sweep;
+    drums.hat.volume = spec.hat_volume;
+    bass_layer.bass.drive = spec.bass_drive;
     stab_chance = std.math.clamp(stab_chance, 0.0, 1.0);
-}
-
-fn processStab() [2]f32 {
-    const env_val = stab_env.process();
-    if (env_val < 0.001) return .{ 0.0, 0.0 };
-
-    var left: f32 = 0.0;
-    var right: f32 = 0.0;
-    for (0..3) |idx| {
-        stab_voices[idx].env = .{
-            .state = .sustain,
-            .level = env_val,
-            .attack_rate = 0,
-            .decay_rate = 0,
-            .sustain_level = env_val,
-            .release_rate = 0,
-        };
-        const sample = stab_voices[idx].process() * 0.08;
-        const stereo = panStereo(sample, stab_voices[idx].pan);
-        left += stereo[0];
-        right += stereo[1];
-    }
-    return .{ left, right };
 }
