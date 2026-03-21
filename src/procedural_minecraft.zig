@@ -2,16 +2,17 @@
 // Short cue-based fragments with long gaps, a soft harmonic bed,
 // degraded piano timbre, and slow resonance tails.
 const std = @import("std");
-const synth = @import("synth.zig");
+const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
 
-const StereoReverb = synth.StereoReverb;
-const scale = synth.pentatonic_scale;
-const midiToFreq = synth.midiToFreq;
-const softClip = synth.softClip;
-const panStereo = synth.panStereo;
-const TAU = synth.TAU;
-const INV_SR = synth.INV_SR;
-const SAMPLE_RATE = synth.SAMPLE_RATE;
+const StereoReverb = dsp.StereoReverb;
+const scale = dsp.pentatonic_scale;
+const midiToFreq = dsp.midiToFreq;
+const softClip = dsp.softClip;
+const panStereo = dsp.panStereo;
+const TAU = dsp.TAU;
+const INV_SR = dsp.INV_SR;
+const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 // ============================================================
 // Tweakable parameters (written by musicConfigMenu)
@@ -124,9 +125,9 @@ var phrase_pos: [VOICE_COUNT]u8 = .{ 0, 0 };
 // Piano voices
 // ============================================================
 
-var voices: [VOICE_COUNT]synth.PianoVoice = .{
-    synth.PianoVoice.init(-0.18, 0.0),
-    synth.PianoVoice.init(0.22, 1.5),
+var voices: [VOICE_COUNT]instruments.PianoVoice = .{
+    instruments.PianoVoice.init(-0.18, 0.0),
+    instruments.PianoVoice.init(0.22, 1.5),
 };
 var voice_note_idx: [VOICE_COUNT]u8 = .{ 10, 12 };
 var voice_beat_counter: [VOICE_COUNT]f32 = .{ 0, 0 };
@@ -153,7 +154,7 @@ var bed_freq: [BED_PARTIALS]f32 = .{
 var bed_target_gain: [BED_PARTIALS]f32 = .{ 0.012, 0.010, 0.008, 0.006 };
 var bed_gain: [BED_PARTIALS]f32 = .{ 0.0, 0.0, 0.0, 0.0 };
 
-var drone: synth.SineDrone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
+var drone: instruments.SineDrone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
 
 // ============================================================
 // Rare events
@@ -169,7 +170,7 @@ var drone_dropout_beats: f32 = 0;
 // ============================================================
 
 var global_sample: u64 = 0;
-var rng: synth.Rng = synth.Rng.init(77777);
+var rng: dsp.Rng = dsp.Rng.init(77777);
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
     const spb = samplesPerBeat();
@@ -238,7 +239,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
 pub fn reset() void {
     global_sample = 0;
-    rng = synth.Rng.init(77777);
+    rng = dsp.Rng.init(77777);
 
     cue_state = .idle;
     cue_samples_remaining = 0;
@@ -271,8 +272,8 @@ pub fn reset() void {
     phrase_pos = .{ 0, 0 };
 
     voices = .{
-        synth.PianoVoice.init(-0.18, 0.0),
-        synth.PianoVoice.init(0.22, 1.5),
+        instruments.PianoVoice.init(-0.18, 0.0),
+        instruments.PianoVoice.init(0.22, 1.5),
     };
     voice_note_idx = .{ 10, 12 };
     voice_beat_counter = .{ 0, 0 };
@@ -284,7 +285,7 @@ pub fn reset() void {
     bed_phase = .{.{0} ** 3} ** BED_PARTIALS;
     bed_gain = .{ 0.0, 0.0, 0.0, 0.0 };
 
-    drone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
+    drone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
 
     bloom_notes_remaining = 0;
     repeat_figure_notes_remaining = 0;
@@ -694,7 +695,7 @@ fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
         1.5 + blur_amount * 1.6
     else
         1.8 + blur_amount * 1.9;
-    voices[voice_idx].trigger(freq, velocity, @max(cutoff, 140.0), synth.Envelope.init(attack_s, decay_s, 0.0, release_s));
+    voices[voice_idx].trigger(freq, velocity, @max(cutoff, 140.0), dsp.Envelope.init(attack_s, decay_s, 0.0, release_s));
 
     exciteResonance(note_idx);
 

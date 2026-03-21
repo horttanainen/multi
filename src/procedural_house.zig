@@ -4,15 +4,17 @@
 // vertical layer activation, and macro key modulation so the groove evolves
 // instead of looping a static bar forever.
 const std = @import("std");
-const synth = @import("synth.zig");
+const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
+const composition = @import("music/composition.zig");
 
-const Envelope = synth.Envelope;
-const LPF = synth.LPF;
-const StereoReverb = synth.StereoReverb;
-const midiToFreq = synth.midiToFreq;
-const softClip = synth.softClip;
-const panStereo = synth.panStereo;
-const SAMPLE_RATE = synth.SAMPLE_RATE;
+const Envelope = dsp.Envelope;
+const LPF = dsp.LPF;
+const StereoReverb = dsp.StereoReverb;
+const midiToFreq = dsp.midiToFreq;
+const softClip = dsp.softClip;
+const panStereo = dsp.panStereo;
+const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 pub const CuePreset = enum(u8) {
     deep_night,
@@ -32,12 +34,12 @@ pub var selected_cue: CuePreset = .deep_night;
 
 const HouseReverb = StereoReverb(.{ 1117, 1049, 983, 907 }, .{ 197, 419 });
 var reverb: HouseReverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
-var rng: synth.Rng = synth.Rng.init(54321);
+var rng: dsp.Rng = dsp.Rng.init(54321);
 
-var engine: synth.CompositionEngine = .{};
+var engine: composition.CompositionEngine = .{};
 
-fn initHarmony() synth.ChordMarkov {
-    var h: synth.ChordMarkov = .{};
+fn initHarmony() composition.ChordMarkov {
+    var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 3, 7, 10 }, .len = 4 }; // i7
     h.chords[1] = .{ .offsets = .{ 3, 7, 10, 14 }, .len = 4 }; // IIImaj-ish color
     h.chords[2] = .{ .offsets = .{ 5, 9, 12, 15 }, .len = 4 }; // iv
@@ -52,13 +54,13 @@ fn initHarmony() synth.ChordMarkov {
     return h;
 }
 
-const HOUSE_ARCS: synth.ArcSystem = .{
+const HOUSE_ARCS: composition.ArcSystem = .{
     .micro = .{ .section_beats = 4, .shape = .rise_fall },
     .meso = .{ .section_beats = 32, .shape = .rise_fall },
     .macro = .{ .section_beats = 128, .shape = .plateau },
 };
 
-var lfo_filter: synth.SlowLfo = .{ .period_beats = 48, .depth = 0.07 };
+var lfo_filter: composition.SlowLfo = .{ .period_beats = 48, .depth = 0.07 };
 
 var drum_target: f32 = 1.0;
 var bass_target: f32 = 0.9;
@@ -72,10 +74,10 @@ var stab_level: f32 = 0.0;
 
 const LAYER_FADE_RATE: f32 = 0.00006;
 
-var kick: synth.Kick = .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 };
-var hat: synth.HiHat = .{ .volume = 0.7 };
-var bass: synth.SawBass = .{ .drive = 0.42, .sub_mix = 0.48, .volume = 0.72 };
-var bass_phrase: synth.PhraseGenerator = .{
+var kick: instruments.Kick = .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 };
+var hat: instruments.HiHat = .{ .volume = 0.7 };
+var bass: instruments.SawBass = .{ .drive = 0.42, .sub_mix = 0.48, .volume = 0.72 };
+var bass_phrase: composition.PhraseGenerator = .{
     .anchor = 0,
     .region_low = 0,
     .region_high = 7,
@@ -85,7 +87,7 @@ var bass_phrase: synth.PhraseGenerator = .{
     .gravity = 3.2,
 };
 
-const PadVoice = synth.Voice(3, 1);
+const PadVoice = dsp.Voice(3, 1);
 const PAD_COUNT = 3;
 var pads: [PAD_COUNT]PadVoice = .{
     .{ .fm_ratio = 1.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1600.0), .pan = -0.55 },
@@ -93,7 +95,7 @@ var pads: [PAD_COUNT]PadVoice = .{
     .{ .fm_ratio = 3.0, .fm_depth = 0.7, .fm_env_depth = 0.4, .unison_spread = 0.005, .filter = LPF.init(1550.0), .pan = 0.55 },
 };
 
-const StabVoice = synth.Voice(2, 1);
+const StabVoice = dsp.Voice(2, 1);
 var stab_voices: [3]StabVoice = .{
     .{ .unison_spread = 0.004, .pan = -0.3 },
     .{ .unison_spread = 0.004, .pan = 0.0 },
@@ -107,7 +109,7 @@ var beat_number: u32 = 0;
 const CHORD_CHANGE_BEATS: f32 = 8.0;
 
 pub fn reset() void {
-    rng = synth.Rng.init(54321);
+    rng = dsp.Rng.init(54321);
     engine.reset(.{ .root = 36, .scale_type = .dorian }, initHarmony(), HOUSE_ARCS, CHORD_CHANGE_BEATS, .mixed);
     lfo_filter = .{ .period_beats = 48, .depth = 0.07 };
 

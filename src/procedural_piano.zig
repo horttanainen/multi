@@ -2,13 +2,15 @@
 //
 // Uses chord progression, phrase memory, multi-scale arcs, and key modulation
 // so the piano develops motifs over time instead of circling one static loop.
-const synth = @import("synth.zig");
+const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
+const composition = @import("music/composition.zig");
 
-const StereoReverb = synth.StereoReverb;
-const midiToFreq = synth.midiToFreq;
-const softClip = synth.softClip;
-const panStereo = synth.panStereo;
-const SAMPLE_RATE = synth.SAMPLE_RATE;
+const StereoReverb = dsp.StereoReverb;
+const midiToFreq = dsp.midiToFreq;
+const softClip = dsp.softClip;
+const panStereo = dsp.panStereo;
+const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 pub const CuePreset = enum(u8) {
     solace,
@@ -26,12 +28,12 @@ pub var selected_cue: CuePreset = .solace;
 
 const PianoReverb = StereoReverb(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 });
 var reverb: PianoReverb = PianoReverb.init(.{ 0.90, 0.91, 0.92, 0.89 });
-var rng: synth.Rng = synth.Rng.init(77777);
+var rng: dsp.Rng = dsp.Rng.init(77777);
 
-var engine: synth.CompositionEngine = .{};
+var engine: composition.CompositionEngine = .{};
 
-fn initHarmony() synth.ChordMarkov {
-    var h: synth.ChordMarkov = .{};
+fn initHarmony() composition.ChordMarkov {
+    var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 3, 7, 10 }, .len = 4 };
     h.chords[1] = .{ .offsets = .{ 3, 7, 10, 14 }, .len = 4 };
     h.chords[2] = .{ .offsets = .{ 5, 8, 12, 15 }, .len = 4 };
@@ -46,12 +48,12 @@ fn initHarmony() synth.ChordMarkov {
     return h;
 }
 
-const PIANO_ARCS: synth.ArcSystem = .{
+const PIANO_ARCS: composition.ArcSystem = .{
     .micro = .{ .section_beats = 8, .shape = .rise_fall },
     .meso = .{ .section_beats = 48, .shape = .rise_fall },
     .macro = .{ .section_beats = 192, .shape = .plateau },
 };
-var lfo_reverb: synth.SlowLfo = .{ .period_beats = 140, .depth = 0.05 };
+var lfo_reverb: composition.SlowLfo = .{ .period_beats = 140, .depth = 0.05 };
 
 var melody_target: f32 = 0.9;
 var harmony_target: f32 = 0.45;
@@ -65,14 +67,14 @@ const LAYER_FADE_RATE: f32 = 0.00004;
 
 const MELODY_VOICE = 0;
 const HARMONY_VOICE = 1;
-var voices: [2]synth.PianoVoice = .{
-    synth.PianoVoice.init(-0.28, 0.0),
-    synth.PianoVoice.init(0.28, 1.5),
+var voices: [2]instruments.PianoVoice = .{
+    instruments.PianoVoice.init(-0.28, 0.0),
+    instruments.PianoVoice.init(0.28, 1.5),
 };
 var voice_beat_counter: [2]f32 = .{ 0.0, 0.0 };
 var voice_beat_len: [2]f32 = .{ 3.25, 5.5 };
 
-var melody_phrase: synth.PhraseGenerator = .{
+var melody_phrase: composition.PhraseGenerator = .{
     .anchor = 10,
     .region_low = 7,
     .region_high = 16,
@@ -81,7 +83,7 @@ var melody_phrase: synth.PhraseGenerator = .{
     .max_notes = 6,
     .gravity = 3.5,
 };
-var harmony_phrase: synth.PhraseGenerator = .{
+var harmony_phrase: composition.PhraseGenerator = .{
     .anchor = 9,
     .region_low = 5,
     .region_high = 13,
@@ -90,14 +92,14 @@ var harmony_phrase: synth.PhraseGenerator = .{
     .max_notes = 5,
     .gravity = 4.0,
 };
-var phrase_memory: synth.PhraseMemory = .{};
+var phrase_memory: composition.PhraseMemory = .{};
 
-var drone: synth.SineDrone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.002, 1.0, 0.5, 0.02);
+var drone: instruments.SineDrone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.002, 1.0, 0.5, 0.02);
 
 const CHORD_CHANGE_BEATS: f32 = 12.0;
 
 pub fn reset() void {
-    rng = synth.Rng.init(77777);
+    rng = dsp.Rng.init(77777);
     engine.reset(.{ .root = 36, .scale_type = .minor_pentatonic }, initHarmony(), PIANO_ARCS, CHORD_CHANGE_BEATS, .mixed);
     lfo_reverb = .{ .period_beats = 140, .depth = 0.05 };
     melody_target = 0.9;
@@ -107,8 +109,8 @@ pub fn reset() void {
     harmony_level = 0.15;
     drone_level = 0.25;
     voices = .{
-        synth.PianoVoice.init(-0.28, 0.0),
-        synth.PianoVoice.init(0.28, 1.5),
+        instruments.PianoVoice.init(-0.28, 0.0),
+        instruments.PianoVoice.init(0.28, 1.5),
     };
     voice_beat_counter = .{ 0.0, 0.0 };
     voice_beat_len = .{ 3.25, 5.5 };
@@ -131,7 +133,7 @@ pub fn reset() void {
         .gravity = 4.0,
     };
     phrase_memory = .{};
-    drone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.002, 1.0, 0.5, 0.02);
+    drone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.002, 1.0, 0.5, 0.02);
     reverb = PianoReverb.init(.{ 0.90, 0.91, 0.92, 0.89 });
     applyCueParams();
     advanceChord();
@@ -143,7 +145,7 @@ pub fn triggerCue() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spb = synth.samplesPerBeat(bpm);
+    const spb = dsp.samplesPerBeat(bpm);
 
     for (0..frames) |i| {
         lfo_reverb.advanceSample(bpm);
@@ -212,7 +214,7 @@ fn triggerMelodyNote(meso: f32, micro: f32) void {
     melody_phrase.rest_chance = rest_chance * (1.25 - meso * 0.35);
 
     if (phrase_memory.count > 0 and rng.float() < 0.32) {
-        var varied_notes: [synth.PhraseGenerator.MAX_LEN]u8 = undefined;
+        var varied_notes: [composition.PhraseGenerator.MAX_LEN]u8 = undefined;
         if (phrase_memory.recallVaried(&rng, &varied_notes, melody_phrase.region_low, melody_phrase.region_high)) |varied_len| {
             if (varied_len > 0 and varied_notes[0] != 0xFF) {
                 triggerVoice(MELODY_VOICE, varied_notes[0], 0.95 + rng.float() * 0.08, meso, micro, true);
@@ -258,7 +260,7 @@ fn triggerVoice(voice_idx: usize, note_idx: u8, velocity: f32, meso: f32, micro:
     else
         0.3 + brightness * 0.7;
     voices[voice_idx].detune_ratio = 1.0005 + (rng.float() - 0.5) * 0.0015;
-    voices[voice_idx].trigger(freq, velocity, cutoff, synth.Envelope.init(0.003, decay, 0.0, release));
+    voices[voice_idx].trigger(freq, velocity, cutoff, dsp.Envelope.init(0.003, decay, 0.0, release));
 }
 
 fn updateLayerTargets(macro: f32) void {
@@ -282,7 +284,7 @@ fn applyCueParams() void {
             harmony_phrase.rest_chance = 0.62;
             harmony_phrase.region_low = 5;
             harmony_phrase.region_high = 13;
-            drone.filter = synth.LPF.init(120.0);
+            drone.filter = dsp.LPF.init(120.0);
             drone.detune_ratio = 1.002;
         },
         .nocturne => {
@@ -298,7 +300,7 @@ fn applyCueParams() void {
             harmony_phrase.rest_chance = 0.72;
             harmony_phrase.region_low = 4;
             harmony_phrase.region_high = 11;
-            drone.filter = synth.LPF.init(100.0);
+            drone.filter = dsp.LPF.init(100.0);
             drone.detune_ratio = 1.0014;
         },
         .daybreak => {
@@ -314,7 +316,7 @@ fn applyCueParams() void {
             harmony_phrase.rest_chance = 0.54;
             harmony_phrase.region_low = 7;
             harmony_phrase.region_high = 14;
-            drone.filter = synth.LPF.init(150.0);
+            drone.filter = dsp.LPF.init(150.0);
             drone.detune_ratio = 1.0025;
         },
         .remembrance => {
@@ -330,7 +332,7 @@ fn applyCueParams() void {
             harmony_phrase.rest_chance = 0.66;
             harmony_phrase.region_low = 5;
             harmony_phrase.region_high = 12;
-            drone.filter = synth.LPF.init(110.0);
+            drone.filter = dsp.LPF.init(110.0);
             drone.detune_ratio = 1.0017;
         },
     }

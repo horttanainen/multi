@@ -3,12 +3,14 @@
 // Uses chord progression, multi-scale arcs, chant motif memory, macro key
 // movement, and cue-specific timing so the presets diverge both harmonically
 // and behaviorally over time.
-const synth = @import("synth.zig");
+const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
+const composition = @import("music/composition.zig");
 
-const StereoReverb = synth.StereoReverb;
-const midiToFreq = synth.midiToFreq;
-const softClip = synth.softClip;
-const panStereo = synth.panStereo;
+const StereoReverb = dsp.StereoReverb;
+const midiToFreq = dsp.midiToFreq;
+const softClip = dsp.softClip;
+const panStereo = dsp.panStereo;
 
 pub const CuePreset = enum(u8) {
     cathedral,
@@ -27,12 +29,12 @@ pub var selected_cue: CuePreset = .cathedral;
 
 const ChoirReverb = StereoReverb(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 });
 var reverb: ChoirReverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
-var rng: synth.Rng = synth.Rng.init(0x4300_9000);
+var rng: dsp.Rng = dsp.Rng.init(0x4300_9000);
 
-var engine: synth.CompositionEngine = .{};
+var engine: composition.CompositionEngine = .{};
 
-fn initHarmony() synth.ChordMarkov {
-    var h: synth.ChordMarkov = .{};
+fn initHarmony() composition.ChordMarkov {
+    var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 3, 7, 10 }, .len = 4 };
     h.chords[1] = .{ .offsets = .{ 3, 7, 10, 15 }, .len = 4 };
     h.chords[2] = .{ .offsets = .{ 5, 8, 12, 15 }, .len = 4 };
@@ -47,12 +49,12 @@ fn initHarmony() synth.ChordMarkov {
     return h;
 }
 
-const CHOIR_ARCS: synth.ArcSystem = .{
+const CHOIR_ARCS: composition.ArcSystem = .{
     .micro = .{ .section_beats = 16, .shape = .rise_fall },
     .meso = .{ .section_beats = 64, .shape = .rise_fall },
     .macro = .{ .section_beats = 256, .shape = .plateau },
 };
-var lfo_reverb: synth.SlowLfo = .{ .period_beats = 180, .depth = 0.04 };
+var lfo_reverb: composition.SlowLfo = .{ .period_beats = 180, .depth = 0.04 };
 
 var drone_target: f32 = 0.9;
 var pad_target: f32 = 0.75;
@@ -66,7 +68,7 @@ var breath_level: f32 = 0.25;
 
 const LAYER_FADE_RATE: f32 = 0.000025;
 
-const ChoirPart = synth.ChoirPart;
+const ChoirPart = instruments.ChoirPart;
 const PAD_COUNT = 3;
 var pad_parts: [PAD_COUNT]ChoirPart = .{
     ChoirPart.init(0.006, -0.35, 0),
@@ -75,7 +77,7 @@ var pad_parts: [PAD_COUNT]ChoirPart = .{
 };
 var chant_part: ChoirPart = ChoirPart.init(0.004, 0.08, 1);
 
-var chant_phrase: synth.PhraseGenerator = .{
+var chant_phrase: composition.PhraseGenerator = .{
     .anchor = 12,
     .region_low = 9,
     .region_high = 16,
@@ -84,11 +86,11 @@ var chant_phrase: synth.PhraseGenerator = .{
     .max_notes = 8,
     .gravity = 3.5,
 };
-var chant_memory: synth.PhraseMemory = .{};
+var chant_memory: composition.PhraseMemory = .{};
 
-var drone: synth.SineDrone = synth.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
-var breath_lpf: synth.LPF = synth.LPF.init(1200.0);
-var shimmer_lpf: synth.LPF = synth.LPF.init(3400.0);
+var drone: instruments.SineDrone = instruments.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
+var breath_lpf: dsp.LPF = dsp.LPF.init(1200.0);
+var shimmer_lpf: dsp.LPF = dsp.LPF.init(3400.0);
 
 var chant_beat_counter: f32 = 0.0;
 
@@ -105,7 +107,7 @@ var cue_chant_release: f32 = 1.6;
 
 pub fn reset() void {
     reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
-    rng = synth.Rng.init(0x4300_9000 + @as(u32, @intFromEnum(selected_cue)) * 23);
+    rng = dsp.Rng.init(0x4300_9000 + @as(u32, @intFromEnum(selected_cue)) * 23);
     engine.reset(.{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
     lfo_reverb = .{ .period_beats = 180, .depth = 0.04 };
     drone_target = 0.9;
@@ -132,9 +134,9 @@ pub fn reset() void {
         .gravity = 3.5,
     };
     chant_memory = .{};
-    drone = synth.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
-    breath_lpf = synth.LPF.init(1200.0);
-    shimmer_lpf = synth.LPF.init(3400.0);
+    drone = instruments.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
+    breath_lpf = dsp.LPF.init(1200.0);
+    shimmer_lpf = dsp.LPF.init(3400.0);
     chant_beat_counter = 0.0;
     applyCueParams();
     advanceChord();
@@ -147,7 +149,7 @@ pub fn triggerCue() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spb = synth.samplesPerBeat(bpm);
+    const spb = dsp.samplesPerBeat(bpm);
 
     for (0..frames) |i| {
         lfo_reverb.advanceSample(bpm);
@@ -223,7 +225,7 @@ fn applyCueParams() void {
             chant_phrase.region_high = 15;
             chant_phrase.min_notes = 4;
             chant_phrase.max_notes = 7;
-            drone.filter = synth.LPF.init(160.0);
+            drone.filter = dsp.LPF.init(160.0);
             drone.detune_ratio = 1.0012;
         },
         .procession => {
@@ -244,7 +246,7 @@ fn applyCueParams() void {
             chant_phrase.region_high = 17;
             chant_phrase.min_notes = 5;
             chant_phrase.max_notes = 8;
-            drone.filter = synth.LPF.init(220.0);
+            drone.filter = dsp.LPF.init(220.0);
             drone.detune_ratio = 1.0018;
         },
         .vigil => {
@@ -265,7 +267,7 @@ fn applyCueParams() void {
             chant_phrase.region_high = 13;
             chant_phrase.min_notes = 3;
             chant_phrase.max_notes = 5;
-            drone.filter = synth.LPF.init(130.0);
+            drone.filter = dsp.LPF.init(130.0);
             drone.detune_ratio = 1.0009;
         },
         .crusade => {
@@ -286,7 +288,7 @@ fn applyCueParams() void {
             chant_phrase.region_high = 18;
             chant_phrase.min_notes = 5;
             chant_phrase.max_notes = 9;
-            drone.filter = synth.LPF.init(240.0);
+            drone.filter = dsp.LPF.init(240.0);
             drone.detune_ratio = 1.0021;
         },
     }
@@ -304,7 +306,7 @@ fn advanceChord() void {
     for (0..PAD_COUNT) |idx| {
         const offset = if (idx < chord.len) chord.offsets[idx] else chord.offsets[0];
         pad_parts[idx].voice.freq = midiToFreq(engine.key.root + offset);
-        pad_parts[idx].trigger(pad_parts[idx].voice.freq, synth.Envelope.init(cue_pad_attack, 1.4, 0.76, cue_pad_release));
+        pad_parts[idx].trigger(pad_parts[idx].voice.freq, dsp.Envelope.init(cue_pad_attack, 1.4, 0.76, cue_pad_release));
         pad_parts[idx].setVowel(@intCast((@intFromEnum(selected_cue) + idx + engine.harmony.current) % 4));
     }
 
@@ -320,11 +322,11 @@ fn triggerChantNote(meso: f32, micro: f32) void {
     chant_phrase.rest_chance = chant_phrase.rest_chance * (1.15 - meso * 0.18);
 
     if (chant_memory.count > 0 and rng.float() < cue_chant_recall_chance) {
-        var varied_notes: [synth.PhraseGenerator.MAX_LEN]u8 = undefined;
+        var varied_notes: [composition.PhraseGenerator.MAX_LEN]u8 = undefined;
         if (chant_memory.recallVaried(&rng, &varied_notes, chant_phrase.region_low, chant_phrase.region_high)) |varied_len| {
             if (varied_len > 0 and varied_notes[0] != 0xFF) {
                 const freq = midiToFreq(engine.key.noteToMidi(varied_notes[0]));
-                chant_part.trigger(freq, synth.Envelope.init(cue_chant_attack, 0.6 + micro * 0.4, 0.55, cue_chant_release));
+                chant_part.trigger(freq, dsp.Envelope.init(cue_chant_attack, 0.6 + micro * 0.4, 0.55, cue_chant_release));
                 return;
             }
         }
@@ -332,7 +334,7 @@ fn triggerChantNote(meso: f32, micro: f32) void {
 
     if (chant_phrase.advance(&rng)) |note_idx| {
         const freq = midiToFreq(engine.key.noteToMidi(note_idx));
-        chant_part.trigger(freq, synth.Envelope.init(cue_chant_attack, 0.5 + meso * 0.35, 0.55, cue_chant_release));
+        chant_part.trigger(freq, dsp.Envelope.init(cue_chant_attack, 0.5 + meso * 0.35, 0.55, cue_chant_release));
         if (chant_phrase.pos == 0 and chant_phrase.len > 0) {
             chant_memory.store(&chant_phrase.notes, chant_phrase.len);
         }

@@ -6,18 +6,20 @@
 // Cues are parameter flavors (arena/night_drive/power_ballad/combat).
 // Uses shared engine instruments: ElectricGuitar, SawBass, Kick, Snare, HiHat.
 const std = @import("std");
-const synth = @import("synth.zig");
+const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
+const composition = @import("music/composition.zig");
 
-const Envelope = synth.Envelope;
-const LPF = synth.LPF;
-const HPF = synth.HPF;
-const StereoReverb = synth.StereoReverb;
-const midiToFreq = synth.midiToFreq;
-const softClip = synth.softClip;
-const panStereo = synth.panStereo;
-const TAU = synth.TAU;
-const INV_SR = synth.INV_SR;
-const SAMPLE_RATE = synth.SAMPLE_RATE;
+const Envelope = dsp.Envelope;
+const LPF = dsp.LPF;
+const HPF = dsp.HPF;
+const StereoReverb = dsp.StereoReverb;
+const midiToFreq = dsp.midiToFreq;
+const softClip = dsp.softClip;
+const panStereo = dsp.panStereo;
+const TAU = dsp.TAU;
+const INV_SR = dsp.INV_SR;
+const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 // ============================================================
 // Tweakable parameters (written by musicConfigMenu / settings)
@@ -45,18 +47,18 @@ pub var selected_cue: CuePreset = .arena;
 
 const RockReverb = StereoReverb(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 });
 var reverb: RockReverb = RockReverb.init(.{ 0.84, 0.85, 0.83, 0.86 });
-var rng: synth.Rng = synth.Rng.init(0x80F0);
+var rng: dsp.Rng = dsp.Rng.init(0x80F0);
 
 // ============================================================
 // Key state & Markov chord progression
 // ============================================================
 
-var key: synth.KeyState = .{ .root = 40, .scale_type = .mixolydian };
+var key: composition.KeyState = .{ .root = 40, .scale_type = .mixolydian };
 
-var harmony: synth.ChordMarkov = initHarmony();
+var harmony: composition.ChordMarkov = initHarmony();
 
-fn initHarmony() synth.ChordMarkov {
-    var h: synth.ChordMarkov = .{};
+fn initHarmony() composition.ChordMarkov {
+    var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 7, 12, 0 }, .len = 3 }; // I
     h.chords[1] = .{ .offsets = .{ 5, 12, 17, 0 }, .len = 3 }; // IV
     h.chords[2] = .{ .offsets = .{ 7, 14, 19, 0 }, .len = 3 }; // V
@@ -77,7 +79,7 @@ fn initHarmony() synth.ChordMarkov {
 // Multi-scale arc system
 // ============================================================
 
-var arcs: synth.ArcSystem = .{
+var arcs: composition.ArcSystem = .{
     .micro = .{ .section_beats = 4, .shape = .rise_fall },
     .meso = .{ .section_beats = 32, .shape = .rise_fall },
     .macro = .{ .section_beats = 128, .shape = .rise_fall },
@@ -87,8 +89,8 @@ var arcs: synth.ArcSystem = .{
 // Slow LFOs
 // ============================================================
 
-var lfo_filter: synth.SlowLfo = .{ .period_beats = 64, .depth = 0.06 };
-var lfo_drive: synth.SlowLfo = .{ .period_beats = 96, .depth = 0.04 };
+var lfo_filter: composition.SlowLfo = .{ .period_beats = 64, .depth = 0.06 };
+var lfo_drive: composition.SlowLfo = .{ .period_beats = 96, .depth = 0.04 };
 
 // ============================================================
 // Layer volumes (vertical activation)
@@ -110,20 +112,20 @@ const LAYER_FADE_RATE: f32 = 0.00005;
 // Phrase memory for lead motif development
 // ============================================================
 
-var lead_memory: synth.PhraseMemory = .{};
+var lead_memory: composition.PhraseMemory = .{};
 
 // ============================================================
-// Instruments (shared engine types from synth.zig)
+// Instruments
 // ============================================================
 
 // Drums
-var kick: synth.Kick = .{};
-var snare: synth.Snare = .{};
-var hat: synth.HiHat = .{};
+var kick: instruments.Kick = .{};
+var snare: instruments.Snare = .{};
+var hat: instruments.HiHat = .{};
 
 // Bass
-var bass: synth.SawBass = .{ .drive = 0.55 };
-var bass_phrase: synth.PhraseGenerator = .{
+var bass: instruments.SawBass = .{ .drive = 0.55 };
+var bass_phrase: composition.PhraseGenerator = .{
     .anchor = 0,
     .region_low = 0,
     .region_high = 6,
@@ -134,18 +136,18 @@ var bass_phrase: synth.PhraseGenerator = .{
 };
 
 // Guitar chords: 3 voices × Voice(2, 4) through overdrive + cabinet
-const RockGuitar = synth.ElectricGuitar(3, 2, 4);
+const RockGuitar = instruments.ElectricGuitar(3, 2, 4);
 var guitar: RockGuitar = RockGuitar.init(0.35, 0.008, 4500.0, 120.0);
 
 // Lead guitar: Voice(3, 2) with its own overdrive + cabinet
-const LeadVoice = synth.Voice(3, 2);
+const LeadVoice = dsp.Voice(3, 2);
 var lead_voice: LeadVoice = .{
     .unison_spread = 0.005,
     .filter = LPF.init(2200.0),
 };
 var lead_cab_lpf: LPF = LPF.init(5000.0);
 var lead_cab_hpf: HPF = HPF.init(200.0);
-var lead_phrase: synth.PhraseGenerator = .{
+var lead_phrase: composition.PhraseGenerator = .{
     .anchor = 10,
     .region_low = 7,
     .region_high = 17,
@@ -188,7 +190,7 @@ pub fn triggerCue() void {
 }
 
 pub fn reset() void {
-    rng = synth.Rng.init(@as(u32, 0x80F0_0000) + @as(u32, @intFromEnum(selected_cue)) * 17);
+    rng = dsp.Rng.init(@as(u32, 0x80F0_0000) + @as(u32, @intFromEnum(selected_cue)) * 17);
 
     key = .{ .root = 40, .scale_type = .mixolydian };
     harmony = initHarmony();
@@ -236,7 +238,7 @@ pub fn reset() void {
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
     const samples_per_step = SAMPLE_RATE * 60.0 / bpm / 4.0;
-    const spb = synth.samplesPerBeat(bpm);
+    const spb = dsp.samplesPerBeat(bpm);
 
     for (0..frames) |i| {
         arcs.advanceSample(bpm);
@@ -484,7 +486,7 @@ fn advanceStep(meso: f32, micro: f32) void {
 
 fn triggerLeadNote(meso: f32, micro: f32) void {
     if (lead_memory.count > 0 and rng.float() < 0.3) {
-        var varied_notes: [synth.PhraseGenerator.MAX_LEN]u8 = undefined;
+        var varied_notes: [composition.PhraseGenerator.MAX_LEN]u8 = undefined;
         if (lead_memory.recallVaried(&rng, &varied_notes, lead_phrase.region_low, lead_phrase.region_high)) |varied_len| {
             if (varied_len > 0 and varied_notes[0] != 0xFF) {
                 const freq = midiToFreq(key.noteToMidi(varied_notes[0]));
@@ -529,7 +531,7 @@ fn processLead(meso: f32, eff_drive: f32) f32 {
 
     var wave = raw.osc;
     wave += @sin(lead_voice.phases[0] * 2.0) * 0.15;
-    wave = synth.overdrive(wave, 1.2 + eff_drive * 2.5 + meso * 0.8);
+    wave = instruments.overdrive(wave, 1.2 + eff_drive * 2.5 + meso * 0.8);
     wave = lead_voice.filter.process(wave);
     wave = lead_cab_hpf.process(wave);
     wave = lead_cab_lpf.process(wave);
