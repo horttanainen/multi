@@ -207,6 +207,11 @@ pub const GuitarChordLayer = struct {
     decay: f32 = 0.36,
     sustain: f32 = 0.0,
     release: f32 = 0.14,
+    strum_interval_samples: u32 = 120,
+    strum_countdown: u32 = 0,
+    pending_voice_count: u8 = 0,
+    pending_order: [3]u8 = .{ 0, 1, 2 },
+    downstroke: bool = true,
 };
 
 pub const GuitarCueSpec = struct {
@@ -246,10 +251,28 @@ pub fn applyGuitarChord(layer: *GuitarChordLayer, key_root: u8, chord: compositi
 
 pub fn advanceGuitarChordLayer(layer: *GuitarChordLayer, step: u8) void {
     if (step % layer.retrigger != 0) return;
-    layer.guitar.triggerEnv(layer.attack, layer.decay, layer.sustain, layer.release);
+    layer.pending_voice_count = 3;
+    layer.strum_countdown = 0;
+    if (layer.downstroke) {
+        layer.pending_order = .{ 0, 1, 2 };
+    } else {
+        layer.pending_order = .{ 2, 1, 0 };
+    }
+    layer.downstroke = !layer.downstroke;
 }
 
 pub fn mixGuitarChordLayer(layer: *GuitarChordLayer, level: f32, drive: f32) [2]f32 {
+    if (layer.pending_voice_count > 0) {
+        if (layer.strum_countdown > 0) {
+            layer.strum_countdown -= 1;
+        } else {
+            const trigger_idx = @as(usize, layer.pending_order[3 - layer.pending_voice_count]);
+            const pick_strength = 1.0 - @as(f32, @floatFromInt(3 - layer.pending_voice_count)) * 0.14;
+            layer.guitar.triggerVoice(trigger_idx, layer.attack, layer.decay, layer.sustain, layer.release, pick_strength);
+            layer.pending_voice_count -= 1;
+            layer.strum_countdown = layer.strum_interval_samples;
+        }
+    }
     const out = layer.guitar.process(drive);
     return .{ out[0] * level, out[1] * level };
 }
@@ -257,7 +280,7 @@ pub fn mixGuitarChordLayer(layer: *GuitarChordLayer, level: f32, drive: f32) [2]
 const LeadVoice = dsp.Voice(3, 2);
 
 pub const ProcessedLeadLayer = struct {
-    voice: LeadVoice = .{ .unison_spread = 0.005, .filter = dsp.LPF.init(2200.0) },
+    voice: LeadVoice = .{ .unison_spread = 0.005, .filter = dsp.LPF.init(2200.0), .vibrato_rate_hz = 5.6, .vibrato_depth = 0.0038 },
     cab_lpf: dsp.LPF = dsp.LPF.init(5000.0),
     cab_hpf: dsp.HPF = dsp.HPF.init(200.0),
     phrase: composition.PhraseGenerator = .{},
@@ -283,6 +306,7 @@ pub const LeadTriggerSpec = struct {
 
 pub fn resetProcessedLeadLayer(layer: *ProcessedLeadLayer, phrase: composition.PhraseGenerator) void {
     layer.* = .{
+        .voice = .{ .unison_spread = 0.005, .filter = dsp.LPF.init(2200.0), .vibrato_rate_hz = 5.6, .vibrato_depth = 0.0038 },
         .phrase = phrase,
     };
 }
@@ -941,5 +965,157 @@ pub fn mixAmbientArpLayer(layer: *AmbientArpLayer, level: f32) [2]f32 {
         left += stereo[0];
         right += stereo[1];
     }
+    return .{ left, right };
+}
+
+pub const MinecraftTextureLayer = struct {
+    pub const RESONANCE_COUNT = 3;
+    pub const BED_PARTIALS = 4;
+
+    resonance_phase: [RESONANCE_COUNT]f32 = .{0} ** RESONANCE_COUNT,
+    resonance_freq: [RESONANCE_COUNT]f32 = .{ dsp.midiToFreq(36), dsp.midiToFreq(43), dsp.midiToFreq(48) },
+    resonance_energy: [RESONANCE_COUNT]f32 = .{ 0.0, 0.0, 0.0 },
+    cloud_phase: [RESONANCE_COUNT][2]f32 = .{.{0} ** 2} ** RESONANCE_COUNT,
+    cloud_freq: [RESONANCE_COUNT]f32 = .{ dsp.midiToFreq(48), dsp.midiToFreq(55), dsp.midiToFreq(60) },
+    cloud_energy: [RESONANCE_COUNT]f32 = .{ 0.0, 0.0, 0.0 },
+    bed_phase: [BED_PARTIALS][3]f32 = .{.{0} ** 3} ** BED_PARTIALS,
+    bed_freq: [BED_PARTIALS]f32 = .{
+        dsp.midiToFreq(36),
+        dsp.midiToFreq(43),
+        dsp.midiToFreq(48),
+        dsp.midiToFreq(55),
+    },
+    bed_target_gain: [BED_PARTIALS]f32 = .{ 0.012, 0.010, 0.008, 0.006 },
+    bed_gain: [BED_PARTIALS]f32 = .{ 0.0, 0.0, 0.0, 0.0 },
+    drone: instruments.SineDrone = instruments.SineDrone.init(dsp.midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0),
+};
+
+pub const MinecraftRegion = enum {
+    open,
+    suspended,
+    bright,
+    sparse,
+};
+
+pub fn resetMinecraftTextureLayer(layer: *MinecraftTextureLayer) void {
+    layer.* = .{};
+}
+
+pub fn applyMinecraftRegionTuning(layer: *MinecraftTextureLayer, region_root_class: u8, region: MinecraftRegion) void {
+    const low_root = region_root_class;
+    const low_fifth = @min(low_root + 3, 4);
+    const mid_root = @min(low_root + 5, 9);
+    const high_root = @min(low_root + 10, 14);
+
+    layer.resonance_freq[0] = dsp.midiToFreq(dsp.pentatonic_scale[low_root]);
+    layer.resonance_freq[1] = dsp.midiToFreq(dsp.pentatonic_scale[low_fifth]);
+    layer.resonance_freq[2] = dsp.midiToFreq(dsp.pentatonic_scale[mid_root]);
+    layer.cloud_freq[0] = dsp.midiToFreq(dsp.pentatonic_scale[mid_root]);
+    layer.cloud_freq[1] = dsp.midiToFreq(dsp.pentatonic_scale[@min(low_root + 8, 14)]);
+    layer.cloud_freq[2] = dsp.midiToFreq(dsp.pentatonic_scale[high_root]);
+
+    layer.drone.freq = dsp.midiToFreq(dsp.pentatonic_scale[low_root]);
+    if (region == .bright) {
+        layer.drone.freq = dsp.midiToFreq(dsp.pentatonic_scale[@min(low_root + 1, 4)]);
+    }
+    if (region == .suspended) {
+        layer.resonance_freq[2] = dsp.midiToFreq(dsp.pentatonic_scale[@min(high_root, 14)]);
+        layer.cloud_freq[1] = dsp.midiToFreq(dsp.pentatonic_scale[@min(low_root + 6, 14)]);
+    }
+
+    layer.bed_freq[0] = dsp.midiToFreq(dsp.pentatonic_scale[low_root]);
+    layer.bed_freq[1] = dsp.midiToFreq(dsp.pentatonic_scale[low_fifth]);
+    layer.bed_freq[2] = dsp.midiToFreq(dsp.pentatonic_scale[mid_root]);
+    layer.bed_freq[3] = dsp.midiToFreq(dsp.pentatonic_scale[high_root]);
+
+    layer.bed_target_gain = switch (region) {
+        .open => .{ 0.014, 0.011, 0.008, 0.005 },
+        .suspended => .{ 0.013, 0.010, 0.009, 0.006 },
+        .bright => .{ 0.011, 0.010, 0.010, 0.008 },
+        .sparse => .{ 0.009, 0.007, 0.005, 0.003 },
+    };
+}
+
+pub fn exciteMinecraftTextureLayer(layer: *MinecraftTextureLayer, note_idx: u8, region_root_class: u8) void {
+    for (0..MinecraftTextureLayer.RESONANCE_COUNT) |idx| {
+        const class_match = note_idx % 5 == region_root_class or note_idx % 5 == (region_root_class + idx) % 5;
+        const boost: f32 = if (class_match) 0.012 else 0.0045;
+        layer.resonance_energy[idx] = std.math.clamp(layer.resonance_energy[idx] + boost, 0.0, 0.08);
+        const cloud_boost: f32 = if (class_match) 0.010 else 0.003;
+        layer.cloud_energy[idx] = std.math.clamp(layer.cloud_energy[idx] + cloud_boost, 0.0, 0.06);
+    }
+}
+
+pub fn mixMinecraftTextureLayer(
+    layer: *MinecraftTextureLayer,
+    scene_presence: f32,
+    region_root_class: u8,
+    brightness: f32,
+    bed_mix: f32,
+    cloud_mix: f32,
+    wow_amount: f32,
+    blur_amount: f32,
+    texture_bed_mul: f32,
+    texture_cloud_mul: f32,
+    drone_dropout_beats: f32,
+) [2]f32 {
+    var left: f32 = 0.0;
+    var right: f32 = 0.0;
+    var resonance_sample: f32 = 0.0;
+
+    for (0..MinecraftTextureLayer.RESONANCE_COUNT) |idx| {
+        layer.resonance_phase[idx] += layer.resonance_freq[idx] * dsp.INV_SR * dsp.TAU;
+        if (layer.resonance_phase[idx] > dsp.TAU) layer.resonance_phase[idx] -= dsp.TAU;
+        layer.resonance_energy[idx] *= 0.99991;
+        resonance_sample += @sin(layer.resonance_phase[idx]) * layer.resonance_energy[idx];
+
+        layer.cloud_phase[idx][0] += layer.cloud_freq[idx] * dsp.INV_SR * dsp.TAU;
+        if (layer.cloud_phase[idx][0] > dsp.TAU) layer.cloud_phase[idx][0] -= dsp.TAU;
+        layer.cloud_phase[idx][1] += layer.cloud_freq[idx] * 0.501 * dsp.INV_SR * dsp.TAU;
+        if (layer.cloud_phase[idx][1] > dsp.TAU) layer.cloud_phase[idx][1] -= dsp.TAU;
+        layer.cloud_energy[idx] *= 0.999985;
+        resonance_sample += (@sin(layer.cloud_phase[idx][0]) * 0.7 + @sin(layer.cloud_phase[idx][1]) * 0.3) * layer.cloud_energy[idx];
+    }
+
+    const texture_presence = std.math.clamp(scene_presence + 0.05, 0.0, 1.05);
+    const cloud_level = std.math.clamp(cloud_mix * texture_cloud_mul, 0.0, 1.4);
+    const resonance_out = resonance_sample * ((0.006 + brightness * 0.004) + cloud_level * 0.01) * texture_presence;
+    left += resonance_out * 0.62;
+    right += resonance_out * 0.82;
+
+    const bed_level = std.math.clamp(bed_mix * texture_bed_mul, 0.0, 1.4) * texture_presence;
+    for (0..MinecraftTextureLayer.BED_PARTIALS) |idx| {
+        layer.bed_gain[idx] += (layer.bed_target_gain[idx] - layer.bed_gain[idx]) * 0.00025;
+        const base_freq = layer.bed_freq[idx];
+        var sample: f32 = 0.0;
+        for (0..3) |osc_idx| {
+            const detune_dir = @as(f32, @floatFromInt(osc_idx)) - 1.0;
+            const detune = 1.0 + detune_dir * (0.0011 + wow_amount * 0.0022);
+            layer.bed_phase[idx][osc_idx] += base_freq * detune * dsp.INV_SR * dsp.TAU;
+            if (layer.bed_phase[idx][osc_idx] > dsp.TAU) layer.bed_phase[idx][osc_idx] -= dsp.TAU;
+            const amp: f32 = if (osc_idx == 1) 0.55 else 0.225;
+            sample += @sin(layer.bed_phase[idx][osc_idx]) * amp;
+        }
+        sample *= layer.bed_gain[idx] * bed_level * (0.8 + blur_amount * 0.35);
+        const pan: f32 = switch (idx) {
+            0 => -0.35,
+            1 => 0.35,
+            2 => -0.12,
+            else => 0.12,
+        };
+        const stereo = dsp.panStereo(sample, pan);
+        left += stereo[0];
+        right += stereo[1];
+    }
+
+    if (scene_presence > 0.02 and drone_dropout_beats <= 0) {
+        layer.drone.detune_ratio = 1.0011 + wow_amount * 0.0012;
+        layer.drone.freq = dsp.midiToFreq(dsp.pentatonic_scale[region_root_class]);
+        var drone_sample = layer.drone.process();
+        drone_sample *= 0.006 + scene_presence * 0.011;
+        left += drone_sample;
+        right += drone_sample;
+    }
+
     return .{ left, right };
 }

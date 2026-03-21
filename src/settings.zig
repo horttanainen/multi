@@ -11,11 +11,13 @@ const procedural_piano = @import("procedural_piano.zig");
 const procedural_minecraft = @import("procedural_minecraft.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
+const procedural_african_drums = @import("procedural_african_drums.zig");
+const procedural_taiko = @import("procedural_taiko.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
 const DEFAULT_MUSIC_STYLE: music.Style = .house;
-const DEFAULT_MUSIC_BPM: f32 = 120.0;
+const DEFAULT_MUSIC_BPM: f32 = 1.0;
 const DEFAULT_MUSIC_REVERB_MIX: f32 = 0.35;
 const DEFAULT_AMBIENT_DRONE_VOL: f32 = 0.15;
 const DEFAULT_AMBIENT_PAD_VOL: f32 = 0.08;
@@ -46,6 +48,7 @@ const DEFAULT_MINECRAFT_WOW: f32 = 0.2;
 const DEFAULT_MINECRAFT_BLUR: f32 = 0.4;
 const DEFAULT_MINECRAFT_ATTACK_SOFTNESS: f32 = 0.35;
 const DEFAULT_ROCK80S_LEAD_MIX: f32 = 0.5;
+const DEFAULT_ROCK80S_CHORD_MIX: f32 = 0.34;
 const DEFAULT_ROCK80S_DRIVE: f32 = 0.55;
 const DEFAULT_ROCK80S_DRUM_MIX: f32 = 0.8;
 const DEFAULT_ROCK80S_BASS_MIX: f32 = 0.7;
@@ -56,6 +59,16 @@ const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 const DEFAULT_CHOIR_DRONE_MIX: f32 = 0.55;
 const DEFAULT_CHOIR_CHANT_MIX: f32 = 0.58;
 const DEFAULT_CHOIR_CUE: u8 = @intFromEnum(procedural_choir.CuePreset.cathedral);
+const DEFAULT_AFRICAN_DRUM_MIX: f32 = 0.9;
+const DEFAULT_AFRICAN_SHAKER_MIX: f32 = 0.55;
+const DEFAULT_AFRICAN_BASS_MIX: f32 = 0.42;
+const DEFAULT_AFRICAN_DRONE_MIX: f32 = 0.16;
+const DEFAULT_AFRICAN_CUE: u8 = @intFromEnum(procedural_african_drums.CuePreset.kuku);
+const DEFAULT_TAIKO_DRUM_MIX: f32 = 0.9;
+const DEFAULT_TAIKO_SHIME_MIX: f32 = 0.55;
+const DEFAULT_TAIKO_NAGADO_MIX: f32 = 0.65;
+const DEFAULT_TAIKO_KANE_MIX: f32 = 0.5;
+const DEFAULT_TAIKO_CUE: u8 = @intFromEnum(procedural_taiko.CuePreset.matsuri);
 
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
@@ -129,6 +142,7 @@ const StoredSettings = struct {
     music_minecraft_blur: ?f32 = null,
     music_minecraft_attack_softness: ?f32 = null,
     music_rock80s_lead_mix: ?f32 = null,
+    music_rock80s_chord_mix: ?f32 = null,
     music_rock80s_drive: ?f32 = null,
     music_rock80s_drum_mix: ?f32 = null,
     music_rock80s_bass_mix: ?f32 = null,
@@ -139,6 +153,16 @@ const StoredSettings = struct {
     music_choir_drone_mix: ?f32 = null,
     music_choir_chant_mix: ?f32 = null,
     music_choir_cue: ?u8 = null,
+    music_african_drum_mix: ?f32 = null,
+    music_african_shaker_mix: ?f32 = null,
+    music_african_bass_mix: ?f32 = null,
+    music_african_drone_mix: ?f32 = null,
+    music_african_cue: ?u8 = null,
+    music_taiko_drum_mix: ?f32 = null,
+    music_taiko_shime_mix: ?f32 = null,
+    music_taiko_nagado_mix: ?f32 = null,
+    music_taiko_kane_mix: ?f32 = null,
+    music_taiko_cue: ?u8 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -177,6 +201,7 @@ pub var music_minecraft_wow: f32 = DEFAULT_MINECRAFT_WOW;
 pub var music_minecraft_blur: f32 = DEFAULT_MINECRAFT_BLUR;
 pub var music_minecraft_attack_softness: f32 = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
 pub var music_rock80s_lead_mix: f32 = DEFAULT_ROCK80S_LEAD_MIX;
+pub var music_rock80s_chord_mix: f32 = DEFAULT_ROCK80S_CHORD_MIX;
 pub var music_rock80s_drive: f32 = DEFAULT_ROCK80S_DRIVE;
 pub var music_rock80s_drum_mix: f32 = DEFAULT_ROCK80S_DRUM_MIX;
 pub var music_rock80s_bass_mix: f32 = DEFAULT_ROCK80S_BASS_MIX;
@@ -187,6 +212,16 @@ pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 pub var music_choir_drone_mix: f32 = DEFAULT_CHOIR_DRONE_MIX;
 pub var music_choir_chant_mix: f32 = DEFAULT_CHOIR_CHANT_MIX;
 pub var music_choir_cue: u8 = DEFAULT_CHOIR_CUE;
+pub var music_african_drum_mix: f32 = DEFAULT_AFRICAN_DRUM_MIX;
+pub var music_african_shaker_mix: f32 = DEFAULT_AFRICAN_SHAKER_MIX;
+pub var music_african_bass_mix: f32 = DEFAULT_AFRICAN_BASS_MIX;
+pub var music_african_drone_mix: f32 = DEFAULT_AFRICAN_DRONE_MIX;
+pub var music_african_cue: u8 = DEFAULT_AFRICAN_CUE;
+pub var music_taiko_drum_mix: f32 = DEFAULT_TAIKO_DRUM_MIX;
+pub var music_taiko_shime_mix: f32 = DEFAULT_TAIKO_SHIME_MIX;
+pub var music_taiko_nagado_mix: f32 = DEFAULT_TAIKO_NAGADO_MIX;
+pub var music_taiko_kane_mix: f32 = DEFAULT_TAIKO_KANE_MIX;
+pub var music_taiko_cue: u8 = DEFAULT_TAIKO_CUE;
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
@@ -345,6 +380,7 @@ pub fn applyMusic() void {
     procedural_80s_rock.bpm = music_bpm;
     procedural_80s_rock.reverb_mix = music_reverb_mix;
     procedural_80s_rock.lead_mix = music_rock80s_lead_mix;
+    procedural_80s_rock.chord_mix = music_rock80s_chord_mix;
     procedural_80s_rock.drive = music_rock80s_drive;
     procedural_80s_rock.drum_mix = music_rock80s_drum_mix;
     procedural_80s_rock.bass_mix = music_rock80s_bass_mix;
@@ -358,6 +394,22 @@ pub fn applyMusic() void {
     procedural_choir.drone_mix = music_choir_drone_mix;
     procedural_choir.chant_mix = music_choir_chant_mix;
     procedural_choir.selected_cue = @enumFromInt(music_choir_cue);
+
+    procedural_african_drums.bpm = music_bpm;
+    procedural_african_drums.reverb_mix = music_reverb_mix;
+    procedural_african_drums.drum_mix = music_african_drum_mix;
+    procedural_african_drums.shaker_mix = music_african_shaker_mix;
+    procedural_african_drums.tone_mix = music_african_bass_mix;
+    procedural_african_drums.slap_mix = music_african_drone_mix;
+    procedural_african_drums.selected_cue = @enumFromInt(music_african_cue);
+
+    procedural_taiko.bpm = music_bpm;
+    procedural_taiko.reverb_mix = music_reverb_mix;
+    procedural_taiko.drum_mix = music_taiko_drum_mix;
+    procedural_taiko.shaker_mix = music_taiko_shime_mix;
+    procedural_taiko.tone_mix = music_taiko_nagado_mix;
+    procedural_taiko.slap_mix = music_taiko_kane_mix;
+    procedural_taiko.selected_cue = @enumFromInt(music_taiko_cue);
 
     if (!style_changed) return;
     music.playStyle(music_style);
@@ -416,6 +468,7 @@ pub fn save() !void {
         .music_minecraft_blur = music_minecraft_blur,
         .music_minecraft_attack_softness = music_minecraft_attack_softness,
         .music_rock80s_lead_mix = music_rock80s_lead_mix,
+        .music_rock80s_chord_mix = music_rock80s_chord_mix,
         .music_rock80s_drive = music_rock80s_drive,
         .music_rock80s_drum_mix = music_rock80s_drum_mix,
         .music_rock80s_bass_mix = music_rock80s_bass_mix,
@@ -426,6 +479,16 @@ pub fn save() !void {
         .music_choir_drone_mix = music_choir_drone_mix,
         .music_choir_chant_mix = music_choir_chant_mix,
         .music_choir_cue = music_choir_cue,
+        .music_african_drum_mix = music_african_drum_mix,
+        .music_african_shaker_mix = music_african_shaker_mix,
+        .music_african_bass_mix = music_african_bass_mix,
+        .music_african_drone_mix = music_african_drone_mix,
+        .music_african_cue = music_african_cue,
+        .music_taiko_drum_mix = music_taiko_drum_mix,
+        .music_taiko_shime_mix = music_taiko_shime_mix,
+        .music_taiko_nagado_mix = music_taiko_nagado_mix,
+        .music_taiko_kane_mix = music_taiko_kane_mix,
+        .music_taiko_cue = music_taiko_cue,
     };
 
     if (has_bg_preset) {
@@ -518,6 +581,7 @@ fn resetMusicSettings() void {
     music_minecraft_blur = DEFAULT_MINECRAFT_BLUR;
     music_minecraft_attack_softness = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
     music_rock80s_lead_mix = DEFAULT_ROCK80S_LEAD_MIX;
+    music_rock80s_chord_mix = DEFAULT_ROCK80S_CHORD_MIX;
     music_rock80s_drive = DEFAULT_ROCK80S_DRIVE;
     music_rock80s_drum_mix = DEFAULT_ROCK80S_DRUM_MIX;
     music_rock80s_bass_mix = DEFAULT_ROCK80S_BASS_MIX;
@@ -528,17 +592,33 @@ fn resetMusicSettings() void {
     music_choir_drone_mix = DEFAULT_CHOIR_DRONE_MIX;
     music_choir_chant_mix = DEFAULT_CHOIR_CHANT_MIX;
     music_choir_cue = DEFAULT_CHOIR_CUE;
+    music_african_drum_mix = DEFAULT_AFRICAN_DRUM_MIX;
+    music_african_shaker_mix = DEFAULT_AFRICAN_SHAKER_MIX;
+    music_african_bass_mix = DEFAULT_AFRICAN_BASS_MIX;
+    music_african_drone_mix = DEFAULT_AFRICAN_DRONE_MIX;
+    music_african_cue = DEFAULT_AFRICAN_CUE;
+    music_taiko_drum_mix = DEFAULT_TAIKO_DRUM_MIX;
+    music_taiko_shime_mix = DEFAULT_TAIKO_SHIME_MIX;
+    music_taiko_nagado_mix = DEFAULT_TAIKO_NAGADO_MIX;
+    music_taiko_kane_mix = DEFAULT_TAIKO_KANE_MIX;
+    music_taiko_cue = DEFAULT_TAIKO_CUE;
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
+    const stored_music_bpm = s.music_bpm orelse DEFAULT_MUSIC_BPM;
     if (s.music_style) |style_int| {
-        if (style_int < 6) {
+        if (style_int < 8) {
             music_style = @enumFromInt(style_int);
         }
     }
 
     music_volume = std.math.clamp(s.music_volume orelse DEFAULT_MUSIC_VOLUME, 0.0, 1.0);
-    music_bpm = std.math.clamp(s.music_bpm orelse DEFAULT_MUSIC_BPM, 30.0, 200.0);
+    if (stored_music_bpm > 2.0) {
+        std.log.warn("loadMusicSettings: music_bpm {d} looks like an old absolute BPM value, resetting to neutral 1.0", .{stored_music_bpm});
+        music_bpm = DEFAULT_MUSIC_BPM;
+    } else {
+        music_bpm = std.math.clamp(stored_music_bpm, 0.0, 2.0);
+    }
     music_reverb_mix = std.math.clamp(s.music_reverb_mix orelse DEFAULT_MUSIC_REVERB_MIX, 0.0, 1.0);
     music_ambient_drone_vol = std.math.clamp(s.music_ambient_drone_vol orelse DEFAULT_AMBIENT_DRONE_VOL, 0.0, 1.0);
     music_ambient_pad_vol = std.math.clamp(s.music_ambient_pad_vol orelse DEFAULT_AMBIENT_PAD_VOL, 0.0, 1.0);
@@ -568,6 +648,7 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_minecraft_blur = std.math.clamp(s.music_minecraft_blur orelse DEFAULT_MINECRAFT_BLUR, 0.0, 1.0);
     music_minecraft_attack_softness = std.math.clamp(s.music_minecraft_attack_softness orelse DEFAULT_MINECRAFT_ATTACK_SOFTNESS, 0.0, 1.0);
     music_rock80s_lead_mix = std.math.clamp(s.music_rock80s_lead_mix orelse DEFAULT_ROCK80S_LEAD_MIX, 0.0, 1.0);
+    music_rock80s_chord_mix = std.math.clamp(s.music_rock80s_chord_mix orelse DEFAULT_ROCK80S_CHORD_MIX, 0.0, 1.0);
     music_rock80s_drive = std.math.clamp(s.music_rock80s_drive orelse DEFAULT_ROCK80S_DRIVE, 0.0, 1.0);
     music_rock80s_drum_mix = std.math.clamp(s.music_rock80s_drum_mix orelse DEFAULT_ROCK80S_DRUM_MIX, 0.0, 1.0);
     music_rock80s_bass_mix = std.math.clamp(s.music_rock80s_bass_mix orelse DEFAULT_ROCK80S_BASS_MIX, 0.0, 1.0);
@@ -578,4 +659,14 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_choir_drone_mix = std.math.clamp(s.music_choir_drone_mix orelse DEFAULT_CHOIR_DRONE_MIX, 0.0, 1.0);
     music_choir_chant_mix = std.math.clamp(s.music_choir_chant_mix orelse DEFAULT_CHOIR_CHANT_MIX, 0.0, 1.0);
     music_choir_cue = std.math.clamp(s.music_choir_cue orelse DEFAULT_CHOIR_CUE, 0, 3);
+    music_african_drum_mix = std.math.clamp(s.music_african_drum_mix orelse DEFAULT_AFRICAN_DRUM_MIX, 0.0, 1.0);
+    music_african_shaker_mix = std.math.clamp(s.music_african_shaker_mix orelse DEFAULT_AFRICAN_SHAKER_MIX, 0.0, 1.0);
+    music_african_bass_mix = std.math.clamp(s.music_african_bass_mix orelse DEFAULT_AFRICAN_BASS_MIX, 0.0, 1.0);
+    music_african_drone_mix = std.math.clamp(s.music_african_drone_mix orelse DEFAULT_AFRICAN_DRONE_MIX, 0.0, 1.0);
+    music_african_cue = std.math.clamp(s.music_african_cue orelse DEFAULT_AFRICAN_CUE, 0, 3);
+    music_taiko_drum_mix = std.math.clamp(s.music_taiko_drum_mix orelse DEFAULT_TAIKO_DRUM_MIX, 0.0, 1.0);
+    music_taiko_shime_mix = std.math.clamp(s.music_taiko_shime_mix orelse DEFAULT_TAIKO_SHIME_MIX, 0.0, 1.0);
+    music_taiko_nagado_mix = std.math.clamp(s.music_taiko_nagado_mix orelse DEFAULT_TAIKO_NAGADO_MIX, 0.0, 1.0);
+    music_taiko_kane_mix = std.math.clamp(s.music_taiko_kane_mix orelse DEFAULT_TAIKO_KANE_MIX, 0.0, 1.0);
+    music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 3);
 }

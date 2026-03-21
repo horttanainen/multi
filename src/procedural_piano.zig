@@ -17,7 +17,8 @@ pub const CuePreset = enum(u8) {
     remembrance,
 };
 
-pub var bpm: f32 = 65.0;
+pub var bpm: f32 = 1.0;
+const BASE_BPM: f32 = 65.0;
 pub var reverb_mix: f32 = 0.65;
 pub var note_vol: f32 = 0.12;
 pub var rest_chance: f32 = 0.5;
@@ -176,9 +177,10 @@ pub fn triggerCue() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
+    const eff_bpm = BASE_BPM * bpm;
     for (0..frames) |i| {
-        lfo_reverb.advanceSample(bpm);
-        const frame = runner.advanceFrame(&rng, &STYLE, bpm, LAYER_FADE_RATE);
+        lfo_reverb.advanceSample(eff_bpm);
+        const frame = runner.advanceFrame(&rng, &STYLE, eff_bpm, LAYER_FADE_RATE);
         if (frame.tick.chord_changed) {
             advanceChord();
         }

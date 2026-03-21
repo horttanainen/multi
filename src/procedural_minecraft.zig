@@ -4,21 +4,21 @@
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const instruments = @import("music/instruments.zig");
+const layers = @import("music/layers.zig");
 
 const StereoReverb = dsp.StereoReverb;
 const scale = dsp.pentatonic_scale;
 const midiToFreq = dsp.midiToFreq;
 const softClip = dsp.softClip;
 const panStereo = dsp.panStereo;
-const TAU = dsp.TAU;
-const INV_SR = dsp.INV_SR;
 const SAMPLE_RATE = dsp.SAMPLE_RATE;
 
 // ============================================================
 // Tweakable parameters (written by musicConfigMenu)
 // ============================================================
 
-pub var bpm: f32 = 65.0;
+pub var bpm: f32 = 1.0;
+const BASE_BPM: f32 = 65.0;
 pub var reverb_mix: f32 = 0.65;
 pub var note_vol: f32 = 0.12;
 pub var rest_chance: f32 = 0.5;
@@ -36,7 +36,7 @@ pub var blur: f32 = 0.4;
 pub var attack_softness: f32 = 0.35;
 
 fn samplesPerBeat() f32 {
-    return SAMPLE_RATE * 60.0 / bpm;
+    return SAMPLE_RATE * 60.0 / (BASE_BPM * bpm);
 }
 
 // ============================================================
@@ -96,8 +96,6 @@ var texture_attack_mul: f32 = 1.0;
 
 const VOICE_COUNT = 2;
 const PHRASE_MAX_LEN = 5;
-const RESONANCE_COUNT = 3;
-const BED_PARTIALS = 4;
 const MOTIF_VOICE: usize = 0;
 const HARMONY_VOICE: usize = 1;
 
@@ -137,24 +135,7 @@ const voice_beat_len: [VOICE_COUNT]f32 = .{ 2.5, 3.75 };
 // Resonance, bed, and drone
 // ============================================================
 
-var resonance_phase: [RESONANCE_COUNT]f32 = .{0} ** RESONANCE_COUNT;
-var resonance_freq: [RESONANCE_COUNT]f32 = .{ midiToFreq(36), midiToFreq(43), midiToFreq(48) };
-var resonance_energy: [RESONANCE_COUNT]f32 = .{ 0.0, 0.0, 0.0 };
-var cloud_phase: [RESONANCE_COUNT][2]f32 = .{.{0} ** 2} ** RESONANCE_COUNT;
-var cloud_freq: [RESONANCE_COUNT]f32 = .{ midiToFreq(48), midiToFreq(55), midiToFreq(60) };
-var cloud_energy: [RESONANCE_COUNT]f32 = .{ 0.0, 0.0, 0.0 };
-
-var bed_phase: [BED_PARTIALS][3]f32 = .{.{0} ** 3} ** BED_PARTIALS;
-var bed_freq: [BED_PARTIALS]f32 = .{
-    midiToFreq(36),
-    midiToFreq(43),
-    midiToFreq(48),
-    midiToFreq(55),
-};
-var bed_target_gain: [BED_PARTIALS]f32 = .{ 0.012, 0.010, 0.008, 0.006 };
-var bed_gain: [BED_PARTIALS]f32 = .{ 0.0, 0.0, 0.0, 0.0 };
-
-var drone: instruments.SineDrone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
+var texture_layer: layers.MinecraftTextureLayer = .{};
 
 // ============================================================
 // Rare events
@@ -206,22 +187,21 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             right += stereo[1];
         }
 
-        const bed = processAmbientBed();
-        left += bed[0];
-        right += bed[1];
-
-        const resonance = processResonance();
-        left += resonance * 0.62;
-        right += resonance * 0.82;
-
-        if (scene_presence > 0.02 and drone_dropout_beats <= 0) {
-            drone.detune_ratio = 1.0011 + effectiveWow() * 0.0012;
-            drone.freq = midiToFreq(scale[region_root_class]);
-            var drone_sample = drone.process();
-            drone_sample *= 0.006 + scene_presence * 0.011;
-            left += drone_sample;
-            right += drone_sample;
-        }
+        const texture_out = layers.mixMinecraftTextureLayer(
+            &texture_layer,
+            scene_presence,
+            region_root_class,
+            brightness,
+            bed_mix,
+            cloud_mix,
+            effectiveWow(),
+            effectiveBlur(),
+            texture_bed_mul,
+            texture_cloud_mul,
+            drone_dropout_beats,
+        );
+        left += texture_out[0];
+        right += texture_out[1];
 
         const dry = 1.0 - reverb_mix;
         const wet = reverb_mix;
@@ -278,14 +258,7 @@ pub fn reset() void {
     voice_note_idx = .{ 10, 12 };
     voice_beat_counter = .{ 0, 0 };
 
-    resonance_phase = .{0} ** RESONANCE_COUNT;
-    resonance_energy = .{ 0.0, 0.0, 0.0 };
-    cloud_phase = .{.{0} ** 2} ** RESONANCE_COUNT;
-    cloud_energy = .{ 0.0, 0.0, 0.0 };
-    bed_phase = .{.{0} ** 3} ** BED_PARTIALS;
-    bed_gain = .{ 0.0, 0.0, 0.0, 0.0 };
-
-    drone = instruments.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
+    layers.resetMinecraftTextureLayer(&texture_layer);
 
     bloom_notes_remaining = 0;
     repeat_figure_notes_remaining = 0;
@@ -460,38 +433,12 @@ fn scheduleRareEvents() void {
 }
 
 fn updateRegionTuning() void {
-    const low_root = region_root_class;
-    const low_fifth = @min(low_root + 3, 4);
-    const mid_root = @min(low_root + 5, 9);
-    const high_root = @min(low_root + 10, 14);
-
-    resonance_freq[0] = midiToFreq(scale[low_root]);
-    resonance_freq[1] = midiToFreq(scale[low_fifth]);
-    resonance_freq[2] = midiToFreq(scale[mid_root]);
-    cloud_freq[0] = midiToFreq(scale[mid_root]);
-    cloud_freq[1] = midiToFreq(scale[@min(low_root + 8, 14)]);
-    cloud_freq[2] = midiToFreq(scale[high_root]);
-
-    drone.freq = midiToFreq(scale[low_root]);
-    if (current_region == .bright) {
-        drone.freq = midiToFreq(scale[@min(low_root + 1, 4)]);
-    }
-    if (current_region == .suspended) {
-        resonance_freq[2] = midiToFreq(scale[@min(high_root, 14)]);
-        cloud_freq[1] = midiToFreq(scale[@min(low_root + 6, 14)]);
-    }
-
-    bed_freq[0] = midiToFreq(scale[low_root]);
-    bed_freq[1] = midiToFreq(scale[low_fifth]);
-    bed_freq[2] = midiToFreq(scale[mid_root]);
-    bed_freq[3] = midiToFreq(scale[high_root]);
-
-    bed_target_gain = switch (current_region) {
-        .open => .{ 0.014, 0.011, 0.008, 0.005 },
-        .suspended => .{ 0.013, 0.010, 0.009, 0.006 },
-        .bright => .{ 0.011, 0.010, 0.010, 0.008 },
-        .sparse => .{ 0.009, 0.007, 0.005, 0.003 },
-    };
+    layers.applyMinecraftRegionTuning(&texture_layer, region_root_class, switch (current_region) {
+        .open => .open,
+        .suspended => .suspended,
+        .bright => .bright,
+        .sparse => .sparse,
+    });
 }
 
 fn rebuildMotif() void {
@@ -697,7 +644,7 @@ fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
         1.8 + blur_amount * 1.9;
     voices[voice_idx].trigger(freq, velocity, @max(cutoff, 140.0), dsp.Envelope.init(attack_s, decay_s, 0.0, release_s));
 
-    exciteResonance(note_idx);
+    layers.exciteMinecraftTextureLayer(&texture_layer, note_idx, region_root_class);
 
     if (bloomNotesAllowedForVoice(voice_idx) and bloom_notes_remaining > 0) {
         bloom_notes_remaining -= 1;
@@ -705,75 +652,6 @@ fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
     if (repeat_figure_notes_remaining > 0 and voice_idx == MOTIF_VOICE) {
         repeat_figure_notes_remaining -= 1;
     }
-}
-
-fn processResonance() f32 {
-    var sample: f32 = 0;
-
-    for (0..RESONANCE_COUNT) |idx| {
-        resonance_phase[idx] += resonance_freq[idx] * INV_SR * TAU;
-        if (resonance_phase[idx] > TAU) resonance_phase[idx] -= TAU;
-
-        resonance_energy[idx] *= 0.99991;
-        sample += @sin(resonance_phase[idx]) * resonance_energy[idx];
-
-        cloud_phase[idx][0] += cloud_freq[idx] * INV_SR * TAU;
-        if (cloud_phase[idx][0] > TAU) cloud_phase[idx][0] -= TAU;
-        cloud_phase[idx][1] += cloud_freq[idx] * 0.501 * INV_SR * TAU;
-        if (cloud_phase[idx][1] > TAU) cloud_phase[idx][1] -= TAU;
-
-        cloud_energy[idx] *= 0.999985;
-        sample += (@sin(cloud_phase[idx][0]) * 0.7 + @sin(cloud_phase[idx][1]) * 0.3) * cloud_energy[idx];
-    }
-
-    const cloud_level = std.math.clamp(cloud_mix * texture_cloud_mul, 0.0, 1.4);
-    return sample * ((0.006 + brightness * 0.004) + cloud_level * 0.01) * scenePresenceForTexture();
-}
-
-fn exciteResonance(note_idx: u8) void {
-    for (0..RESONANCE_COUNT) |idx| {
-        const class_match = note_idx % 5 == region_root_class or note_idx % 5 == (region_root_class + idx) % 5;
-        const boost: f32 = if (class_match) 0.012 else 0.0045;
-        resonance_energy[idx] = std.math.clamp(resonance_energy[idx] + boost, 0.0, 0.08);
-        const cloud_boost: f32 = if (class_match) 0.010 else 0.003;
-        cloud_energy[idx] = std.math.clamp(cloud_energy[idx] + cloud_boost, 0.0, 0.06);
-    }
-}
-
-fn processAmbientBed() [2]f32 {
-    var left: f32 = 0;
-    var right: f32 = 0;
-    const bed_level = std.math.clamp(bed_mix * texture_bed_mul, 0.0, 1.4) * scenePresenceForTexture();
-    const blur_amount = effectiveBlur();
-    const wow_amount = effectiveWow();
-
-    for (0..BED_PARTIALS) |idx| {
-        bed_gain[idx] += (bed_target_gain[idx] - bed_gain[idx]) * 0.00025;
-
-        const base_freq = bed_freq[idx];
-        var sample: f32 = 0;
-        for (0..3) |osc_idx| {
-            const detune_dir = @as(f32, @floatFromInt(osc_idx)) - 1.0;
-            const detune = 1.0 + detune_dir * (0.0011 + wow_amount * 0.0022);
-            bed_phase[idx][osc_idx] += base_freq * detune * INV_SR * TAU;
-            if (bed_phase[idx][osc_idx] > TAU) bed_phase[idx][osc_idx] -= TAU;
-            const amp: f32 = if (osc_idx == 1) 0.55 else 0.225;
-            sample += @sin(bed_phase[idx][osc_idx]) * amp;
-        }
-
-        sample *= bed_gain[idx] * bed_level * (0.8 + blur_amount * 0.35);
-        const pan: f32 = switch (idx) {
-            0 => -0.35,
-            1 => 0.35,
-            2 => -0.12,
-            else => 0.12,
-        };
-        const stereo = panStereo(sample, pan);
-        left += stereo[0];
-        right += stereo[1];
-    }
-
-    return .{ left, right };
 }
 
 fn scenePresenceForTexture() f32 {

@@ -8,12 +8,14 @@ const procedural_minecraft = @import("procedural_minecraft.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
+const procedural_african_drums = @import("procedural_african_drums.zig");
+const procedural_taiko = @import("procedural_taiko.zig");
 
 // ============================================================
 // Style selection
 // ============================================================
 
-const STYLE_COUNT = 6;
+const STYLE_COUNT = 8;
 var style_value: u8 = 0;
 
 const style_names = [STYLE_COUNT][:0]const u8{
@@ -23,6 +25,8 @@ const style_names = [STYLE_COUNT][:0]const u8{
     "Style: Choir",
     "Style: Minecraft",
     "Style: 80s Rock",
+    "Style: African Drums",
+    "Style: Taiko",
 };
 
 const MINECRAFT_CUE_COUNT = 5;
@@ -79,6 +83,22 @@ const piano_cue_names = [PIANO_CUE_COUNT][:0]const u8{
     "Cue: Daybreak",
     "Cue: Remembrance",
 };
+const AFRICAN_CUE_COUNT = 4;
+var african_cue_value: u8 = 0;
+const african_cue_names = [AFRICAN_CUE_COUNT][:0]const u8{
+    "Cue: Kuku",
+    "Cue: Djole",
+    "Cue: Fanga",
+    "Cue: Soli",
+};
+const TAIKO_CUE_COUNT = 4;
+var taiko_cue_value: u8 = 0;
+const taiko_cue_names = [TAIKO_CUE_COUNT][:0]const u8{
+    "Cue: Matsuri",
+    "Cue: Yatai-bayashi",
+    "Cue: Miyake",
+    "Cue: Oroshi",
+};
 
 // ============================================================
 // Shared configs (all styles)
@@ -87,7 +107,7 @@ const piano_cue_names = [PIANO_CUE_COUNT][:0]const u8{
 // zig fmt: off
 var volume_config = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var reverb_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var bpm_config    = menu.ConfigData{ .value = 0.36, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 30.0, .shader_scale = 170.0, .repeat_delay_ms = 75 };
+var bpm_config    = menu.ConfigData{ .value = 1.0, .step = 0.01, .min = 0, .max = 2.0, .repeat_delay_ms = 75 };
 
 // --- Ambient-specific ---
 var amb_drone_vol_config  = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
@@ -122,6 +142,7 @@ var minecraft_attack_softness_config = menu.ConfigData{ .value = 0.35, .step = 0
 
 // --- 80s Rock-specific ---
 var rock80s_lead_mix_config = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var rock80s_chord_mix_config = menu.ConfigData{ .value = 0.34, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var rock80s_drive_config    = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var rock80s_drum_mix_config = menu.ConfigData{ .value = 0.8, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var rock80s_bass_mix_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
@@ -132,6 +153,16 @@ var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .mi
 var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var choir_drone_mix_config   = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var choir_chant_mix_config   = menu.ConfigData{ .value = 0.58, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var african_drum_mix_config   = menu.ConfigData{ .value = 0.9,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var african_shaker_mix_config = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var african_tone_mix_config   = menu.ConfigData{ .value = 0.62, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var african_slap_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+
+// --- Taiko-specific ---
+var taiko_drum_mix_config   = menu.ConfigData{ .value = 0.9,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var taiko_shime_mix_config  = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var taiko_nagado_mix_config = menu.ConfigData{ .value = 0.65, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var taiko_kane_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 // zig fmt: on
 
 // ============================================================
@@ -146,7 +177,7 @@ var main_items = [_]menu.Item{
     .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
     .{ .label = "Tweak", .kind = .{ .button = actionOpenTweak }, .font = .medium },
     .{ .label = "Volume", .kind = .{ .config = &volume_config }, .font = .medium },
-    .{ .label = "BPM", .kind = .{ .config = &bpm_config }, .font = .medium },
+    .{ .label = "Tempo Scale", .kind = .{ .config = &bpm_config }, .font = .medium },
     .{ .label = "Reverb", .kind = .{ .config = &reverb_config }, .font = .medium },
 };
 
@@ -205,6 +236,7 @@ var rock80s_items = [_]menu.Item{
     .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerRock80sCue }, .font = .medium },
     .{ .label = "Cue: Arena", .kind = .{ .button = actionCycleRock80sCue }, .font = .medium, .cycle_names = &rock80s_cue_names, .cycle_index = &rock80s_cue_value, .on_cycle = onCycleRock80sCue },
     .{ .label = "Lead Presence", .kind = .{ .config = &rock80s_lead_mix_config }, .font = .medium },
+    .{ .label = "Guitar Presence", .kind = .{ .config = &rock80s_chord_mix_config }, .font = .medium },
     .{ .label = "Drive", .kind = .{ .config = &rock80s_drive_config }, .font = .medium },
     .{ .label = "Drums", .kind = .{ .config = &rock80s_drum_mix_config }, .font = .medium },
     .{ .label = "Bass", .kind = .{ .config = &rock80s_bass_mix_config }, .font = .medium },
@@ -220,6 +252,26 @@ var choir_items = [_]menu.Item{
     .{ .label = "Breathiness", .kind = .{ .config = &choir_breathiness_config }, .font = .medium },
     .{ .label = "Drone Presence", .kind = .{ .config = &choir_drone_mix_config }, .font = .medium },
     .{ .label = "Chant Presence", .kind = .{ .config = &choir_chant_mix_config }, .font = .medium },
+};
+
+var african_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerAfricanCue }, .font = .medium },
+    .{ .label = "Cue: Kuku", .kind = .{ .button = actionCycleAfricanCue }, .font = .medium, .cycle_names = &african_cue_names, .cycle_index = &african_cue_value, .on_cycle = onCycleAfricanCue },
+    .{ .label = "Drum Presence", .kind = .{ .config = &african_drum_mix_config }, .font = .medium },
+    .{ .label = "Shaker Presence", .kind = .{ .config = &african_shaker_mix_config }, .font = .medium },
+    .{ .label = "Tone Drum", .kind = .{ .config = &african_tone_mix_config }, .font = .medium },
+    .{ .label = "Slap Drum", .kind = .{ .config = &african_slap_mix_config }, .font = .medium },
+};
+
+var taiko_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerTaikoCue }, .font = .medium },
+    .{ .label = "Cue: Matsuri", .kind = .{ .button = actionCycleTaikoCue }, .font = .medium, .cycle_names = &taiko_cue_names, .cycle_index = &taiko_cue_value, .on_cycle = onCycleTaikoCue },
+    .{ .label = "Drum Presence", .kind = .{ .config = &taiko_drum_mix_config }, .font = .medium },
+    .{ .label = "Shime Volume", .kind = .{ .config = &taiko_shime_mix_config }, .font = .medium },
+    .{ .label = "Nagado Volume", .kind = .{ .config = &taiko_nagado_mix_config }, .font = .medium },
+    .{ .label = "Atarigane Volume", .kind = .{ .config = &taiko_kane_mix_config }, .font = .medium },
 };
 
 // ============================================================
@@ -303,10 +355,25 @@ fn loadFromParams() void {
         .rock80s => {
             rock80s_cue_value = settings.music_rock80s_cue;
             rock80s_lead_mix_config.value = settings.music_rock80s_lead_mix;
+            rock80s_chord_mix_config.value = settings.music_rock80s_chord_mix;
             rock80s_drive_config.value = settings.music_rock80s_drive;
             rock80s_drum_mix_config.value = settings.music_rock80s_drum_mix;
             rock80s_bass_mix_config.value = settings.music_rock80s_bass_mix;
             rock80s_gate_config.value = settings.music_rock80s_gate;
+        },
+        .african_drums => {
+            african_cue_value = settings.music_african_cue;
+            african_drum_mix_config.value = settings.music_african_drum_mix;
+            african_shaker_mix_config.value = settings.music_african_shaker_mix;
+            african_tone_mix_config.value = settings.music_african_bass_mix;
+            african_slap_mix_config.value = settings.music_african_drone_mix;
+        },
+        .taiko => {
+            taiko_cue_value = settings.music_taiko_cue;
+            taiko_drum_mix_config.value = settings.music_taiko_drum_mix;
+            taiko_shime_mix_config.value = settings.music_taiko_shime_mix;
+            taiko_nagado_mix_config.value = settings.music_taiko_nagado_mix;
+            taiko_kane_mix_config.value = settings.music_taiko_kane_mix;
         },
     }
 }
@@ -321,7 +388,7 @@ fn toShader(cfg: *const menu.ConfigData) f32 {
 
 fn fromShader(cfg: *menu.ConfigData, val: f32) void {
     if (cfg.shader_scale == 0) return;
-    cfg.value = std.math.clamp((val - cfg.shader_offset) / cfg.shader_scale, 0.0, 1.0);
+    cfg.value = std.math.clamp((val - cfg.shader_offset) / cfg.shader_scale, cfg.min, cfg.max);
 }
 
 fn applyMenuToSettings(save_changes: bool) !void {
@@ -377,10 +444,25 @@ fn applyMenuToSettings(save_changes: bool) !void {
         .rock80s => {
             settings.music_rock80s_cue = rock80s_cue_value;
             settings.music_rock80s_lead_mix = rock80s_lead_mix_config.value;
+            settings.music_rock80s_chord_mix = rock80s_chord_mix_config.value;
             settings.music_rock80s_drive = rock80s_drive_config.value;
             settings.music_rock80s_drum_mix = rock80s_drum_mix_config.value;
             settings.music_rock80s_bass_mix = rock80s_bass_mix_config.value;
             settings.music_rock80s_gate = rock80s_gate_config.value;
+        },
+        .african_drums => {
+            settings.music_african_cue = african_cue_value;
+            settings.music_african_drum_mix = african_drum_mix_config.value;
+            settings.music_african_shaker_mix = african_shaker_mix_config.value;
+            settings.music_african_bass_mix = african_tone_mix_config.value;
+            settings.music_african_drone_mix = african_slap_mix_config.value;
+        },
+        .taiko => {
+            settings.music_taiko_cue = taiko_cue_value;
+            settings.music_taiko_drum_mix = taiko_drum_mix_config.value;
+            settings.music_taiko_shime_mix = taiko_shime_mix_config.value;
+            settings.music_taiko_nagado_mix = taiko_nagado_mix_config.value;
+            settings.music_taiko_kane_mix = taiko_kane_mix_config.value;
         },
     }
 
@@ -433,6 +515,8 @@ fn actionOpenTweak() anyerror!void {
         .choir => menu.open(&choir_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
         .minecraft => menu.open(&minecraft_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
         .rock80s => menu.open(&rock80s_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .african_drums => menu.open(&african_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .taiko => menu.open(&taiko_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
     }
 }
 
@@ -543,4 +627,42 @@ fn onCycleChoirCue() void {
         return;
     };
     procedural_choir.triggerCue();
+}
+
+fn actionTriggerAfricanCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_african_drums.triggerCue();
+}
+
+fn actionCycleAfricanCue() anyerror!void {
+    african_cue_value = (african_cue_value + 1) % AFRICAN_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_african_drums.triggerCue();
+}
+
+fn onCycleAfricanCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleAfricanCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_african_drums.triggerCue();
+}
+
+fn actionTriggerTaikoCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_taiko.triggerCue();
+}
+
+fn actionCycleTaikoCue() anyerror!void {
+    taiko_cue_value = (taiko_cue_value + 1) % TAIKO_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_taiko.triggerCue();
+}
+
+fn onCycleTaikoCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleTaikoCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_taiko.triggerCue();
 }

@@ -17,7 +17,8 @@ pub const CuePreset = enum(u8) {
     crusade,
 };
 
-pub var bpm: f32 = 44.0;
+pub var bpm: f32 = 1.0;
+const BASE_BPM: f32 = 44.0;
 pub var reverb_mix: f32 = 0.72;
 pub var choir_vol: f32 = 0.15;
 pub var breathiness: f32 = 0.3;
@@ -66,7 +67,7 @@ var breath_level: f32 = 0.25;
 
 const LAYER_FADE_RATE: f32 = 0.000025;
 
-var chant_phrase_template: composition.PhraseGenerator = .{
+const CHANT_PHRASE_TEMPLATE: composition.PhraseGenerator = .{
     .anchor = 12,
     .region_low = 9,
     .region_high = 16,
@@ -82,16 +83,127 @@ var breath_layer: layers.BreathLayer = .{};
 
 var chant_beat_counter: f32 = 0.0;
 
-var cue_reverb_boost: f32 = 0.0;
-var cue_breath_boost: f32 = 0.0;
-var cue_chant_recall_chance: f32 = 0.3;
-var cue_chant_threshold: f32 = 0.35;
-var cue_chord_change_beats: f32 = 16.0;
-var cue_chant_beat_len: f32 = 2.0;
-var cue_pad_attack: f32 = 1.4;
-var cue_pad_release: f32 = 5.8;
-var cue_chant_attack: f32 = 0.18;
-var cue_chant_release: f32 = 1.6;
+// ============================================================
+// Cue specs (static data describing each flavor)
+// ============================================================
+
+const ChoirCueSpec = struct {
+    root: u8,
+    scale_type: composition.ScaleType,
+    modulation_mode: composition.ModulationMode,
+    chord_change_beats: f32,
+    chant_beat_len: f32,
+    reverb_boost: f32,
+    breath_boost: f32,
+    chant_threshold: f32,
+    pad_attack: f32,
+    pad_release: f32,
+    chant_rest_chance: f32,
+    chant_region_low: u8,
+    chant_region_high: u8,
+    chant_min_notes: u8,
+    chant_max_notes: u8,
+    chant_recall_chance: f32,
+    chant_attack: f32,
+    chant_release: f32,
+    drone_filter_hz: f32,
+    drone_detune_ratio: f32,
+};
+
+const CUE_SPECS: [4]ChoirCueSpec = .{
+    // cathedral
+    .{
+        .root = 38,
+        .scale_type = .dorian,
+        .modulation_mode = .none,
+        .chord_change_beats = 18.0,
+        .chant_beat_len = 2.5,
+        .reverb_boost = 0.08,
+        .breath_boost = 0.05,
+        .chant_threshold = 0.25,
+        .pad_attack = 2.0,
+        .pad_release = 7.5,
+        .chant_rest_chance = 0.24,
+        .chant_region_low = 9,
+        .chant_region_high = 15,
+        .chant_min_notes = 4,
+        .chant_max_notes = 7,
+        .chant_recall_chance = 0.28,
+        .chant_attack = 0.22,
+        .chant_release = 2.1,
+        .drone_filter_hz = 160.0,
+        .drone_detune_ratio = 1.0012,
+    },
+    // procession
+    .{
+        .root = 40,
+        .scale_type = .mixolydian,
+        .modulation_mode = .none,
+        .chord_change_beats = 12.0,
+        .chant_beat_len = 1.5,
+        .reverb_boost = 0.02,
+        .breath_boost = 0.0,
+        .chant_threshold = 0.12,
+        .pad_attack = 1.0,
+        .pad_release = 4.5,
+        .chant_rest_chance = 0.14,
+        .chant_region_low = 10,
+        .chant_region_high = 17,
+        .chant_min_notes = 5,
+        .chant_max_notes = 8,
+        .chant_recall_chance = 0.22,
+        .chant_attack = 0.12,
+        .chant_release = 1.2,
+        .drone_filter_hz = 220.0,
+        .drone_detune_ratio = 1.0018,
+    },
+    // vigil
+    .{
+        .root = 36,
+        .scale_type = .harmonic_minor,
+        .modulation_mode = .none,
+        .chord_change_beats = 22.0,
+        .chant_beat_len = 3.5,
+        .reverb_boost = 0.12,
+        .breath_boost = 0.12,
+        .chant_threshold = 0.5,
+        .pad_attack = 2.6,
+        .pad_release = 8.5,
+        .chant_rest_chance = 0.36,
+        .chant_region_low = 8,
+        .chant_region_high = 13,
+        .chant_min_notes = 3,
+        .chant_max_notes = 5,
+        .chant_recall_chance = 0.4,
+        .chant_attack = 0.28,
+        .chant_release = 2.6,
+        .drone_filter_hz = 130.0,
+        .drone_detune_ratio = 1.0009,
+    },
+    // crusade
+    .{
+        .root = 41,
+        .scale_type = .natural_minor,
+        .modulation_mode = .fourth,
+        .chord_change_beats = 10.0,
+        .chant_beat_len = 1.0,
+        .reverb_boost = 0.0,
+        .breath_boost = -0.05,
+        .chant_threshold = 0.08,
+        .pad_attack = 0.8,
+        .pad_release = 3.6,
+        .chant_rest_chance = 0.08,
+        .chant_region_low = 11,
+        .chant_region_high = 18,
+        .chant_min_notes = 5,
+        .chant_max_notes = 9,
+        .chant_recall_chance = 0.18,
+        .chant_attack = 0.08,
+        .chant_release = 0.95,
+        .drone_filter_hz = 240.0,
+        .drone_detune_ratio = 1.0021,
+    },
+};
 
 pub fn reset() void {
     reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
@@ -106,17 +218,8 @@ pub fn reset() void {
     pad_level = 0.5;
     chant_level = 0.0;
     breath_level = 0.25;
-    chant_phrase_template = .{
-        .anchor = 12,
-        .region_low = 9,
-        .region_high = 16,
-        .rest_chance = 0.18,
-        .min_notes = 4,
-        .max_notes = 8,
-        .gravity = 3.5,
-    };
     layers.resetChoirPadLayer(&pad_layer);
-    layers.resetChoirChantLayer(&chant_layer, chant_phrase_template);
+    layers.resetChoirChantLayer(&chant_layer, CHANT_PHRASE_TEMPLATE);
     layers.resetDroneLayer(&drone_layer, .{
         .freq = dsp.midiToFreq(36),
         .detune_ratio = 1.0016,
@@ -138,19 +241,20 @@ pub fn triggerCue() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spb = dsp.samplesPerBeat(bpm);
+    const eff_bpm = BASE_BPM * bpm;
+    const spb = dsp.samplesPerBeat(eff_bpm);
+    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
 
     for (0..frames) |i| {
-        lfo_reverb.advanceSample(bpm);
-        engine.chord_change_beats = cue_chord_change_beats;
-        const tick = engine.advanceSample(&rng, bpm);
+        lfo_reverb.advanceSample(eff_bpm);
+        const tick = engine.advanceSample(&rng, eff_bpm);
         if (tick.chord_changed) {
             advanceChord();
         }
 
         chant_beat_counter += 1.0 / spb;
-        if (chant_beat_counter >= cue_chant_beat_len) {
-            chant_beat_counter -= cue_chant_beat_len;
+        if (chant_beat_counter >= spec.chant_beat_len) {
+            chant_beat_counter -= spec.chant_beat_len;
             triggerChantNote(tick.meso, tick.micro);
         }
 
@@ -175,11 +279,11 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         left += chant_out[0];
         right += chant_out[1];
 
-        const breath_out = layers.mixBreathLayer(&breath_layer, &rng, breathiness, cue_breath_boost, tick.meso, breath_level);
+        const breath_out = layers.mixBreathLayer(&breath_layer, &rng, breathiness, spec.breath_boost, tick.meso, breath_level);
         left += breath_out[0];
         right += breath_out[1];
 
-        const wet = (reverb_mix + cue_reverb_boost) * lfo_reverb.modulate();
+        const wet = (reverb_mix + spec.reverb_boost) * lfo_reverb.modulate();
         const dry = 1.0 - wet;
         const rev = reverb.process(.{ left, right });
         left = left * dry + rev[0] * wet;
@@ -191,134 +295,47 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 }
 
 fn applyCueParams() void {
-    switch (selected_cue) {
-        .cathedral => {
-            engine.key.root = 38;
-            engine.key.target_root = 38;
-            cue_reverb_boost = 0.08;
-            cue_breath_boost = 0.05;
-            cue_chant_recall_chance = 0.28;
-            cue_chant_threshold = 0.25;
-            cue_chord_change_beats = 18.0;
-            cue_chant_beat_len = 2.5;
-            cue_pad_attack = 2.0;
-            cue_pad_release = 7.5;
-            cue_chant_attack = 0.22;
-            cue_chant_release = 2.1;
-            layers.applyChoirChantCue(&chant_layer, .{
-                .phrase = .{ .rest_chance = 0.24, .region_low = 9, .region_high = 15 },
-                .min_notes = 4,
-                .max_notes = 7,
-                .recall_chance = cue_chant_recall_chance,
-                .attack = cue_chant_attack,
-                .release = cue_chant_release,
-            });
-            layers.applyDroneCue(&drone_layer, 160.0, 1.0012);
-        },
-        .procession => {
-            engine.key.root = 40;
-            engine.key.target_root = 40;
-            cue_reverb_boost = 0.02;
-            cue_breath_boost = 0.0;
-            cue_chant_recall_chance = 0.22;
-            cue_chant_threshold = 0.12;
-            cue_chord_change_beats = 12.0;
-            cue_chant_beat_len = 1.5;
-            cue_pad_attack = 1.0;
-            cue_pad_release = 4.5;
-            cue_chant_attack = 0.12;
-            cue_chant_release = 1.2;
-            layers.applyChoirChantCue(&chant_layer, .{
-                .phrase = .{ .rest_chance = 0.14, .region_low = 10, .region_high = 17 },
-                .min_notes = 5,
-                .max_notes = 8,
-                .recall_chance = cue_chant_recall_chance,
-                .attack = cue_chant_attack,
-                .release = cue_chant_release,
-            });
-            layers.applyDroneCue(&drone_layer, 220.0, 1.0018);
-        },
-        .vigil => {
-            engine.key.root = 36;
-            engine.key.target_root = 36;
-            cue_reverb_boost = 0.12;
-            cue_breath_boost = 0.12;
-            cue_chant_recall_chance = 0.4;
-            cue_chant_threshold = 0.5;
-            cue_chord_change_beats = 22.0;
-            cue_chant_beat_len = 3.5;
-            cue_pad_attack = 2.6;
-            cue_pad_release = 8.5;
-            cue_chant_attack = 0.28;
-            cue_chant_release = 2.6;
-            layers.applyChoirChantCue(&chant_layer, .{
-                .phrase = .{ .rest_chance = 0.36, .region_low = 8, .region_high = 13 },
-                .min_notes = 3,
-                .max_notes = 5,
-                .recall_chance = cue_chant_recall_chance,
-                .attack = cue_chant_attack,
-                .release = cue_chant_release,
-            });
-            layers.applyDroneCue(&drone_layer, 130.0, 1.0009);
-        },
-        .crusade => {
-            engine.key.root = 41;
-            engine.key.target_root = 41;
-            cue_reverb_boost = 0.0;
-            cue_breath_boost = -0.05;
-            cue_chant_recall_chance = 0.18;
-            cue_chant_threshold = 0.08;
-            cue_chord_change_beats = 10.0;
-            cue_chant_beat_len = 1.0;
-            cue_pad_attack = 0.8;
-            cue_pad_release = 3.6;
-            cue_chant_attack = 0.08;
-            cue_chant_release = 0.95;
-            layers.applyChoirChantCue(&chant_layer, .{
-                .phrase = .{ .rest_chance = 0.08, .region_low = 11, .region_high = 18 },
-                .min_notes = 5,
-                .max_notes = 9,
-                .recall_chance = cue_chant_recall_chance,
-                .attack = cue_chant_attack,
-                .release = cue_chant_release,
-            });
-            layers.applyDroneCue(&drone_layer, 240.0, 1.0021);
-        },
-    }
-    engine.key.scale_type = switch (selected_cue) {
-        .cathedral => .dorian,
-        .procession => .mixolydian,
-        .vigil => .harmonic_minor,
-        .crusade => .natural_minor,
-    };
-    engine.modulation_mode = if (selected_cue == .crusade) .fourth else .none;
+    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
+    engine.key.root = spec.root;
+    engine.key.target_root = spec.root;
+    engine.key.scale_type = spec.scale_type;
+    engine.modulation_mode = spec.modulation_mode;
+    engine.chord_change_beats = spec.chord_change_beats;
+    layers.applyChoirChantCue(&chant_layer, .{
+        .phrase = .{ .rest_chance = spec.chant_rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
+        .min_notes = spec.chant_min_notes,
+        .max_notes = spec.chant_max_notes,
+        .recall_chance = spec.chant_recall_chance,
+        .attack = spec.chant_attack,
+        .release = spec.chant_release,
+    });
+    layers.applyDroneCue(&drone_layer, spec.drone_filter_hz, spec.drone_detune_ratio);
 }
 
 fn advanceChord() void {
+    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
     const chord = engine.harmony.chords[engine.harmony.current];
-    layers.applyChoirPadChord(&pad_layer, engine.key.root, chord, cue_pad_attack, cue_pad_release, @intFromEnum(selected_cue), engine.harmony.current);
+    layers.applyChoirPadChord(&pad_layer, engine.key.root, chord, spec.pad_attack, spec.pad_release, @intFromEnum(selected_cue), engine.harmony.current);
     layers.applyChoirChantChord(&chant_layer, engine.key.root, &engine.harmony, engine.key.scale_type, @intFromEnum(selected_cue));
     layers.applyDroneChord(&drone_layer, engine.key.root, chord, -1);
 }
 
 fn triggerChantNote(meso: f32, micro: f32) void {
+    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
     layers.maybeTriggerChoirChant(&chant_layer, &rng, &engine.key, chant_level, meso, micro, .{
-        .phrase = .{
-            .rest_chance = chant_layer.phrase.rest_chance,
-            .region_low = chant_layer.phrase.region_low,
-            .region_high = chant_layer.phrase.region_high,
-        },
-        .min_notes = chant_layer.phrase.min_notes,
-        .max_notes = chant_layer.phrase.max_notes,
-        .recall_chance = cue_chant_recall_chance,
-        .attack = cue_chant_attack,
-        .release = cue_chant_release,
+        .phrase = .{ .rest_chance = spec.chant_rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
+        .min_notes = spec.chant_min_notes,
+        .max_notes = spec.chant_max_notes,
+        .recall_chance = spec.chant_recall_chance,
+        .attack = spec.chant_attack,
+        .release = spec.chant_release,
     });
 }
 
 fn updateLayerTargets(macro: f32) void {
+    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
     drone_target = 0.65 + macro * 0.35;
     pad_target = 0.3 + macro * 0.7;
-    chant_target = if (macro > cue_chant_threshold) @min((macro - cue_chant_threshold) * 1.25, 0.95) else 0.0;
+    chant_target = if (macro > spec.chant_threshold) @min((macro - spec.chant_threshold) * 1.25, 0.95) else 0.0;
     breath_target = 0.18 + (1.0 - macro) * 0.35;
 }

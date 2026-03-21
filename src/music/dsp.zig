@@ -112,6 +112,138 @@ pub const HPF = struct {
     }
 };
 
+pub fn DelayLine(comptime size: usize) type {
+    comptime {
+        if (size == 0) @compileError("DelayLine size must be > 0");
+    }
+
+    return struct {
+        buf: [size]f32 = [_]f32{0} ** size,
+        pos: usize = 0,
+
+        pub fn reset(self: *@This()) void {
+            self.* = .{};
+        }
+
+        pub fn push(self: *@This(), sample: f32) void {
+            self.buf[self.pos] = sample;
+            self.pos = (self.pos + 1) % size;
+        }
+
+        pub fn tap(self: *const @This(), delay: usize) f32 {
+            const clamped_delay = @min(delay, size - 1);
+            const read_pos = (self.pos + size - 1 - clamped_delay) % size;
+            return self.buf[read_pos];
+        }
+
+        pub fn process(self: *@This(), sample: f32, delay: usize) f32 {
+            const tapped = self.tap(delay);
+            self.push(sample);
+            return tapped;
+        }
+    };
+}
+
+pub fn ResonatorBank(comptime n_modes: usize) type {
+    comptime {
+        if (n_modes == 0) @compileError("ResonatorBank mode count must be > 0");
+    }
+
+    return struct {
+        phases: [n_modes]f32 = .{0.0} ** n_modes,
+        freqs: [n_modes]f32 = .{0.0} ** n_modes,
+        amps: [n_modes]f32 = .{0.0} ** n_modes,
+        decays: [n_modes]f32 = .{0.999} ** n_modes,
+
+        pub fn reset(self: *@This()) void {
+            self.* = .{};
+        }
+
+        pub fn configure(self: *@This(), freqs: [n_modes]f32, decays: [n_modes]f32) void {
+            self.freqs = freqs;
+            self.decays = decays;
+        }
+
+        pub fn excite(self: *@This(), gains: [n_modes]f32, amount: f32) void {
+            for (0..n_modes) |idx| {
+                self.amps[idx] += gains[idx] * amount;
+            }
+        }
+
+        pub fn process(self: *@This()) f32 {
+            var out: f32 = 0.0;
+            for (0..n_modes) |idx| {
+                if (self.amps[idx] <= 0.00001) continue;
+                self.phases[idx] += self.freqs[idx] * INV_SR * TAU;
+                if (self.phases[idx] > TAU) self.phases[idx] -= TAU;
+                out += @sin(self.phases[idx]) * self.amps[idx];
+                self.amps[idx] *= self.decays[idx];
+            }
+            return out;
+        }
+    };
+}
+
+pub fn WaveguideString(comptime size: usize) type {
+    comptime {
+        if (size < 8) @compileError("WaveguideString size must be >= 8");
+    }
+
+    return struct {
+        line: DelayLine(size) = .{},
+        damping: LPF = LPF.init(4200.0),
+        seed: u32 = 0x1357_9BDF,
+        feedback: f32 = 0.992,
+        delay_samples: usize = 64,
+        excitation: f32 = 0.0,
+
+        pub fn reset(self: *@This()) void {
+            self.* = .{};
+        }
+
+        pub fn setFreq(self: *@This(), freq: f32) void {
+            const safe_freq = @max(freq, 8.0);
+            const delay_f = SAMPLE_RATE / safe_freq;
+            self.delay_samples = @intFromFloat(std.math.clamp(delay_f, 2.0, @as(f32, @floatFromInt(size - 2))));
+        }
+
+        pub fn pluck(self: *@This(), amount: f32, brightness: f32) void {
+            self.line.reset();
+            self.damping = LPF.init(1200.0 + brightness * 6800.0);
+            self.feedback = 0.985 + brightness * 0.01;
+            for (0..self.delay_samples) |idx| {
+                self.seed ^= self.seed << 13;
+                self.seed ^= self.seed >> 17;
+                self.seed ^= self.seed << 5;
+                const noise = (@as(f32, @floatFromInt(self.seed & 0x7FFF)) / 16384.0) - 1.0;
+                self.line.buf[idx] = noise * amount;
+            }
+            self.line.pos = self.delay_samples % size;
+            self.excitation = amount * (0.02 + brightness * 0.03);
+        }
+
+        pub fn process(self: *@This()) f32 {
+            const delayed = self.line.tap(self.delay_samples);
+            const filtered = self.damping.process(delayed);
+            const next = softClip(filtered * self.feedback + self.excitation);
+            self.line.push(next);
+            self.excitation *= 0.6;
+            return delayed;
+        }
+    };
+}
+
+pub fn exciterNoiseBurst(rng: *Rng, hpf: *HPF, lpf: *LPF, age: u32, decay_rate: f32, gain: f32) f32 {
+    const decay = @exp(-@as(f32, @floatFromInt(age)) * decay_rate);
+    const noise = hpf.process(lpf.process(rng.float() * 2.0 - 1.0));
+    return noise * decay * gain;
+}
+
+pub fn exciterPulseBurst(phase: f32, age: u32, decay_rate: f32, gain: f32) f32 {
+    const decay = @exp(-@as(f32, @floatFromInt(age)) * decay_rate);
+    return (@sin(phase * 23.0) + @sin(phase * 41.0) * 0.5) * decay * gain;
+}
+
 pub fn CombFilter(comptime size: usize) type {
     return struct {
         buf: [size]f32 = [_]f32{0} ** size,
@@ -272,6 +404,9 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
         filter: LPF = LPF.init(3000.0),
         pan: f32 = 0,
         unison_spread: f32 = 0.004,
+        vibrato_phase: f32 = 0,
+        vibrato_rate_hz: f32 = 0,
+        vibrato_depth: f32 = 0,
         fm_ratio: f32 = 0,
         fm_depth: f32 = 0,
         fm_env_depth: f32 = 0,
@@ -302,13 +437,20 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
 
             var sample: f32 = 0;
             const use_fm = self.fm_ratio > 0;
+            var vibrato_ratio: f32 = 1.0;
+            if (self.vibrato_rate_hz > 0 and self.vibrato_depth > 0) {
+                self.vibrato_phase += self.vibrato_rate_hz * INV_SR * TAU;
+                if (self.vibrato_phase > TAU) self.vibrato_phase -= TAU;
+                vibrato_ratio += @sin(self.vibrato_phase) * self.vibrato_depth;
+            }
 
             for (0..n_unison) |u| {
-                const osc_freq = if (n_unison > 1) blk: {
+                const osc_freq_base = if (n_unison > 1) blk: {
                     const u_f: f32 = @floatFromInt(u);
                     const center: f32 = @as(f32, @floatFromInt(n_unison - 1)) / 2.0;
                     break :blk self.freq * (1.0 + (u_f - center) * self.unison_spread);
                 } else self.freq;
+                const osc_freq = osc_freq_base * vibrato_ratio;
 
                 var fm_signal: f32 = 0;
                 if (use_fm) {

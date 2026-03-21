@@ -24,9 +24,11 @@ pub const CuePreset = enum(u8) {
     combat,
 };
 
-pub var bpm: f32 = 112.0;
+pub var bpm: f32 = 1.0;
+const BASE_BPM: f32 = 112.0;
 pub var reverb_mix: f32 = 0.35;
 pub var lead_mix: f32 = 0.5;
+pub var chord_mix: f32 = 0.34;
 pub var drive: f32 = 0.55;
 pub var drum_mix: f32 = 0.8;
 pub var bass_mix: f32 = 0.7;
@@ -129,9 +131,19 @@ const ROCK_LEAD_PHRASE: composition.PhraseGenerator = .{
 };
 const CHORD_CHANGE_BEATS: f32 = 8.0;
 const RockCueSpec = struct {
+    root: u8,
+    scale_type: composition.ScaleType,
+    chord_change_beats: f32,
+    modulation_mode: composition.ModulationMode,
+    kick_main_mask: u16,
+    kick_fill_mask: u16,
+    snare_backbeat_mask: u16,
+    bass_trigger_mask: u16,
+    bass_rest_chance: f32,
     extra_kick_density: f32,
     hat_density: f32,
     lead_density: f32,
+    lead_gate: f32,
     energy: f32,
     reverb_boost: f32,
     snare_ghost: f32,
@@ -148,9 +160,19 @@ const RockCueSpec = struct {
 };
 const CUE_SPECS: [4]RockCueSpec = .{
     .{
+        .root = 40,
+        .scale_type = .mixolydian,
+        .chord_change_beats = 8.0,
+        .modulation_mode = .fifth,
+        .kick_main_mask = (1 << 0) | (1 << 8),
+        .kick_fill_mask = (1 << 6) | (1 << 14),
+        .snare_backbeat_mask = (1 << 4) | (1 << 12),
+        .bass_trigger_mask = 0x5555,
+        .bass_rest_chance = 0.06,
         .extra_kick_density = 0.35,
         .hat_density = 0.6,
         .lead_density = 0.65,
+        .lead_gate = 0.42,
         .energy = 0.7,
         .reverb_boost = 0.1,
         .snare_ghost = 0.15,
@@ -159,16 +181,26 @@ const CUE_SPECS: [4]RockCueSpec = .{
         .chord_decay = 0.5,
         .chord_sustain = 0.3,
         .chord_release = 0.2,
-        .guitar_gain = 1.3,
-        .guitar_od_amount = 3.0,
+        .guitar_gain = 0.9,
+        .guitar_od_amount = 1.7,
         .cabinet_lpf_hz = 5000.0,
         .cabinet_hpf_hz = 120.0,
         .lead_phrase = .{ .rest_chance = 0.12, .region_low = 7, .region_high = 17 },
     },
     .{
+        .root = 38,
+        .scale_type = .natural_minor,
+        .chord_change_beats = 8.0,
+        .modulation_mode = .none,
+        .kick_main_mask = (1 << 0) | (1 << 7) | (1 << 8),
+        .kick_fill_mask = (1 << 14),
+        .snare_backbeat_mask = (1 << 4) | (1 << 12),
+        .bass_trigger_mask = (1 << 0) | (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8) | (1 << 11) | (1 << 12) | (1 << 15),
+        .bass_rest_chance = 0.14,
         .extra_kick_density = 0.1,
         .hat_density = 0.75,
         .lead_density = 0.3,
+        .lead_gate = 0.6,
         .energy = 0.35,
         .reverb_boost = 0.2,
         .snare_ghost = 0.05,
@@ -177,16 +209,26 @@ const CUE_SPECS: [4]RockCueSpec = .{
         .chord_decay = 0.8,
         .chord_sustain = 0.5,
         .chord_release = 0.4,
-        .guitar_gain = 0.8,
-        .guitar_od_amount = 1.8,
+        .guitar_gain = 0.62,
+        .guitar_od_amount = 1.0,
         .cabinet_lpf_hz = 3000.0,
         .cabinet_hpf_hz = 120.0,
         .lead_phrase = .{ .rest_chance = 0.4, .region_low = 9, .region_high = 15 },
     },
     .{
+        .root = 36,
+        .scale_type = .natural_minor,
+        .chord_change_beats = 16.0,
+        .modulation_mode = .none,
+        .kick_main_mask = (1 << 0) | (1 << 8),
+        .kick_fill_mask = (1 << 15),
+        .snare_backbeat_mask = (1 << 4) | (1 << 12),
+        .bass_trigger_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .bass_rest_chance = 0.22,
         .extra_kick_density = 0.05,
         .hat_density = 0.15,
         .lead_density = 0.25,
+        .lead_gate = 0.72,
         .energy = 0.2,
         .reverb_boost = 0.15,
         .snare_ghost = 0.0,
@@ -195,16 +237,26 @@ const CUE_SPECS: [4]RockCueSpec = .{
         .chord_decay = 1.2,
         .chord_sustain = 0.6,
         .chord_release = 0.6,
-        .guitar_gain = 0.6,
-        .guitar_od_amount = 1.2,
+        .guitar_gain = 0.5,
+        .guitar_od_amount = 0.8,
         .cabinet_lpf_hz = 2500.0,
         .cabinet_hpf_hz = 120.0,
         .lead_phrase = .{ .rest_chance = 0.45, .region_low = 8, .region_high = 14 },
     },
     .{
+        .root = 43,
+        .scale_type = .harmonic_minor,
+        .chord_change_beats = 4.0,
+        .modulation_mode = .mixed,
+        .kick_main_mask = (1 << 0) | (1 << 3) | (1 << 8) | (1 << 11),
+        .kick_fill_mask = (1 << 5) | (1 << 6) | (1 << 13) | (1 << 14) | (1 << 15),
+        .snare_backbeat_mask = (1 << 4) | (1 << 12),
+        .bass_trigger_mask = 0xFFFF,
+        .bass_rest_chance = 0.02,
         .extra_kick_density = 0.7,
         .hat_density = 0.95,
         .lead_density = 0.85,
+        .lead_gate = 0.28,
         .energy = 0.95,
         .reverb_boost = 0.0,
         .snare_ghost = 0.25,
@@ -213,8 +265,8 @@ const CUE_SPECS: [4]RockCueSpec = .{
         .chord_decay = 0.06,
         .chord_sustain = 0.0,
         .chord_release = 0.03,
-        .guitar_gain = 1.8,
-        .guitar_od_amount = 4.5,
+        .guitar_gain = 1.05,
+        .guitar_od_amount = 2.3,
         .cabinet_lpf_hz = 3500.0,
         .cabinet_hpf_hz = 150.0,
         .lead_phrase = .{ .rest_chance = 0.05, .region_low = 7, .region_high = 19 },
@@ -262,10 +314,11 @@ pub fn reset() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
+    const eff_bpm = BASE_BPM * bpm;
     for (0..frames) |i| {
-        const frame = runner.advanceFrame(&rng, &STYLE, bpm, LAYER_FADE_RATE);
-        lfo_filter.advanceSample(bpm);
-        lfo_drive.advanceSample(bpm);
+        const frame = runner.advanceFrame(&rng, &STYLE, eff_bpm, LAYER_FADE_RATE);
+        lfo_filter.advanceSample(eff_bpm);
+        lfo_drive.advanceSample(eff_bpm);
 
         if (frame.tick.chord_changed) {
             advanceChord();
@@ -288,7 +341,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         right += bass_out[1];
 
         const eff_drive = drive * lfo_drive.modulate() + cue_energy * 0.2;
-        const guitar_out = layers.mixGuitarChordLayer(&guitar_layer, runner.layer_levels[CHORD_LAYER], eff_drive);
+        const guitar_out = layers.mixGuitarChordLayer(&guitar_layer, chord_mix * runner.layer_levels[CHORD_LAYER], eff_drive);
         left += guitar_out[0];
         right += guitar_out[1];
 
@@ -313,11 +366,11 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
 fn applyCueParams() void {
     const spec = STYLE.cues[@intFromEnum(selected_cue)];
-    runner.engine.key.root = 40;
-    runner.engine.key.target_root = 40;
-    runner.engine.key.scale_type = .mixolydian;
-    runner.engine.chord_change_beats = CHORD_CHANGE_BEATS;
-    runner.engine.modulation_mode = .fifth;
+    runner.engine.key.root = spec.root;
+    runner.engine.key.target_root = spec.root;
+    runner.engine.key.scale_type = spec.scale_type;
+    runner.engine.chord_change_beats = spec.chord_change_beats;
+    runner.engine.modulation_mode = spec.modulation_mode;
     cue_energy = spec.energy;
     cue_reverb_boost = spec.reverb_boost;
     layers.applyGuitarCue(&guitar_layer, .{
@@ -335,6 +388,7 @@ fn applyCueParams() void {
         .density = spec.lead_density,
         .phrase = spec.lead_phrase,
     });
+    bass_layer.phrase.rest_chance = spec.bass_rest_chance;
 }
 
 // ============================================================
@@ -353,21 +407,22 @@ fn advanceChord() void {
 // ============================================================
 
 fn advanceStep(step: u8, meso: f32, micro: f32) void {
+    const spec = STYLE.cues[@intFromEnum(selected_cue)];
     layers.advanceDrumKitLayer(&drums, step, meso, &rng, .{
-        .kick_main_mask = ROCK_DRUM_PATTERN.kick_main_mask,
-        .kick_fill_mask = ROCK_DRUM_PATTERN.kick_fill_mask,
+        .kick_main_mask = spec.kick_main_mask,
+        .kick_fill_mask = spec.kick_fill_mask,
         .kick_fill_velocity = ROCK_DRUM_PATTERN.kick_fill_velocity,
-        .kick_fill_density = STYLE.cues[@intFromEnum(selected_cue)].extra_kick_density,
-        .snare_backbeat_mask = ROCK_DRUM_PATTERN.snare_backbeat_mask,
-        .snare_ghost_chance = STYLE.cues[@intFromEnum(selected_cue)].snare_ghost,
+        .kick_fill_density = spec.extra_kick_density,
+        .snare_backbeat_mask = spec.snare_backbeat_mask,
+        .snare_ghost_chance = spec.snare_ghost,
         .hat_onbeat_chance = ROCK_DRUM_PATTERN.hat_onbeat_chance,
-        .hat_offbeat_chance = STYLE.cues[@intFromEnum(selected_cue)].hat_density,
+        .hat_offbeat_chance = spec.hat_density,
     });
 
-    if (step % 2 == 0) {
+    if (spec.bass_trigger_mask & (@as(u16, 1) << @as(u4, @intCast(step))) != 0) {
         layers.advanceStepBassLayer(&bass_layer, step, micro, meso, lfo_filter.modulate(), &rng, &runner.engine.key, .{
-            .trigger_mask = ROCK_BASS_LAYER_SPEC.trigger_mask,
-            .base_rest_chance = ROCK_BASS_LAYER_SPEC.base_rest_chance,
+            .trigger_mask = spec.bass_trigger_mask,
+            .base_rest_chance = spec.bass_rest_chance,
             .meso_rest_spread = ROCK_BASS_LAYER_SPEC.meso_rest_spread,
             .filter_base_hz = 380.0 + drive * 900.0 + cue_energy * 400.0,
             .filter_micro_hz = ROCK_BASS_LAYER_SPEC.filter_micro_hz,
@@ -377,7 +432,7 @@ fn advanceStep(step: u8, meso: f32, micro: f32) void {
 
     layers.advanceGuitarChordLayer(&guitar_layer, step);
     layers.maybeTriggerProcessedLeadLayer(&lead_layer, step, &rng, &runner.engine.key, .{
-        .gate = gate,
+        .gate = spec.lead_gate,
         .drive = drive,
         .micro = micro,
         .meso = meso,
