@@ -278,3 +278,217 @@ pub fn panStereo(sample: f32, pan: f32) [2]f32 {
         sample * (0.5 + pan * 0.5),
     };
 }
+
+pub fn samplesPerBeat(bpm: f32) f32 {
+    return SAMPLE_RATE * 60.0 / bpm;
+}
+
+// ============================================================
+// Voice: multi-oscillator synthesis with unison detuning & FM
+// ============================================================
+//
+// n_unison:    number of detuned copies (1 = mono, 2+ = chorus/thick)
+// n_harmonics: additive partials per oscillator (1 = fundamental only)
+//
+// Set fm_ratio > 0 to enable FM synthesis (modulator per unison osc).
+
+pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
+    comptime {
+        if (n_unison == 0) @compileError("n_unison must be > 0");
+        if (n_harmonics == 0) @compileError("n_harmonics must be > 0");
+    }
+
+    const PHASE_COUNT = @as(usize, n_unison) * @as(usize, n_harmonics);
+
+    return struct {
+        phases: [PHASE_COUNT]f32 = .{0} ** PHASE_COUNT,
+        mod_phases: [n_unison]f32 = .{0} ** n_unison,
+        freq: f32 = 0,
+        env: Envelope = Envelope.init(0.01, 1.0, 0.0, 0.5),
+        filter: LPF = LPF.init(3000.0),
+        pan: f32 = 0,
+        unison_spread: f32 = 0.004,
+
+        fm_ratio: f32 = 0,
+        fm_depth: f32 = 0,
+        fm_env_depth: f32 = 0,
+
+        const Self = @This();
+
+        pub fn trigger(self: *Self, freq: f32, env_preset: Envelope) void {
+            self.freq = freq;
+            self.env = env_preset;
+            self.env.trigger();
+        }
+
+        pub fn noteOff(self: *Self) void {
+            self.env.noteOff();
+        }
+
+        pub fn isIdle(self: *const Self) bool {
+            return self.env.state == .idle;
+        }
+
+        pub fn process(self: *Self) f32 {
+            const env_val = self.env.process();
+            if (env_val <= 0.0001) return 0;
+
+            var sample: f32 = 0;
+            const use_fm = self.fm_ratio > 0;
+
+            for (0..n_unison) |u| {
+                const osc_freq = if (n_unison > 1) blk: {
+                    const u_f: f32 = @floatFromInt(u);
+                    const center: f32 = @as(f32, @floatFromInt(n_unison - 1)) / 2.0;
+                    break :blk self.freq * (1.0 + (u_f - center) * self.unison_spread);
+                } else self.freq;
+
+                var fm_signal: f32 = 0;
+                if (use_fm) {
+                    self.mod_phases[u] += osc_freq * self.fm_ratio * INV_SR * TAU;
+                    if (self.mod_phases[u] > TAU) self.mod_phases[u] -= TAU;
+                    fm_signal = self.fm_depth * (1.0 + self.fm_env_depth * env_val) * @sin(self.mod_phases[u]);
+                }
+
+                for (0..n_harmonics) |h| {
+                    const idx = u * n_harmonics + h;
+                    const harmonic: f32 = @floatFromInt(h + 1);
+                    const amp = 1.0 / (harmonic * harmonic);
+
+                    self.phases[idx] += osc_freq * harmonic * INV_SR * TAU;
+                    if (self.phases[idx] > TAU) self.phases[idx] -= TAU;
+
+                    if (use_fm) {
+                        sample += @sin(self.phases[idx] + fm_signal) * amp;
+                    } else {
+                        sample += @sin(self.phases[idx]) * amp;
+                    }
+                }
+            }
+
+            if (n_unison > 1) {
+                sample /= @as(f32, @floatFromInt(n_unison));
+            }
+
+            sample = self.filter.process(sample);
+            return sample * env_val;
+        }
+    };
+}
+
+// ============================================================
+// PhraseGenerator: coherent melodic phrase builder
+// ============================================================
+//
+// Builds short melodic phrases (3-7 notes) with a directional
+// contour (ascending, descending, or arch). When a phrase is
+// exhausted, a new one is generated anchored near the last note.
+
+pub const PhraseGenerator = struct {
+    const MAX_LEN = 8;
+    const REST: u8 = 0xFF;
+
+    notes: [MAX_LEN]u8 = .{0} ** MAX_LEN,
+    len: u8 = 0,
+    pos: u8 = 0,
+    anchor: u8 = 10,
+
+    region_low: u8 = 5,
+    region_high: u8 = 17,
+    rest_chance: f32 = 0.3,
+    min_notes: u8 = 3,
+    max_notes: u8 = 7,
+
+    pub fn build(self: *PhraseGenerator, rng: *Rng) void {
+        const range = @as(u32, self.max_notes - self.min_notes) + 1;
+        self.len = self.min_notes + @as(u8, @intCast(rng.next() % range));
+        self.pos = 0;
+
+        var current = self.anchor;
+        const direction = rng.next() % 3;
+
+        for (0..self.len) |i| {
+            const progress: f32 = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(@max(self.len, 1)));
+
+            const up_bias: f32 = switch (direction) {
+                0 => 0.65,
+                1 => 0.35,
+                else => if (progress < 0.5) 0.7 else 0.3,
+            };
+
+            if (rng.float() < self.rest_chance and i > 0) {
+                self.notes[i] = REST;
+            } else {
+                current = biasedScaleStep(rng, current, self.region_low, self.region_high, up_bias);
+                self.notes[i] = current;
+            }
+        }
+
+        if (current != REST) self.anchor = current;
+    }
+
+    /// Returns scale index of next note, or null for rest.
+    pub fn advance(self: *PhraseGenerator, rng: *Rng) ?u8 {
+        if (self.pos >= self.len) {
+            self.build(rng);
+        }
+
+        const idx = self.pos;
+        self.pos += 1;
+
+        const note = self.notes[idx];
+        if (note == REST) return null;
+        return note;
+    }
+
+    fn biasedScaleStep(rng_ptr: *Rng, current: u8, low: u8, high: u8, up_bias: f32) u8 {
+        const r = rng_ptr.float();
+        var delta: i8 = 0;
+        if (r < 0.6) {
+            delta = if (rng_ptr.float() < up_bias) @as(i8, 1) else @as(i8, -1);
+        } else if (r < 0.85) {
+            delta = if (rng_ptr.float() < up_bias) @as(i8, 2) else @as(i8, -2);
+        } else if (r < 0.95) {
+            delta = if (rng_ptr.float() < up_bias) @as(i8, 3) else @as(i8, -3);
+        }
+
+        const new_raw: i16 = @as(i16, current) + delta;
+        return @intCast(std.math.clamp(new_raw, @as(i16, low), @as(i16, high)));
+    }
+};
+
+// ============================================================
+// ArcController: tension dynamics over time
+// ============================================================
+//
+// Outputs a 0.0–1.0 tension value that cycles over section_beats.
+// Styles use tension to modulate filter cutoff, volume, density, etc.
+
+pub const ArcShape = enum { rise, fall, rise_fall, plateau };
+
+pub const ArcController = struct {
+    beat_count: f32 = 0,
+    section_beats: f32 = 32,
+    shape: ArcShape = .rise_fall,
+
+    pub fn advanceSample(self: *ArcController, bpm_val: f32) void {
+        self.beat_count += bpm_val / (SAMPLE_RATE * 60.0);
+        while (self.beat_count >= self.section_beats) {
+            self.beat_count -= self.section_beats;
+        }
+    }
+
+    pub fn tension(self: *const ArcController) f32 {
+        const p = self.beat_count / self.section_beats;
+        return switch (self.shape) {
+            .rise => p,
+            .fall => 1.0 - p,
+            .rise_fall => @sin(p * std.math.pi),
+            .plateau => if (p < 0.25) p * 4.0 else if (p > 0.75) (1.0 - p) * 4.0 else 1.0,
+        };
+    }
+
+    pub fn reset(self: *ArcController) void {
+        self.beat_count = 0;
+    }
+};
