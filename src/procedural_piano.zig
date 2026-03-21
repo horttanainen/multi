@@ -5,6 +5,7 @@
 const dsp = @import("music/dsp.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
+const layers = @import("music/layers.zig");
 
 const StereoReverb = dsp.StereoReverb;
 const midiToFreq = dsp.midiToFreq;
@@ -257,16 +258,23 @@ fn advanceChord() void {
 }
 
 fn triggerMelodyNote(meso: f32, micro: f32) void {
-    melody_phrase.rest_chance = rest_chance * (1.25 - meso * 0.35);
-    const picked = composition.nextPhraseNoteWithMemory(&rng, &melody_phrase, &phrase_memory, 0.32) orelse return;
+    const picked = layers.nextPhraseStep(&rng, meso, &melody_phrase, &phrase_memory, .{
+        .base_rest_chance = rest_chance,
+        .rest_scale = 1.25,
+        .meso_scale = 0.35,
+        .recall_chance = 0.32,
+    }) orelse return;
     triggerVoice(MELODY_VOICE, picked.note, 0.95 + rng.float() * 0.08, meso, micro, true);
 }
 
 fn triggerHarmonyNote(meso: f32) void {
-    harmony_phrase.rest_chance = (rest_chance + 0.15) * (1.2 - meso * 0.25);
-    if (harmony_phrase.advance(&rng)) |note_idx| {
-        triggerVoice(HARMONY_VOICE, note_idx, 0.58 + rng.float() * 0.06, meso, 0.0, false);
-    }
+    const picked = layers.nextPhraseStep(&rng, meso, &harmony_phrase, null, .{
+        .base_rest_chance = rest_chance,
+        .rest_offset = 0.15,
+        .rest_scale = 1.2,
+        .meso_scale = 0.25,
+    }) orelse return;
+    triggerVoice(HARMONY_VOICE, picked.note, 0.58 + rng.float() * 0.06, meso, 0.0, false);
 }
 
 fn triggerVoice(voice_idx: usize, note_idx: u8, velocity: f32, meso: f32, micro: f32, is_melody: bool) void {

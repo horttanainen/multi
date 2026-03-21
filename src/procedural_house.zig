@@ -7,6 +7,7 @@ const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
+const layers = @import("music/layers.zig");
 
 const Envelope = dsp.Envelope;
 const LPF = dsp.LPF;
@@ -67,6 +68,14 @@ const STAB_LAYER = 3;
 const KICK_MAIN_MASK: u16 = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12);
 const KICK_FILL_MASK: u16 = (1 << 10) | (1 << 15);
 const BASS_TRIGGER_MASK: u16 = (1 << 0) | (1 << 3) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 14);
+const HOUSE_BASS_LAYER_SPEC: layers.StepBassSpec = .{
+    .trigger_mask = BASS_TRIGGER_MASK,
+    .base_rest_chance = 0.06,
+    .meso_rest_spread = 0.08,
+    .filter_base_hz = 300.0,
+    .filter_micro_hz = 220.0,
+    .filter_meso_hz = 340.0,
+};
 const HOUSE_LAYER_CURVES: [4]composition.LayerCurve = .{
     .{ .offset = 0.9, .slope = 0.1, .max = 1.0 },
     .{ .offset = 0.65, .slope = 0.35, .max = 1.0 },
@@ -272,13 +281,13 @@ fn advanceChord() void {
     composition.applyChordTonesToPhrases(&runner.engine.harmony, runner.engine.key.scale_type, .{ &bass_phrase });
 
     const chord = runner.engine.harmony.chords[runner.engine.harmony.current];
+    var freqs: [PAD_COUNT]f32 = undefined;
+    layers.fillChordFrequencies(PAD_COUNT, &freqs, runner.engine.key.root, chord, 1);
     const filter_mod = lfo_filter.modulate();
     for (0..PAD_COUNT) |idx| {
-        const offset = if (idx < chord.len) chord.offsets[idx] else chord.offsets[0];
-        const freq = midiToFreq(runner.engine.key.root + offset + 12);
         pads[idx].filter = LPF.init((1100.0 + filter_mod * 900.0) + @as(f32, @floatFromInt(idx)) * 120.0);
-        pads[idx].trigger(freq, Envelope.init(0.8, 0.5, 0.72, 2.8));
-        stab_voices[idx].freq = midiToFreq(runner.engine.key.root + offset + 12);
+        pads[idx].trigger(freqs[idx], Envelope.init(0.8, 0.5, 0.72, 2.8));
+        stab_voices[idx].freq = freqs[idx];
     }
 
     bass.freq = midiToFreq(runner.engine.key.root + chord.offsets[0]);
@@ -287,9 +296,15 @@ fn advanceChord() void {
 fn advanceStep(step: u8, meso: f32, micro: f32) void {
     beat_number += 1;
 
-    if (composition.kickVelocity(step, KICK_MAIN_MASK, KICK_FILL_MASK, 0.55, &rng, 0.36, meso)) |velocity| {
-        kick.trigger(velocity);
-    }
+    const drum_events = layers.drumStepEvents(step, meso, &rng, .{
+        .kick_main_mask = KICK_MAIN_MASK,
+        .kick_fill_mask = KICK_FILL_MASK,
+        .kick_fill_velocity = 0.55,
+        .kick_fill_density = 0.36,
+        .hat_onbeat_chance = 0.0,
+        .hat_offbeat_chance = 0.0,
+    });
+    layers.applyDrumStep(drum_events, &kick, null, null);
 
     const hat_chance = if (step % 2 == 1)
         0.92
@@ -301,15 +316,7 @@ fn advanceStep(step: u8, meso: f32, micro: f32) void {
         hat.trigger();
     }
 
-    if (composition.stepActive(BASS_TRIGGER_MASK, step)) {
-        bass_phrase.rest_chance = 0.06 + (1.0 - meso) * 0.08;
-        if (bass_phrase.advance(&rng)) |note_idx| {
-            bass.trigger(midiToFreq(runner.engine.key.noteToMidi(note_idx)));
-        } else {
-            bass.env.trigger();
-        }
-        bass.setFilter((300.0 + micro * 220.0 + meso * 340.0) * lfo_filter.modulate());
-    }
+    layers.triggerStepBass(step, micro, meso, lfo_filter.modulate(), &rng, &runner.engine.key, &bass_phrase, &bass, HOUSE_BASS_LAYER_SPEC);
 
     const stab_trigger = switch (step) {
         3, 11 => true,
