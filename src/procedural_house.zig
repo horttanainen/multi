@@ -36,8 +36,6 @@ const HouseReverb = StereoReverb(.{ 1117, 1049, 983, 907 }, .{ 197, 419 });
 var reverb: HouseReverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
 var rng: dsp.Rng = dsp.Rng.init(54321);
 
-var engine: composition.CompositionEngine = .{};
-
 fn initHarmony() composition.ChordMarkov {
     var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 3, 7, 10 }, .len = 4 }; // i7
@@ -62,15 +60,19 @@ const HOUSE_ARCS: composition.ArcSystem = .{
 
 var lfo_filter: composition.SlowLfo = .{ .period_beats = 48, .depth = 0.07 };
 
-var drum_target: f32 = 1.0;
-var bass_target: f32 = 0.9;
-var pad_target: f32 = 0.45;
-var stab_target: f32 = 0.25;
-
-var drum_level: f32 = 1.0;
-var bass_level: f32 = 0.8;
-var pad_level: f32 = 0.2;
-var stab_level: f32 = 0.0;
+const DRUM_LAYER = 0;
+const BASS_LAYER = 1;
+const PAD_LAYER = 2;
+const STAB_LAYER = 3;
+const KICK_MAIN_MASK: u16 = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12);
+const KICK_FILL_MASK: u16 = (1 << 10) | (1 << 15);
+const BASS_TRIGGER_MASK: u16 = (1 << 0) | (1 << 3) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 14);
+const HOUSE_LAYER_CURVES: [4]composition.LayerCurve = .{
+    .{ .offset = 0.9, .slope = 0.1, .max = 1.0 },
+    .{ .offset = 0.65, .slope = 0.35, .max = 1.0 },
+    .{ .offset = 0.18, .slope = 0.82, .max = 1.0 },
+    .{ .start = 0.2, .offset = 0.0, .slope = 1.2, .max = 0.85 },
+};
 
 const LAYER_FADE_RATE: f32 = 0.00006;
 
@@ -103,24 +105,83 @@ var stab_voices: [3]StabVoice = .{
 };
 var stab_env: Envelope = Envelope.init(0.002, 0.08, 0.0, 0.05);
 
-var step_counter: f32 = 0.0;
-var bar_step: u8 = 0;
 var beat_number: u32 = 0;
 const CHORD_CHANGE_BEATS: f32 = 8.0;
+const HouseCueSpec = struct {
+    root: u8,
+    scale_type: composition.ScaleType,
+    chord_change_beats: f32,
+    modulation_mode: composition.ModulationMode,
+    lfo_filter: composition.SlowLfo,
+    bass_phrase: composition.PhraseConfig,
+    kick_base_freq: f32,
+    kick_sweep: f32,
+    hat_volume: f32,
+    bass_drive: f32,
+};
+const CUE_SPECS: [4]HouseCueSpec = .{
+    .{
+        .root = 36,
+        .scale_type = .dorian,
+        .chord_change_beats = 8.0,
+        .modulation_mode = .mixed,
+        .lfo_filter = .{ .period_beats = 56, .depth = 0.07 },
+        .bass_phrase = .{ .rest_chance = 0.08, .region_low = 0, .region_high = 7 },
+        .kick_base_freq = 48.0,
+        .kick_sweep = 110.0,
+        .hat_volume = 0.7,
+        .bass_drive = 0.42,
+    },
+    .{
+        .root = 38,
+        .scale_type = .mixolydian,
+        .chord_change_beats = 6.0,
+        .modulation_mode = .fifth,
+        .lfo_filter = .{ .period_beats = 42, .depth = 0.09 },
+        .bass_phrase = .{ .rest_chance = 0.04, .region_low = 1, .region_high = 8 },
+        .kick_base_freq = 50.0,
+        .kick_sweep = 120.0,
+        .hat_volume = 0.82,
+        .bass_drive = 0.5,
+    },
+    .{
+        .root = 34,
+        .scale_type = .minor_pentatonic,
+        .chord_change_beats = 10.0,
+        .modulation_mode = .fourth,
+        .lfo_filter = .{ .period_beats = 70, .depth = 0.05 },
+        .bass_phrase = .{ .rest_chance = 0.14, .region_low = 0, .region_high = 6 },
+        .kick_base_freq = 45.0,
+        .kick_sweep = 95.0,
+        .hat_volume = 0.55,
+        .bass_drive = 0.32,
+    },
+    .{
+        .root = 41,
+        .scale_type = .harmonic_minor,
+        .chord_change_beats = 4.0,
+        .modulation_mode = .none,
+        .lfo_filter = .{ .period_beats = 36, .depth = 0.11 },
+        .bass_phrase = .{ .rest_chance = 0.02, .region_low = 0, .region_high = 9 },
+        .kick_base_freq = 52.0,
+        .kick_sweep = 132.0,
+        .hat_volume = 0.92,
+        .bass_drive = 0.62,
+    },
+};
+const HouseStyleSpec = composition.StyleSpec(HouseCueSpec, 4, 0);
+const STYLE: HouseStyleSpec = .{
+    .arcs = HOUSE_ARCS,
+    .layer_curves = HOUSE_LAYER_CURVES,
+    .voice_timings = .{},
+    .cues = &CUE_SPECS,
+};
+const HouseRunner = composition.StepStyleRunner(HouseCueSpec, 4);
+var runner: HouseRunner = .{};
 
 pub fn reset() void {
     rng = dsp.Rng.init(54321);
-    engine.reset(.{ .root = 36, .scale_type = .dorian }, initHarmony(), HOUSE_ARCS, CHORD_CHANGE_BEATS, .mixed);
     lfo_filter = .{ .period_beats = 48, .depth = 0.07 };
-
-    drum_target = 1.0;
-    bass_target = 0.9;
-    pad_target = 0.45;
-    stab_target = 0.25;
-    drum_level = 1.0;
-    bass_level = 0.8;
-    pad_level = 0.2;
-    stab_level = 0.0;
 
     kick = .{ .base_freq = 48.0, .sweep = 110.0, .volume = 1.2 };
     hat = .{ .volume = 0.7 };
@@ -145,12 +206,10 @@ pub fn reset() void {
         .{ .unison_spread = 0.004, .pan = 0.3 },
     };
     stab_env = Envelope.init(0.002, 0.08, 0.0, 0.05);
-
-    step_counter = 0.0;
-    bar_step = 0;
     beat_number = 0;
 
     reverb = HouseReverb.init(.{ 0.80, 0.81, 0.82, 0.79 });
+    runner.reset(&STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .mixed, .{ 1.0, 0.9, 0.45, 0.25 }, .{ 1.0, 0.8, 0.2, 0.0 });
     applyCueParams();
     advanceChord();
 }
@@ -161,53 +220,45 @@ pub fn triggerCue() void {
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const samples_per_step = SAMPLE_RATE * 60.0 / bpm / 4.0;
     for (0..frames) |i| {
         lfo_filter.advanceSample(bpm);
-        const tick = engine.advanceSample(&rng, bpm);
-        if (tick.chord_changed) {
+        const frame = runner.advanceFrame(&rng, &STYLE, bpm, LAYER_FADE_RATE);
+        if (frame.tick.chord_changed) {
             advanceChord();
         }
-        updateLayerTargets(tick.macro);
-        drum_level += (drum_target - drum_level) * LAYER_FADE_RATE;
-        bass_level += (bass_target - bass_level) * LAYER_FADE_RATE;
-        pad_level += (pad_target - pad_level) * LAYER_FADE_RATE;
-        stab_level += (stab_target - stab_level) * LAYER_FADE_RATE;
 
-        step_counter += 1.0;
-        if (step_counter >= samples_per_step) {
-            step_counter -= samples_per_step;
-            advanceStep(tick.meso, tick.micro);
+        if (frame.step) |step| {
+            advanceStep(step, frame.tick.meso, frame.tick.micro);
         }
 
         var left: f32 = 0.0;
         var right: f32 = 0.0;
 
-        const kick_s = kick.process() * kick_vol * drum_level;
+        const kick_s = kick.process() * kick_vol * runner.layer_levels[DRUM_LAYER];
         left += kick_s;
         right += kick_s;
 
-        const hat_s = hat.process(&rng) * hihat_vol * drum_level;
+        const hat_s = hat.process(&rng) * hihat_vol * runner.layer_levels[DRUM_LAYER];
         left += hat_s * 0.42;
         right += hat_s * 0.62;
 
-        const bass_s = bass.process() * bass_vol * bass_level;
+        const bass_s = bass.process() * bass_vol * runner.layer_levels[BASS_LAYER];
         left += bass_s * 0.9;
         right += bass_s * 0.84;
 
         for (0..PAD_COUNT) |p| {
-            const sample = pads[p].process() * pad_vol * pad_level;
+            const sample = pads[p].process() * pad_vol * runner.layer_levels[PAD_LAYER];
             const stereo = panStereo(sample, pads[p].pan);
             left += stereo[0];
             right += stereo[1];
         }
 
         const stab_out = processStab();
-        left += stab_out[0] * stab_level;
-        right += stab_out[1] * stab_level;
+        left += stab_out[0] * runner.layer_levels[STAB_LAYER];
+        right += stab_out[1] * runner.layer_levels[STAB_LAYER];
 
         const rev = reverb.process(.{ left, right });
-        const wet = reverb_mix + tick.meso * 0.05;
+        const wet = reverb_mix + frame.tick.meso * 0.05;
         const dry = 1.0 - wet;
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
@@ -218,30 +269,26 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 }
 
 fn advanceChord() void {
-    const degrees = engine.harmony.chordScaleDegrees(engine.key.scale_type);
-    bass_phrase.setChordTones(degrees.tones[0..degrees.count]);
+    composition.applyChordTonesToPhrases(&runner.engine.harmony, runner.engine.key.scale_type, .{ &bass_phrase });
 
-    const chord = engine.harmony.chords[engine.harmony.current];
+    const chord = runner.engine.harmony.chords[runner.engine.harmony.current];
     const filter_mod = lfo_filter.modulate();
     for (0..PAD_COUNT) |idx| {
         const offset = if (idx < chord.len) chord.offsets[idx] else chord.offsets[0];
-        const freq = midiToFreq(engine.key.root + offset + 12);
+        const freq = midiToFreq(runner.engine.key.root + offset + 12);
         pads[idx].filter = LPF.init((1100.0 + filter_mod * 900.0) + @as(f32, @floatFromInt(idx)) * 120.0);
         pads[idx].trigger(freq, Envelope.init(0.8, 0.5, 0.72, 2.8));
-        stab_voices[idx].freq = midiToFreq(engine.key.root + offset + 12);
+        stab_voices[idx].freq = midiToFreq(runner.engine.key.root + offset + 12);
     }
 
-    bass.freq = midiToFreq(engine.key.root + chord.offsets[0]);
+    bass.freq = midiToFreq(runner.engine.key.root + chord.offsets[0]);
 }
 
-fn advanceStep(meso: f32, micro: f32) void {
-    const step = bar_step;
+fn advanceStep(step: u8, meso: f32, micro: f32) void {
     beat_number += 1;
 
-    if (step % 4 == 0) {
-        kick.trigger(1.0);
-    } else if ((step == 10 or step == 15) and rng.float() < 0.18 + meso * 0.22) {
-        kick.trigger(0.55);
+    if (composition.kickVelocity(step, KICK_MAIN_MASK, KICK_FILL_MASK, 0.55, &rng, 0.36, meso)) |velocity| {
+        kick.trigger(velocity);
     }
 
     const hat_chance = if (step % 2 == 1)
@@ -254,10 +301,10 @@ fn advanceStep(meso: f32, micro: f32) void {
         hat.trigger();
     }
 
-    if (shouldTriggerBass(step)) {
+    if (composition.stepActive(BASS_TRIGGER_MASK, step)) {
         bass_phrase.rest_chance = 0.06 + (1.0 - meso) * 0.08;
         if (bass_phrase.advance(&rng)) |note_idx| {
-            bass.trigger(midiToFreq(engine.key.noteToMidi(note_idx)));
+            bass.trigger(midiToFreq(runner.engine.key.noteToMidi(note_idx)));
         } else {
             bass.env.trigger();
         }
@@ -273,88 +320,22 @@ fn advanceStep(meso: f32, micro: f32) void {
         stab_env = Envelope.init(0.002, 0.05 + micro * 0.06, 0.0, 0.04 + meso * 0.04);
         stab_env.trigger();
     }
-
-    bar_step = (bar_step + 1) % 16;
-}
-
-fn shouldTriggerBass(step: u8) bool {
-    return switch (step) {
-        0, 3, 6, 8, 10, 14 => true,
-        else => false,
-    };
-}
-
-fn updateLayerTargets(macro: f32) void {
-    drum_target = 0.9 + macro * 0.1;
-    bass_target = 0.65 + macro * 0.35;
-    pad_target = 0.18 + macro * 0.82;
-    stab_target = if (macro > 0.2) @min((macro - 0.2) * 1.2, 0.85) else 0.0;
 }
 
 fn applyCueParams() void {
-    switch (selected_cue) {
-        .deep_night => {
-            engine.key.root = 36;
-            engine.key.target_root = 36;
-            engine.key.scale_type = .dorian;
-            engine.chord_change_beats = 8.0;
-            engine.modulation_mode = .mixed;
-            lfo_filter = .{ .period_beats = 56, .depth = 0.07 };
-            bass_phrase.rest_chance = 0.08;
-            bass_phrase.region_low = 0;
-            bass_phrase.region_high = 7;
-            kick.base_freq = 48.0;
-            kick.sweep = 110.0;
-            hat.volume = 0.7;
-            bass.drive = 0.42;
-            stab_chance = std.math.clamp(stab_chance, 0.0, 1.0);
-        },
-        .sunset_drive => {
-            engine.key.root = 38;
-            engine.key.target_root = 38;
-            engine.key.scale_type = .mixolydian;
-            engine.chord_change_beats = 6.0;
-            engine.modulation_mode = .fifth;
-            lfo_filter = .{ .period_beats = 42, .depth = 0.09 };
-            bass_phrase.rest_chance = 0.04;
-            bass_phrase.region_low = 1;
-            bass_phrase.region_high = 8;
-            kick.base_freq = 50.0;
-            kick.sweep = 120.0;
-            hat.volume = 0.82;
-            bass.drive = 0.5;
-        },
-        .soft_focus => {
-            engine.key.root = 34;
-            engine.key.target_root = 34;
-            engine.key.scale_type = .minor_pentatonic;
-            engine.chord_change_beats = 10.0;
-            engine.modulation_mode = .fourth;
-            lfo_filter = .{ .period_beats = 70, .depth = 0.05 };
-            bass_phrase.rest_chance = 0.14;
-            bass_phrase.region_low = 0;
-            bass_phrase.region_high = 6;
-            kick.base_freq = 45.0;
-            kick.sweep = 95.0;
-            hat.volume = 0.55;
-            bass.drive = 0.32;
-        },
-        .warehouse => {
-            engine.key.root = 41;
-            engine.key.target_root = 41;
-            engine.key.scale_type = .harmonic_minor;
-            engine.chord_change_beats = 4.0;
-            engine.modulation_mode = .none;
-            lfo_filter = .{ .period_beats = 36, .depth = 0.11 };
-            bass_phrase.rest_chance = 0.02;
-            bass_phrase.region_low = 0;
-            bass_phrase.region_high = 9;
-            kick.base_freq = 52.0;
-            kick.sweep = 132.0;
-            hat.volume = 0.92;
-            bass.drive = 0.62;
-        },
-    }
+    const spec = STYLE.cues[@intFromEnum(selected_cue)];
+    runner.engine.key.root = spec.root;
+    runner.engine.key.target_root = spec.root;
+    runner.engine.key.scale_type = spec.scale_type;
+    runner.engine.chord_change_beats = spec.chord_change_beats;
+    runner.engine.modulation_mode = spec.modulation_mode;
+    lfo_filter = spec.lfo_filter;
+    composition.applyPhraseConfig(spec.bass_phrase, &bass_phrase);
+    kick.base_freq = spec.kick_base_freq;
+    kick.sweep = spec.kick_sweep;
+    hat.volume = spec.hat_volume;
+    bass.drive = spec.bass_drive;
+    stab_chance = std.math.clamp(stab_chance, 0.0, 1.0);
 }
 
 fn processStab() [2]f32 {

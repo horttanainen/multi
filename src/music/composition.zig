@@ -200,6 +200,213 @@ pub const CompositionTick = struct {
     chord_changed: bool,
 };
 
+pub fn easeLevels(comptime N: usize, levels: *[N]f32, targets: *const [N]f32, rate: f32) void {
+    for (0..N) |i| {
+        levels[i] += (targets[i] - levels[i]) * rate;
+    }
+}
+
+pub const LayerCurve = struct {
+    start: f32 = 0.0,
+    offset: f32 = 0.0,
+    slope: f32 = 1.0,
+    min: f32 = 0.0,
+    max: f32 = 1.0,
+
+    pub fn target(self: LayerCurve, macro: f32) f32 {
+        const t = @max(macro - self.start, 0.0);
+        return std.math.clamp(self.offset + t * self.slope, self.min, self.max);
+    }
+};
+
+pub fn applyLayerCurves(comptime N: usize, curves: *const [N]LayerCurve, macro: f32, out: *[N]f32) void {
+    for (0..N) |i| {
+        out[i] = curves[i].target(macro);
+    }
+}
+
+pub fn StyleSpec(comptime CueSpecType: type, comptime LayerCount: usize, comptime TimingCount: usize) type {
+    return struct {
+        arcs: ArcSystem,
+        layer_curves: [LayerCount]LayerCurve,
+        voice_timings: [TimingCount]VoiceTimingSpec,
+        cues: []const CueSpecType,
+    };
+}
+
+pub fn StyleFrame(comptime VoiceCount: usize) type {
+    return struct {
+        tick: CompositionTick,
+        voice_triggers: [VoiceCount]bool,
+    };
+}
+
+pub const StepStyleFrame = struct {
+    tick: CompositionTick,
+    step: ?u8,
+};
+
+pub const StepSequencer16 = struct {
+    step_counter: f32 = 0.0,
+    step: u8 = 0,
+
+    pub fn reset(self: *StepSequencer16) void {
+        self.step_counter = 0.0;
+        self.step = 0;
+    }
+
+    pub fn advanceSample(self: *StepSequencer16, bpm_val: f32) ?u8 {
+        const samples_per_step = dsp.SAMPLE_RATE * 60.0 / bpm_val / 4.0;
+        self.step_counter += 1.0;
+        if (self.step_counter < samples_per_step) return null;
+        self.step_counter -= samples_per_step;
+        const current_step = self.step;
+        self.step = (self.step + 1) % 16;
+        return current_step;
+    }
+};
+
+pub fn tensionChance(base: f32, tension: f32) f32 {
+    return base * (0.5 + tension * 0.5);
+}
+
+pub fn subdivisionChance(step: u8, onbeat: f32, offbeat: f32, tension: f32) f32 {
+    if (step % 2 == 0) return onbeat;
+    return tensionChance(offbeat, tension);
+}
+
+pub fn stepActive(mask: u16, step: u8) bool {
+    return (mask & (@as(u16, 1) << @intCast(step))) != 0;
+}
+
+pub fn kickVelocity(step: u8, main_mask: u16, fill_mask: u16, fill_velocity: f32, rng: *dsp.Rng, fill_density: f32, tension: f32) ?f32 {
+    if (stepActive(main_mask, step)) return 1.0;
+    if (!stepActive(fill_mask, step)) return null;
+    if (rng.float() >= tensionChance(fill_density, tension)) return null;
+    return fill_velocity;
+}
+
+pub fn snareBackbeatOrGhost(step: u8, backbeat_mask: u16, rng: *dsp.Rng, ghost_chance: f32, tension: f32) enum { none, backbeat, ghost } {
+    if (stepActive(backbeat_mask, step)) return .backbeat;
+    if (ghost_chance <= 0 or rng.float() >= ghost_chance * tension) return .none;
+    return .ghost;
+}
+
+pub fn leadStepChance(step: u8, density: f32, meso: f32, offbeat_scale: f32) f32 {
+    if (step % 2 == 0) return tensionChance(density, meso);
+    return density * offbeat_scale * meso;
+}
+
+pub fn advanceBeatCounter(counter: *f32, beat_len: f32, samples_per_beat: f32) bool {
+    counter.* += 1.0 / samples_per_beat;
+    if (counter.* < beat_len) return false;
+    counter.* -= beat_len;
+    return true;
+}
+
+pub const VoiceTimingSpec = struct {
+    base_beats: f32,
+    random_beats: f32 = 0.0,
+
+    pub fn sample(self: VoiceTimingSpec, rng: *dsp.Rng) f32 {
+        return self.base_beats + rng.float() * self.random_beats;
+    }
+};
+
+pub fn sampleVoiceTimings(comptime N: usize, specs: *const [N]VoiceTimingSpec, rng: *dsp.Rng, out: *[N]f32) void {
+    for (0..N) |i| {
+        out[i] = specs[i].sample(rng);
+    }
+}
+
+pub fn StyleRunner(comptime CueSpecType: type, comptime LayerCount: usize, comptime VoiceCount: usize) type {
+    return struct {
+        engine: CompositionEngine = .{},
+        layer_targets: [LayerCount]f32 = .{0.0} ** LayerCount,
+        layer_levels: [LayerCount]f32 = .{0.0} ** LayerCount,
+        voice_beat_counter: [VoiceCount]f32 = .{0.0} ** VoiceCount,
+        voice_beat_len: [VoiceCount]f32 = .{0.0} ** VoiceCount,
+
+        pub fn reset(
+            self: *@This(),
+            rng: *dsp.Rng,
+            style: *const StyleSpec(CueSpecType, LayerCount, VoiceCount),
+            key_state: KeyState,
+            harmony_state: ChordMarkov,
+            chord_beats: f32,
+            mode: ModulationMode,
+            initial_targets: [LayerCount]f32,
+            initial_levels: [LayerCount]f32,
+        ) void {
+            self.engine.reset(key_state, harmony_state, style.arcs, chord_beats, mode);
+            self.layer_targets = initial_targets;
+            self.layer_levels = initial_levels;
+            self.voice_beat_counter = .{0.0} ** VoiceCount;
+            sampleVoiceTimings(VoiceCount, &style.voice_timings, rng, &self.voice_beat_len);
+        }
+
+        pub fn advanceFrame(
+            self: *@This(),
+            rng: *dsp.Rng,
+            style: *const StyleSpec(CueSpecType, LayerCount, VoiceCount),
+            bpm_val: f32,
+            fade_rate: f32,
+        ) StyleFrame(VoiceCount) {
+            const tick = self.engine.advanceSample(rng, bpm_val);
+            applyLayerCurves(LayerCount, &style.layer_curves, tick.macro, &self.layer_targets);
+            easeLevels(LayerCount, &self.layer_levels, &self.layer_targets, fade_rate);
+
+            const spb = dsp.samplesPerBeat(bpm_val);
+            var voice_triggers: [VoiceCount]bool = .{false} ** VoiceCount;
+            for (0..VoiceCount) |i| {
+                voice_triggers[i] = advanceBeatCounter(&self.voice_beat_counter[i], self.voice_beat_len[i], spb);
+            }
+            return .{ .tick = tick, .voice_triggers = voice_triggers };
+        }
+    };
+}
+
+pub fn StepStyleRunner(comptime CueSpecType: type, comptime LayerCount: usize) type {
+    return struct {
+        engine: CompositionEngine = .{},
+        layer_targets: [LayerCount]f32 = .{0.0} ** LayerCount,
+        layer_levels: [LayerCount]f32 = .{0.0} ** LayerCount,
+        sequencer: StepSequencer16 = .{},
+
+        pub fn reset(
+            self: *@This(),
+            style: *const StyleSpec(CueSpecType, LayerCount, 0),
+            key_state: KeyState,
+            harmony_state: ChordMarkov,
+            chord_beats: f32,
+            mode: ModulationMode,
+            initial_targets: [LayerCount]f32,
+            initial_levels: [LayerCount]f32,
+        ) void {
+            self.engine.reset(key_state, harmony_state, style.arcs, chord_beats, mode);
+            self.layer_targets = initial_targets;
+            self.layer_levels = initial_levels;
+            self.sequencer.reset();
+        }
+
+        pub fn advanceFrame(
+            self: *@This(),
+            rng: *dsp.Rng,
+            style: *const StyleSpec(CueSpecType, LayerCount, 0),
+            bpm_val: f32,
+            fade_rate: f32,
+        ) StepStyleFrame {
+            const tick = self.engine.advanceSample(rng, bpm_val);
+            applyLayerCurves(LayerCount, &style.layer_curves, tick.macro, &self.layer_targets);
+            easeLevels(LayerCount, &self.layer_levels, &self.layer_targets, fade_rate);
+            return .{
+                .tick = tick,
+                .step = self.sequencer.advanceSample(bpm_val),
+            };
+        }
+    };
+}
+
 pub const CompositionEngine = struct {
     arcs: ArcSystem = .{},
     key: KeyState = .{},
@@ -462,6 +669,48 @@ pub const PhraseMemory = struct {
         }
     }
 };
+
+pub const PhraseNotePick = struct {
+    note: u8,
+    recalled: bool,
+};
+
+pub const PhraseConfig = struct {
+    rest_chance: f32,
+    region_low: u8,
+    region_high: u8,
+};
+
+pub fn applyPhraseConfig(spec: PhraseConfig, phrase: *PhraseGenerator) void {
+    phrase.rest_chance = spec.rest_chance;
+    phrase.region_low = spec.region_low;
+    phrase.region_high = spec.region_high;
+}
+
+pub fn nextPhraseNoteWithMemory(rng: *dsp.Rng, phrase: *PhraseGenerator, memory: *PhraseMemory, recall_chance: f32) ?PhraseNotePick {
+    if (memory.count > 0 and rng.float() < recall_chance) {
+        var varied_notes: [PhraseGenerator.MAX_LEN]u8 = undefined;
+        const varied_len = memory.recallVaried(rng, &varied_notes, phrase.region_low, phrase.region_high) orelse return nextPhraseNote(rng, phrase, memory);
+        if (varied_len == 0 or varied_notes[0] == PhraseGenerator.REST) return nextPhraseNote(rng, phrase, memory);
+        return .{ .note = varied_notes[0], .recalled = true };
+    }
+    return nextPhraseNote(rng, phrase, memory);
+}
+
+fn nextPhraseNote(rng: *dsp.Rng, phrase: *PhraseGenerator, memory: *PhraseMemory) ?PhraseNotePick {
+    const note = phrase.advance(rng) orelse return null;
+    if (phrase.pos == 0 and phrase.len > 0) {
+        memory.store(&phrase.notes, phrase.len);
+    }
+    return .{ .note = note, .recalled = false };
+}
+
+pub fn applyChordTonesToPhrases(harmony: *const ChordMarkov, scale_type: ScaleType, phrases: anytype) void {
+    const degrees = harmony.chordScaleDegrees(scale_type);
+    inline for (phrases) |phrase| {
+        phrase.setChordTones(degrees.tones[0..degrees.count]);
+    }
+}
 
 pub const CueParams = struct {
     density: f32 = 0.5,

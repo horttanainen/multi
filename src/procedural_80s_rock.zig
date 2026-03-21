@@ -49,14 +49,6 @@ const RockReverb = StereoReverb(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 });
 var reverb: RockReverb = RockReverb.init(.{ 0.84, 0.85, 0.83, 0.86 });
 var rng: dsp.Rng = dsp.Rng.init(0x80F0);
 
-// ============================================================
-// Key state & Markov chord progression
-// ============================================================
-
-var key: composition.KeyState = .{ .root = 40, .scale_type = .mixolydian };
-
-var harmony: composition.ChordMarkov = initHarmony();
-
 fn initHarmony() composition.ChordMarkov {
     var h: composition.ChordMarkov = .{};
     h.chords[0] = .{ .offsets = .{ 0, 7, 12, 0 }, .len = 3 }; // I
@@ -76,10 +68,10 @@ fn initHarmony() composition.ChordMarkov {
 }
 
 // ============================================================
-// Multi-scale arc system
+// Multi-scale arc system template
 // ============================================================
 
-var arcs: composition.ArcSystem = .{
+const ROCK_ARCS: composition.ArcSystem = .{
     .micro = .{ .section_beats = 4, .shape = .rise_fall },
     .meso = .{ .section_beats = 32, .shape = .rise_fall },
     .macro = .{ .section_beats = 128, .shape = .rise_fall },
@@ -96,15 +88,18 @@ var lfo_drive: composition.SlowLfo = .{ .period_beats = 96, .depth = 0.04 };
 // Layer volumes (vertical activation)
 // ============================================================
 
-var drum_target: f32 = 1.0;
-var bass_target: f32 = 1.0;
-var chord_target: f32 = 0.8;
-var lead_target: f32 = 0.3;
-
-var drum_level: f32 = 1.0;
-var bass_level: f32 = 0.8;
-var chord_level: f32 = 0.5;
-var lead_level: f32 = 0.0;
+const DRUM_LAYER = 0;
+const BASS_LAYER = 1;
+const CHORD_LAYER = 2;
+const LEAD_LAYER = 3;
+const KICK_MAIN_MASK: u16 = (1 << 0) | (1 << 8);
+const SNARE_BACKBEAT_MASK: u16 = (1 << 4) | (1 << 12);
+const ROCK_LAYER_CURVES: [4]composition.LayerCurve = .{
+    .{ .offset = 0.85, .slope = 0.15, .max = 1.0 },
+    .{ .offset = 0.8, .slope = 0.2, .max = 1.0 },
+    .{ .offset = 0.3, .slope = 0.7, .max = 1.0 },
+    .{ .start = 0.25, .offset = 0.0, .slope = 1.6, .max = 1.0 },
+};
 
 const LAYER_FADE_RATE: f32 = 0.00005;
 
@@ -161,12 +156,109 @@ var lead_phrase: composition.PhraseGenerator = .{
 // Sequencer state
 // ============================================================
 
-var step_counter: f32 = 0.0;
-var bar_step: u8 = 0;
 var beat_number: u32 = 0;
-var chord_beat_counter: f32 = 0;
 const CHORD_CHANGE_BEATS: f32 = 8.0;
-var last_macro_quarter: u8 = 0;
+const RockCueSpec = struct {
+    extra_kick_density: f32,
+    hat_density: f32,
+    lead_density: f32,
+    energy: f32,
+    reverb_boost: f32,
+    snare_ghost: f32,
+    chord_retrigger: u8,
+    chord_attack: f32,
+    chord_decay: f32,
+    chord_sustain: f32,
+    chord_release: f32,
+    guitar_gain: f32,
+    guitar_od_amount: f32,
+    cabinet_lpf_hz: f32,
+    cabinet_hpf_hz: f32,
+    lead_phrase: composition.PhraseConfig,
+};
+const CUE_SPECS: [4]RockCueSpec = .{
+    .{
+        .extra_kick_density = 0.35,
+        .hat_density = 0.6,
+        .lead_density = 0.65,
+        .energy = 0.7,
+        .reverb_boost = 0.1,
+        .snare_ghost = 0.15,
+        .chord_retrigger = 4,
+        .chord_attack = 0.003,
+        .chord_decay = 0.5,
+        .chord_sustain = 0.3,
+        .chord_release = 0.2,
+        .guitar_gain = 1.3,
+        .guitar_od_amount = 3.0,
+        .cabinet_lpf_hz = 5000.0,
+        .cabinet_hpf_hz = 120.0,
+        .lead_phrase = .{ .rest_chance = 0.12, .region_low = 7, .region_high = 17 },
+    },
+    .{
+        .extra_kick_density = 0.1,
+        .hat_density = 0.75,
+        .lead_density = 0.3,
+        .energy = 0.35,
+        .reverb_boost = 0.2,
+        .snare_ghost = 0.05,
+        .chord_retrigger = 8,
+        .chord_attack = 0.02,
+        .chord_decay = 0.8,
+        .chord_sustain = 0.5,
+        .chord_release = 0.4,
+        .guitar_gain = 0.8,
+        .guitar_od_amount = 1.8,
+        .cabinet_lpf_hz = 3000.0,
+        .cabinet_hpf_hz = 120.0,
+        .lead_phrase = .{ .rest_chance = 0.4, .region_low = 9, .region_high = 15 },
+    },
+    .{
+        .extra_kick_density = 0.05,
+        .hat_density = 0.15,
+        .lead_density = 0.25,
+        .energy = 0.2,
+        .reverb_boost = 0.15,
+        .snare_ghost = 0.0,
+        .chord_retrigger = 8,
+        .chord_attack = 0.03,
+        .chord_decay = 1.2,
+        .chord_sustain = 0.6,
+        .chord_release = 0.6,
+        .guitar_gain = 0.6,
+        .guitar_od_amount = 1.2,
+        .cabinet_lpf_hz = 2500.0,
+        .cabinet_hpf_hz = 120.0,
+        .lead_phrase = .{ .rest_chance = 0.45, .region_low = 8, .region_high = 14 },
+    },
+    .{
+        .extra_kick_density = 0.7,
+        .hat_density = 0.95,
+        .lead_density = 0.85,
+        .energy = 0.95,
+        .reverb_boost = 0.0,
+        .snare_ghost = 0.25,
+        .chord_retrigger = 2,
+        .chord_attack = 0.001,
+        .chord_decay = 0.06,
+        .chord_sustain = 0.0,
+        .chord_release = 0.03,
+        .guitar_gain = 1.8,
+        .guitar_od_amount = 4.5,
+        .cabinet_lpf_hz = 3500.0,
+        .cabinet_hpf_hz = 150.0,
+        .lead_phrase = .{ .rest_chance = 0.05, .region_low = 7, .region_high = 19 },
+    },
+};
+const RockStyleSpec = composition.StyleSpec(RockCueSpec, 4, 0);
+const STYLE: RockStyleSpec = .{
+    .arcs = ROCK_ARCS,
+    .layer_curves = ROCK_LAYER_CURVES,
+    .voice_timings = .{},
+    .cues = &CUE_SPECS,
+};
+const RockRunner = composition.StepStyleRunner(RockCueSpec, 4);
+var runner: RockRunner = .{};
 
 // Cue-derived parameters
 var cue_extra_kick_density: f32 = 0.0;
@@ -191,32 +283,10 @@ pub fn triggerCue() void {
 
 pub fn reset() void {
     rng = dsp.Rng.init(@as(u32, 0x80F0_0000) + @as(u32, @intFromEnum(selected_cue)) * 17);
-
-    key = .{ .root = 40, .scale_type = .mixolydian };
-    harmony = initHarmony();
-    arcs = .{
-        .micro = .{ .section_beats = 4, .shape = .rise_fall },
-        .meso = .{ .section_beats = 32, .shape = .rise_fall },
-        .macro = .{ .section_beats = 128, .shape = .rise_fall },
-    };
     lfo_filter = .{ .period_beats = 64, .depth = 0.06 };
     lfo_drive = .{ .period_beats = 96, .depth = 0.04 };
     lead_memory = .{};
-
-    drum_target = 1.0;
-    bass_target = 1.0;
-    chord_target = 0.8;
-    lead_target = 0.3;
-    drum_level = 1.0;
-    bass_level = 0.8;
-    chord_level = 0.5;
-    lead_level = 0.0;
-
-    step_counter = 0.0;
-    bar_step = 0;
     beat_number = 0;
-    chord_beat_counter = 0;
-    last_macro_quarter = 0;
 
     kick = .{};
     snare = .{};
@@ -233,54 +303,29 @@ pub fn reset() void {
     lead_phrase = .{ .anchor = 10, .region_low = 7, .region_high = 17, .rest_chance = 0.15, .min_notes = 4, .max_notes = 8, .gravity = 3.0 };
 
     reverb = RockReverb.init(.{ 0.84, 0.85, 0.83, 0.86 });
+    runner.reset(&STYLE, .{ .root = 40, .scale_type = .mixolydian }, initHarmony(), CHORD_CHANGE_BEATS, .fifth, .{ 1.0, 1.0, 0.8, 0.3 }, .{ 1.0, 0.8, 0.5, 0.0 });
     applyCueParams();
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const samples_per_step = SAMPLE_RATE * 60.0 / bpm / 4.0;
-    const spb = dsp.samplesPerBeat(bpm);
-
     for (0..frames) |i| {
-        arcs.advanceSample(bpm);
-        key.advanceSample();
+        const frame = runner.advanceFrame(&rng, &STYLE, bpm, LAYER_FADE_RATE);
         lfo_filter.advanceSample(bpm);
         lfo_drive.advanceSample(bpm);
 
-        const meso = arcs.meso.tension();
-        const macro = arcs.macro.tension();
-        const micro = arcs.micro.tension();
-
-        chord_beat_counter += 1.0 / spb;
-        if (chord_beat_counter >= CHORD_CHANGE_BEATS) {
-            chord_beat_counter -= CHORD_CHANGE_BEATS;
+        if (frame.tick.chord_changed) {
             advanceChord();
         }
 
-        const macro_quarter: u8 = @intFromFloat(arcs.macro.beat_count / arcs.macro.section_beats * 4.0);
-        if (macro_quarter != last_macro_quarter) {
-            last_macro_quarter = macro_quarter;
-            if (macro_quarter == 0) {
-                key.modulateByFifth();
-            }
-        }
-
-        updateLayerTargets(macro);
-        drum_level += (drum_target - drum_level) * LAYER_FADE_RATE;
-        bass_level += (bass_target - bass_level) * LAYER_FADE_RATE;
-        chord_level += (chord_target - chord_level) * LAYER_FADE_RATE;
-        lead_level += (lead_target - lead_level) * LAYER_FADE_RATE;
-
-        step_counter += 1.0;
-        if (step_counter >= samples_per_step) {
-            step_counter -= samples_per_step;
-            advanceStep(meso, micro);
+        if (frame.step) |step| {
+            advanceStep(step, frame.tick.meso, frame.tick.micro);
         }
 
         // ---- Mix ----
         var left: f32 = 0.0;
         var right: f32 = 0.0;
 
-        const d_level = drum_mix * drum_level;
+        const d_level = drum_mix * runner.layer_levels[DRUM_LAYER];
         const kick_s = kick.process() * d_level;
         left += kick_s * 0.85;
         right += kick_s * 0.85;
@@ -293,16 +338,16 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         left += hat_s * 0.42;
         right += hat_s * 0.52;
 
-        const bass_s = bass.process() * bass_mix * bass_level;
+        const bass_s = bass.process() * bass_mix * runner.layer_levels[BASS_LAYER];
         left += bass_s * 0.85;
         right += bass_s * 0.8;
 
         const eff_drive = drive * lfo_drive.modulate() + cue_energy * 0.2;
         const guitar_out = guitar.process(eff_drive);
-        left += guitar_out[0] * chord_level;
-        right += guitar_out[1] * chord_level;
+        left += guitar_out[0] * runner.layer_levels[CHORD_LAYER];
+        right += guitar_out[1] * runner.layer_levels[CHORD_LAYER];
 
-        const lead_s = processLead(meso, eff_drive) * lead_mix * lead_level;
+        const lead_s = processLead(frame.tick.meso, eff_drive) * lead_mix * runner.layer_levels[LEAD_LAYER];
         const lead_stereo = panStereo(lead_s, 0.08);
         left += lead_stereo[0];
         right += lead_stereo[1];
@@ -323,84 +368,27 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 // ============================================================
 
 fn applyCueParams() void {
-    switch (selected_cue) {
-        .arena => {
-            cue_extra_kick_density = 0.35;
-            cue_hat_density = 0.6;
-            cue_lead_density = 0.65;
-            cue_energy = 0.7;
-            cue_reverb_boost = 0.1;
-            cue_snare_ghost = 0.15;
-            cue_chord_retrigger = 4;
-            cue_chord_attack = 0.003;
-            cue_chord_decay = 0.5;
-            cue_chord_sustain = 0.3;
-            cue_chord_release = 0.2;
-            guitar.gain = 1.3;
-            guitar.od_amount = 3.0;
-            guitar.setCabinet(5000.0, 120.0);
-            lead_phrase.rest_chance = 0.12;
-            lead_phrase.region_low = 7;
-            lead_phrase.region_high = 17;
-        },
-        .night_drive => {
-            cue_extra_kick_density = 0.1;
-            cue_hat_density = 0.75;
-            cue_lead_density = 0.3;
-            cue_energy = 0.35;
-            cue_reverb_boost = 0.2;
-            cue_snare_ghost = 0.05;
-            cue_chord_retrigger = 8;
-            cue_chord_attack = 0.02;
-            cue_chord_decay = 0.8;
-            cue_chord_sustain = 0.5;
-            cue_chord_release = 0.4;
-            guitar.gain = 0.8;
-            guitar.od_amount = 1.8;
-            guitar.setCabinet(3000.0, 120.0);
-            lead_phrase.rest_chance = 0.4;
-            lead_phrase.region_low = 9;
-            lead_phrase.region_high = 15;
-        },
-        .power_ballad => {
-            cue_extra_kick_density = 0.05;
-            cue_hat_density = 0.15;
-            cue_lead_density = 0.25;
-            cue_energy = 0.2;
-            cue_reverb_boost = 0.15;
-            cue_snare_ghost = 0.0;
-            cue_chord_retrigger = 8;
-            cue_chord_attack = 0.03;
-            cue_chord_decay = 1.2;
-            cue_chord_sustain = 0.6;
-            cue_chord_release = 0.6;
-            guitar.gain = 0.6;
-            guitar.od_amount = 1.2;
-            guitar.setCabinet(2500.0, 120.0);
-            lead_phrase.rest_chance = 0.45;
-            lead_phrase.region_low = 8;
-            lead_phrase.region_high = 14;
-        },
-        .combat => {
-            cue_extra_kick_density = 0.7;
-            cue_hat_density = 0.95;
-            cue_lead_density = 0.85;
-            cue_energy = 0.95;
-            cue_reverb_boost = 0.0;
-            cue_snare_ghost = 0.25;
-            cue_chord_retrigger = 2;
-            cue_chord_attack = 0.001;
-            cue_chord_decay = 0.06;
-            cue_chord_sustain = 0.0;
-            cue_chord_release = 0.03;
-            guitar.gain = 1.8;
-            guitar.od_amount = 4.5;
-            guitar.setCabinet(3500.0, 150.0);
-            lead_phrase.rest_chance = 0.05;
-            lead_phrase.region_low = 7;
-            lead_phrase.region_high = 19;
-        },
-    }
+    const spec = STYLE.cues[@intFromEnum(selected_cue)];
+    runner.engine.key.root = 40;
+    runner.engine.key.target_root = 40;
+    runner.engine.key.scale_type = .mixolydian;
+    runner.engine.chord_change_beats = CHORD_CHANGE_BEATS;
+    runner.engine.modulation_mode = .fifth;
+    cue_extra_kick_density = spec.extra_kick_density;
+    cue_hat_density = spec.hat_density;
+    cue_lead_density = spec.lead_density;
+    cue_energy = spec.energy;
+    cue_reverb_boost = spec.reverb_boost;
+    cue_snare_ghost = spec.snare_ghost;
+    cue_chord_retrigger = spec.chord_retrigger;
+    cue_chord_attack = spec.chord_attack;
+    cue_chord_decay = spec.chord_decay;
+    cue_chord_sustain = spec.chord_sustain;
+    cue_chord_release = spec.chord_release;
+    guitar.gain = spec.guitar_gain;
+    guitar.od_amount = spec.guitar_od_amount;
+    guitar.setCabinet(spec.cabinet_lpf_hz, spec.cabinet_hpf_hz);
+    composition.applyPhraseConfig(spec.lead_phrase, &lead_phrase);
 }
 
 // ============================================================
@@ -408,58 +396,44 @@ fn applyCueParams() void {
 // ============================================================
 
 fn advanceChord() void {
-    _ = harmony.nextChord(&rng);
-
-    const chord = harmony.chords[harmony.current];
+    const chord = runner.engine.harmony.chords[runner.engine.harmony.current];
     var freqs: [3]f32 = undefined;
     for (0..3) |idx| {
         const offset = if (idx < chord.len) chord.offsets[idx] else chord.offsets[0];
-        freqs[idx] = midiToFreq(key.root + offset);
+        freqs[idx] = midiToFreq(runner.engine.key.root + offset);
     }
     guitar.setFreqs(&freqs);
 
-    const degrees = harmony.chordScaleDegrees(key.scale_type);
-    lead_phrase.setChordTones(degrees.tones[0..degrees.count]);
-    bass_phrase.setChordTones(degrees.tones[0..degrees.count]);
+    composition.applyChordTonesToPhrases(&runner.engine.harmony, runner.engine.key.scale_type, .{ &lead_phrase, &bass_phrase });
 
-    bass.freq = midiToFreq(key.root + chord.offsets[0]);
+    bass.freq = midiToFreq(runner.engine.key.root + chord.offsets[0]);
 }
 
 // ============================================================
 // Sequencer (16th note grid)
 // ============================================================
 
-fn advanceStep(meso: f32, micro: f32) void {
-    const step = bar_step;
+fn advanceStep(step: u8, meso: f32, micro: f32) void {
     beat_number += 1;
 
-    // --- Kick ---
-    if (step == 0 or step == 8) {
-        kick.trigger(1.0);
-    }
-    if (step != 0 and step != 8) {
-        if (rng.float() < cue_extra_kick_density * (0.5 + meso * 0.5)) {
-            kick.trigger(0.7);
-        }
+    if (composition.kickVelocity(step, KICK_MAIN_MASK, ~KICK_MAIN_MASK, 0.7, &rng, cue_extra_kick_density, meso)) |velocity| {
+        kick.trigger(velocity);
     }
 
-    // --- Snare ---
-    if (step == 4 or step == 12) {
-        snare.trigger();
-    } else if (cue_snare_ghost > 0 and rng.float() < cue_snare_ghost * meso) {
-        snare.triggerGhost();
+    switch (composition.snareBackbeatOrGhost(step, SNARE_BACKBEAT_MASK, &rng, cue_snare_ghost, meso)) {
+        .backbeat => snare.trigger(),
+        .ghost => snare.triggerGhost(),
+        .none => {},
     }
 
-    // --- Hi-hat ---
-    const hat_chance = if (step % 2 == 0) @as(f32, 0.9) else cue_hat_density * (0.5 + meso * 0.5);
+    const hat_chance = composition.subdivisionChance(step, 0.9, cue_hat_density, meso);
     if (rng.float() < hat_chance) {
         hat.trigger();
     }
 
-    // --- Bass ---
     if (step % 2 == 0) {
         if (bass_phrase.advance(&rng)) |note_idx| {
-            bass.trigger(midiToFreq(key.noteToMidi(note_idx)));
+            bass.trigger(midiToFreq(runner.engine.key.noteToMidi(note_idx)));
         } else {
             bass.env.trigger();
         }
@@ -467,59 +441,30 @@ fn advanceStep(meso: f32, micro: f32) void {
         bass.setFilter((380.0 + drive * 900.0 + cue_energy * 400.0) * filter_mod);
     }
 
-    // --- Guitar chords ---
     if (step % cue_chord_retrigger == 0) {
         guitar.triggerEnv(cue_chord_attack, cue_chord_decay, cue_chord_sustain, cue_chord_release);
     }
 
-    // --- Lead ---
-    const lead_trigger_chance = if (step % 2 == 0)
-        cue_lead_density * (0.5 + meso * 0.5)
-    else
-        cue_lead_density * 0.25 * meso;
+    const lead_trigger_chance = composition.leadStepChance(step, cue_lead_density, meso, 0.25);
     if (rng.float() < lead_trigger_chance) {
         triggerLeadNote(meso, micro);
     }
-
-    bar_step = (bar_step + 1) % 16;
 }
 
 fn triggerLeadNote(meso: f32, micro: f32) void {
-    if (lead_memory.count > 0 and rng.float() < 0.3) {
-        var varied_notes: [composition.PhraseGenerator.MAX_LEN]u8 = undefined;
-        if (lead_memory.recallVaried(&rng, &varied_notes, lead_phrase.region_low, lead_phrase.region_high)) |varied_len| {
-            if (varied_len > 0 and varied_notes[0] != 0xFF) {
-                const freq = midiToFreq(key.noteToMidi(varied_notes[0]));
-                const env_decay = 0.14 + (1.0 - gate) * 0.2 + meso * 0.1;
-                lead_voice.trigger(freq, Envelope.init(0.002, env_decay, 0.0, 0.08 + gate * 0.08));
-                lead_voice.filter = LPF.init((1800.0 + drive * 3000.0 + meso * 1200.0) * lfo_filter.modulate());
-                return;
-            }
-        }
-    }
-
-    if (lead_phrase.advance(&rng)) |note_idx| {
-        const freq = midiToFreq(key.noteToMidi(note_idx));
-        const env_decay = 0.14 + (1.0 - gate) * 0.2 + micro * 0.1;
-        lead_voice.trigger(freq, Envelope.init(0.002, env_decay, 0.0, 0.08 + gate * 0.08));
-        lead_voice.filter = LPF.init((1800.0 + drive * 3000.0 + meso * 1200.0) * lfo_filter.modulate());
-
-        if (lead_phrase.pos == 0 and lead_phrase.len > 0) {
-            lead_memory.store(&lead_phrase.notes, lead_phrase.len);
-        }
-    }
+    const picked = composition.nextPhraseNoteWithMemory(&rng, &lead_phrase, &lead_memory, 0.3) orelse return;
+    const freq = midiToFreq(runner.engine.key.noteToMidi(picked.note));
+    const env_decay = if (picked.recalled)
+        0.14 + (1.0 - gate) * 0.2 + meso * 0.1
+    else
+        0.14 + (1.0 - gate) * 0.2 + micro * 0.1;
+    lead_voice.trigger(freq, Envelope.init(0.002, env_decay, 0.0, 0.08 + gate * 0.08));
+    lead_voice.filter = LPF.init((1800.0 + drive * 3000.0 + meso * 1200.0) * lfo_filter.modulate());
 }
 
 // ============================================================
 // Vertical layer activation
 // ============================================================
-
-fn updateLayerTargets(macro: f32) void {
-    drum_target = 0.85 + macro * 0.15;
-    bass_target = 0.8 + macro * 0.2;
-    chord_target = 0.3 + macro * 0.7;
-    lead_target = if (macro > 0.25) @min((macro - 0.25) * 1.6, 1.0) else 0.0;
-}
 
 // ============================================================
 // Lead DSP (uses overdrive + cabinet like guitar)
