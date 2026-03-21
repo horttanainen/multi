@@ -21,6 +21,7 @@ const DEFAULT_AMBIENT_DRONE_VOL: f32 = 0.15;
 const DEFAULT_AMBIENT_PAD_VOL: f32 = 0.08;
 const DEFAULT_AMBIENT_MELODY_VOL: f32 = 0.06;
 const DEFAULT_AMBIENT_ARP_VOL: f32 = 0.025;
+const DEFAULT_AMBIENT_CUE: u8 = @intFromEnum(procedural_music.CuePreset.dawn);
 const DEFAULT_HOUSE_KICK_VOL: f32 = 0.25;
 const DEFAULT_HOUSE_HIHAT_VOL: f32 = 0.12;
 const DEFAULT_HOUSE_BASS_VOL: f32 = 0.2;
@@ -102,6 +103,7 @@ const StoredSettings = struct {
     music_ambient_pad_vol: ?f32 = null,
     music_ambient_melody_vol: ?f32 = null,
     music_ambient_arp_vol: ?f32 = null,
+    music_ambient_cue: ?u8 = null,
     music_house_kick_vol: ?f32 = null,
     music_house_hihat_vol: ?f32 = null,
     music_house_bass_vol: ?f32 = null,
@@ -147,6 +149,7 @@ pub var music_ambient_drone_vol: f32 = DEFAULT_AMBIENT_DRONE_VOL;
 pub var music_ambient_pad_vol: f32 = DEFAULT_AMBIENT_PAD_VOL;
 pub var music_ambient_melody_vol: f32 = DEFAULT_AMBIENT_MELODY_VOL;
 pub var music_ambient_arp_vol: f32 = DEFAULT_AMBIENT_ARP_VOL;
+pub var music_ambient_cue: u8 = DEFAULT_AMBIENT_CUE;
 pub var music_house_kick_vol: f32 = DEFAULT_HOUSE_KICK_VOL;
 pub var music_house_hihat_vol: f32 = DEFAULT_HOUSE_HIHAT_VOL;
 pub var music_house_bass_vol: f32 = DEFAULT_HOUSE_BASS_VOL;
@@ -297,6 +300,7 @@ pub fn applyMusic() void {
     procedural_music.pad_vol = music_ambient_pad_vol;
     procedural_music.melody_vol = music_ambient_melody_vol;
     procedural_music.arp_vol = music_ambient_arp_vol;
+    procedural_music.selected_cue = @enumFromInt(music_ambient_cue);
 
     procedural_house.bpm = music_bpm;
     procedural_house.reverb_mix = music_reverb_mix;
@@ -380,6 +384,7 @@ pub fn save() !void {
         .music_ambient_pad_vol = music_ambient_pad_vol,
         .music_ambient_melody_vol = music_ambient_melody_vol,
         .music_ambient_arp_vol = music_ambient_arp_vol,
+        .music_ambient_cue = music_ambient_cue,
         .music_house_kick_vol = music_house_kick_vol,
         .music_house_hihat_vol = music_house_hihat_vol,
         .music_house_bass_vol = music_house_bass_vol,
@@ -479,6 +484,7 @@ fn resetMusicSettings() void {
     music_ambient_pad_vol = DEFAULT_AMBIENT_PAD_VOL;
     music_ambient_melody_vol = DEFAULT_AMBIENT_MELODY_VOL;
     music_ambient_arp_vol = DEFAULT_AMBIENT_ARP_VOL;
+    music_ambient_cue = DEFAULT_AMBIENT_CUE;
     music_house_kick_vol = DEFAULT_HOUSE_KICK_VOL;
     music_house_hihat_vol = DEFAULT_HOUSE_HIHAT_VOL;
     music_house_bass_vol = DEFAULT_HOUSE_BASS_VOL;
@@ -526,6 +532,7 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_ambient_pad_vol = std.math.clamp(s.music_ambient_pad_vol orelse DEFAULT_AMBIENT_PAD_VOL, 0.0, 1.0);
     music_ambient_melody_vol = std.math.clamp(s.music_ambient_melody_vol orelse DEFAULT_AMBIENT_MELODY_VOL, 0.0, 1.0);
     music_ambient_arp_vol = std.math.clamp(s.music_ambient_arp_vol orelse DEFAULT_AMBIENT_ARP_VOL, 0.0, 1.0);
+    music_ambient_cue = std.math.clamp(s.music_ambient_cue orelse DEFAULT_AMBIENT_CUE, 0, 3);
     music_house_kick_vol = std.math.clamp(s.music_house_kick_vol orelse DEFAULT_HOUSE_KICK_VOL, 0.0, 1.0);
     music_house_hihat_vol = std.math.clamp(s.music_house_hihat_vol orelse DEFAULT_HOUSE_HIHAT_VOL, 0.0, 1.0);
     music_house_bass_vol = std.math.clamp(s.music_house_bass_vol orelse DEFAULT_HOUSE_BASS_VOL, 0.0, 1.0);

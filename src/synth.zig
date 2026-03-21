@@ -401,6 +401,261 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
 }
 
 // ============================================================
+// Overdrive: asymmetric tube-style waveshaper
+// ============================================================
+
+/// Soft-clip with asymmetry — positive half clips harder, adding even
+/// harmonics like a real tube amp. `gain` controls pre-saturation level.
+pub fn overdrive(x: f32, gain: f32) f32 {
+    const g = x * gain;
+    if (g > 0) {
+        const t = g * 1.2;
+        if (t > 1.0) return 0.85;
+        return t * (1.5 - 0.5 * t * t);
+    } else {
+        const t = g * 0.9;
+        if (t < -1.0) return -0.75;
+        return t * (1.5 - 0.5 * t * t);
+    }
+}
+
+// ============================================================
+// ElectricGuitar: overdriven multi-voice guitar with cabinet sim
+// ============================================================
+//
+// Wraps N Voice oscillators through overdrive + HPF/LPF cabinet.
+// Configurable: gain, cabinet filters, overdrive amount, pan spread.
+// Use for power chords, clean rhythm, stabs — anything guitar-like.
+
+pub fn ElectricGuitar(comptime n_voices: u8, comptime n_unison: u8, comptime n_harmonics: u8) type {
+    const GuitarVoice = Voice(n_unison, n_harmonics);
+
+    return struct {
+        voices: [n_voices]GuitarVoice = .{GuitarVoice{}} ** n_voices,
+        env: Envelope = Envelope.init(0.004, 0.36, 0.0, 0.14),
+        cab_lpf_l: LPF = LPF.init(4500.0),
+        cab_lpf_r: LPF = LPF.init(4500.0),
+        cab_hpf_l: HPF = HPF.init(120.0),
+        cab_hpf_r: HPF = HPF.init(120.0),
+        gain: f32 = 1.0,
+        od_amount: f32 = 2.5, // overdrive gain (higher = more distortion)
+
+        const Self = @This();
+
+        pub fn init(pan_spread: f32, unison_spread_val: f32, cab_lpf_hz: f32, cab_hpf_hz: f32) Self {
+            var g: Self = .{};
+            g.cab_lpf_l = LPF.init(cab_lpf_hz);
+            g.cab_lpf_r = LPF.init(cab_lpf_hz);
+            g.cab_hpf_l = HPF.init(cab_hpf_hz);
+            g.cab_hpf_r = HPF.init(cab_hpf_hz);
+            for (0..n_voices) |i| {
+                const t: f32 = if (n_voices > 1)
+                    (@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n_voices - 1))) * 2.0 - 1.0
+                else
+                    0;
+                g.voices[i].pan = t * pan_spread;
+                g.voices[i].unison_spread = unison_spread_val;
+            }
+            return g;
+        }
+
+        /// Set frequencies for all voices from a chord (array of MIDI notes or frequencies).
+        pub fn setFreqs(self: *Self, freqs: []const f32) void {
+            for (0..@min(n_voices, freqs.len)) |i| {
+                self.voices[i].freq = freqs[i];
+            }
+        }
+
+        /// Trigger the shared envelope.
+        pub fn triggerEnv(self: *Self, attack: f32, decay: f32, sustain: f32, release: f32) void {
+            self.env = Envelope.init(attack, decay, sustain, release);
+            self.env.trigger();
+        }
+
+        /// Set cabinet filter cutoff (call when cue changes).
+        pub fn setCabinet(self: *Self, lpf_hz: f32, hpf_hz: f32) void {
+            self.cab_lpf_l = LPF.init(lpf_hz);
+            self.cab_lpf_r = LPF.init(lpf_hz);
+            self.cab_hpf_l = HPF.init(hpf_hz);
+            self.cab_hpf_r = HPF.init(hpf_hz);
+        }
+
+        /// Process all voices through overdrive + cabinet, returns stereo.
+        pub fn process(self: *Self, extra_drive: f32) [2]f32 {
+            const env_val = self.env.process();
+            if (env_val <= 0.0001) return .{ 0.0, 0.0 };
+
+            var left: f32 = 0.0;
+            var right: f32 = 0.0;
+
+            for (0..n_voices) |idx| {
+                // Feed shared envelope to each voice
+                self.voices[idx].env = .{
+                    .state = .sustain,
+                    .level = env_val,
+                    .attack_rate = 0,
+                    .decay_rate = 0,
+                    .sustain_level = env_val,
+                    .release_rate = 0,
+                };
+
+                const raw = self.voices[idx].processRaw();
+                if (raw.env_val <= 0.0001) continue;
+
+                var wave = raw.osc * self.gain;
+                wave = overdrive(wave, self.od_amount + extra_drive);
+                wave *= raw.env_val;
+
+                const stereo = panStereo(wave, self.voices[idx].pan);
+                left += stereo[0];
+                right += stereo[1];
+            }
+
+            // Cabinet simulation
+            left = self.cab_hpf_l.process(left);
+            left = self.cab_lpf_l.process(left);
+            right = self.cab_hpf_r.process(right);
+            right = self.cab_lpf_r.process(right);
+
+            return .{ left, right };
+        }
+    };
+}
+
+// ============================================================
+// SawBass: saw + sub octave bass with filter
+// ============================================================
+//
+// Mono bass instrument: saw wave + sub-octave sine + resonant LPF.
+// Configurable drive, filter cutoff. Used by rock, house, etc.
+
+pub const SawBass = struct {
+    phase: f32 = 0,
+    sub_phase: f32 = 0,
+    freq: f32 = midiToFreq(40),
+    env: Envelope = Envelope.init(0.002, 0.18, 0.0, 0.08),
+    filter: LPF = LPF.init(800.0),
+    drive: f32 = 0.55,
+    sub_mix: f32 = 0.4, // sub octave level relative to saw
+    volume: f32 = 0.55,
+
+    pub fn trigger(self: *SawBass, freq: f32) void {
+        self.freq = freq;
+        self.env.trigger();
+    }
+
+    pub fn setFilter(self: *SawBass, cutoff: f32) void {
+        self.filter = LPF.init(cutoff);
+    }
+
+    pub fn process(self: *SawBass) f32 {
+        const env_val = self.env.process();
+        if (env_val <= 0.0001) return 0.0;
+
+        self.phase += self.freq * INV_SR * TAU;
+        if (self.phase > TAU) self.phase -= TAU;
+        self.sub_phase += self.freq * 0.5 * INV_SR * TAU;
+        if (self.sub_phase > TAU) self.sub_phase -= TAU;
+
+        const saw = self.phase / std.math.pi - 1.0;
+        const sub = @sin(self.sub_phase);
+        var sample = saw * (0.6 + self.drive * 0.35) + sub * self.sub_mix;
+        sample = self.filter.process(sample);
+        sample *= 1.0 + self.drive * 0.45;
+        return sample * env_val * self.volume;
+    }
+};
+
+// ============================================================
+// Kick: synthesized bass drum (sine sweep with pitch envelope)
+// ============================================================
+
+pub const Kick = struct {
+    phase: f32 = 0,
+    pitch_env: f32 = 0,
+    env: Envelope = Envelope.init(0.001, 0.16, 0.0, 0.1),
+    sample_count: f32 = 0,
+    base_freq: f32 = 44.0, // lowest frequency
+    sweep: f32 = 90.0, // pitch sweep range
+    decay_rate: f32 = 0.993, // pitch envelope decay
+    volume: f32 = 1.5,
+
+    pub fn trigger(self: *Kick, accent: f32) void {
+        self.env.trigger();
+        self.pitch_env = accent;
+        self.sample_count = 0;
+    }
+
+    pub fn process(self: *Kick) f32 {
+        const env_val = self.env.process();
+        if (env_val <= 0.0001) return 0.0;
+
+        self.pitch_env *= self.decay_rate;
+        const freq = self.base_freq + self.pitch_env * self.sweep;
+        self.phase += freq * INV_SR * TAU;
+        if (self.phase > TAU) self.phase -= TAU;
+        self.sample_count += 1;
+        return @sin(self.phase) * env_val * self.volume;
+    }
+};
+
+// ============================================================
+// Snare: body tone + filtered noise
+// ============================================================
+
+pub const Snare = struct {
+    phase: f32 = 0,
+    env: Envelope = Envelope.init(0.001, 0.12, 0.0, 0.06),
+    noise_lpf: LPF = LPF.init(3400.0),
+    body_lpf: LPF = LPF.init(2200.0),
+    tone_freq: f32 = 190.0,
+    noise_mix: f32 = 0.78,
+    body_mix: f32 = 0.35,
+
+    pub fn trigger(self: *Snare) void {
+        self.env.trigger();
+    }
+
+    /// Trigger a ghost hit (quieter, shorter).
+    pub fn triggerGhost(self: *Snare) void {
+        self.env = Envelope.init(0.001, 0.06, 0.0, 0.03);
+        self.env.trigger();
+    }
+
+    pub fn process(self: *Snare, rng_inst: *Rng) f32 {
+        const env_val = self.env.process();
+        if (env_val <= 0.0001) return 0.0;
+
+        self.phase += self.tone_freq * INV_SR * TAU;
+        if (self.phase > TAU) self.phase -= TAU;
+        const noise = self.noise_lpf.process(rng_inst.float() * 2.0 - 1.0);
+        const tone = self.body_lpf.process(@sin(self.phase));
+        return (noise * self.noise_mix + tone * self.body_mix) * env_val;
+    }
+};
+
+// ============================================================
+// HiHat: filtered noise burst
+// ============================================================
+
+pub const HiHat = struct {
+    env: Envelope = Envelope.init(0.001, 0.03, 0.0, 0.02),
+    hpf: HPF = HPF.init(6000.0),
+    volume: f32 = 0.45,
+
+    pub fn trigger(self: *HiHat) void {
+        self.env.trigger();
+    }
+
+    pub fn process(self: *HiHat, rng_inst: *Rng) f32 {
+        const env_val = self.env.process();
+        if (env_val <= 0.0001) return 0.0;
+        const noise = self.hpf.process(rng_inst.float() * 2.0 - 1.0);
+        return noise * env_val * self.volume;
+    }
+};
+
+// ============================================================
 // PhraseGenerator: coherent melodic phrase builder
 // ============================================================
 //

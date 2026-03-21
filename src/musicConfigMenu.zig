@@ -5,6 +5,7 @@ const state = @import("state.zig");
 const minecraft_piano = @import("minecraft_piano.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
+const procedural_music = @import("procedural_music.zig");
 
 // ============================================================
 // Style selection
@@ -39,6 +40,15 @@ const rock80s_cue_names = [ROCK80S_CUE_COUNT][:0]const u8{
     "Cue: Night Drive",
     "Cue: Power Ballad",
     "Cue: Combat",
+};
+
+const AMBIENT_CUE_COUNT = 4;
+var ambient_cue_value: u8 = 0;
+const ambient_cue_names = [AMBIENT_CUE_COUNT][:0]const u8{
+    "Cue: Dawn",
+    "Cue: Twilight",
+    "Cue: Space",
+    "Cue: Forest",
 };
 
 const CHOIR_CUE_COUNT = 4;
@@ -123,6 +133,7 @@ var main_items = [_]menu.Item{
 // --- Ambient sub-menu ---
 var ambient_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Cue: Dawn", .kind = .{ .button = actionCycleAmbientCue }, .font = .medium, .cycle_names = &ambient_cue_names, .cycle_index = &ambient_cue_value, .on_cycle = onCycleAmbientCue },
     .{ .label = "Drone Volume", .kind = .{ .config = &amb_drone_vol_config }, .font = .medium },
     .{ .label = "Pad Volume", .kind = .{ .config = &amb_pad_vol_config }, .font = .medium },
     .{ .label = "Melody Volume", .kind = .{ .config = &amb_melody_vol_config }, .font = .medium },
@@ -223,6 +234,7 @@ fn loadFromParams() void {
 
     switch (settings.music_style) {
         .ambient => {
+            ambient_cue_value = settings.music_ambient_cue;
             fromShader(&amb_drone_vol_config, settings.music_ambient_drone_vol);
             fromShader(&amb_pad_vol_config, settings.music_ambient_pad_vol);
             fromShader(&amb_melody_vol_config, settings.music_ambient_melody_vol);
@@ -294,6 +306,7 @@ fn applyMenuToSettings(save_changes: bool) !void {
 
     switch (settings.music_style) {
         .ambient => {
+            settings.music_ambient_cue = ambient_cue_value;
             settings.music_ambient_drone_vol = toShader(&amb_drone_vol_config);
             settings.music_ambient_pad_vol = toShader(&amb_pad_vol_config);
             settings.music_ambient_melody_vol = toShader(&amb_melody_vol_config);
@@ -417,6 +430,20 @@ fn onCycleMinecraftCue() void {
 fn actionTriggerRock80sCue() anyerror!void {
     try applyMenuToSettings(false);
     procedural_80s_rock.triggerCue();
+}
+
+fn actionCycleAmbientCue() anyerror!void {
+    ambient_cue_value = (ambient_cue_value + 1) % AMBIENT_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_music.triggerCue();
+}
+
+fn onCycleAmbientCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleAmbientCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_music.triggerCue();
 }
 
 fn actionCycleRock80sCue() anyerror!void {
