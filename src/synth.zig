@@ -48,6 +48,17 @@ pub const Envelope = struct {
     }
 
     pub fn trigger(self: *Envelope) void {
+        // Retrigger from current level — avoids hard cut-off of previous note.
+        // Level is preserved so the attack ramps from wherever we are now.
+        self.state = .attack;
+    }
+
+    /// Retrigger with new ADSR parameters, keeping current level for smooth transition.
+    pub fn retrigger(self: *Envelope, attack_s: f32, decay_s: f32, sustain: f32, release_s: f32) void {
+        self.attack_rate = 1.0 / @max(attack_s * SAMPLE_RATE, 1.0);
+        self.decay_rate = (1.0 - sustain) / @max(decay_s * SAMPLE_RATE, 1.0);
+        self.sustain_level = sustain;
+        self.release_rate = sustain / @max(release_s * SAMPLE_RATE, 1.0);
         self.state = .attack;
     }
 
@@ -317,7 +328,10 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
 
         pub fn trigger(self: *Self, freq: f32, env_preset: Envelope) void {
             self.freq = freq;
+            // Preserve current level so retriggering doesn't hard-cut the previous note
+            const current_level = self.env.level;
             self.env = env_preset;
+            self.env.level = current_level;
             self.env.trigger();
         }
 
@@ -395,7 +409,7 @@ pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {
 // exhausted, a new one is generated anchored near the last note.
 
 pub const PhraseGenerator = struct {
-    const MAX_LEN = 8;
+    pub const MAX_LEN = 8;
     const REST: u8 = 0xFF;
 
     notes: [MAX_LEN]u8 = .{0} ** MAX_LEN,
@@ -408,6 +422,12 @@ pub const PhraseGenerator = struct {
     rest_chance: f32 = 0.3,
     min_notes: u8 = 3,
     max_notes: u8 = 7,
+
+    // Chord-tone gravity: notes gravitate toward current chord tones.
+    // Set chord_tone_count > 0 to enable. Values are scale degree indices.
+    chord_tones: [4]u8 = .{0} ** 4,
+    chord_tone_count: u8 = 0,
+    gravity: f32 = 2.0, // weight multiplier for chord tones (0 = off)
 
     pub fn build(self: *PhraseGenerator, rng: *Rng) void {
         const range = @as(u32, self.max_notes - self.min_notes) + 1;
@@ -429,7 +449,7 @@ pub const PhraseGenerator = struct {
             if (rng.float() < self.rest_chance and i > 0) {
                 self.notes[i] = REST;
             } else {
-                current = biasedScaleStep(rng, current, self.region_low, self.region_high, up_bias);
+                current = self.selectNote(rng, current, up_bias);
                 self.notes[i] = current;
             }
         }
@@ -451,6 +471,27 @@ pub const PhraseGenerator = struct {
         return note;
     }
 
+    /// Set current chord tones for gravity. Pass scale degree indices.
+    pub fn setChordTones(self: *PhraseGenerator, tones: []const u8) void {
+        self.chord_tone_count = @intCast(@min(tones.len, 4));
+        for (0..self.chord_tone_count) |i| {
+            self.chord_tones[i] = tones[i];
+        }
+    }
+
+    fn selectNote(self: *const PhraseGenerator, rng_ptr: *Rng, current: u8, up_bias: f32) u8 {
+        const candidate = biasedScaleStep(rng_ptr, current, self.region_low, self.region_high, up_bias);
+
+        if (self.chord_tone_count == 0) return candidate;
+        if (isChordTone(candidate, &self.chord_tones, self.chord_tone_count)) return candidate;
+
+        // Snap to nearest chord tone with probability based on gravity
+        if (rng_ptr.float() < self.gravity / (self.gravity + 1.0)) {
+            return nearestChordTone(candidate, &self.chord_tones, self.chord_tone_count, self.region_low, self.region_high);
+        }
+        return candidate;
+    }
+
     fn biasedScaleStep(rng_ptr: *Rng, current: u8, low: u8, high: u8, up_bias: f32) u8 {
         const r = rng_ptr.float();
         var delta: i8 = 0;
@@ -464,6 +505,28 @@ pub const PhraseGenerator = struct {
 
         const new_raw: i16 = @as(i16, current) + delta;
         return @intCast(std.math.clamp(new_raw, @as(i16, low), @as(i16, high)));
+    }
+
+    fn isChordTone(degree: u8, tones: *const [4]u8, count: u8) bool {
+        for (0..count) |i| {
+            if (degree == tones[i]) return true;
+        }
+        return false;
+    }
+
+    fn nearestChordTone(target: u8, tones: *const [4]u8, count: u8, low: u8, high: u8) u8 {
+        var best: u8 = target;
+        var best_dist: u8 = 255;
+        for (0..count) |i| {
+            const ct = tones[i];
+            if (ct < low or ct > high) continue;
+            const dist = if (ct > target) ct - target else target - ct;
+            if (dist < best_dist) {
+                best_dist = dist;
+                best = ct;
+            }
+        }
+        return best;
     }
 };
 
@@ -500,5 +563,360 @@ pub const ArcController = struct {
 
     pub fn reset(self: *ArcController) void {
         self.beat_count = 0;
+    }
+};
+
+// ============================================================
+// Scale system: multiple scales with key modulation
+// ============================================================
+
+pub const ScaleType = enum {
+    minor_pentatonic, // {0, 3, 5, 7, 10}
+    major_pentatonic, // {0, 2, 4, 7, 9}
+    dorian, // {0, 2, 3, 5, 7, 9, 10}
+    mixolydian, // {0, 2, 4, 5, 7, 9, 10}
+    natural_minor, // {0, 2, 3, 5, 7, 8, 10}
+    harmonic_minor, // {0, 2, 3, 5, 7, 8, 11}
+};
+
+const MAX_SCALE_NOTES = 7;
+
+pub const ScaleIntervals = struct {
+    intervals: [MAX_SCALE_NOTES]u8,
+    len: u8,
+};
+
+pub fn getScaleIntervals(scale_type: ScaleType) ScaleIntervals {
+    return switch (scale_type) {
+        .minor_pentatonic => .{ .intervals = .{ 0, 3, 5, 7, 10, 0, 0 }, .len = 5 },
+        .major_pentatonic => .{ .intervals = .{ 0, 2, 4, 7, 9, 0, 0 }, .len = 5 },
+        .dorian => .{ .intervals = .{ 0, 2, 3, 5, 7, 9, 10 }, .len = 7 },
+        .mixolydian => .{ .intervals = .{ 0, 2, 4, 5, 7, 9, 10 }, .len = 7 },
+        .natural_minor => .{ .intervals = .{ 0, 2, 3, 5, 7, 8, 10 }, .len = 7 },
+        .harmonic_minor => .{ .intervals = .{ 0, 2, 3, 5, 7, 8, 11 }, .len = 7 },
+    };
+}
+
+/// Convert scale degree to MIDI note. Degree 0 = root in octave 2.
+pub fn scaleNoteToMidi(root: u8, scale_type: ScaleType, degree: u8) u8 {
+    const si = getScaleIntervals(scale_type);
+    const octave: u8 = degree / si.len;
+    const step: u8 = degree % si.len;
+    return root + octave * 12 + si.intervals[step];
+}
+
+/// How many scale degrees fit in the given MIDI range.
+pub fn scaleDegreesInRange(scale_type: ScaleType, octaves: u8) u8 {
+    const si = getScaleIntervals(scale_type);
+    return si.len * octaves;
+}
+
+/// Manages key (root note) with smooth modulation over time.
+pub const KeyState = struct {
+    root: u8 = 36, // C2 default
+    target_root: u8 = 36,
+    scale_type: ScaleType = .minor_pentatonic,
+    transition_progress: f32 = 1.0, // 1.0 = arrived at target
+    transition_speed: f32 = 0.0001, // per-sample increment (~0.2 beats at 72bpm)
+
+    pub fn modulateTo(self: *KeyState, new_root: u8) void {
+        self.target_root = new_root;
+        self.transition_progress = 0;
+    }
+
+    pub fn modulateByFourth(self: *KeyState) void {
+        self.modulateTo(self.root + 5);
+    }
+
+    pub fn modulateByFifth(self: *KeyState) void {
+        self.modulateTo(self.root + 7);
+    }
+
+    pub fn advanceSample(self: *KeyState) void {
+        if (self.transition_progress >= 1.0) return;
+        self.transition_progress += self.transition_speed;
+        if (self.transition_progress >= 1.0) {
+            self.transition_progress = 1.0;
+            self.root = self.target_root;
+        }
+    }
+
+    /// Returns true during a key transition (old notes should fade out).
+    pub fn isTransitioning(self: *const KeyState) bool {
+        return self.transition_progress < 1.0;
+    }
+
+    pub fn noteToMidi(self: *const KeyState, degree: u8) u8 {
+        return scaleNoteToMidi(self.root, self.scale_type, degree);
+    }
+};
+
+// ============================================================
+// ChordMarkov: probabilistic chord progression
+// ============================================================
+
+pub const MAX_CHORD_TONES = 4;
+pub const MAX_CHORDS = 8;
+
+pub const ChordDef = struct {
+    /// Semitone offsets from scale root (e.g. minor triad = {0, 3, 7}).
+    offsets: [MAX_CHORD_TONES]u8 = .{0} ** MAX_CHORD_TONES,
+    len: u8 = 3,
+};
+
+pub const ChordMarkov = struct {
+    chords: [MAX_CHORDS]ChordDef = .{ChordDef{}} ** MAX_CHORDS,
+    num_chords: u8 = 0,
+    transitions: [MAX_CHORDS][MAX_CHORDS]f32 = .{.{0} ** MAX_CHORDS} ** MAX_CHORDS,
+    current: u8 = 0,
+
+    /// Advance to next chord based on transition probabilities.
+    pub fn nextChord(self: *ChordMarkov, rng: *Rng) ChordDef {
+        const row = self.transitions[self.current];
+        var cumulative: f32 = 0;
+        const r = rng.float();
+        for (0..self.num_chords) |i| {
+            cumulative += row[i];
+            if (r < cumulative) {
+                self.current = @intCast(i);
+                return self.chords[i];
+            }
+        }
+        // Fallback (rounding errors)
+        self.current = 0;
+        return self.chords[0];
+    }
+
+    /// Get current chord's MIDI notes given a root.
+    pub fn currentMidiNotes(self: *const ChordMarkov, root: u8) [MAX_CHORD_TONES]u8 {
+        const chord = self.chords[self.current];
+        var notes: [MAX_CHORD_TONES]u8 = .{0} ** MAX_CHORD_TONES;
+        for (0..chord.len) |i| {
+            notes[i] = root + chord.offsets[i];
+        }
+        return notes;
+    }
+
+    /// Get current chord's scale-degree approximations for PhraseGenerator gravity.
+    /// Maps chord semitone offsets to nearest scale degrees.
+    pub fn chordScaleDegrees(self: *const ChordMarkov, scale_type: ScaleType) struct { tones: [MAX_CHORD_TONES]u8, count: u8 } {
+        const chord = self.chords[self.current];
+        const si = getScaleIntervals(scale_type);
+        var tones: [MAX_CHORD_TONES]u8 = .{0} ** MAX_CHORD_TONES;
+        for (0..chord.len) |ci| {
+            // Find nearest scale degree for this semitone offset
+            var best_deg: u8 = 0;
+            var best_dist: u8 = 255;
+            for (0..si.len) |s| {
+                const dist = if (si.intervals[s] > chord.offsets[ci])
+                    si.intervals[s] - chord.offsets[ci]
+                else
+                    chord.offsets[ci] - si.intervals[s];
+                if (dist < best_dist) {
+                    best_dist = dist;
+                    best_deg = @intCast(s);
+                }
+            }
+            tones[ci] = best_deg;
+        }
+        return .{ .tones = tones, .count = chord.len };
+    }
+};
+
+// ============================================================
+// ArcSystem: three nested arcs for multi-scale dynamics
+// ============================================================
+
+pub const ArcSystem = struct {
+    micro: ArcController = .{ .section_beats = 8, .shape = .rise_fall },
+    meso: ArcController = .{ .section_beats = 48, .shape = .rise_fall },
+    macro: ArcController = .{ .section_beats = 256, .shape = .rise_fall },
+
+    pub fn advanceSample(self: *ArcSystem, bpm_val: f32) void {
+        self.micro.advanceSample(bpm_val);
+        self.meso.advanceSample(bpm_val);
+        self.macro.advanceSample(bpm_val);
+    }
+
+    pub fn reset(self: *ArcSystem) void {
+        self.micro.reset();
+        self.meso.reset();
+        self.macro.reset();
+    }
+};
+
+// ============================================================
+// PhraseMemory: stores phrases for motif development
+// ============================================================
+//
+// Stores recently generated phrases and can recall them with
+// transformations (transpose, retrograde, augment) for variation.
+
+pub const PhraseMemory = struct {
+    const SIZE = 6;
+    const PLEN = PhraseGenerator.MAX_LEN;
+    const REST = PhraseGenerator.REST;
+
+    phrases: [SIZE][PLEN]u8 = .{.{0} ** PLEN} ** SIZE,
+    lengths: [SIZE]u8 = .{0} ** SIZE,
+    count: u8 = 0,
+    write_pos: u8 = 0,
+
+    pub fn store(self: *PhraseMemory, notes: *const [PLEN]u8, len: u8) void {
+        self.phrases[self.write_pos] = notes.*;
+        self.lengths[self.write_pos] = len;
+        self.write_pos = (self.write_pos + 1) % SIZE;
+        if (self.count < SIZE) self.count += 1;
+    }
+
+    /// Recall a stored phrase with random variation applied.
+    /// Returns phrase length, fills `out` with notes. Returns null if memory empty.
+    pub fn recallVaried(self: *const PhraseMemory, rng: *Rng, out: *[PLEN]u8, region_low: u8, region_high: u8) ?u8 {
+        if (self.count == 0) return null;
+
+        const idx = @as(u8, @intCast(rng.next() % self.count));
+        const src = self.phrases[idx];
+        const len = self.lengths[idx];
+        if (len == 0) return null;
+
+        const transform = rng.next() % 4;
+        switch (transform) {
+            0 => {
+                // Transpose: shift all notes by +/-1 or +/-2
+                const shift: i8 = switch (rng.next() % 4) {
+                    0 => 1,
+                    1 => -1,
+                    2 => 2,
+                    else => -2,
+                };
+                for (0..len) |i| {
+                    if (src[i] == REST) {
+                        out[i] = REST;
+                    } else {
+                        const raw: i16 = @as(i16, src[i]) + shift;
+                        out[i] = @intCast(std.math.clamp(raw, @as(i16, region_low), @as(i16, region_high)));
+                    }
+                }
+                return len;
+            },
+            1 => {
+                // Retrograde: reverse note order
+                for (0..len) |i| {
+                    out[i] = src[len - 1 - i];
+                }
+                return len;
+            },
+            2 => {
+                // Augment rests: insert rest after each note (half density)
+                var out_len: u8 = 0;
+                for (0..len) |i| {
+                    if (out_len >= PLEN) break;
+                    out[out_len] = src[i];
+                    out_len += 1;
+                    if (out_len < PLEN and src[i] != REST and rng.float() < 0.5) {
+                        out[out_len] = REST;
+                        out_len += 1;
+                    }
+                }
+                return out_len;
+            },
+            else => {
+                // Ornament: insert passing tones between steps
+                var out_len: u8 = 0;
+                for (0..len) |i| {
+                    if (out_len >= PLEN) break;
+                    out[out_len] = src[i];
+                    out_len += 1;
+                    // Insert passing tone between consecutive non-rest notes
+                    if (i + 1 < len and src[i] != REST and src[i + 1] != REST and out_len < PLEN) {
+                        const a: i16 = src[i];
+                        const b: i16 = src[i + 1];
+                        if (@abs(b - a) == 2) {
+                            // There's room for a passing tone
+                            out[out_len] = @intCast(std.math.clamp(@divTrunc(a + b, 2), @as(i16, region_low), @as(i16, region_high)));
+                            out_len += 1;
+                        }
+                    }
+                }
+                return out_len;
+            },
+        }
+    }
+};
+
+// ============================================================
+// CueParams: parameter set that defines a cue "flavor"
+// ============================================================
+
+pub const CueParams = struct {
+    density: f32 = 0.5, // note density (1 - rest_chance)
+    energy: f32 = 0.5, // maps to filter range, attack speed, volume
+    harmonic_tension: f32 = 0.3, // biases chord selection toward tension chords
+    register_low: u8 = 5, // lowest scale degree for melodies
+    register_high: u8 = 17, // highest scale degree
+    scale_type: ScaleType = .minor_pentatonic,
+    tempo_mult: f32 = 1.0, // relative BPM multiplier
+    layer_weights: [6]f32 = .{ 1, 1, 1, 1, 1, 1 }, // per-layer volume targets
+
+    /// Interpolate between two cue parameter sets.
+    pub fn lerp(a: CueParams, b: CueParams, t: f32) CueParams {
+        var result: CueParams = undefined;
+        result.density = a.density + (b.density - a.density) * t;
+        result.energy = a.energy + (b.energy - a.energy) * t;
+        result.harmonic_tension = a.harmonic_tension + (b.harmonic_tension - a.harmonic_tension) * t;
+        result.register_low = if (t < 0.5) a.register_low else b.register_low;
+        result.register_high = if (t < 0.5) a.register_high else b.register_high;
+        result.scale_type = if (t < 0.5) a.scale_type else b.scale_type;
+        result.tempo_mult = a.tempo_mult + (b.tempo_mult - a.tempo_mult) * t;
+        for (0..6) |i| {
+            result.layer_weights[i] = a.layer_weights[i] + (b.layer_weights[i] - a.layer_weights[i]) * t;
+        }
+        return result;
+    }
+};
+
+/// Manages smooth interpolation between two CueParams over time.
+pub const CueInterpolator = struct {
+    from: CueParams = .{},
+    to: CueParams = .{},
+    current: CueParams = .{},
+    progress: f32 = 1.0, // 1.0 = fully arrived
+    speed: f32 = 0.00002, // per-sample (~1 beat at 72bpm to complete)
+
+    pub fn setCue(self: *CueInterpolator, target: CueParams) void {
+        self.from = self.current;
+        self.to = target;
+        self.progress = 0;
+    }
+
+    pub fn advanceSample(self: *CueInterpolator) void {
+        if (self.progress >= 1.0) return;
+        self.progress = @min(self.progress + self.speed, 1.0);
+        self.current = CueParams.lerp(self.from, self.to, self.progress);
+    }
+};
+
+// ============================================================
+// SlowLfo: ultra-slow modulation for organic movement
+// ============================================================
+
+pub const SlowLfo = struct {
+    phase: f32 = 0,
+    period_beats: f32 = 120,
+    depth: f32 = 0.05,
+
+    pub fn advanceSample(self: *SlowLfo, bpm_val: f32) void {
+        self.phase += bpm_val / (SAMPLE_RATE * 60.0) * TAU / self.period_beats;
+        if (self.phase > TAU) self.phase -= TAU;
+    }
+
+    /// Returns modulation multiplier: 1.0 +/- depth.
+    pub fn modulate(self: *const SlowLfo) f32 {
+        return 1.0 + @sin(self.phase) * self.depth;
+    }
+
+    /// Returns raw bipolar value: -depth to +depth.
+    pub fn value(self: *const SlowLfo) f32 {
+        return @sin(self.phase) * self.depth;
     }
 };
