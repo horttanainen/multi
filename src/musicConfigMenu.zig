@@ -2,10 +2,12 @@ const std = @import("std");
 const menu = @import("menu.zig");
 const settings = @import("settings.zig");
 const state = @import("state.zig");
-const minecraft_piano = @import("minecraft_piano.zig");
+const procedural_house = @import("procedural_house.zig");
+const procedural_piano = @import("procedural_piano.zig");
+const procedural_minecraft = @import("procedural_minecraft.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
-const procedural_music = @import("procedural_music.zig");
+const procedural_ambient = @import("procedural_ambient.zig");
 
 // ============================================================
 // Style selection
@@ -58,6 +60,24 @@ const choir_cue_names = [CHOIR_CUE_COUNT][:0]const u8{
     "Cue: Procession",
     "Cue: Vigil",
     "Cue: Crusade",
+};
+
+const HOUSE_CUE_COUNT = 4;
+var house_cue_value: u8 = 0;
+const house_cue_names = [HOUSE_CUE_COUNT][:0]const u8{
+    "Cue: Deep Night",
+    "Cue: Sunset Drive",
+    "Cue: Soft Focus",
+    "Cue: Warehouse",
+};
+
+const PIANO_CUE_COUNT = 4;
+var piano_cue_value: u8 = 0;
+const piano_cue_names = [PIANO_CUE_COUNT][:0]const u8{
+    "Cue: Solace",
+    "Cue: Nocturne",
+    "Cue: Daybreak",
+    "Cue: Remembrance",
 };
 
 // ============================================================
@@ -143,6 +163,8 @@ var ambient_items = [_]menu.Item{
 // --- House sub-menu ---
 var house_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerHouseCue }, .font = .medium },
+    .{ .label = "Cue: Deep Night", .kind = .{ .button = actionCycleHouseCue }, .font = .medium, .cycle_names = &house_cue_names, .cycle_index = &house_cue_value, .on_cycle = onCycleHouseCue },
     .{ .label = "Kick Volume", .kind = .{ .config = &house_kick_vol_config }, .font = .medium },
     .{ .label = "Hi-hat Volume", .kind = .{ .config = &house_hihat_vol_config }, .font = .medium },
     .{ .label = "Bass Volume", .kind = .{ .config = &house_bass_vol_config }, .font = .medium },
@@ -153,6 +175,8 @@ var house_items = [_]menu.Item{
 // --- Piano sub-menu ---
 var piano_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerPianoCue }, .font = .medium },
+    .{ .label = "Cue: Solace", .kind = .{ .button = actionCyclePianoCue }, .font = .medium, .cycle_names = &piano_cue_names, .cycle_index = &piano_cue_value, .on_cycle = onCyclePianoCue },
     .{ .label = "Note Volume", .kind = .{ .config = &piano_note_vol_config }, .font = .medium },
     .{ .label = "Rest Chance", .kind = .{ .config = &piano_rest_config }, .font = .medium },
     .{ .label = "Brightness", .kind = .{ .config = &piano_brightness_config }, .font = .medium },
@@ -241,6 +265,7 @@ fn loadFromParams() void {
             fromShader(&amb_arp_vol_config, settings.music_ambient_arp_vol);
         },
         .house => {
+            house_cue_value = settings.music_house_cue;
             fromShader(&house_kick_vol_config, settings.music_house_kick_vol);
             fromShader(&house_hihat_vol_config, settings.music_house_hihat_vol);
             fromShader(&house_bass_vol_config, settings.music_house_bass_vol);
@@ -248,6 +273,7 @@ fn loadFromParams() void {
             house_stab_config.value = settings.music_house_stab_chance;
         },
         .piano => {
+            piano_cue_value = settings.music_piano_cue;
             fromShader(&piano_note_vol_config, settings.music_piano_note_vol);
             piano_rest_config.value = settings.music_piano_rest_chance;
             piano_brightness_config.value = settings.music_piano_brightness;
@@ -313,6 +339,7 @@ fn applyMenuToSettings(save_changes: bool) !void {
             settings.music_ambient_arp_vol = toShader(&amb_arp_vol_config);
         },
         .house => {
+            settings.music_house_cue = house_cue_value;
             settings.music_house_kick_vol = toShader(&house_kick_vol_config);
             settings.music_house_hihat_vol = toShader(&house_hihat_vol_config);
             settings.music_house_bass_vol = toShader(&house_bass_vol_config);
@@ -320,6 +347,7 @@ fn applyMenuToSettings(save_changes: bool) !void {
             settings.music_house_stab_chance = house_stab_config.value;
         },
         .piano => {
+            settings.music_piano_cue = piano_cue_value;
             settings.music_piano_note_vol = toShader(&piano_note_vol_config);
             settings.music_piano_rest_chance = piano_rest_config.value;
             settings.music_piano_brightness = piano_brightness_config.value;
@@ -408,15 +436,53 @@ fn actionOpenTweak() anyerror!void {
     }
 }
 
+fn actionTriggerHouseCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_house.triggerCue();
+}
+
+fn actionCycleHouseCue() anyerror!void {
+    house_cue_value = (house_cue_value + 1) % HOUSE_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_house.triggerCue();
+}
+
+fn onCycleHouseCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleHouseCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_house.triggerCue();
+}
+
+fn actionTriggerPianoCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_piano.triggerCue();
+}
+
+fn actionCyclePianoCue() anyerror!void {
+    piano_cue_value = (piano_cue_value + 1) % PIANO_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_piano.triggerCue();
+}
+
+fn onCyclePianoCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCyclePianoCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_piano.triggerCue();
+}
+
 fn actionTriggerMinecraftCue() anyerror!void {
     try applyMenuToSettings(false);
-    minecraft_piano.triggerCue();
+    procedural_minecraft.triggerCue();
 }
 
 fn actionCycleMinecraftCue() anyerror!void {
     minecraft_cue_value = (minecraft_cue_value + 1) % MINECRAFT_CUE_COUNT;
     try applyMenuToSettings(false);
-    minecraft_piano.triggerCue();
+    procedural_minecraft.triggerCue();
 }
 
 fn onCycleMinecraftCue() void {
@@ -424,7 +490,7 @@ fn onCycleMinecraftCue() void {
         std.log.warn("musicConfigMenu.onCycleMinecraftCue: failed to apply settings: {}", .{err});
         return;
     };
-    minecraft_piano.triggerCue();
+    procedural_minecraft.triggerCue();
 }
 
 fn actionTriggerRock80sCue() anyerror!void {
@@ -435,7 +501,7 @@ fn actionTriggerRock80sCue() anyerror!void {
 fn actionCycleAmbientCue() anyerror!void {
     ambient_cue_value = (ambient_cue_value + 1) % AMBIENT_CUE_COUNT;
     try applyMenuToSettings(false);
-    procedural_music.triggerCue();
+    procedural_ambient.triggerCue();
 }
 
 fn onCycleAmbientCue() void {
@@ -443,7 +509,7 @@ fn onCycleAmbientCue() void {
         std.log.warn("musicConfigMenu.onCycleAmbientCue: failed to apply settings: {}", .{err});
         return;
     };
-    procedural_music.triggerCue();
+    procedural_ambient.triggerCue();
 }
 
 fn actionCycleRock80sCue() anyerror!void {

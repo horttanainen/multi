@@ -656,6 +656,183 @@ pub const HiHat = struct {
 };
 
 // ============================================================
+// SineDrone: filtered dual-sine drone
+// ============================================================
+
+pub const SineDrone = struct {
+    phases: [2]f32 = .{ 0.0, 0.0 },
+    freq: f32 = midiToFreq(36),
+    detune_ratio: f32 = 1.002,
+    primary_mix: f32 = 1.0,
+    secondary_mix: f32 = 0.5,
+    volume: f32 = 0.02,
+    filter: LPF = LPF.init(120.0),
+
+    pub fn init(freq: f32, cutoff_hz: f32, detune_ratio: f32, primary_mix: f32, secondary_mix: f32, volume: f32) SineDrone {
+        return .{
+            .freq = freq,
+            .detune_ratio = detune_ratio,
+            .primary_mix = primary_mix,
+            .secondary_mix = secondary_mix,
+            .volume = volume,
+            .filter = LPF.init(cutoff_hz),
+        };
+    }
+
+    pub fn process(self: *SineDrone) f32 {
+        self.phases[0] += self.freq * INV_SR * TAU;
+        if (self.phases[0] > TAU) self.phases[0] -= TAU;
+        self.phases[1] += self.freq * self.detune_ratio * INV_SR * TAU;
+        if (self.phases[1] > TAU) self.phases[1] -= TAU;
+
+        var sample = @sin(self.phases[0]) * self.primary_mix + @sin(self.phases[1]) * self.secondary_mix;
+        sample = self.filter.process(sample);
+        return sample * self.volume;
+    }
+};
+
+// ============================================================
+// ChoirPart: formant-filtered choir voice
+// ============================================================
+
+pub const ChoirPart = struct {
+    voice: Voice(3, 4) = .{},
+    formant_a: LPF = LPF.init(700.0),
+    formant_b: LPF = LPF.init(1200.0),
+    pan: f32 = 0.0,
+    vowel_mix: f32 = 0.45,
+
+    pub fn init(unison_spread: f32, pan: f32, vowel_idx: u8) ChoirPart {
+        var part: ChoirPart = .{
+            .voice = .{ .unison_spread = unison_spread },
+            .pan = pan,
+        };
+        part.setVowel(vowel_idx);
+        return part;
+    }
+
+    pub fn setVowel(self: *ChoirPart, vowel_idx: u8) void {
+        switch (vowel_idx) {
+            0 => {
+                self.formant_a = LPF.init(620.0);
+                self.formant_b = LPF.init(1180.0);
+                self.vowel_mix = 0.34;
+            },
+            1 => {
+                self.formant_a = LPF.init(540.0);
+                self.formant_b = LPF.init(920.0);
+                self.vowel_mix = 0.42;
+            },
+            2 => {
+                self.formant_a = LPF.init(420.0);
+                self.formant_b = LPF.init(780.0);
+                self.vowel_mix = 0.58;
+            },
+            else => {
+                self.formant_a = LPF.init(760.0);
+                self.formant_b = LPF.init(1520.0);
+                self.vowel_mix = 0.48;
+            },
+        }
+    }
+
+    pub fn trigger(self: *ChoirPart, freq: f32, env: Envelope) void {
+        self.voice.trigger(freq, env);
+    }
+
+    pub fn process(self: *ChoirPart) f32 {
+        const raw = self.voice.processRaw();
+        if (raw.env_val <= 0.0001) return 0.0;
+
+        const fa = self.formant_a.process(raw.osc);
+        const fb = self.formant_b.process(raw.osc);
+        const filtered = fa * (1.0 - self.vowel_mix) + fb * self.vowel_mix;
+        return filtered * raw.env_val;
+    }
+};
+
+// ============================================================
+// PianoVoice: FM piano body with hammer transient
+// ============================================================
+
+pub const PianoVoice = struct {
+    carrier_phase: f32 = 0.0,
+    detune_phase: f32 = 0.0,
+    mod_phase: f32 = 0.0,
+    flutter_phase: f32 = 0.0,
+    freq: f32 = midiToFreq(60),
+    detune_ratio: f32 = 1.001,
+    mod_ratio: f32 = 3.0,
+    mod_depth: f32 = 0.5,
+    velocity: f32 = 1.0,
+    pan: f32 = 0.0,
+    env: Envelope = Envelope.init(0.01, 1.8, 0.0, 1.5),
+    filter: LPF = LPF.init(2400.0),
+    hammer_age: u32 = 999999,
+    active: bool = false,
+    unison_mix: f32 = 0.42,
+    sub_mix: f32 = 0.12,
+    bell_mix: f32 = 0.12,
+
+    pub fn init(pan: f32, flutter_phase: f32) PianoVoice {
+        return .{
+            .pan = pan,
+            .flutter_phase = flutter_phase,
+        };
+    }
+
+    pub fn trigger(self: *PianoVoice, freq: f32, velocity: f32, cutoff_hz: f32, env: Envelope) void {
+        self.freq = freq;
+        self.velocity = velocity;
+        self.filter = LPF.init(cutoff_hz);
+        self.env = env;
+        self.env.trigger();
+        self.hammer_age = 0;
+        self.active = true;
+    }
+
+    pub fn process(self: *PianoVoice, rng_inst: *Rng, wow_amount: f32, bell_tone: f32, attack_softness: f32, hammer_level: f32) f32 {
+        const env_val = self.env.process();
+        if (!self.active and env_val < 0.001) return 0.0;
+        if (env_val < 0.001) self.active = false;
+
+        self.flutter_phase += 0.00004 * TAU;
+        if (self.flutter_phase > TAU) self.flutter_phase -= TAU;
+
+        const flutter = @sin(self.flutter_phase) * (0.0002 + wow_amount * 0.0022);
+        const carrier_freq = self.freq * (1.0 + flutter);
+        const mod_freq = carrier_freq * self.mod_ratio;
+        self.mod_phase += mod_freq * INV_SR * TAU;
+        if (self.mod_phase > TAU) self.mod_phase -= TAU;
+
+        const fm_amount = 0.12 + bell_tone * 0.95;
+        const mod_signal = @sin(self.mod_phase) * self.mod_depth * env_val * fm_amount;
+
+        self.carrier_phase += carrier_freq * INV_SR * TAU;
+        if (self.carrier_phase > TAU) self.carrier_phase -= TAU;
+
+        self.detune_phase += carrier_freq * self.detune_ratio * INV_SR * TAU;
+        if (self.detune_phase > TAU) self.detune_phase -= TAU;
+
+        var body = @sin(self.carrier_phase + mod_signal);
+        body += @sin(self.detune_phase + mod_signal * 0.6) * self.unison_mix;
+        body += @sin(self.carrier_phase * 0.5) * self.sub_mix;
+        body += @sin(self.carrier_phase * 2.0 + mod_signal * 0.3) * (0.018 + bell_tone * self.bell_mix);
+        body = self.filter.process(body);
+
+        var hammer: f32 = 0.0;
+        if (self.hammer_age < 4096) {
+            const age: f32 = @floatFromInt(self.hammer_age);
+            const decay = @exp(-age * (0.0038 + attack_softness * 0.0024));
+            hammer = ((rng_inst.float() * 2.0 - 1.0) * 0.65 + @sin(self.carrier_phase * 5.0) * 0.25) * decay;
+            self.hammer_age += 1;
+        }
+
+        return (body + hammer * hammer_level) * env_val * self.velocity;
+    }
+};
+
+// ============================================================
 // PhraseGenerator: coherent melodic phrase builder
 // ============================================================
 //
@@ -685,10 +862,27 @@ pub const PhraseGenerator = struct {
     gravity: f32 = 2.0, // weight multiplier for chord tones (0 = off)
 
     pub fn build(self: *PhraseGenerator, rng: *Rng) void {
-        const range = @as(u32, self.max_notes - self.min_notes) + 1;
-        self.len = self.min_notes + @as(u8, @intCast(rng.next() % range));
+        const clamped_min = @min(self.min_notes, MAX_LEN);
+        const clamped_max = @min(self.max_notes, MAX_LEN);
+        if (clamped_min > clamped_max) {
+            std.log.warn("PhraseGenerator.build: invalid phrase note range min={d} max={d}, using {d}", .{ self.min_notes, self.max_notes, MAX_LEN });
+            self.len = MAX_LEN;
+            self.pos = 0;
+            return self.fill(rng);
+        }
+
+        if (self.max_notes > MAX_LEN or self.min_notes > MAX_LEN) {
+            std.log.warn("PhraseGenerator.build: clamping phrase note range min={d} max={d} to max len {d}", .{ self.min_notes, self.max_notes, MAX_LEN });
+        }
+
+        const range = @as(u32, clamped_max - clamped_min) + 1;
+        self.len = clamped_min + @as(u8, @intCast(rng.next() % range));
         self.pos = 0;
 
+        self.fill(rng);
+    }
+
+    fn fill(self: *PhraseGenerator, rng: *Rng) void {
         var current = self.anchor;
         const direction = rng.next() % 3;
 
@@ -997,6 +1191,80 @@ pub const ArcSystem = struct {
         self.micro.reset();
         self.meso.reset();
         self.macro.reset();
+    }
+};
+
+pub const ModulationMode = enum {
+    none,
+    fourth,
+    fifth,
+    mixed,
+};
+
+pub const CompositionTick = struct {
+    micro: f32,
+    meso: f32,
+    macro: f32,
+    chord_changed: bool,
+};
+
+pub const CompositionEngine = struct {
+    arcs: ArcSystem = .{},
+    key: KeyState = .{},
+    harmony: ChordMarkov = .{},
+    chord_beat_counter: f32 = 0.0,
+    chord_change_beats: f32 = 16.0,
+    last_macro_quarter: u8 = 0,
+    modulation_mode: ModulationMode = .mixed,
+
+    pub fn reset(self: *CompositionEngine, key_state: KeyState, harmony_state: ChordMarkov, arc_state: ArcSystem, chord_beats: f32, mode: ModulationMode) void {
+        self.key = key_state;
+        self.harmony = harmony_state;
+        self.arcs = arc_state;
+        self.chord_beat_counter = 0.0;
+        self.chord_change_beats = chord_beats;
+        self.last_macro_quarter = 0;
+        self.modulation_mode = mode;
+    }
+
+    pub fn advanceSample(self: *CompositionEngine, rng: *Rng, bpm_val: f32) CompositionTick {
+        self.arcs.advanceSample(bpm_val);
+        self.key.advanceSample();
+
+        const spb = samplesPerBeat(bpm_val);
+        self.chord_beat_counter += 1.0 / spb;
+        var chord_changed = false;
+        if (self.chord_beat_counter >= self.chord_change_beats) {
+            self.chord_beat_counter -= self.chord_change_beats;
+            _ = self.harmony.nextChord(rng);
+            chord_changed = true;
+        }
+
+        const macro_quarter: u8 = @intFromFloat(self.arcs.macro.beat_count / self.arcs.macro.section_beats * 4.0);
+        if (macro_quarter != self.last_macro_quarter) {
+            self.last_macro_quarter = macro_quarter;
+            if (macro_quarter == 0) {
+                switch (self.modulation_mode) {
+                    .none => {},
+                    .fourth => self.key.modulateByFourth(),
+                    .fifth => self.key.modulateByFifth(),
+                    .mixed => {
+                        if (rng.float() < 0.5) {
+                            self.key.modulateByFourth();
+                        } else {
+                            self.key.modulateByFifth();
+                        }
+                    },
+                }
+            }
+        }
+
+        return .{
+            .micro = self.arcs.micro.tension(),
+            .meso = self.arcs.meso.tension(),
+            .macro = self.arcs.macro.tension(),
+            .chord_changed = chord_changed,
+        };
     }
 };
 

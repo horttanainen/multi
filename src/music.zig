@@ -2,10 +2,10 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const c = sdl.c;
 const audio = @import("audio.zig");
-const procedural_music = @import("procedural_music.zig");
+const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_house = @import("procedural_house.zig");
-const piano_generator = @import("piano_generator.zig");
-const minecraft_piano = @import("minecraft_piano.zig");
+const procedural_piano = @import("procedural_piano.zig");
+const procedural_minecraft = @import("procedural_minecraft.zig");
 const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const allocator = @import("allocator.zig").allocator;
@@ -136,11 +136,11 @@ pub fn cleanup() void {
 
 fn resetCurrentStyle() void {
     switch (current_style) {
-        .ambient => procedural_music.reset(),
+        .ambient => procedural_ambient.reset(),
         .house => procedural_house.reset(),
-        .piano => piano_generator.reset(),
+        .piano => procedural_piano.reset(),
         .choir => procedural_choir.reset(),
-        .minecraft => minecraft_piano.reset(),
+        .minecraft => procedural_minecraft.reset(),
         .rock80s => procedural_80s_rock.reset(),
     }
 }
@@ -184,11 +184,11 @@ fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_in
                 const chunk_bytes = chunk_frames * bytes_per_frame;
 
                 switch (current_style) {
-                    .ambient => procedural_music.fillBuffer(&buf, chunk_frames),
+                    .ambient => procedural_ambient.fillBuffer(&buf, chunk_frames),
                     .house => procedural_house.fillBuffer(&buf, chunk_frames),
-                    .piano => piano_generator.fillBuffer(&buf, chunk_frames),
+                    .piano => procedural_piano.fillBuffer(&buf, chunk_frames),
                     .choir => procedural_choir.fillBuffer(&buf, chunk_frames),
-                    .minecraft => minecraft_piano.fillBuffer(&buf, chunk_frames),
+                    .minecraft => procedural_minecraft.fillBuffer(&buf, chunk_frames),
                     .rock80s => procedural_80s_rock.fillBuffer(&buf, chunk_frames),
                 }
 

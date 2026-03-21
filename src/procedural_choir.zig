@@ -1,23 +1,14 @@
-// Procedural monastic choir style.
-// Thick unison voices (3 detuned × 4 harmonics) with formant filtering,
-// phrase-based chant melody, and arc-driven dynamics for swells.
-const std = @import("std");
+// Procedural monastic choir style — v2 composition engine.
+//
+// Uses chord progression, multi-scale arcs, chant motif memory, macro key
+// movement, and cue-specific timing so the presets diverge both harmonically
+// and behaviorally over time.
 const synth = @import("synth.zig");
 
-const Envelope = synth.Envelope;
-const LPF = synth.LPF;
 const StereoReverb = synth.StereoReverb;
 const midiToFreq = synth.midiToFreq;
 const softClip = synth.softClip;
 const panStereo = synth.panStereo;
-const scale = synth.pentatonic_scale;
-const TAU = synth.TAU;
-const INV_SR = synth.INV_SR;
-const SAMPLE_RATE = synth.SAMPLE_RATE;
-
-// ============================================================
-// Tweakable parameters (written by musicConfigMenu)
-// ============================================================
 
 pub const CuePreset = enum(u8) {
     cathedral,
@@ -34,287 +25,331 @@ pub var drone_mix: f32 = 0.55;
 pub var chant_mix: f32 = 0.58;
 pub var selected_cue: CuePreset = .cathedral;
 
-// ============================================================
-// Reverb (long cathedral tail)
-// ============================================================
-
 const ChoirReverb = StereoReverb(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 });
 var reverb: ChoirReverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
 var rng: synth.Rng = synth.Rng.init(0x4300_9000);
 
-// ============================================================
-// Choir voice: 3 unison × 4 harmonics with formant filters
-// ============================================================
+var engine: synth.CompositionEngine = .{};
 
-const ChoirVoice = synth.Voice(3, 4);
+fn initHarmony() synth.ChordMarkov {
+    var h: synth.ChordMarkov = .{};
+    h.chords[0] = .{ .offsets = .{ 0, 3, 7, 10 }, .len = 4 };
+    h.chords[1] = .{ .offsets = .{ 3, 7, 10, 15 }, .len = 4 };
+    h.chords[2] = .{ .offsets = .{ 5, 8, 12, 15 }, .len = 4 };
+    h.chords[3] = .{ .offsets = .{ 7, 10, 14, 17 }, .len = 4 };
+    h.chords[4] = .{ .offsets = .{ 10, 14, 17, 22 }, .len = 4 };
+    h.num_chords = 5;
+    h.transitions[0] = .{ 0.10, 0.18, 0.28, 0.16, 0.28, 0, 0, 0 };
+    h.transitions[1] = .{ 0.26, 0.10, 0.24, 0.10, 0.30, 0, 0, 0 };
+    h.transitions[2] = .{ 0.28, 0.14, 0.10, 0.22, 0.26, 0, 0, 0 };
+    h.transitions[3] = .{ 0.24, 0.14, 0.20, 0.10, 0.32, 0, 0, 0 };
+    h.transitions[4] = .{ 0.34, 0.12, 0.18, 0.14, 0.22, 0, 0, 0 };
+    return h;
+}
 
-const ChoirPart = struct {
-    voice: ChoirVoice = .{},
-    formant_a: LPF = LPF.init(700.0),
-    formant_b: LPF = LPF.init(1200.0),
-    pan: f32 = 0.0,
-    vowel_mix: f32 = 0.45,
+const CHOIR_ARCS: synth.ArcSystem = .{
+    .micro = .{ .section_beats = 16, .shape = .rise_fall },
+    .meso = .{ .section_beats = 64, .shape = .rise_fall },
+    .macro = .{ .section_beats = 256, .shape = .plateau },
 };
+var lfo_reverb: synth.SlowLfo = .{ .period_beats = 180, .depth = 0.04 };
 
+var drone_target: f32 = 0.9;
+var pad_target: f32 = 0.75;
+var chant_target: f32 = 0.2;
+var breath_target: f32 = 0.35;
+
+var drone_level: f32 = 0.8;
+var pad_level: f32 = 0.5;
+var chant_level: f32 = 0.0;
+var breath_level: f32 = 0.25;
+
+const LAYER_FADE_RATE: f32 = 0.000025;
+
+const ChoirPart = synth.ChoirPart;
 const PAD_COUNT = 3;
 var pad_parts: [PAD_COUNT]ChoirPart = .{
-    .{ .voice = .{ .unison_spread = 0.006 }, .pan = -0.35, .vowel_mix = 0.35 },
-    .{ .voice = .{ .unison_spread = 0.006 }, .pan = 0.0, .vowel_mix = 0.45 },
-    .{ .voice = .{ .unison_spread = 0.006 }, .pan = 0.35, .vowel_mix = 0.55 },
+    ChoirPart.init(0.006, -0.35, 0),
+    ChoirPart.init(0.006, 0.0, 1),
+    ChoirPart.init(0.006, 0.35, 2),
 };
-var chant_part: ChoirPart = .{ .voice = .{ .unison_spread = 0.004 }, .pan = 0.08, .vowel_mix = 0.5 };
-
-// ============================================================
-// Phrase generator for chant melody (replaces fixed chant_map)
-// ============================================================
+var chant_part: ChoirPart = ChoirPart.init(0.004, 0.08, 1);
 
 var chant_phrase: synth.PhraseGenerator = .{
     .anchor = 12,
-    .region_low = 10,
+    .region_low = 9,
     .region_high = 16,
-    .rest_chance = 0.15,
+    .rest_chance = 0.18,
     .min_notes = 4,
     .max_notes = 8,
+    .gravity = 3.5,
 };
+var chant_memory: synth.PhraseMemory = .{};
 
-// ============================================================
-// Arc controller for dynamics (slow cathedral swells)
-// ============================================================
+var drone: synth.SineDrone = synth.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
+var breath_lpf: synth.LPF = synth.LPF.init(1200.0);
+var shimmer_lpf: synth.LPF = synth.LPF.init(3400.0);
 
-var arc: synth.ArcController = .{ .section_beats = 64, .shape = .rise_fall };
+var chant_beat_counter: f32 = 0.0;
 
-// ============================================================
-// Drone & breath (raw oscillators, no Voice type needed)
-// ============================================================
-
-var drone_phase: [2]f32 = .{ 0.0, 0.0 };
-var drone_freq: f32 = midiToFreq(36);
-var drone_lpf: LPF = LPF.init(180.0);
-
-var breath_lpf: LPF = LPF.init(1200.0);
-var shimmer_lpf: LPF = LPF.init(3400.0);
-
-// ============================================================
-// Sequencer state
-// ============================================================
-
-var step_counter: f32 = 0.0;
-var chant_step: u8 = 0;
-var chord_step: u8 = 0;
-
-const chord_map = [4][4][3]u8{
-    .{ .{ 38, 45, 50 }, .{ 41, 48, 53 }, .{ 43, 50, 55 }, .{ 36, 43, 48 } }, // cathedral
-    .{ .{ 36, 43, 48 }, .{ 38, 45, 50 }, .{ 41, 48, 53 }, .{ 43, 50, 55 } }, // procession
-    .{ .{ 41, 48, 53 }, .{ 38, 45, 50 }, .{ 36, 43, 48 }, .{ 43, 50, 55 } }, // vigil
-    .{ .{ 38, 45, 50 }, .{ 43, 50, 55 }, .{ 45, 52, 57 }, .{ 41, 48, 53 } }, // crusade
-};
-
-// ============================================================
-// Public API
-// ============================================================
+var cue_reverb_boost: f32 = 0.0;
+var cue_breath_boost: f32 = 0.0;
+var cue_chant_recall_chance: f32 = 0.3;
+var cue_chant_threshold: f32 = 0.35;
+var cue_chord_change_beats: f32 = 16.0;
+var cue_chant_beat_len: f32 = 2.0;
+var cue_pad_attack: f32 = 1.4;
+var cue_pad_release: f32 = 5.8;
+var cue_chant_attack: f32 = 0.18;
+var cue_chant_release: f32 = 1.6;
 
 pub fn reset() void {
     reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
     rng = synth.Rng.init(0x4300_9000 + @as(u32, @intFromEnum(selected_cue)) * 23);
-    step_counter = 0.0;
-    chant_step = 0;
-    chord_step = 0;
+    engine.reset(.{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
+    lfo_reverb = .{ .period_beats = 180, .depth = 0.04 };
+    drone_target = 0.9;
+    pad_target = 0.75;
+    chant_target = 0.2;
+    breath_target = 0.35;
+    drone_level = 0.8;
+    pad_level = 0.5;
+    chant_level = 0.0;
+    breath_level = 0.25;
     pad_parts = .{
-        .{ .voice = .{ .unison_spread = 0.006 }, .pan = -0.35, .vowel_mix = 0.35 },
-        .{ .voice = .{ .unison_spread = 0.006 }, .pan = 0.0, .vowel_mix = 0.45 },
-        .{ .voice = .{ .unison_spread = 0.006 }, .pan = 0.35, .vowel_mix = 0.55 },
+        ChoirPart.init(0.006, -0.35, 0),
+        ChoirPart.init(0.006, 0.0, 1),
+        ChoirPart.init(0.006, 0.35, 2),
     };
-    chant_part = .{ .voice = .{ .unison_spread = 0.004 }, .pan = 0.08, .vowel_mix = 0.5 };
+    chant_part = ChoirPart.init(0.004, 0.08, 1);
     chant_phrase = .{
         .anchor = 12,
-        .region_low = 10,
+        .region_low = 9,
         .region_high = 16,
-        .rest_chance = 0.15,
+        .rest_chance = 0.18,
         .min_notes = 4,
         .max_notes = 8,
+        .gravity = 3.5,
     };
-    arc = .{ .section_beats = 64, .shape = .rise_fall };
-    drone_phase = .{ 0.0, 0.0 };
-    drone_freq = midiToFreq(36);
-    drone_lpf = LPF.init(180.0);
-    breath_lpf = LPF.init(1200.0);
-    shimmer_lpf = LPF.init(3400.0);
-    triggerCue();
+    chant_memory = .{};
+    drone = synth.SineDrone.init(midiToFreq(36), 180.0, 1.0016, 0.78, 0.32, 0.32);
+    breath_lpf = synth.LPF.init(1200.0);
+    shimmer_lpf = synth.LPF.init(3400.0);
+    chant_beat_counter = 0.0;
+    applyCueParams();
+    advanceChord();
 }
 
 pub fn triggerCue() void {
-    chord_step = 0;
-    chant_step = 0;
-    chant_phrase.anchor = 10 + @as(u8, @intFromEnum(selected_cue));
-    loadCueChord();
-    loadCueVowels();
-    triggerPadChord();
-    triggerChantNote();
+    applyCueParams();
+    advanceChord();
+    chant_beat_counter = 0.0;
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const samples_per_step = SAMPLE_RATE * 60.0 / bpm * 0.5;
+    const spb = synth.samplesPerBeat(bpm);
 
     for (0..frames) |i| {
-        arc.advanceSample(bpm);
-        const t = arc.tension();
-
-        step_counter += 1.0;
-        if (step_counter >= samples_per_step) {
-            step_counter -= samples_per_step;
-            advanceStep();
+        lfo_reverb.advanceSample(bpm);
+        engine.chord_change_beats = cue_chord_change_beats;
+        const tick = engine.advanceSample(&rng, bpm);
+        if (tick.chord_changed) {
+            advanceChord();
         }
+
+        chant_beat_counter += 1.0 / spb;
+        if (chant_beat_counter >= cue_chant_beat_len) {
+            chant_beat_counter -= cue_chant_beat_len;
+            triggerChantNote(tick.meso, tick.micro);
+        }
+
+        updateLayerTargets(tick.macro);
+        drone_level += (drone_target - drone_level) * LAYER_FADE_RATE;
+        pad_level += (pad_target - pad_level) * LAYER_FADE_RATE;
+        chant_level += (chant_target - chant_level) * LAYER_FADE_RATE;
+        breath_level += (breath_target - breath_level) * LAYER_FADE_RATE;
 
         var left: f32 = 0.0;
         var right: f32 = 0.0;
 
-        // Drone: arc swells volume slightly
-        const drone_vol = drone_mix * (0.85 + t * 0.15);
-        const drone = processDrone() * drone_vol * choir_vol;
-        left += drone * 0.9;
-        right += drone * 0.9;
+        const drone_sample = drone.process() * drone_mix * choir_vol * drone_level;
+        left += drone_sample * 0.9;
+        right += drone_sample * 0.9;
 
-        // Pad voices: arc swells for crescendo/decrescendo
-        const pad_vol = 0.95 * (0.8 + t * 0.2);
         for (0..PAD_COUNT) |idx| {
-            const sample = processChoirPart(&pad_parts[idx]) * choir_vol * pad_vol;
+            const sample = pad_parts[idx].process() * choir_vol * pad_level;
             const stereo = panStereo(sample, pad_parts[idx].pan);
             left += stereo[0];
             right += stereo[1];
         }
 
-        // Chant melody
-        const chant = processChoirPart(&chant_part) * choir_vol * chant_mix;
-        const chant_stereo = panStereo(chant, chant_part.pan);
+        const chant_sample = chant_part.process() * choir_vol * chant_mix * chant_level;
+        const chant_stereo = panStereo(chant_sample, chant_part.pan);
         left += chant_stereo[0];
         right += chant_stereo[1];
 
-        // Breath: more present at low tension (fills silence)
-        const breath = processBreath(t);
+        const breath = processBreath(tick.meso) * breath_level;
         left += breath;
         right += breath;
 
+        const wet = (reverb_mix + cue_reverb_boost) * lfo_reverb.modulate();
+        const dry = 1.0 - wet;
         const rev = reverb.process(.{ left, right });
-        const dry = 1.0 - reverb_mix;
-        left = left * dry + rev[0] * reverb_mix;
-        right = right * dry + rev[1] * reverb_mix;
+        left = left * dry + rev[0] * wet;
+        right = right * dry + rev[1] * wet;
 
         buf[i * 2] = softClip(left * 0.88);
         buf[i * 2 + 1] = softClip(right * 0.88);
     }
 }
 
-// ============================================================
-// Sequencer
-// ============================================================
-
-fn advanceStep() void {
-    const step = chant_step;
-    if (step % 4 == 0) {
-        triggerChantNote();
+fn applyCueParams() void {
+    switch (selected_cue) {
+        .cathedral => {
+            engine.key.root = 38;
+            engine.key.target_root = 38;
+            cue_reverb_boost = 0.08;
+            cue_breath_boost = 0.05;
+            cue_chant_recall_chance = 0.28;
+            cue_chant_threshold = 0.25;
+            cue_chord_change_beats = 18.0;
+            cue_chant_beat_len = 2.5;
+            cue_pad_attack = 2.0;
+            cue_pad_release = 7.5;
+            cue_chant_attack = 0.22;
+            cue_chant_release = 2.1;
+            chant_phrase.rest_chance = 0.24;
+            chant_phrase.region_low = 9;
+            chant_phrase.region_high = 15;
+            chant_phrase.min_notes = 4;
+            chant_phrase.max_notes = 7;
+            drone.filter = synth.LPF.init(160.0);
+            drone.detune_ratio = 1.0012;
+        },
+        .procession => {
+            engine.key.root = 40;
+            engine.key.target_root = 40;
+            cue_reverb_boost = 0.02;
+            cue_breath_boost = 0.0;
+            cue_chant_recall_chance = 0.22;
+            cue_chant_threshold = 0.12;
+            cue_chord_change_beats = 12.0;
+            cue_chant_beat_len = 1.5;
+            cue_pad_attack = 1.0;
+            cue_pad_release = 4.5;
+            cue_chant_attack = 0.12;
+            cue_chant_release = 1.2;
+            chant_phrase.rest_chance = 0.14;
+            chant_phrase.region_low = 10;
+            chant_phrase.region_high = 17;
+            chant_phrase.min_notes = 5;
+            chant_phrase.max_notes = 8;
+            drone.filter = synth.LPF.init(220.0);
+            drone.detune_ratio = 1.0018;
+        },
+        .vigil => {
+            engine.key.root = 36;
+            engine.key.target_root = 36;
+            cue_reverb_boost = 0.12;
+            cue_breath_boost = 0.12;
+            cue_chant_recall_chance = 0.4;
+            cue_chant_threshold = 0.5;
+            cue_chord_change_beats = 22.0;
+            cue_chant_beat_len = 3.5;
+            cue_pad_attack = 2.6;
+            cue_pad_release = 8.5;
+            cue_chant_attack = 0.28;
+            cue_chant_release = 2.6;
+            chant_phrase.rest_chance = 0.36;
+            chant_phrase.region_low = 8;
+            chant_phrase.region_high = 13;
+            chant_phrase.min_notes = 3;
+            chant_phrase.max_notes = 5;
+            drone.filter = synth.LPF.init(130.0);
+            drone.detune_ratio = 1.0009;
+        },
+        .crusade => {
+            engine.key.root = 41;
+            engine.key.target_root = 41;
+            cue_reverb_boost = 0.0;
+            cue_breath_boost = -0.05;
+            cue_chant_recall_chance = 0.18;
+            cue_chant_threshold = 0.08;
+            cue_chord_change_beats = 10.0;
+            cue_chant_beat_len = 1.0;
+            cue_pad_attack = 0.8;
+            cue_pad_release = 3.6;
+            cue_chant_attack = 0.08;
+            cue_chant_release = 0.95;
+            chant_phrase.rest_chance = 0.08;
+            chant_phrase.region_low = 11;
+            chant_phrase.region_high = 18;
+            chant_phrase.min_notes = 5;
+            chant_phrase.max_notes = 9;
+            drone.filter = synth.LPF.init(240.0);
+            drone.detune_ratio = 1.0021;
+        },
     }
-    if (step % 8 == 0) {
-        loadCueChord();
-        loadCueVowels();
-        triggerPadChord();
-    }
-
-    chant_step = (chant_step + 1) % 16;
-    if (chant_step != 0) return;
-
-    chord_step = @intCast((chord_step + 1) % chord_map[@intFromEnum(selected_cue)].len);
+    engine.key.scale_type = switch (selected_cue) {
+        .cathedral => .dorian,
+        .procession => .mixolydian,
+        .vigil => .harmonic_minor,
+        .crusade => .natural_minor,
+    };
+    engine.modulation_mode = if (selected_cue == .crusade) .fourth else .none;
 }
 
-fn loadCueChord() void {
-    const chord = chord_map[@intFromEnum(selected_cue)][chord_step];
+fn advanceChord() void {
+    const chord = engine.harmony.chords[engine.harmony.current];
     for (0..PAD_COUNT) |idx| {
-        pad_parts[idx].voice.freq = midiToFreq(chord[idx]);
+        const offset = if (idx < chord.len) chord.offsets[idx] else chord.offsets[0];
+        pad_parts[idx].voice.freq = midiToFreq(engine.key.root + offset);
+        pad_parts[idx].trigger(pad_parts[idx].voice.freq, synth.Envelope.init(cue_pad_attack, 1.4, 0.76, cue_pad_release));
+        pad_parts[idx].setVowel(@intCast((@intFromEnum(selected_cue) + idx + engine.harmony.current) % 4));
     }
-    drone_freq = midiToFreq(chord[0] - 12);
+
+    const degrees = engine.harmony.chordScaleDegrees(engine.key.scale_type);
+    chant_phrase.setChordTones(degrees.tones[0..degrees.count]);
+    drone.freq = midiToFreq(engine.key.root + chord.offsets[0] - 12);
+    chant_part.setVowel(@intCast((@intFromEnum(selected_cue) + engine.harmony.current) % 4));
 }
 
-fn loadCueVowels() void {
-    const cue_index = @intFromEnum(selected_cue);
-    for (0..PAD_COUNT) |idx| {
-        const seed = cue_index * 9 + @as(u8, @intCast(idx));
-        setPartVowel(&pad_parts[idx], @intCast((seed + chord_step) % 4));
-    }
-    setPartVowel(&chant_part, @intCast((cue_index + chant_step / 4) % 4));
-}
+fn triggerChantNote(meso: f32, micro: f32) void {
+    if (chant_level < 0.05) return;
 
-fn triggerPadChord() void {
-    for (0..PAD_COUNT) |idx| {
-        const freq = pad_parts[idx].voice.freq;
-        pad_parts[idx].voice.trigger(freq, Envelope.init(1.4, 1.6, 0.76, 5.8));
-    }
-}
+    chant_phrase.rest_chance = chant_phrase.rest_chance * (1.15 - meso * 0.18);
 
-fn triggerChantNote() void {
+    if (chant_memory.count > 0 and rng.float() < cue_chant_recall_chance) {
+        var varied_notes: [synth.PhraseGenerator.MAX_LEN]u8 = undefined;
+        if (chant_memory.recallVaried(&rng, &varied_notes, chant_phrase.region_low, chant_phrase.region_high)) |varied_len| {
+            if (varied_len > 0 and varied_notes[0] != 0xFF) {
+                const freq = midiToFreq(engine.key.noteToMidi(varied_notes[0]));
+                chant_part.trigger(freq, synth.Envelope.init(cue_chant_attack, 0.6 + micro * 0.4, 0.55, cue_chant_release));
+                return;
+            }
+        }
+    }
+
     if (chant_phrase.advance(&rng)) |note_idx| {
-        const freq = midiToFreq(scale[note_idx]);
-        chant_part.voice.trigger(freq, Envelope.init(0.18, 0.5, 0.55, 1.6));
+        const freq = midiToFreq(engine.key.noteToMidi(note_idx));
+        chant_part.trigger(freq, synth.Envelope.init(cue_chant_attack, 0.5 + meso * 0.35, 0.55, cue_chant_release));
+        if (chant_phrase.pos == 0 and chant_phrase.len > 0) {
+            chant_memory.store(&chant_phrase.notes, chant_phrase.len);
+        }
     }
 }
 
-// ============================================================
-// Formant vowels
-// ============================================================
-
-fn setPartVowel(part: *ChoirPart, vowel_idx: u8) void {
-    switch (vowel_idx) {
-        0 => { // ah
-            part.formant_a = LPF.init(620.0);
-            part.formant_b = LPF.init(1180.0);
-            part.vowel_mix = 0.34;
-        },
-        1 => { // oh
-            part.formant_a = LPF.init(540.0);
-            part.formant_b = LPF.init(920.0);
-            part.vowel_mix = 0.42;
-        },
-        2 => { // oo
-            part.formant_a = LPF.init(420.0);
-            part.formant_b = LPF.init(780.0);
-            part.vowel_mix = 0.58;
-        },
-        else => { // eh
-            part.formant_a = LPF.init(760.0);
-            part.formant_b = LPF.init(1520.0);
-            part.vowel_mix = 0.48;
-        },
-    }
+fn updateLayerTargets(macro: f32) void {
+    drone_target = 0.65 + macro * 0.35;
+    pad_target = 0.3 + macro * 0.7;
+    chant_target = if (macro > cue_chant_threshold) @min((macro - cue_chant_threshold) * 1.25, 0.95) else 0.0;
+    breath_target = 0.18 + (1.0 - macro) * 0.35;
 }
 
-// ============================================================
-// DSP processing
-// ============================================================
-
-fn processChoirPart(part: *ChoirPart) f32 {
-    const raw = part.voice.processRaw();
-    if (raw.env_val <= 0.0001) return 0;
-
-    const fa = part.formant_a.process(raw.osc);
-    const fb = part.formant_b.process(raw.osc);
-    const filtered = fa * (1.0 - part.vowel_mix) + fb * part.vowel_mix;
-    return filtered * raw.env_val;
-}
-
-fn processDrone() f32 {
-    drone_phase[0] += drone_freq * INV_SR * TAU;
-    if (drone_phase[0] > TAU) drone_phase[0] -= TAU;
-    drone_phase[1] += drone_freq * 1.0016 * INV_SR * TAU;
-    if (drone_phase[1] > TAU) drone_phase[1] -= TAU;
-
-    var sample = @sin(drone_phase[0]) * 0.78 + @sin(drone_phase[1]) * 0.32;
-    sample = drone_lpf.process(sample);
-    return sample * 0.32;
-}
-
-fn processBreath(t: f32) f32 {
+fn processBreath(meso: f32) f32 {
     if (breathiness <= 0.001) return 0.0;
 
-    // More breath at low tension (fills silence between swells)
-    const breath_mod = breathiness * (1.1 - t * 0.3);
+    const breath_mod = (breathiness + cue_breath_boost) * (1.0 - meso * 0.25);
     const noise = rng.float() * 2.0 - 1.0;
     const base = breath_lpf.process(noise);
     const shimmer = shimmer_lpf.process(noise * 0.35);

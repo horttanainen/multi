@@ -4,8 +4,6 @@
 const std = @import("std");
 const synth = @import("synth.zig");
 
-const Envelope = synth.Envelope;
-const LPF = synth.LPF;
 const StereoReverb = synth.StereoReverb;
 const scale = synth.pentatonic_scale;
 const midiToFreq = synth.midiToFreq;
@@ -126,25 +124,12 @@ var phrase_pos: [VOICE_COUNT]u8 = .{ 0, 0 };
 // Piano voices
 // ============================================================
 
-var voice_carrier_phase: [VOICE_COUNT]f32 = .{0} ** VOICE_COUNT;
-var voice_detune_phase: [VOICE_COUNT]f32 = .{0} ** VOICE_COUNT;
-var voice_mod_phase: [VOICE_COUNT]f32 = .{0} ** VOICE_COUNT;
-var voice_freq: [VOICE_COUNT]f32 = .{ midiToFreq(60), midiToFreq(67) };
-var voice_detune: [VOICE_COUNT]f32 = .{ 1.001, 0.999 };
-var voice_mod_ratio: [VOICE_COUNT]f32 = .{ 3.1, 2.8 };
-var voice_mod_depth: [VOICE_COUNT]f32 = .{ 1.0, 0.9 };
-var voice_velocity: [VOICE_COUNT]f32 = .{ 1.0, 1.0 };
-var voice_pan: [VOICE_COUNT]f32 = .{ -0.18, 0.22 };
-var voice_flutter_phase: [VOICE_COUNT]f32 = .{ 0.0, 1.5 };
-var voice_hammer_age: [VOICE_COUNT]u32 = .{ 999999, 999999 };
-var voice_active: [VOICE_COUNT]bool = .{ false, false };
+var voices: [VOICE_COUNT]synth.PianoVoice = .{
+    synth.PianoVoice.init(-0.18, 0.0),
+    synth.PianoVoice.init(0.22, 1.5),
+};
 var voice_note_idx: [VOICE_COUNT]u8 = .{ 10, 12 };
 var voice_beat_counter: [VOICE_COUNT]f32 = .{ 0, 0 };
-var voice_env: [VOICE_COUNT]Envelope = .{
-    Envelope.init(0.01, 1.8, 0.0, 1.5),
-    Envelope.init(0.012, 2.1, 0.0, 1.8),
-};
-var voice_lpf: [VOICE_COUNT]LPF = .{ LPF.init(2400.0), LPF.init(2100.0) };
 const voice_beat_len: [VOICE_COUNT]f32 = .{ 2.5, 3.75 };
 
 // ============================================================
@@ -168,10 +153,7 @@ var bed_freq: [BED_PARTIALS]f32 = .{
 var bed_target_gain: [BED_PARTIALS]f32 = .{ 0.012, 0.010, 0.008, 0.006 };
 var bed_gain: [BED_PARTIALS]f32 = .{ 0.0, 0.0, 0.0, 0.0 };
 
-var drone_phase: f32 = 0;
-var drone_detune_phase: f32 = 0;
-var drone_freq: f32 = midiToFreq(36);
-var drone_lpf: LPF = LPF.init(120.0);
+var drone: synth.SineDrone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
 
 // ============================================================
 // Rare events
@@ -210,50 +192,15 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         }
 
         for (0..VOICE_COUNT) |voice_idx| {
-            const env_val = voice_env[voice_idx].process();
-            if (!voice_active[voice_idx] and env_val < 0.001) continue;
-
-            voice_flutter_phase[voice_idx] += (0.00004 + @as(f32, @floatFromInt(voice_idx)) * 0.00001) * TAU;
-            if (voice_flutter_phase[voice_idx] > TAU) voice_flutter_phase[voice_idx] -= TAU;
-
             const wow_amount = effectiveWow();
-            const flutter = @sin(voice_flutter_phase[voice_idx]) * (0.0002 + wow_amount * 0.0022);
-            const carrier_freq = voice_freq[voice_idx] * (1.0 + flutter);
-            const mod_freq = carrier_freq * voice_mod_ratio[voice_idx];
-            voice_mod_phase[voice_idx] += mod_freq * INV_SR * TAU;
-            if (voice_mod_phase[voice_idx] > TAU) voice_mod_phase[voice_idx] -= TAU;
-
             const blur_amount = effectiveBlur();
             const bell_tone = std.math.clamp(bell_amount * texture_bell_mul * (1.0 - blur_amount * 0.45), 0.0, 1.0);
-            const fm_amount = 0.12 + bell_tone * 0.95;
-            const mod_signal = @sin(voice_mod_phase[voice_idx]) * voice_mod_depth[voice_idx] * env_val * fm_amount;
-
-            voice_carrier_phase[voice_idx] += carrier_freq * INV_SR * TAU;
-            if (voice_carrier_phase[voice_idx] > TAU) voice_carrier_phase[voice_idx] -= TAU;
-
-            voice_detune_phase[voice_idx] += carrier_freq * voice_detune[voice_idx] * INV_SR * TAU;
-            if (voice_detune_phase[voice_idx] > TAU) voice_detune_phase[voice_idx] -= TAU;
-
-            var body = @sin(voice_carrier_phase[voice_idx] + mod_signal);
-            body += @sin(voice_detune_phase[voice_idx] + mod_signal * 0.6) * 0.42;
-            body += @sin(voice_carrier_phase[voice_idx] * 0.5) * 0.12;
-            body += @sin(voice_carrier_phase[voice_idx] * 2.0 + mod_signal * 0.3) * (0.018 + bell_tone * 0.12);
-            body = voice_lpf[voice_idx].process(body);
-
-            var hammer: f32 = 0;
-            if (voice_hammer_age[voice_idx] < 4096) {
-                const age: f32 = @floatFromInt(voice_hammer_age[voice_idx]);
-                const decay = @exp(-age * (0.0038 + effectiveAttackSoftness() * 0.0024));
-                hammer = ((rng.float() * 2.0 - 1.0) * 0.65 + @sin(voice_carrier_phase[voice_idx] * 5.0) * 0.25) * decay;
-                voice_hammer_age[voice_idx] += 1;
-            }
-
             const voice_gain = if (voice_idx == MOTIF_VOICE) 1.0 else std.math.clamp(harmony_mix * texture_harmony_mul, 0.0, 1.0);
             const hammer_level = hammer_mix * texture_hammer_mul * (0.2 + brightness * 0.22) * (1.0 - effectiveAttackSoftness() * 0.45);
-            var sample = (body + hammer * hammer_level) * env_val * note_vol * voice_velocity[voice_idx] * voice_gain;
+            var sample = voices[voice_idx].process(&rng, wow_amount, bell_tone, effectiveAttackSoftness(), hammer_level) * note_vol * voice_gain;
             sample *= 0.88;
 
-            const stereo = panStereo(sample, voice_pan[voice_idx]);
+            const stereo = panStereo(sample, voices[voice_idx].pan);
             left += stereo[0];
             right += stereo[1];
         }
@@ -267,12 +214,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         right += resonance * 0.82;
 
         if (scene_presence > 0.02 and drone_dropout_beats <= 0) {
-            drone_phase += drone_freq * INV_SR * TAU;
-            if (drone_phase > TAU) drone_phase -= TAU;
-            drone_detune_phase += drone_freq * (1.0011 + effectiveWow() * 0.0012) * INV_SR * TAU;
-            if (drone_detune_phase > TAU) drone_detune_phase -= TAU;
-            var drone_sample = @sin(drone_phase) + @sin(drone_detune_phase) * 0.45;
-            drone_sample = drone_lpf.process(drone_sample);
+            drone.detune_ratio = 1.0011 + effectiveWow() * 0.0012;
+            drone.freq = midiToFreq(scale[region_root_class]);
+            var drone_sample = drone.process();
             drone_sample *= 0.006 + scene_presence * 0.011;
             left += drone_sample;
             right += drone_sample;
@@ -326,25 +270,12 @@ pub fn reset() void {
     phrase_len = .{ 0, 0 };
     phrase_pos = .{ 0, 0 };
 
-    voice_carrier_phase = .{0} ** VOICE_COUNT;
-    voice_detune_phase = .{0} ** VOICE_COUNT;
-    voice_mod_phase = .{0} ** VOICE_COUNT;
-    voice_freq = .{ midiToFreq(60), midiToFreq(67) };
-    voice_detune = .{ 1.001, 0.999 };
-    voice_mod_ratio = .{ 3.1, 2.8 };
-    voice_mod_depth = .{ 1.0, 0.9 };
-    voice_velocity = .{ 1.0, 1.0 };
-    voice_pan = .{ -0.18, 0.22 };
-    voice_flutter_phase = .{ 0.0, 1.5 };
-    voice_hammer_age = .{ 999999, 999999 };
-    voice_active = .{ false, false };
+    voices = .{
+        synth.PianoVoice.init(-0.18, 0.0),
+        synth.PianoVoice.init(0.22, 1.5),
+    };
     voice_note_idx = .{ 10, 12 };
     voice_beat_counter = .{ 0, 0 };
-    voice_env = .{
-        Envelope.init(0.01, 1.8, 0.0, 1.5),
-        Envelope.init(0.012, 2.1, 0.0, 1.8),
-    };
-    voice_lpf = .{ LPF.init(2400.0), LPF.init(2100.0) };
 
     resonance_phase = .{0} ** RESONANCE_COUNT;
     resonance_energy = .{ 0.0, 0.0, 0.0 };
@@ -353,10 +284,7 @@ pub fn reset() void {
     bed_phase = .{.{0} ** 3} ** BED_PARTIALS;
     bed_gain = .{ 0.0, 0.0, 0.0, 0.0 };
 
-    drone_phase = 0;
-    drone_detune_phase = 0;
-    drone_freq = midiToFreq(36);
-    drone_lpf = LPF.init(120.0);
+    drone = synth.SineDrone.init(midiToFreq(36), 120.0, 1.0011, 1.0, 0.45, 1.0);
 
     bloom_notes_remaining = 0;
     repeat_figure_notes_remaining = 0;
@@ -543,9 +471,9 @@ fn updateRegionTuning() void {
     cloud_freq[1] = midiToFreq(scale[@min(low_root + 8, 14)]);
     cloud_freq[2] = midiToFreq(scale[high_root]);
 
-    drone_freq = midiToFreq(scale[low_root]);
+    drone.freq = midiToFreq(scale[low_root]);
     if (current_region == .bright) {
-        drone_freq = midiToFreq(scale[@min(low_root + 1, 4)]);
+        drone.freq = midiToFreq(scale[@min(low_root + 1, 4)]);
     }
     if (current_region == .suspended) {
         resonance_freq[2] = midiToFreq(scale[@min(high_root, 14)]);
@@ -570,16 +498,16 @@ fn rebuildMotif() void {
     deriveHarmonyPhrase();
     phrase_pos = .{ 0, 0 };
 
-    voice_pan[MOTIF_VOICE] = -0.1 - rng.float() * 0.08;
-    voice_pan[HARMONY_VOICE] = 0.1 + rng.float() * 0.1;
-    voice_detune[MOTIF_VOICE] = 0.9995 + rng.float() * 0.001;
-    voice_detune[HARMONY_VOICE] = 1.0002 + rng.float() * 0.0009;
+    voices[MOTIF_VOICE].pan = -0.1 - rng.float() * 0.08;
+    voices[HARMONY_VOICE].pan = 0.1 + rng.float() * 0.1;
+    voices[MOTIF_VOICE].detune_ratio = 0.9995 + rng.float() * 0.001;
+    voices[HARMONY_VOICE].detune_ratio = 1.0002 + rng.float() * 0.0009;
 
     const blur_amount = effectiveBlur();
-    voice_mod_ratio[MOTIF_VOICE] = 2.5 + brightness * 0.25 + bell_amount * 0.15 - blur_amount * 0.18;
-    voice_mod_ratio[HARMONY_VOICE] = 2.3 + brightness * 0.22 + bell_amount * 0.12 - blur_amount * 0.14;
-    voice_mod_depth[MOTIF_VOICE] = 0.45 + brightness * 0.28 + bell_amount * 0.2 - blur_amount * 0.18;
-    voice_mod_depth[HARMONY_VOICE] = 0.28 + brightness * 0.18 + bell_amount * 0.14 - blur_amount * 0.12;
+    voices[MOTIF_VOICE].mod_ratio = 2.5 + brightness * 0.25 + bell_amount * 0.15 - blur_amount * 0.18;
+    voices[HARMONY_VOICE].mod_ratio = 2.3 + brightness * 0.22 + bell_amount * 0.12 - blur_amount * 0.14;
+    voices[MOTIF_VOICE].mod_depth = 0.45 + brightness * 0.28 + bell_amount * 0.2 - blur_amount * 0.18;
+    voices[HARMONY_VOICE].mod_depth = 0.28 + brightness * 0.18 + bell_amount * 0.14 - blur_amount * 0.12;
 }
 
 fn buildMotif() void {
@@ -727,10 +655,10 @@ fn advanceVoice(voice_idx: usize) void {
     }
 
     if (should_rest) {
-        voice_active[voice_idx] = false;
+        voices[voice_idx].active = false;
     } else {
         triggerVoiceNote(voice_idx, phrase_notes[voice_idx][safe_idx]);
-        voice_active[voice_idx] = true;
+        voices[voice_idx].active = true;
     }
 
     phrase_pos[voice_idx] += 1;
@@ -740,8 +668,8 @@ fn advanceVoice(voice_idx: usize) void {
 
 fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
     voice_note_idx[voice_idx] = note_idx;
-    voice_freq[voice_idx] = midiToFreq(scale[note_idx]);
-    voice_velocity[voice_idx] = if (voice_idx == MOTIF_VOICE)
+    const freq = midiToFreq(scale[note_idx]);
+    const velocity = if (voice_idx == MOTIF_VOICE)
         0.9 + rng.float() * 0.1
     else
         0.48 + rng.float() * 0.08;
@@ -753,7 +681,6 @@ fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
         650.0 + brightness * 2800.0 + note_height * 550.0 - blur_amount * 850.0
     else
         520.0 + brightness * 1700.0 + note_height * 280.0 - blur_amount * 620.0;
-    voice_lpf[voice_idx] = LPF.init(@max(cutoff, 140.0));
 
     const attack_s = if (voice_idx == MOTIF_VOICE)
         0.003 + attack_amount * 0.05
@@ -767,9 +694,7 @@ fn triggerVoiceNote(voice_idx: usize, note_idx: u8) void {
         1.5 + blur_amount * 1.6
     else
         1.8 + blur_amount * 1.9;
-    voice_env[voice_idx] = Envelope.init(attack_s, decay_s, 0.0, release_s);
-    voice_env[voice_idx].trigger();
-    voice_hammer_age[voice_idx] = 0;
+    voices[voice_idx].trigger(freq, velocity, @max(cutoff, 140.0), synth.Envelope.init(attack_s, decay_s, 0.0, release_s));
 
     exciteResonance(note_idx);
 
