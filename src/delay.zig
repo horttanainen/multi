@@ -1,38 +1,49 @@
 const std = @import("std");
-const sdl = @import("sdl.zig");
+const time = @import("time.zig");
 
 const allocator = @import("allocator.zig").allocator;
+pub var delayedActions: std.StringHashMap(u64) = std.StringHashMap(u64).init(allocator);
 
-pub var delayedActions: std.StringHashMap(bool) = std.StringHashMap(bool).init(allocator);
+fn nowMs() u64 {
+    return @intFromFloat(time.now() * 1000.0);
+}
 
 pub fn check(name: [:0]const u8) bool {
-    return delayedActions.contains(name);
+    const expires_at = delayedActions.get(name) orelse return false;
+    if (expires_at > nowMs()) return true;
+
+    const removed = delayedActions.fetchRemove(name);
+    if (removed == null) {
+        std.log.warn("delay.check: key '{s}' vanished during expiry cleanup", .{name});
+        return false;
+    }
+    allocator.free(removed.?.key);
+    return false;
 }
 
 pub fn action(name: [:0]const u8, delayMs: u32) void {
-    if (delayedActions.contains(name)) return;
-
-    const nameCopy = allocator.dupe(u8, name) catch {
-        return;
-    };
-
-    delayedActions.put(nameCopy, true) catch {
-        allocator.free(nameCopy);
-        return;
-    };
-    const keyPtr = delayedActions.getKeyPtr(nameCopy);
-
-    _ = sdl.addTimer(delayMs, shutTimer, @ptrCast(@constCast(keyPtr)));
-}
-
-fn shutTimer(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-    const name: *[]const u8 = @alignCast(@ptrCast(param));
-
-    if (delayedActions.fetchRemove(name.*)) |entry| {
-        allocator.free(entry.key);
+    const now = nowMs();
+    const expires_at = now + delayMs;
+    if (delayedActions.get(name)) |existing_expires_at| {
+        if (existing_expires_at > now) return;
+        const removed = delayedActions.fetchRemove(name);
+        if (removed == null) {
+            std.log.warn("delay.action: key '{s}' vanished while refreshing expired entry", .{name});
+            return;
+        }
+        allocator.free(removed.?.key);
     }
 
-    return 0;
+    const nameCopy = allocator.dupe(u8, name) catch {
+        std.log.err("delay.action: failed to duplicate key '{s}'", .{name});
+        return;
+    };
+
+    delayedActions.put(nameCopy, expires_at) catch {
+        allocator.free(nameCopy);
+        std.log.err("delay.action: failed to store key '{s}'", .{name});
+        return;
+    };
 }
 
 pub fn cleanup() void {
