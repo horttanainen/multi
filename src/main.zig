@@ -55,7 +55,7 @@ const Sprite = entity.Sprite;
 //   - RMS volume (overall energy)
 //   - Band-split energy (bass / mid / treble) via simple bandpass filters or a small FFT
 //   - Beat detection (track energy spikes in the bass band)
-// 2. Pass as uniforms — add a few floats to PaintUniforms like audio_bass, audio_mid, audio_treble, audio_beat. Push them each frame alongside the existing uniforms.
+// 2. Pass as uniforms — add a few floats to PaintUniforms like audio_bass/audio_mid/audio_treble and push them each frame alongside the existing uniforms.
 // 3. Use in shader — modulate existing params: pulse spin_speed or contrast with bass energy, shift colors with treble, spike spin_amount on beats, etc.
 
 // Considerations:

@@ -2,6 +2,7 @@
 // Algorithm adapted from Balatro's background shader (originally by localthunk).
 const std = @import("std");
 const gpu = @import("gpu.zig");
+const music = @import("music.zig");
 const time = @import("time.zig");
 const window = @import("window.zig");
 
@@ -17,6 +18,16 @@ pub var uniforms: gpu.PaintUniforms = .{
     .colour_1 = .{ 0.5, 0.3, 0.3 },
     .colour_2 = .{ 0.3, 0.5, 0.3 },
     .colour_3 = .{ 0.3, 0.3, 0.5 },
+    .bass_mode = 3.0,
+    .bass_strength = 0.45,
+    .texture_mode = 5.0,
+    .texture_strength = 0.35,
+    .accent_mode = 8.0,
+    .accent_strength = 0.28,
+    .loudness_mode = 8.0,
+    .loudness_strength = 0.22,
+    .onset_mode = 10.0,
+    .onset_strength = 0.24,
 };
 
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
@@ -26,9 +37,20 @@ pub fn init() void {
 }
 
 pub fn draw() void {
-    uniforms.resolution = .{ @floatFromInt(window.width), @floatFromInt(window.height) };
-    uniforms.time = @floatCast(time.passedTime);
-    gpu.drawPaintBackground(uniforms);
+    var draw_uniforms = uniforms;
+    const reactive = music.getReactiveVisual();
+    draw_uniforms.resolution = .{ @floatFromInt(window.width), @floatFromInt(window.height) };
+    draw_uniforms.time = @floatCast(time.passedTime);
+    draw_uniforms.audio_loudness = reactive.loudness;
+    draw_uniforms.audio_loudness_att = reactive.loudness_att;
+    draw_uniforms.audio_bass = reactive.low;
+    draw_uniforms.audio_bass_att = reactive.low_att;
+    draw_uniforms.audio_texture = reactive.mid;
+    draw_uniforms.audio_texture_att = reactive.mid_att;
+    draw_uniforms.audio_accent = reactive.high;
+    draw_uniforms.audio_accent_att = reactive.high_att;
+    draw_uniforms.audio_onset = reactive.onset;
+    gpu.drawPaintBackground(draw_uniforms);
 }
 
 pub fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {

@@ -1,60 +1,72 @@
 const std = @import("std");
 const background_paint = @import("background_paint.zig");
 const menu = @import("menu.zig");
+const sdl = @import("sdl.zig");
 const settings = @import("settings.zig");
 const state = @import("state.zig");
 
 // --- ConfigData for each tweakable parameter ---
-// All 0.0–1.0 user-facing. shader_value = shader_offset + value * shader_scale.
+// Most are normalized 0.0–1.0 user-facing values; shader_value = shader_offset + value * shader_scale.
 // zig fmt: off
 var spin_rotation_config = menu.ConfigData{ .value = 0,    .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0,  .shader_scale = 6.28,  .repeat_delay_ms = 75 };
-var spin_speed_config    = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.1,  .rand_max = 0.8,  .shader_offset = 0.0,  .shader_scale = 0.1,   .repeat_delay_ms = 75 };
-var contrast_config      = menu.ConfigData{ .value = 0.33, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2,  .rand_max = 0.7,  .shader_offset = 0.5,  .shader_scale = 4.5,   .repeat_delay_ms = 75 };
-var spin_amount_config   = menu.ConfigData{ .value = 0.4,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2,  .rand_max = 0.8,  .shader_offset = 0.0,  .shader_scale = 1.0,   .repeat_delay_ms = 75 };
-var pixel_filter_config  = menu.ConfigData{ .value = 0.27, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.13, .rand_max = 1.0, .shader_offset = 50.0, .shader_scale = 750.0, .repeat_delay_ms = 75 };
-var offset_x_config      = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.35, .rand_max = 0.65, .shader_offset = -0.5, .shader_scale = 1.0,   .repeat_delay_ms = 75 };
-var offset_y_config      = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.35, .rand_max = 0.65, .shader_offset = -0.5, .shader_scale = 1.0,   .repeat_delay_ms = 75 };
+var spin_speed_config    = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.01, .rand_max = 1.0,  .shader_offset = 0.0,  .shader_scale = 0.1,   .repeat_delay_ms = 75 };
+var contrast_config      = menu.ConfigData{ .value = 0.33, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0,  .rand_max = 1.0,  .shader_offset = 0.5,  .shader_scale = 4.5,   .repeat_delay_ms = 75 };
+var spin_amount_config   = menu.ConfigData{ .value = 0.4,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0,  .rand_max = 1.0,  .shader_offset = 0.0,  .shader_scale = 1.0,   .repeat_delay_ms = 75 };
+var pixel_filter_config  = menu.ConfigData{ .value = 250.0, .step = 5.0, .min = 50.0, .max = 1200.0, .rand_min = 150.0, .rand_max = 1200.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var offset_x_config      = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -0.5, .rand_max = 0.5, .shader_offset = 0.0, .shader_scale = 1.0,   .repeat_delay_ms = 75 };
+var offset_y_config      = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -0.5, .rand_max = 0.5, .shader_offset = 0.0, .shader_scale = 1.0,   .repeat_delay_ms = 75 };
 var offset_z_config      = menu.ConfigData{ .value = 0.18, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 1.0,  .shader_offset = 0.1,  .shader_scale = 4.9,   .repeat_delay_ms = 75 };
 
 // Shared controls
 var noise_scale_config     = menu.ConfigData{ .value = 0.23, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.05, .rand_max = 0.6,  .shader_offset = 0.1, .shader_scale = 3.9, .repeat_delay_ms = 75 };
-var noise_octaves_config   = menu.ConfigData{ .value = 5.0,  .step = 1.0,  .min = 1.0, .max = 16.0, .rand_min = 2.0, .rand_max = 10.0, .repeat_delay_ms = 150 };
-var noise_speed_config     = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.05, .rand_max = 0.5,  .shader_offset = 0.0, .shader_scale = 2.0, .repeat_delay_ms = 75 };
+var noise_octaves_config   = menu.ConfigData{ .value = 5.0,  .step = 1.0,  .min = 1.0, .max = 16.0, .rand_min = 2.0, .rand_max = 16.0, .repeat_delay_ms = 150 };
+var noise_speed_config     = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.1,  .rand_max = 1.0,  .shader_offset = 0.0, .shader_scale = 2.0, .repeat_delay_ms = 75 };
 var noise_amplitude_config = menu.ConfigData{ .value = 0.33, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.15, .rand_max = 0.6,  .shader_offset = 0.0, .shader_scale = 3.0, .repeat_delay_ms = 75 };
-var color_intensity_config = menu.ConfigData{ .value = 0.31, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2,  .rand_max = 0.4, .shader_offset = 0.1, .shader_scale = 2.9, .repeat_delay_ms = 75 };
+var color_intensity_config = menu.ConfigData{ .value = 0.31, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2,  .rand_max = 0.8, .shader_offset = 0.1, .shader_scale = 2.9, .repeat_delay_ms = 75 };
 var color_speed_config     = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0,  .rand_max = 0.25, .shader_offset = 0.0, .shader_scale = 2.0, .repeat_delay_ms = 75 };
-var swirl_falloff_config   = menu.ConfigData{ .value = 1.0,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.18, .rand_max = 0.8,  .shader_offset = 0.1, .shader_scale = 4.9, .repeat_delay_ms = 75 };
+var swirl_falloff_config   = menu.ConfigData{ .value = 1.0,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.1,  .rand_max = 0.7,  .shader_offset = 0.1, .shader_scale = 4.9, .repeat_delay_ms = 75 };
 var swirl_segments_config  = menu.ConfigData{ .value = 6.0,  .step = 1.0,  .min = 2.0, .max = 16.0, .rand_min = 3.0, .rand_max = 10.0, .repeat_delay_ms = 150 };
-var swirl_count_config     = menu.ConfigData{ .value = 1.0,  .step = 1.0,  .min = 1.0, .max = 4.0,  .rand_min = 1.0, .rand_max = 3.0,  .repeat_delay_ms = 200 };
-var swirl_c1_x_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c1_y_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c2_x_config = menu.ConfigData{ .value = 0.75, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c2_y_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c3_x_config = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c3_y_config = menu.ConfigData{ .value = 0.7,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c4_x_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
-var swirl_c4_y_config = menu.ConfigData{ .value = 0.25, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.2, .rand_max = 0.8, .shader_offset = -0.5, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_count_config     = menu.ConfigData{ .value = 1.0,  .step = 1.0,  .min = 1.0, .max = 4.0,  .rand_min = 1.0, .rand_max = 4.0,  .repeat_delay_ms = 200 };
+var swirl_c1_x_config = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c1_y_config = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c2_x_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c2_y_config = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c3_x_config = menu.ConfigData{ .value = -0.5, .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c3_y_config = menu.ConfigData{ .value = 0.4,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c4_x_config = menu.ConfigData{ .value = 0.0,  .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var swirl_c4_y_config = menu.ConfigData{ .value = -0.5, .step = 0.01, .min = -1.0, .max = 1.0, .rand_min = -1.0, .rand_max = 1.0, .shader_offset = 0.0, .shader_scale = 1.0, .repeat_delay_ms = 75 };
+var low_strength_config  = menu.ConfigData{ .value = 0.45, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var mid_strength_config  = menu.ConfigData{ .value = 0.35, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var high_strength_config = menu.ConfigData{ .value = 0.28, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var loudness_strength_config = menu.ConfigData{ .value = 0.22, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
+var onset_strength_config = menu.ConfigData{ .value = 0.24, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 // zig fmt: on
 
 // HSV controls for 3 colours (already 0–1 naturally)
-var c1_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var c1_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.55, .rand_max = 0.85, .repeat_delay_ms = 75 };
-var c1_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.40, .rand_max = 0.75, .repeat_delay_ms = 75 };
-var c2_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var c2_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.55, .rand_max = 0.85, .repeat_delay_ms = 75 };
-var c2_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.40, .rand_max = 0.75, .repeat_delay_ms = 75 };
-var c3_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var c3_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.45, .rand_max = 0.75, .repeat_delay_ms = 75 };
-var c3_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.45, .rand_max = 0.85, .repeat_delay_ms = 75 };
+var c1_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c1_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c1_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c2_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c2_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c2_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c3_h_config = menu.ConfigData{ .value = 0, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c3_s_config = menu.ConfigData{ .value = 0.7, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
+var c3_v_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .rand_min = 0.0, .rand_max = 1.0, .repeat_delay_ms = 75 };
 
 // Algorithm selection state
 var swirl_type_value: u8 = 0;
 var noise_type_value: u8 = 0;
 var color_mode_value: u8 = 0;
+var low_mode_value: u8 = 1;
+var mid_mode_value: u8 = 1;
+var high_mode_value: u8 = 1;
+var loudness_mode_value: u8 = 1;
+var onset_mode_value: u8 = 1;
 
 const SWIRL_COUNT = 8;
 const NOISE_COUNT = 8;
 const COLOR_COUNT = 8;
+const SWIRL_KALEIDOSCOPE_INDEX: u8 = 2;
 
 const swirl_names = [SWIRL_COUNT][:0]const u8{
     "Swirl: None",
@@ -86,6 +98,47 @@ const color_names = [COLOR_COUNT][:0]const u8{
     "Color: Neon",
     "Color: Posterize",
 };
+const low_mode_targets = [_]u8{ 0, 3, 2, 5, 6, 4, 8 };
+const low_mode_names = [_][:0]const u8{
+    "Low: Off",
+    "Low: Spin Speed",
+    "Low: Zoom",
+    "Low: Noise Frequency",
+    "Low: Noise Speed",
+    "Low: Spin Amount",
+    "Low: Color Intensity",
+};
+const mid_mode_targets = [_]u8{ 0, 3, 2, 5, 6, 4, 8 };
+const mid_mode_names = [_][:0]const u8{
+    "Mid: Off",
+    "Mid: Spin Speed",
+    "Mid: Zoom",
+    "Mid: Noise Frequency",
+    "Mid: Noise Speed",
+    "Mid: Spin Amount",
+    "Mid: Color Intensity",
+};
+const high_mode_targets = [_]u8{ 0, 10, 8 };
+const high_mode_names = [_][:0]const u8{
+    "High: Off",
+    "High: Flash",
+    "High: Color Intensity",
+};
+const loudness_mode_targets = [_]u8{ 0, 8, 2, 5, 6, 4 };
+const loudness_mode_names = [_][:0]const u8{
+    "Loudness: Off",
+    "Loudness: Color Intensity",
+    "Loudness: Zoom",
+    "Loudness: Noise Frequency",
+    "Loudness: Noise Speed",
+    "Loudness: Spin Amount",
+};
+const onset_mode_targets = [_]u8{ 0, 10, 8 };
+const onset_mode_names = [_][:0]const u8{
+    "High Pulse: Off",
+    "High Pulse: Flash",
+    "High Pulse: Color Intensity",
+};
 
 // ============================================================
 // Top-level menu
@@ -111,6 +164,7 @@ var main_items = [_]menu.Item{
     .{ .label = "Randomize Colors", .kind = .{ .button = actionRandomizeColors }, .font = .medium },
     // --- Global ---
     .{ .label = "Tweak Global", .kind = .{ .button = actionOpenGlobalMenu }, .font = .medium },
+    .{ .label = "Tweak Music", .kind = .{ .button = actionOpenMusicMenu }, .font = .medium },
     .{ .label = "Randomize", .kind = .{ .button = actionRandomize }, .font = .medium },
     .{ .label = "Randomize All", .kind = .{ .button = actionRandomizeAll }, .font = .medium },
     .{ .label = "Save Preset", .kind = .{ .button = actionSavePreset }, .font = .medium },
@@ -126,7 +180,24 @@ var swirl_items = [_]menu.Item{
     .{ .label = "Spin Speed", .kind = .{ .config = &spin_speed_config }, .font = .medium },
     .{ .label = "Spin Amount", .kind = .{ .config = &spin_amount_config }, .font = .medium },
     .{ .label = "Swirl Falloff", .kind = .{ .config = &swirl_falloff_config }, .font = .medium },
-    .{ .label = "Swirl Segments", .kind = .{ .config = &swirl_segments_config }, .font = .medium },
+    .{ .label = "Swirl Centers", .kind = .{ .config = &swirl_count_config }, .font = .medium },
+    .{ .label = "Center 1 X", .kind = .{ .config = &swirl_c1_x_config }, .font = .medium },
+    .{ .label = "Center 1 Y", .kind = .{ .config = &swirl_c1_y_config }, .font = .medium },
+    .{ .label = "Center 2 X", .kind = .{ .config = &swirl_c2_x_config }, .font = .medium },
+    .{ .label = "Center 2 Y", .kind = .{ .config = &swirl_c2_y_config }, .font = .medium },
+    .{ .label = "Center 3 X", .kind = .{ .config = &swirl_c3_x_config }, .font = .medium },
+    .{ .label = "Center 3 Y", .kind = .{ .config = &swirl_c3_y_config }, .font = .medium },
+    .{ .label = "Center 4 X", .kind = .{ .config = &swirl_c4_x_config }, .font = .medium },
+    .{ .label = "Center 4 Y", .kind = .{ .config = &swirl_c4_y_config }, .font = .medium },
+};
+
+var swirl_items_kaleidoscope = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Spin Rotation", .kind = .{ .config = &spin_rotation_config }, .font = .medium },
+    .{ .label = "Spin Speed", .kind = .{ .config = &spin_speed_config }, .font = .medium },
+    .{ .label = "Spin Amount", .kind = .{ .config = &spin_amount_config }, .font = .medium },
+    .{ .label = "Swirl Falloff", .kind = .{ .config = &swirl_falloff_config }, .font = .medium },
+    .{ .label = "Kaleidoscope Segments", .kind = .{ .config = &swirl_segments_config }, .font = .medium },
     .{ .label = "Swirl Centers", .kind = .{ .config = &swirl_count_config }, .font = .medium },
     .{ .label = "Center 1 X", .kind = .{ .config = &swirl_c1_x_config }, .font = .medium },
     .{ .label = "Center 1 Y", .kind = .{ .config = &swirl_c1_y_config }, .font = .medium },
@@ -140,7 +211,7 @@ var swirl_items = [_]menu.Item{
 
 var noise_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Noise Scale", .kind = .{ .config = &noise_scale_config }, .font = .medium },
+    .{ .label = "Noise Frequency", .kind = .{ .config = &noise_scale_config }, .font = .medium },
     .{ .label = "Noise Speed", .kind = .{ .config = &noise_speed_config }, .font = .medium },
     .{ .label = "Noise Amplitude", .kind = .{ .config = &noise_amplitude_config }, .font = .medium },
     .{ .label = "Noise Octaves", .kind = .{ .config = &noise_octaves_config }, .font = .medium },
@@ -148,18 +219,33 @@ var noise_items = [_]menu.Item{
 
 var color_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Color 1", .kind = .{ .button = actionOpenColor1Menu }, .font = .medium, .preview_color = previewColor1 },
+    .{ .label = "Color 2", .kind = .{ .button = actionOpenColor2Menu }, .font = .medium, .preview_color = previewColor2 },
+    .{ .label = "Color 3", .kind = .{ .button = actionOpenColor3Menu }, .font = .medium, .preview_color = previewColor3 },
     .{ .label = "Color Intensity", .kind = .{ .config = &color_intensity_config }, .font = .medium },
     .{ .label = "Color Speed", .kind = .{ .config = &color_speed_config }, .font = .medium },
     .{ .label = "Contrast", .kind = .{ .config = &contrast_config }, .font = .medium },
-    .{ .label = "Colour 1 Hue", .kind = .{ .config = &c1_h_config }, .font = .medium },
-    .{ .label = "Colour 1 Sat", .kind = .{ .config = &c1_s_config }, .font = .medium },
-    .{ .label = "Colour 1 Val", .kind = .{ .config = &c1_v_config }, .font = .medium },
-    .{ .label = "Colour 2 Hue", .kind = .{ .config = &c2_h_config }, .font = .medium },
-    .{ .label = "Colour 2 Sat", .kind = .{ .config = &c2_s_config }, .font = .medium },
-    .{ .label = "Colour 2 Val", .kind = .{ .config = &c2_v_config }, .font = .medium },
-    .{ .label = "Colour 3 Hue", .kind = .{ .config = &c3_h_config }, .font = .medium },
-    .{ .label = "Colour 3 Sat", .kind = .{ .config = &c3_s_config }, .font = .medium },
-    .{ .label = "Colour 3 Val", .kind = .{ .config = &c3_v_config }, .font = .medium },
+};
+
+var color1_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToColorMenu }, .font = .medium },
+    .{ .label = "Hue", .kind = .{ .config = &c1_h_config }, .font = .medium, .preview_color = previewColor1 },
+    .{ .label = "Sat", .kind = .{ .config = &c1_s_config }, .font = .medium, .preview_color = previewColor1 },
+    .{ .label = "Val", .kind = .{ .config = &c1_v_config }, .font = .medium, .preview_color = previewColor1 },
+};
+
+var color2_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToColorMenu }, .font = .medium },
+    .{ .label = "Hue", .kind = .{ .config = &c2_h_config }, .font = .medium, .preview_color = previewColor2 },
+    .{ .label = "Sat", .kind = .{ .config = &c2_s_config }, .font = .medium, .preview_color = previewColor2 },
+    .{ .label = "Val", .kind = .{ .config = &c2_v_config }, .font = .medium, .preview_color = previewColor2 },
+};
+
+var color3_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToColorMenu }, .font = .medium },
+    .{ .label = "Hue", .kind = .{ .config = &c3_h_config }, .font = .medium, .preview_color = previewColor3 },
+    .{ .label = "Sat", .kind = .{ .config = &c3_s_config }, .font = .medium, .preview_color = previewColor3 },
+    .{ .label = "Val", .kind = .{ .config = &c3_v_config }, .font = .medium, .preview_color = previewColor3 },
 };
 
 var global_items = [_]menu.Item{
@@ -170,13 +256,40 @@ var global_items = [_]menu.Item{
     .{ .label = "Pixel Filter", .kind = .{ .config = &pixel_filter_config }, .font = .medium },
 };
 
+var music_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Low: Spin Speed", .kind = .{ .button = actionCycleLowMode }, .font = .medium, .cycle_names = &low_mode_names, .cycle_index = &low_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "Low Strength", .kind = .{ .config = &low_strength_config }, .font = .medium },
+    .{ .label = "Mid: Noise Speed", .kind = .{ .button = actionCycleMidMode }, .font = .medium, .cycle_names = &mid_mode_names, .cycle_index = &mid_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "Mid Strength", .kind = .{ .config = &mid_strength_config }, .font = .medium },
+    .{ .label = "High: Flash", .kind = .{ .button = actionCycleHighMode }, .font = .medium, .cycle_names = &high_mode_names, .cycle_index = &high_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "High Strength", .kind = .{ .config = &high_strength_config }, .font = .medium },
+    .{ .label = "Loudness: Color Intensity", .kind = .{ .button = actionCycleLoudnessMode }, .font = .medium, .cycle_names = &loudness_mode_names, .cycle_index = &loudness_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "Loudness Strength", .kind = .{ .config = &loudness_strength_config }, .font = .medium },
+    .{ .label = "High Pulse: Flash", .kind = .{ .button = actionCycleOnsetMode }, .font = .medium, .cycle_names = &onset_mode_names, .cycle_index = &onset_mode_value, .on_cycle = onCycleSync },
+    .{ .label = "High Pulse Strength", .kind = .{ .config = &onset_strength_config }, .font = .medium },
+};
+
 // ============================================================
 // Public API
 // ============================================================
 
 pub fn open() void {
+    openImpl(.replace);
+}
+
+pub fn push() void {
+    openImpl(.push);
+}
+
+const OpenMode = enum { replace, push };
+
+fn openImpl(mode: OpenMode) void {
     loadFromUniforms();
-    menu.open(&main_items, .{ .minimal_edit = true });
+    switch (mode) {
+        .replace => menu.open(&main_items, .{ .minimal_edit = true }),
+        .push => menu.push(&main_items, .{ .minimal_edit = true }),
+    }
 }
 
 pub fn sync() void {
@@ -209,6 +322,16 @@ pub fn sync() void {
     background_paint.uniforms.swirl_type = @floatFromInt(swirl_type_value);
     background_paint.uniforms.noise_type = @floatFromInt(noise_type_value);
     background_paint.uniforms.color_mode = @floatFromInt(color_mode_value);
+    background_paint.uniforms.bass_mode = @floatFromInt(low_mode_targets[low_mode_value]);
+    background_paint.uniforms.bass_strength = low_strength_config.value;
+    background_paint.uniforms.texture_mode = @floatFromInt(mid_mode_targets[mid_mode_value]);
+    background_paint.uniforms.texture_strength = mid_strength_config.value;
+    background_paint.uniforms.accent_mode = @floatFromInt(high_mode_targets[high_mode_value]);
+    background_paint.uniforms.accent_strength = high_strength_config.value;
+    background_paint.uniforms.loudness_mode = @floatFromInt(loudness_mode_targets[loudness_mode_value]);
+    background_paint.uniforms.loudness_strength = loudness_strength_config.value;
+    background_paint.uniforms.onset_mode = @floatFromInt(onset_mode_targets[onset_mode_value]);
+    background_paint.uniforms.onset_strength = onset_strength_config.value;
 }
 
 // ============================================================
@@ -251,6 +374,16 @@ fn loadFromUniforms() void {
     swirl_type_value = @intFromFloat(u.swirl_type);
     noise_type_value = @intFromFloat(u.noise_type);
     color_mode_value = @intFromFloat(u.color_mode);
+    low_mode_value = mapTargetToCycleIndex("loadFromUniforms.low", u.bass_mode, &low_mode_targets, 1);
+    low_strength_config.value = u.bass_strength;
+    mid_mode_value = mapTargetToCycleIndex("loadFromUniforms.mid", u.texture_mode, &mid_mode_targets, 1);
+    mid_strength_config.value = u.texture_strength;
+    high_mode_value = mapTargetToCycleIndex("loadFromUniforms.high", u.accent_mode, &high_mode_targets, 1);
+    high_strength_config.value = u.accent_strength;
+    loudness_mode_value = mapTargetToCycleIndex("loadFromUniforms.loudness", u.loudness_mode, &loudness_mode_targets, 1);
+    loudness_strength_config.value = u.loudness_strength;
+    onset_mode_value = mapTargetToCycleIndex("loadFromUniforms.onset", u.onset_mode, &onset_mode_targets, 1);
+    onset_strength_config.value = u.onset_strength;
     updateAlgorithmLabels();
 }
 
@@ -259,6 +392,35 @@ fn loadHsvFromRgb(rgb: [3]f32, h_cfg: *menu.ConfigData, s_cfg: *menu.ConfigData,
     h_cfg.value = hsv[0];
     s_cfg.value = hsv[1];
     v_cfg.value = hsv[2];
+}
+
+fn previewColor1() sdl.Color {
+    const rgb = hsvToRgb(c1_h_config.value, c1_s_config.value, c1_v_config.value);
+    return rgbToSdlColor(rgb);
+}
+
+fn previewColor2() sdl.Color {
+    const rgb = hsvToRgb(c2_h_config.value, c2_s_config.value, c2_v_config.value);
+    return rgbToSdlColor(rgb);
+}
+
+fn previewColor3() sdl.Color {
+    const rgb = hsvToRgb(c3_h_config.value, c3_s_config.value, c3_v_config.value);
+    return rgbToSdlColor(rgb);
+}
+
+fn rgbToSdlColor(rgb: [3]f32) sdl.Color {
+    return .{
+        .r = toByte(rgb[0]),
+        .g = toByte(rgb[1]),
+        .b = toByte(rgb[2]),
+        .a = 255,
+    };
+}
+
+fn toByte(value: f32) u8 {
+    const clamped = std.math.clamp(value, 0.0, 1.0);
+    return @intFromFloat(clamped * 255.0);
 }
 
 fn onCycleSync() void {
@@ -277,23 +439,48 @@ fn updateAlgorithmLabels() void {
 // ============================================================
 
 fn actionBackToMain() anyerror!void {
-    menu.open(&main_items, .{ .minimal_edit = true });
+    try menu.back();
+}
+
+fn actionBackToColorMenu() anyerror!void {
+    try menu.back();
 }
 
 fn actionOpenSwirlMenu() anyerror!void {
-    menu.open(&swirl_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+    if (swirl_type_value == SWIRL_KALEIDOSCOPE_INDEX) {
+        menu.push(&swirl_items_kaleidoscope, .{ .minimal_edit = true });
+        return;
+    }
+
+    menu.push(&swirl_items, .{ .minimal_edit = true });
 }
 
 fn actionOpenNoiseMenu() anyerror!void {
-    menu.open(&noise_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+    menu.push(&noise_items, .{ .minimal_edit = true });
 }
 
 fn actionOpenColorMenu() anyerror!void {
-    menu.open(&color_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+    menu.push(&color_items, .{ .minimal_edit = true });
+}
+
+fn actionOpenColor1Menu() anyerror!void {
+    menu.push(&color1_items, .{ .minimal_edit = true });
+}
+
+fn actionOpenColor2Menu() anyerror!void {
+    menu.push(&color2_items, .{ .minimal_edit = true });
+}
+
+fn actionOpenColor3Menu() anyerror!void {
+    menu.push(&color3_items, .{ .minimal_edit = true });
 }
 
 fn actionOpenGlobalMenu() anyerror!void {
-    menu.open(&global_items, .{ .minimal_edit = true, .back_fn = actionBackToMain });
+    menu.push(&global_items, .{ .minimal_edit = true });
+}
+
+fn actionOpenMusicMenu() anyerror!void {
+    menu.push(&music_items, .{ .minimal_edit = true });
 }
 
 // ============================================================
@@ -316,6 +503,43 @@ fn actionCycleColorMode() anyerror!void {
     color_mode_value = (color_mode_value + 1) % COLOR_COUNT;
     updateAlgorithmLabels();
     sync();
+}
+
+fn actionCycleLowMode() anyerror!void {
+    low_mode_value = (low_mode_value + 1) % @as(u8, low_mode_targets.len);
+    sync();
+}
+
+fn actionCycleMidMode() anyerror!void {
+    mid_mode_value = (mid_mode_value + 1) % @as(u8, mid_mode_targets.len);
+    sync();
+}
+
+fn actionCycleHighMode() anyerror!void {
+    high_mode_value = (high_mode_value + 1) % @as(u8, high_mode_targets.len);
+    sync();
+}
+
+fn actionCycleLoudnessMode() anyerror!void {
+    loudness_mode_value = (loudness_mode_value + 1) % @as(u8, loudness_mode_targets.len);
+    sync();
+}
+
+fn actionCycleOnsetMode() anyerror!void {
+    onset_mode_value = (onset_mode_value + 1) % @as(u8, onset_mode_targets.len);
+    sync();
+}
+
+fn mapTargetToCycleIndex(context: []const u8, mode_value: f32, targets: []const u8, fallback: u8) u8 {
+    const clamped = std.math.clamp(mode_value, 0.0, 255.0);
+    const mode_u8: u8 = @intFromFloat(@round(clamped));
+    var i: usize = 0;
+    while (i < targets.len) : (i += 1) {
+        if (targets[i] == mode_u8) return @intCast(i);
+    }
+
+    std.log.warn("{s}: unexpected target mode {d}, falling back to index {d}", .{ context, mode_u8, fallback });
+    return fallback;
 }
 
 // ============================================================
@@ -347,16 +571,13 @@ fn randomizeNoise() void {
 }
 
 fn randomizeColors() void {
-    const rng = std.crypto.random;
-    const base_hue: f32 = rng.float(f32);
-    const hue_step: f32 = 0.08 + rng.float(f32) * 0.15;
-    c1_h_config.value = base_hue;
+    c1_h_config.value = randomInRange(c1_h_config);
     c1_s_config.value = randomInRange(c1_s_config);
     c1_v_config.value = randomInRange(c1_v_config);
-    c2_h_config.value = @mod(base_hue + hue_step, 1.0);
+    c2_h_config.value = randomInRange(c2_h_config);
     c2_s_config.value = randomInRange(c2_s_config);
     c2_v_config.value = randomInRange(c2_v_config);
-    c3_h_config.value = @mod(base_hue + 0.45 + rng.float(f32) * 0.15, 1.0);
+    c3_h_config.value = randomInRange(c3_h_config);
     c3_s_config.value = randomInRange(c3_s_config);
     c3_v_config.value = randomInRange(c3_v_config);
     color_intensity_config.value = randomInRange(color_intensity_config);
@@ -384,7 +605,7 @@ pub fn randomize() void {
 fn randomizeAlgorithms() void {
     const rng = std.crypto.random;
     swirl_type_value = rng.intRangeAtMost(u8, 0, SWIRL_COUNT - 1);
-    noise_type_value = rng.intRangeAtMost(u8, 0, NOISE_COUNT - 1);
+    noise_type_value = rng.intRangeAtMost(u8, 1, NOISE_COUNT - 1);
     color_mode_value = rng.intRangeAtMost(u8, 0, COLOR_COUNT - 1);
     updateAlgorithmLabels();
 }
@@ -394,7 +615,7 @@ fn toShader(cfg: *const menu.ConfigData) f32 {
 }
 
 fn fromShader(cfg: *menu.ConfigData, shader: f32) void {
-    cfg.value = std.math.clamp((shader - cfg.shader_offset) / cfg.shader_scale, 0.0, 1.0);
+    cfg.value = std.math.clamp((shader - cfg.shader_offset) / cfg.shader_scale, cfg.min, cfg.max);
 }
 
 fn randomInRange(cfg: menu.ConfigData) f32 {
@@ -446,7 +667,7 @@ fn actionSavePreset() anyerror!void {
 
 fn actionExitEditor() anyerror!void {
     state.editingBackground = false;
-    menu.close();
+    try menu.back();
 }
 
 pub fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {

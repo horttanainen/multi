@@ -7,8 +7,6 @@ const settings = @import("settings.zig");
 var on_back: ?*const fn () void = null;
 var is_open: bool = false;
 var showing_lut_picker: bool = false;
-var suppress_settings_cleanup: bool = false;
-var suppress_lut_picker_cleanup: bool = false;
 var staged_preferred_lut_index: usize = 0;
 
 var lut_strength_config = menu.ConfigData{ .value = 1.0, .step = 0.05, .min = 0.0, .max = 5.0, .repeat_delay_ms = 75 };
@@ -25,13 +23,11 @@ var lut_picker_items: []menu.Item = &.{};
 var color_grading_label_buf: [96:0]u8 = undefined;
 
 pub fn open(back_fn: *const fn () void) void {
-    on_back = back_fn;
-    is_open = true;
-    showing_lut_picker = false;
-    staged_preferred_lut_index = getSavedLutIndex();
-    lut_strength_config.value = settings.lutStrength();
-    refreshColorGradingLabel();
-    menu.openWithCleanup(&items, cleanupSettingsMenu, .{});
+    openImpl(back_fn, .replace);
+}
+
+pub fn push() void {
+    openImpl(null, .push);
 }
 
 pub fn isOpen() bool {
@@ -44,11 +40,10 @@ pub fn lutStrength() f32 {
 }
 
 fn actionBack() anyerror!void {
-    menu.close();
+    try menu.back();
 }
 
 fn actionOpenLutPicker() anyerror!void {
-    suppress_settings_cleanup = true;
     try openLutPicker(staged_preferred_lut_index + 1);
 }
 
@@ -75,7 +70,7 @@ fn actionSaveChanges() anyerror!void {
 }
 
 fn actionBackToSettings() anyerror!void {
-    menu.close();
+    try menu.back();
 }
 
 fn buildLutPickerItems() ![]menu.Item {
@@ -130,25 +125,33 @@ fn refreshLutPickerLabels() void {
 fn openLutPicker(focus_index: usize) !void {
     showing_lut_picker = true;
     const new_items = try buildLutPickerItems();
-    menu.openWithCleanup(new_items, cleanupLutPickerItems, .{ .layout = .vertical });
+    menu.pushWithCleanup(new_items, cleanupLutPickerItems, .{ .layout = .vertical });
     lut_picker_items = new_items;
     menu.setFocusedIndex(@min(focus_index, new_items.len - 1));
 }
 
 fn cleanupSettingsMenu() void {
-    if (suppress_settings_cleanup) {
-        suppress_settings_cleanup = false;
-        return;
-    }
     is_open = false;
     showing_lut_picker = false;
     settings.apply();
 
-    const back_fn = on_back orelse {
-        std.log.warn("settingsMenu.cleanupSettingsMenu: no back handler is configured", .{});
-        return;
-    };
-    back_fn();
+    if (on_back) |back_fn| back_fn();
+}
+
+const OpenMode = enum { replace, push };
+
+fn openImpl(back_fn: ?*const fn () void, mode: OpenMode) void {
+    on_back = back_fn;
+    is_open = true;
+    showing_lut_picker = false;
+    staged_preferred_lut_index = getSavedLutIndex();
+    lut_strength_config.value = settings.lutStrength();
+    refreshColorGradingLabel();
+
+    switch (mode) {
+        .replace => menu.openWithCleanup(&items, cleanupSettingsMenu, .{}),
+        .push => menu.pushWithCleanup(&items, cleanupSettingsMenu, .{}),
+    }
 }
 
 fn cleanupLutPickerItems() void {
@@ -159,14 +162,7 @@ fn cleanupLutPickerItems() void {
     }
     allocator.free(lut_picker_items);
     lut_picker_items = &.{};
-
-    if (suppress_lut_picker_cleanup) {
-        suppress_lut_picker_cleanup = false;
-        return;
-    }
-
     showing_lut_picker = false;
-    menu.openWithCleanup(&items, cleanupSettingsMenu, .{});
 }
 
 fn allocLabel(comptime fmt: []const u8, args: anytype) ![:0]const u8 {

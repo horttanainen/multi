@@ -36,6 +36,7 @@ pub const Item = struct {
     kind: ItemKind,
     font: text.Font = .large,
     image: ?u64 = null,
+    preview_color: ?*const fn () sdl.Color = null,
     cycle_names: ?[]const [:0]const u8 = null,
     cycle_index: ?*u8 = null,
     on_cycle: ?*const fn () void = null,
@@ -52,6 +53,18 @@ pub const OpenOptions = struct {
     item_height: i32 = BTN_H,
     minimal_edit: bool = false,
     back_fn: ?*const fn () anyerror!void = null,
+};
+
+const NavState = struct {
+    items: []Item,
+    focused_index: usize,
+    scroll_offset: usize,
+    scroll_anim: f32,
+    layout: Layout,
+    item_height: i32,
+    minimal_edit: bool,
+    back_fn: ?*const fn () anyerror!void,
+    close_fn: ?*const fn () void,
 };
 
 // ============================================================
@@ -72,22 +85,35 @@ var current_layout: Layout = .vertical;
 var current_item_height: i32 = BTN_H;
 var current_minimal_edit: bool = false;
 var current_back_fn: ?*const fn () anyerror!void = null;
+const NAV_STACK_CAPACITY: usize = 32;
+var nav_stack: [NAV_STACK_CAPACITY]NavState = undefined;
+var nav_stack_len: usize = 0;
 
 const LERP_SPEED: f32 = 0.2;
 
 pub fn open(items: []Item, options: OpenOptions) void {
-    openImpl(items, null, options);
+    openImpl(items, null, options, .replace);
 }
 
 pub fn openWithCleanup(items: []Item, cleanup: *const fn () void, options: OpenOptions) void {
-    openImpl(items, cleanup, options);
+    openImpl(items, cleanup, options, .replace);
 }
 
-fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions) void {
-    // Notify previous caller that it's being replaced
-    const prev_fn = close_fn;
-    close_fn = cleanup;
-    if (prev_fn) |f| f();
+pub fn push(items: []Item, options: OpenOptions) void {
+    openImpl(items, null, options, .push);
+}
+
+pub fn pushWithCleanup(items: []Item, cleanup: *const fn () void, options: OpenOptions) void {
+    openImpl(items, cleanup, options, .push);
+}
+
+const OpenMode = enum { replace, push };
+
+fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions, mode: OpenMode) void {
+    switch (mode) {
+        .replace => resetNavigation(),
+        .push => pushCurrentState(),
+    }
 
     is_open = true;
     active_items = items;
@@ -99,13 +125,27 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions) vo
     current_item_height = options.item_height;
     current_minimal_edit = options.minimal_edit;
     current_back_fn = options.back_fn;
+    close_fn = cleanup;
 }
 
 pub fn close() void {
+    if (!is_open and nav_stack_len == 0) return;
+
     is_open = false;
-    const f = close_fn;
+    active_items = &.{};
+    focused_index = 0;
+    scroll_offset = 0;
+    scroll_anim = 0.0;
+    editing_index = null;
+    const current_cleanup = close_fn;
     close_fn = null;
-    if (f) |fn_ptr| fn_ptr();
+    current_back_fn = null;
+    if (current_cleanup) |fn_ptr| fn_ptr();
+    clearNavStack();
+}
+
+pub fn back() anyerror!void {
+    try goBack();
 }
 
 pub fn isOpen() bool {
@@ -248,11 +288,91 @@ fn handleBrowseInput() !void {
 }
 
 fn goBack() !void {
-    if (current_back_fn) |back| {
-        try back();
+    if (nav_stack_len > 0) {
+        popState();
+        return;
+    }
+
+    if (current_back_fn) |back_fn| {
+        try back_fn();
     } else {
         close();
     }
+}
+
+fn pushCurrentState() void {
+    if (!is_open) return;
+
+    if (nav_stack_len >= NAV_STACK_CAPACITY) {
+        std.log.warn("menu.pushCurrentState: navigation stack full, dropping oldest entry", .{});
+        const dropped = nav_stack[0];
+        if (dropped.close_fn) |cleanup| cleanup();
+        std.mem.copyForwards(NavState, nav_stack[0 .. NAV_STACK_CAPACITY - 1], nav_stack[1..NAV_STACK_CAPACITY]);
+        nav_stack_len = NAV_STACK_CAPACITY - 1;
+    }
+
+    nav_stack[nav_stack_len] = .{
+        .items = active_items,
+        .focused_index = focused_index,
+        .scroll_offset = scroll_offset,
+        .scroll_anim = scroll_anim,
+        .layout = current_layout,
+        .item_height = current_item_height,
+        .minimal_edit = current_minimal_edit,
+        .back_fn = current_back_fn,
+        .close_fn = close_fn,
+    };
+    nav_stack_len += 1;
+}
+
+fn popState() void {
+    if (nav_stack_len == 0) {
+        std.log.warn("menu.popState: attempted to pop empty navigation stack", .{});
+        return;
+    }
+
+    const current_cleanup = close_fn;
+    if (current_cleanup) |cleanup| cleanup();
+
+    nav_stack_len -= 1;
+    const state = nav_stack[nav_stack_len];
+    restoreState(state);
+}
+
+fn restoreState(state: NavState) void {
+    is_open = true;
+    active_items = state.items;
+    focused_index = state.focused_index;
+    scroll_offset = state.scroll_offset;
+    scroll_anim = state.scroll_anim;
+    editing_index = null;
+    current_layout = state.layout;
+    current_item_height = state.item_height;
+    current_minimal_edit = state.minimal_edit;
+    current_back_fn = state.back_fn;
+    close_fn = state.close_fn;
+}
+
+fn clearNavStack() void {
+    while (nav_stack_len > 0) {
+        nav_stack_len -= 1;
+        const entry = nav_stack[nav_stack_len];
+        if (entry.close_fn) |cleanup| cleanup();
+    }
+}
+
+fn resetNavigation() void {
+    if (is_open) {
+        const current_cleanup = close_fn;
+        if (current_cleanup) |cleanup| cleanup();
+    }
+
+    is_open = false;
+    active_items = &.{};
+    editing_index = null;
+    close_fn = null;
+    current_back_fn = null;
+    clearNavStack();
 }
 
 fn handleEditInput() !void {
@@ -468,6 +588,9 @@ const COLOR_FOCUSED = config.menu.colorFocused;
 const COLOR_EDITING = config.menu.colorEditing;
 const COLOR_OVERLAY = config.menu.colorOverlay;
 const COLOR_SIDE = config.menu.colorSide;
+const SWATCH_MIN_SIZE: i32 = 18;
+const SWATCH_PAD: i32 = 8;
+const SWATCH_BORDER: i32 = 2;
 
 pub fn draw() !void {
     if (!is_open) return;
@@ -527,6 +650,8 @@ fn drawVertical() !void {
         try gpu.setRenderDrawColor(color);
         try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H });
 
+        var preview_label: ?[:0]const u8 = null;
+
         if (item.image) |uuid| {
             if (sprite.getSprite(uuid)) |s| {
                 const inner_w = btn_w - IMG_PAD * 2;
@@ -552,11 +677,14 @@ fn drawVertical() !void {
                 .button, .sprite_pick => item.label,
                 .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
             };
+            preview_label = label;
             try text.writeCenter(item.font, label, .{
                 .x = btn_x + @divFloor(btn_w, 2),
                 .y = y + @divFloor(BTN_H, 2),
             });
         }
+
+        try drawInlineColorPreview(item, preview_label, btn_x, y, btn_w, BTN_H);
 
         if (in_window) hint_y = y + BTN_H;
     }
@@ -625,6 +753,7 @@ fn drawMinimalEdit() !void {
         .x = center_x,
         .y = y + @divFloor(BTN_H, 2),
     }, current_text_alpha);
+    try drawFloatingColorPreview(item, label, btn_x, y, btn_w, BTN_H);
 
     const hint = if (item.cycle_names != null) "Up/Down: Cycle  Enter: Confirm  Esc: Back" else "Enter: Apply  Esc: Cancel";
     try text.writeCenter(.small, hint, .{
@@ -659,6 +788,8 @@ fn drawHorizontal() !void {
         try gpu.setRenderDrawColor(color);
         try gpu.renderFillRect(sdl.Rect{ .x = x, .y = screen_cy - @divFloor(btn_h, 2), .w = btn_w, .h = btn_h });
 
+        var preview_label: ?[:0]const u8 = null;
+
         if (item.image) |uuid| {
             if (sprite.getSprite(uuid)) |s| {
                 const inner_w = btn_w - IMG_PAD * 2;
@@ -684,10 +815,72 @@ fn drawHorizontal() !void {
                 .button, .sprite_pick => item.label,
                 .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
             };
+            preview_label = label;
             try text.writeCenter(item.font, label, .{
                 .x = x + @divFloor(btn_w, 2),
                 .y = screen_cy,
             });
         }
+
+        try drawInlineColorPreview(item, preview_label, x, screen_cy - @divFloor(btn_h, 2), btn_w, btn_h);
     }
+}
+
+fn drawInlineColorPreview(item: Item, label: ?[:0]const u8, x: i32, y: i32, w: i32, h: i32) !void {
+    if (item.preview_color == null) return;
+    const preview_fn = item.preview_color.?;
+    const preview = preview_fn();
+    const inner_size = h - SWATCH_PAD * 2;
+    const size = if (inner_size > SWATCH_MIN_SIZE) inner_size else SWATCH_MIN_SIZE;
+    var swatch_x = x + w - size - SWATCH_PAD;
+    if (label) |label_text| {
+        const label_size = text.measure(item.font, label_text) catch |err| {
+            std.log.warn("menu.drawInlineColorPreview: failed to measure label: {}", .{err});
+            const swatch_y = y + @divFloor(h - size, 2);
+            try drawColorSwatch(swatch_x, swatch_y, size, preview);
+            return;
+        };
+        const center_x = x + @divFloor(w, 2);
+        const label_left = center_x - @divFloor(label_size.x, 2);
+        const target = label_left - SWATCH_PAD - size;
+        swatch_x = std.math.clamp(target, x + SWATCH_PAD, x + w - size - SWATCH_PAD);
+    }
+    const swatch_y = y + @divFloor(h - size, 2);
+    try drawColorSwatch(swatch_x, swatch_y, size, preview);
+}
+
+fn drawFloatingColorPreview(item: Item, label: [:0]const u8, x: i32, y: i32, w: i32, h: i32) !void {
+    if (item.preview_color == null) return;
+    const preview_fn = item.preview_color.?;
+    const preview = preview_fn();
+
+    const inner_size = h - SWATCH_PAD * 2;
+    const size = if (inner_size > SWATCH_MIN_SIZE) inner_size else SWATCH_MIN_SIZE;
+    const label_size = text.measure(item.font, label) catch |err| {
+        std.log.warn("menu.drawFloatingColorPreview: failed to measure label: {}", .{err});
+        return;
+    };
+    const center_x = x + @divFloor(w, 2);
+    const label_left = center_x - @divFloor(label_size.x, 2);
+    const target = label_left - SWATCH_PAD - size;
+    const swatch_x = std.math.clamp(target, x + SWATCH_PAD, x + w - size - SWATCH_PAD);
+    const swatch_y = y + @divFloor(h - size, 2);
+    try drawColorSwatch(swatch_x, swatch_y, size, preview);
+}
+
+fn drawColorSwatch(x: i32, y: i32, size: i32, color: sdl.Color) !void {
+    try gpu.setRenderDrawColor(.{ .r = 10, .g = 10, .b = 10, .a = 220 });
+    try gpu.renderFillRect(.{ .x = x, .y = y, .w = size, .h = size });
+
+    const inner = SWATCH_BORDER;
+    const inner_size = size - inner * 2;
+    if (inner_size <= 0) return;
+
+    try gpu.setRenderDrawColor(color);
+    try gpu.renderFillRect(.{
+        .x = x + inner,
+        .y = y + inner,
+        .w = inner_size,
+        .h = inner_size,
+    });
 }

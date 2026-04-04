@@ -169,7 +169,6 @@ var taiko_kane_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min
 // Menu items
 // ============================================================
 
-var stored_back_fn: ?*const fn () anyerror!void = null;
 const IDX_STYLE: usize = 1;
 
 var main_items = [_]menu.Item{
@@ -279,10 +278,26 @@ var taiko_items = [_]menu.Item{
 // ============================================================
 
 pub fn open(back_fn: ?*const fn () anyerror!void) void {
-    stored_back_fn = back_fn;
+    openImpl(back_fn, .replace);
+}
+
+pub fn push() void {
+    openImpl(null, .push);
+}
+
+const OpenMode = enum { replace, push };
+
+fn openImpl(back_fn: ?*const fn () anyerror!void, mode: OpenMode) void {
     state.editingMusic = true;
     loadFromParams();
-    menu.open(&main_items, .{ .minimal_edit = true, .back_fn = back_fn });
+    const options = menu.OpenOptions{
+        .minimal_edit = true,
+        .back_fn = back_fn,
+    };
+    switch (mode) {
+        .replace => menu.open(&main_items, options),
+        .push => menu.push(&main_items, options),
+    }
 }
 
 pub fn sync() void {
@@ -478,16 +493,12 @@ fn applyMenuToSettings(save_changes: bool) !void {
 fn actionBack() anyerror!void {
     try applyMenuToSettings(true);
     state.editingMusic = false;
-    if (stored_back_fn) |back| {
-        try back();
-    } else {
-        menu.close();
-    }
+    try menu.back();
 }
 
 fn actionBackToMain() anyerror!void {
     try applyMenuToSettings(false);
-    menu.open(&main_items, .{ .minimal_edit = true, .back_fn = stored_back_fn });
+    try menu.back();
 }
 
 fn actionCycleStyle() anyerror!void {
@@ -509,14 +520,14 @@ fn onCycleStyle() void {
 fn actionOpenTweak() anyerror!void {
     try applyMenuToSettings(false);
     switch (settings.music_style) {
-        .ambient => menu.open(&ambient_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .house => menu.open(&house_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .piano => menu.open(&piano_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .choir => menu.open(&choir_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .minecraft => menu.open(&minecraft_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .rock80s => menu.open(&rock80s_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .african_drums => menu.open(&african_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
-        .taiko => menu.open(&taiko_items, .{ .minimal_edit = true, .back_fn = actionBackToMain }),
+        .ambient => menu.push(&ambient_items, .{ .minimal_edit = true }),
+        .house => menu.push(&house_items, .{ .minimal_edit = true }),
+        .piano => menu.push(&piano_items, .{ .minimal_edit = true }),
+        .choir => menu.push(&choir_items, .{ .minimal_edit = true }),
+        .minecraft => menu.push(&minecraft_items, .{ .minimal_edit = true }),
+        .rock80s => menu.push(&rock80s_items, .{ .minimal_edit = true }),
+        .african_drums => menu.push(&african_items, .{ .minimal_edit = true }),
+        .taiko => menu.push(&taiko_items, .{ .minimal_edit = true }),
     }
 }
 

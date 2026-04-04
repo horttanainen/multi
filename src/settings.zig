@@ -110,6 +110,16 @@ const StoredSettings = struct {
     bg_noise_amplitude: ?f32 = null,
     bg_color_speed: ?f32 = null,
     bg_swirl_falloff: ?f32 = null,
+    bg_bass_mode: ?f32 = null,
+    bg_bass_strength: ?f32 = null,
+    bg_texture_mode: ?f32 = null,
+    bg_texture_strength: ?f32 = null,
+    bg_accent_mode: ?f32 = null,
+    bg_accent_strength: ?f32 = null,
+    bg_loudness_mode: ?f32 = null,
+    bg_loudness_strength: ?f32 = null,
+    bg_onset_mode: ?f32 = null,
+    bg_onset_strength: ?f32 = null,
     music_style: ?u8 = null,
     music_volume: ?f32 = null,
     music_bpm: ?f32 = null,
@@ -265,6 +275,20 @@ pub fn init() !void {
 fn loadBgPreset(s: StoredSettings) void {
     const spin_rotation = s.bg_spin_rotation orelse return;
     const spin_speed = s.bg_spin_speed orelse return;
+    const has_extended_music_mapping = s.bg_loudness_mode != null or s.bg_onset_mode != null;
+    const bass_mode_loaded = if (has_extended_music_mapping)
+        (s.bg_bass_mode orelse 3.0)
+    else
+        remapLegacyTargetMode(s.bg_bass_mode orelse 1.0);
+    const texture_mode_loaded = if (has_extended_music_mapping)
+        (s.bg_texture_mode orelse 5.0)
+    else
+        remapLegacyTargetMode(s.bg_texture_mode orelse 5.0);
+    const accent_mode_loaded = if (has_extended_music_mapping)
+        (s.bg_accent_mode orelse 8.0)
+    else
+        remapLegacyTargetMode(s.bg_accent_mode orelse 7.0);
+
     has_bg_preset = true;
     bg_preset = .{
         .resolution = .{ 0, 0 },
@@ -295,7 +319,51 @@ fn loadBgPreset(s: StoredSettings) void {
         .noise_amplitude = s.bg_noise_amplitude orelse 1.0,
         .color_speed = s.bg_color_speed orelse 0.0,
         .swirl_falloff = s.bg_swirl_falloff orelse 5.0,
+        .bass_mode = remapRemovedConeMode(bass_mode_loaded, 3.0),
+        .bass_strength = s.bg_bass_strength orelse 0.45,
+        .texture_mode = texture_mode_loaded,
+        .texture_strength = s.bg_texture_strength orelse 0.35,
+        .accent_mode = remapUnsupportedAccentMode(remapRemovedContrastMode(accent_mode_loaded, 8.0), 8.0),
+        .accent_strength = s.bg_accent_strength orelse 0.28,
+        .loudness_mode = remapRemovedContrastMode(s.bg_loudness_mode orelse 8.0, 8.0),
+        .loudness_strength = s.bg_loudness_strength orelse 0.22,
+        .onset_mode = remapUnsupportedOnsetMode(remapRemovedContrastMode(s.bg_onset_mode orelse 10.0, 10.0), 10.0),
+        .onset_strength = s.bg_onset_strength orelse 0.24,
     };
+    normalizeBackgroundPreset(&bg_preset);
+}
+
+fn remapLegacyTargetMode(mode: f32) f32 {
+    if (mode <= 0.0) return 0.0;
+    return std.math.clamp(mode + 1.0, 0.0, 10.0);
+}
+
+fn remapRemovedConeMode(mode: f32, replacement: f32) f32 {
+    const clamped = std.math.clamp(mode, 0.0, 255.0);
+    const mode_u8: u8 = @intFromFloat(@round(clamped));
+    if (mode_u8 == 1) return replacement;
+    return mode;
+}
+
+fn remapRemovedContrastMode(mode: f32, replacement: f32) f32 {
+    const clamped = std.math.clamp(mode, 0.0, 255.0);
+    const mode_u8: u8 = @intFromFloat(@round(clamped));
+    if (mode_u8 == 9) return replacement;
+    return mode;
+}
+
+fn remapUnsupportedOnsetMode(mode: f32, replacement: f32) f32 {
+    const clamped = std.math.clamp(mode, 0.0, 255.0);
+    const mode_u8: u8 = @intFromFloat(@round(clamped));
+    if (mode_u8 == 0 or mode_u8 == 8 or mode_u8 == 10) return mode;
+    return replacement;
+}
+
+fn remapUnsupportedAccentMode(mode: f32, replacement: f32) f32 {
+    const clamped = std.math.clamp(mode, 0.0, 255.0);
+    const mode_u8: u8 = @intFromFloat(@round(clamped));
+    if (mode_u8 == 0 or mode_u8 == 8 or mode_u8 == 10) return mode;
+    return replacement;
 }
 
 pub fn cleanup() void {
@@ -419,6 +487,7 @@ pub fn applyBackgroundPreset() void {
     if (!has_bg_preset) return;
     const prev_res = background_paint.uniforms.resolution;
     const prev_time = background_paint.uniforms.time;
+    normalizeBackgroundPreset(&bg_preset);
     background_paint.uniforms = bg_preset;
     background_paint.uniforms.resolution = prev_res;
     background_paint.uniforms.time = prev_time;
@@ -428,7 +497,41 @@ pub fn applyBackgroundPreset() void {
 pub fn saveBackgroundPreset(u: gpu.PaintUniforms) !void {
     has_bg_preset = true;
     bg_preset = u;
+    normalizeBackgroundPreset(&bg_preset);
     try save();
+}
+
+fn normalizeBackgroundPreset(u: *gpu.PaintUniforms) void {
+    if (u.bass_mode == 0 and u.texture_mode == 0 and u.accent_mode == 0 and u.loudness_mode == 0 and u.onset_mode == 0) {
+        u.bass_mode = 3.0;
+        u.bass_strength = 0.45;
+        u.texture_mode = 5.0;
+        u.texture_strength = 0.35;
+        u.accent_mode = 8.0;
+        u.accent_strength = 0.28;
+        u.loudness_mode = 8.0;
+        u.loudness_strength = 0.22;
+        u.onset_mode = 10.0;
+        u.onset_strength = 0.24;
+        return;
+    }
+
+    u.bass_mode = remapRemovedConeMode(u.bass_mode, 3.0);
+    u.accent_mode = remapUnsupportedAccentMode(remapRemovedContrastMode(u.accent_mode, 8.0), 8.0);
+    u.loudness_mode = remapRemovedContrastMode(u.loudness_mode, 8.0);
+    u.onset_mode = remapRemovedContrastMode(u.onset_mode, 10.0);
+    u.onset_mode = remapUnsupportedOnsetMode(u.onset_mode, 10.0);
+
+    u.bass_mode = std.math.clamp(u.bass_mode, 0.0, 10.0);
+    u.bass_strength = std.math.clamp(u.bass_strength, 0.0, 1.0);
+    u.texture_mode = std.math.clamp(u.texture_mode, 0.0, 10.0);
+    u.texture_strength = std.math.clamp(u.texture_strength, 0.0, 1.0);
+    u.accent_mode = std.math.clamp(u.accent_mode, 0.0, 10.0);
+    u.accent_strength = std.math.clamp(u.accent_strength, 0.0, 1.0);
+    u.loudness_mode = std.math.clamp(u.loudness_mode, 0.0, 10.0);
+    u.loudness_strength = std.math.clamp(u.loudness_strength, 0.0, 1.0);
+    u.onset_mode = std.math.clamp(u.onset_mode, 0.0, 10.0);
+    u.onset_strength = std.math.clamp(u.onset_strength, 0.0, 1.0);
 }
 
 pub fn save() !void {
@@ -529,6 +632,16 @@ pub fn save() !void {
         stored.bg_noise_amplitude = bg_preset.noise_amplitude;
         stored.bg_color_speed = bg_preset.color_speed;
         stored.bg_swirl_falloff = bg_preset.swirl_falloff;
+        stored.bg_bass_mode = bg_preset.bass_mode;
+        stored.bg_bass_strength = bg_preset.bass_strength;
+        stored.bg_texture_mode = bg_preset.texture_mode;
+        stored.bg_texture_strength = bg_preset.texture_strength;
+        stored.bg_accent_mode = bg_preset.accent_mode;
+        stored.bg_accent_strength = bg_preset.accent_strength;
+        stored.bg_loudness_mode = bg_preset.loudness_mode;
+        stored.bg_loudness_strength = bg_preset.loudness_strength;
+        stored.bg_onset_mode = bg_preset.onset_mode;
+        stored.bg_onset_strength = bg_preset.onset_strength;
     }
 
     const contents = std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(stored, .{ .whitespace = .indent_2 })}) catch |err| {

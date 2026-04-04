@@ -29,19 +29,15 @@ fn actionClose() anyerror!void {
 }
 
 fn actionOpenSettings() anyerror!void {
-    settingsMenu.open(openMainMenu);
+    settingsMenu.push();
 }
 
 fn actionOpenLevelEditorMenu() anyerror!void {
-    menu.open(&level_editor_items, .{});
+    menu.push(&level_editor_items, .{});
 }
 
 fn actionOpenMainMenu() anyerror!void {
-    openMainMenu();
-}
-
-fn openMainMenu() void {
-    menu.open(&main_items, .{});
+    try menu.back();
 }
 
 fn actionPlay() anyerror!void {
@@ -55,15 +51,14 @@ fn actionOpenMusic() anyerror!void {
     state.editingBackground = false;
     state.editingLevel = false;
     state.editingMusic = true;
-    musicConfigMenu.open(actionOpenMainMenu);
+    musicConfigMenu.push();
 }
 
 fn actionOpenBackgroundEditor() anyerror!void {
     state.editingBackground = true;
     state.editingLevel = false;
     state.editingMusic = false;
-    menu.close();
-    backgroundConfigMenu.open();
+    backgroundConfigMenu.push();
 }
 
 fn actionQuitGame() anyerror!void {
