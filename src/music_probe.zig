@@ -242,7 +242,7 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
         .ambient => {
             const s = procedural_ambient.debugSnapshot();
             std.log.info(
-                "probe ambient t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
+                "probe ambient t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
                 .{
                     sim_seconds,
                     s.cue_from,
@@ -259,6 +259,10 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.longform_intensity,
                     s.longform_cadence,
                     s.longform_modulation,
+                    s.section_id,
+                    s.section_progress,
+                    s.section_transition_count,
+                    s.section_distinct_transition_count,
                     s.chord_change_beats,
                     s.next_chord_change_beats,
                     s.drone_level,
@@ -271,7 +275,7 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
         .choir => {
             const s = procedural_choir.debugSnapshot();
             std.log.info(
-                "probe choir t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} chant_ctr={d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
+                "probe choir t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} chant_ctr={d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
                 .{
                     sim_seconds,
                     s.cue_from,
@@ -288,6 +292,10 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.longform_intensity,
                     s.longform_cadence,
                     s.longform_modulation,
+                    s.section_id,
+                    s.section_progress,
+                    s.section_transition_count,
+                    s.section_distinct_transition_count,
                     s.chord_change_beats,
                     s.next_chord_change_beats,
                     s.chant_beat_counter,
@@ -301,7 +309,7 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
         .african_drums => {
             const s = procedural_african_drums.debugSnapshot();
             std.log.info(
-                "probe african t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any}/{d}",
+                "probe african t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any}/{d}",
                 .{
                     sim_seconds,
                     s.cue_from,
@@ -318,6 +326,10 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.longform_intensity,
                     s.longform_cadence,
                     s.longform_modulation,
+                    s.section_id,
+                    s.section_progress,
+                    s.section_transition_count,
+                    s.section_distinct_transition_count,
                     s.chord_change_beats,
                     s.next_chord_change_beats,
                     s.current_step,
@@ -330,7 +342,7 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
         .taiko => {
             const s = procedural_taiko.debugSnapshot();
             std.log.info(
-                "probe taiko t={d:.2}s cue={d}->{d} structural={d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any} call={any}/{any}",
+                "probe taiko t={d:.2}s cue={d}->{d} structural={d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} sec_targets={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any} call={any}/{any}",
                 .{
                     sim_seconds,
                     s.cue_from,
@@ -348,6 +360,13 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.longform_intensity,
                     s.longform_cadence,
                     s.longform_modulation,
+                    s.section_id,
+                    s.section_progress,
+                    s.section_transition_count,
+                    s.section_distinct_transition_count,
+                    s.section_density,
+                    s.section_harmonic_motion,
+                    s.section_cadence_scale,
                     s.chord_change_beats,
                     s.next_chord_change_beats,
                     s.sequencer_step,

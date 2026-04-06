@@ -79,6 +79,25 @@ const Player = struct {
 pub fn damage(playerId: usize, amount: f32) void { ... }
 ```
 
+## No Methods, No Struct-Local Functions
+
+Do not define `fn` declarations inside struct bodies. This is a hard rule.
+
+- No methods
+- No "static" helper functions inside structs
+- No nested behavior in data structs
+- Structs are data only
+
+All behavior must be file-level functions in the module namespace.
+
+## `self` is banned
+
+Do not introduce `self` parameters or method-like signatures in this codebase.
+
+- Never write `fn x(self: *Type, ...)`
+- Never write `fn x(self: Type, ...)`
+- If a function needs struct data, pass the struct pointer/value as a normally named parameter (for example `state`, `engine`, `player`) or pass an ID and do the lookup.
+
 ## One component, one file
 
 Each logical component lives in its own file. The file is the namespace. Don't split a single component across multiple files, and don't merge two unrelated components into one file.

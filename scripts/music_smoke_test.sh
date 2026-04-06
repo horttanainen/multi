@@ -11,7 +11,7 @@ set -euo pipefail
 
 LOG_FILE="${MUSIC_SMOKE_LOG:-/tmp/music_generation_smoke.log}"
 PROBE_BIN=".zig-cache/music_probe_smoke_bin"
-PLAN_FILE="${MUSIC_SMOKE_PLAN_FILE:-docs/procedural_music_context_2026-04-06.plan.json}"
+PLAN_FILE="${MUSIC_SMOKE_PLAN_FILE:-docs/procedural_music_context_2026-04-06_v2.plan.json}"
 SPEED_X="${MUSIC_SMOKE_SPEED_X:-100}"
 SIM_SECONDS="${MUSIC_SMOKE_SIM_SECONDS:-1200}"      # 20 minutes of simulated music
 REPORT_SECONDS="${MUSIC_SMOKE_REPORT_SECONDS:-10}"
@@ -19,6 +19,9 @@ MIN_ACHIEVED_SPEED="${MUSIC_SMOKE_MIN_ACHIEVED_SPEED:-50}"
 MIN_ACHIEVED_SPEED_CHOIR="${MUSIC_SMOKE_MIN_ACHIEVED_SPEED_CHOIR:-40}"
 MIN_LONG_FORM_DIR_CHANGES="${MUSIC_SMOKE_MIN_LONG_FORM_DIR_CHANGES:-3}"
 MIN_LONG_FORM_DIR_CHANGES_CHOIR="${MUSIC_SMOKE_MIN_LONG_FORM_DIR_CHANGES_CHOIR:-2}"
+MIN_SECTION_TRANSITIONS="${MUSIC_SMOKE_MIN_SECTION_TRANSITIONS:-4}"
+MIN_SECTION_DISTINCT_TRANSITIONS="${MUSIC_SMOKE_MIN_SECTION_DISTINCT_TRANSITIONS:-4}"
+PINGPONG_ALT_RUN_THRESHOLD="${MUSIC_SMOKE_PINGPONG_ALT_RUN_THRESHOLD:-8}"
 
 TRANSITION_SIM_SECONDS="${MUSIC_SMOKE_TRANSITION_SIM_SECONDS:-180}"
 TRANSITION_REPORT_SECONDS="${MUSIC_SMOKE_TRANSITION_REPORT_SECONDS:-5}"
@@ -97,6 +100,9 @@ require_gt_zero "$MIN_ACHIEVED_SPEED" "MUSIC_SMOKE_MIN_ACHIEVED_SPEED"
 require_gt_zero "$MIN_ACHIEVED_SPEED_CHOIR" "MUSIC_SMOKE_MIN_ACHIEVED_SPEED_CHOIR"
 require_ge_zero "$MIN_LONG_FORM_DIR_CHANGES" "MUSIC_SMOKE_MIN_LONG_FORM_DIR_CHANGES"
 require_ge_zero "$MIN_LONG_FORM_DIR_CHANGES_CHOIR" "MUSIC_SMOKE_MIN_LONG_FORM_DIR_CHANGES_CHOIR"
+require_gt_zero "$MIN_SECTION_TRANSITIONS" "MUSIC_SMOKE_MIN_SECTION_TRANSITIONS"
+require_gt_zero "$MIN_SECTION_DISTINCT_TRANSITIONS" "MUSIC_SMOKE_MIN_SECTION_DISTINCT_TRANSITIONS"
+require_gt_zero "$PINGPONG_ALT_RUN_THRESHOLD" "MUSIC_SMOKE_PINGPONG_ALT_RUN_THRESHOLD"
 require_gt_zero "$TRANSITION_SIM_SECONDS" "MUSIC_SMOKE_TRANSITION_SIM_SECONDS"
 require_gt_zero "$TRANSITION_REPORT_SECONDS" "MUSIC_SMOKE_TRANSITION_REPORT_SECONDS"
 require_gt_zero "$TRANSITION_ONE_AT_SECONDS" "MUSIC_SMOKE_TRANSITION_ONE_AT_SECONDS"
@@ -121,12 +127,21 @@ if [[ ! -f "$PLAN_FILE" ]]; then
   exit 2
 fi
 
-for topic in realtime_continuous temporal_controls long_form latency_speed game_pmg_gap; do
-  if ! grep -q "\"$topic\"" "$PLAN_FILE"; then
-    echo "music_smoke_test: plan file missing topic '$topic': $PLAN_FILE" >&2
-    exit 2
-  fi
-done
+if grep -q "\"v2_roadmap\"" "$PLAN_FILE"; then
+  for milestone in M1_macro_form_graph M2_theme_variation_engine M3_transition_composer M4_control_axes_and_runtime_steering M5_eval_upgrade; do
+    if ! grep -q "\"$milestone\"" "$PLAN_FILE"; then
+      echo "music_smoke_test: plan file missing milestone '$milestone': $PLAN_FILE" >&2
+      exit 2
+    fi
+  done
+else
+  for topic in realtime_continuous temporal_controls long_form latency_speed game_pmg_gap; do
+    if ! grep -q "\"$topic\"" "$PLAN_FILE"; then
+      echo "music_smoke_test: plan file missing topic '$topic': $PLAN_FILE" >&2
+      exit 2
+    fi
+  done
+fi
 
 WALL_SECONDS="$(awk -v sim="$SIM_SECONDS" -v speed="$SPEED_X" 'BEGIN { printf "%.3f", sim / speed }')"
 TRANSITION_WALL_SECONDS="$(awk -v sim="$TRANSITION_SIM_SECONDS" -v speed="$SPEED_X" 'BEGIN { printf "%.3f", sim / speed }')"
@@ -139,6 +154,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
   echo "config: base_cues ambient=$AMBIENT_BASE_CUE choir=$CHOIR_BASE_CUE african_drums=$AFRICAN_DRUMS_BASE_CUE taiko=$TAIKO_BASE_CUE"
   echo "config: min_achieved_speed_default=$MIN_ACHIEVED_SPEED min_achieved_speed_choir=$MIN_ACHIEVED_SPEED_CHOIR"
   echo "config: min_long_form_dir_changes_default=$MIN_LONG_FORM_DIR_CHANGES min_long_form_dir_changes_choir=$MIN_LONG_FORM_DIR_CHANGES_CHOIR"
+  echo "config: m1_min_section_transitions=$MIN_SECTION_TRANSITIONS m1_min_distinct_transitions=$MIN_SECTION_DISTINCT_TRANSITIONS m1_pingpong_alt_run_threshold=$PINGPONG_ALT_RUN_THRESHOLD"
   echo "config: transition_sim_seconds=$TRANSITION_SIM_SECONDS transition_report_seconds=$TRANSITION_REPORT_SECONDS transition_times=${TRANSITION_ONE_AT_SECONDS},${TRANSITION_TWO_AT_SECONDS}"
   echo "config: divergence_sim_seconds=$DIVERGENCE_SIM_SECONDS divergence_report_seconds=$DIVERGENCE_REPORT_SECONDS divergence_seeds=${DIVERGENCE_SEED_A},${DIVERGENCE_SEED_B} divergence_early_snapshots=$DIVERGENCE_EARLY_SNAPSHOTS"
   echo "config: choir_max_hf_ratio=$CHOIR_MAX_HF_RATIO choir_max_hf_hot_block_ratio=$CHOIR_MAX_HF_HOT_BLOCK_RATIO"
@@ -200,6 +216,7 @@ analyze_primary_run() {
   last_topic_long_form="FAIL"
   last_topic_latency="FAIL"
   last_topic_gap="FAIL"
+  last_topic_m1="FAIL"
   last_topic_noise="PASS"
   last_numeric="FAIL"
   last_duration="FAIL"
@@ -217,6 +234,11 @@ analyze_primary_run() {
   last_dir_c="0"
   last_dir_m="0"
   last_dir_changes="0"
+  last_section_transition_count="0"
+  last_section_distinct_transition_count="0"
+  last_section_unique_count="0"
+  last_section_pingpong_max_alt_run="0"
+  last_section_changes="0"
   last_hf_ratio="0"
   last_hf_hot_ratio="0"
 
@@ -232,7 +254,7 @@ analyze_primary_run() {
   if [[ -z "$hf_ratio" ]]; then hf_ratio="-1"; fi
   if [[ -z "$hf_hot_ratio" ]]; then hf_hot_ratio="-1"; fi
 
-  local metrics snaps chord_total chord_unique chord_changes dir_i dir_c dir_m dir_changes cad_span cad_changes
+  local metrics snaps chord_total chord_unique chord_changes dir_i dir_c dir_m dir_changes cad_span cad_changes section_transition_count section_distinct_transition_count section_unique_count section_pingpong_max_alt_run section_changes
   metrics="$(awk -v style="$probe_style" '
     function absf(x) { return x < 0 ? -x : x }
     $0 ~ ("probe " style " ") {
@@ -291,19 +313,51 @@ analyze_primary_run() {
         if (v < cadmin) cadmin = v;
         if (v > cadmax) cadmax = v;
       }
+      if (match($0, /sec=[0-9]+:[0-9.]+\/[0-9]+\/[0-9]+/)) {
+        sec_field = substr($0, RSTART, RLENGTH);
+        sub(/sec=/, "", sec_field);
+        split(sec_field, sec_parts, ":");
+        sec_id = sec_parts[1] + 0;
+        split(sec_parts[2], sec_tail, "/");
+        sec_transitions = sec_tail[2] + 0;
+        sec_distinct = sec_tail[3] + 0;
+
+        if (sec_transitions > max_sec_transitions) max_sec_transitions = sec_transitions;
+        if (sec_distinct > max_sec_distinct) max_sec_distinct = sec_distinct;
+        section_ids[sec_id] = 1;
+
+        if (sec_seen && sec_id != prev_sec_id) {
+          section_changes += 1;
+          from_id = prev_sec_id;
+          to_id = sec_id;
+          if (pingpong_seen && from_id == prev_transition_to && to_id == prev_transition_from) {
+            pingpong_alt_run += 1;
+          } else {
+            pingpong_alt_run = 1;
+          }
+          if (pingpong_alt_run > pingpong_max_alt_run) pingpong_max_alt_run = pingpong_alt_run;
+          prev_transition_from = from_id;
+          prev_transition_to = to_id;
+          pingpong_seen = 1;
+        }
+        prev_sec_id = sec_id;
+        sec_seen = 1;
+      }
     }
     END {
       uniq = 0;
       for (x in ch) uniq += 1;
+      sec_uniq = 0;
+      for (x in section_ids) sec_uniq += 1;
       idir = dir_seen ? (imax - imin) : 0.0;
       cdir = dir_seen ? (cmax - cmin) : 0.0;
       mdir = dir_seen ? (mmax - mmin) : 0.0;
       cadspan = cad_seen ? (cadmax - cadmin) : 0.0;
-      printf "%d %d %d %d %.6f %.6f %.6f %d %.6f %d\n", snaps, chord_total, uniq, chord_changes, idir, cdir, mdir, dir_changes, cadspan, cad_changes;
+      printf "%d %d %d %d %.6f %.6f %.6f %d %.6f %d %d %d %d %d %d\n", snaps, chord_total, uniq, chord_changes, idir, cdir, mdir, dir_changes, cadspan, cad_changes, max_sec_transitions, max_sec_distinct, sec_uniq, pingpong_max_alt_run, section_changes;
     }
   ' "$run_log")"
 
-  read -r snaps chord_total chord_unique chord_changes dir_i dir_c dir_m dir_changes cad_span cad_changes <<< "$metrics"
+  read -r snaps chord_total chord_unique chord_changes dir_i dir_c dir_m dir_changes cad_span cad_changes section_transition_count section_distinct_transition_count section_unique_count section_pingpong_max_alt_run section_changes <<< "$metrics"
 
   local min_speed min_long_form_dir_changes
   min_speed="$MIN_ACHIEVED_SPEED"
@@ -313,7 +367,7 @@ analyze_primary_run() {
     min_long_form_dir_changes="$MIN_LONG_FORM_DIR_CHANGES_CHOIR"
   fi
 
-  local numeric_ok duration_ok topic_realtime topic_temporal topic_long_form topic_latency topic_gap topic_noise
+  local numeric_ok duration_ok topic_realtime topic_temporal topic_long_form topic_latency topic_gap topic_m1 topic_noise
   numeric_ok=1
   duration_ok=1
   topic_realtime=1
@@ -321,6 +375,7 @@ analyze_primary_run() {
   topic_long_form=1
   topic_latency=1
   topic_gap=1
+  topic_m1=1
   topic_noise=1
 
   if [[ "$non_finite" != "0" ]]; then
@@ -370,6 +425,17 @@ analyze_primary_run() {
     topic_gap=0
   fi
 
+  # PLAN milestone: M1_macro_form_graph
+  if [[ "$section_transition_count" -lt "$MIN_SECTION_TRANSITIONS" ]]; then
+    topic_m1=0
+  fi
+  if [[ "$section_distinct_transition_count" -lt "$MIN_SECTION_DISTINCT_TRANSITIONS" ]]; then
+    topic_m1=0
+  fi
+  if [[ "$section_pingpong_max_alt_run" -ge "$PINGPONG_ALT_RUN_THRESHOLD" ]]; then
+    topic_m1=0
+  fi
+
   # Additional topic: persistent high-frequency artifact guardrail (choir only)
   if [[ "$style" == "choir" ]]; then
     if ! awk -v x="$hf_ratio" 'BEGIN { exit !(x >= 0) }'; then
@@ -391,6 +457,7 @@ analyze_primary_run() {
   last_topic_long_form="$([[ "$topic_long_form" -eq 1 ]] && echo PASS || echo FAIL)"
   last_topic_latency="$([[ "$topic_latency" -eq 1 ]] && echo PASS || echo FAIL)"
   last_topic_gap="$([[ "$topic_gap" -eq 1 ]] && echo PASS || echo FAIL)"
+  last_topic_m1="$([[ "$topic_m1" -eq 1 ]] && echo PASS || echo FAIL)"
   last_topic_noise="$([[ "$topic_noise" -eq 1 ]] && echo PASS || echo FAIL)"
   last_numeric="$([[ "$numeric_ok" -eq 1 ]] && echo PASS || echo FAIL)"
   last_duration="$([[ "$duration_ok" -eq 1 ]] && echo PASS || echo FAIL)"
@@ -408,6 +475,11 @@ analyze_primary_run() {
   last_dir_c="$dir_c"
   last_dir_m="$dir_m"
   last_dir_changes="$dir_changes"
+  last_section_transition_count="$section_transition_count"
+  last_section_distinct_transition_count="$section_distinct_transition_count"
+  last_section_unique_count="$section_unique_count"
+  last_section_pingpong_max_alt_run="$section_pingpong_max_alt_run"
+  last_section_changes="$section_changes"
   last_hf_ratio="$hf_ratio"
   last_hf_hot_ratio="$hf_hot_ratio"
 }
@@ -542,6 +614,7 @@ topic_temporal_fail=0
 topic_long_form_fail=0
 topic_latency_fail=0
 topic_gap_fail=0
+topic_m1_fail=0
 topic_transition_fail=0
 topic_cross_seed_fail=0
 topic_noise_fail=0
@@ -574,6 +647,7 @@ for style in "${styles[@]}"; do
       last_topic_long_form="FAIL"
       last_topic_latency="FAIL"
       last_topic_gap="FAIL"
+      last_topic_m1="FAIL"
       last_topic_transition="FAIL"
       last_topic_cross_seed="FAIL"
       last_topic_noise="FAIL"
@@ -592,6 +666,11 @@ for style in "${styles[@]}"; do
       last_dir_c="0"
       last_dir_m="0"
       last_dir_changes="0"
+      last_section_transition_count="0"
+      last_section_distinct_transition_count="0"
+      last_section_unique_count="0"
+      last_section_pingpong_max_alt_run="0"
+      last_section_changes="0"
       last_hf_ratio="-1"
       last_hf_hot_ratio="-1"
       last_transition_events="0"
@@ -628,6 +707,7 @@ for style in "${styles[@]}"; do
     [[ "$last_topic_long_form" == "PASS" ]] || run_status="FAIL"
     [[ "$last_topic_latency" == "PASS" ]] || run_status="FAIL"
     [[ "$last_topic_gap" == "PASS" ]] || run_status="FAIL"
+    [[ "$last_topic_m1" == "PASS" ]] || run_status="FAIL"
     [[ "$last_topic_transition" == "PASS" ]] || run_status="FAIL"
     [[ "$last_topic_cross_seed" == "PASS" ]] || run_status="FAIL"
     [[ "$last_topic_noise" == "PASS" ]] || run_status="FAIL"
@@ -645,12 +725,13 @@ for style in "${styles[@]}"; do
     [[ "$last_topic_long_form" == "PASS" ]] || topic_long_form_fail=$((topic_long_form_fail + 1))
     [[ "$last_topic_latency" == "PASS" ]] || topic_latency_fail=$((topic_latency_fail + 1))
     [[ "$last_topic_gap" == "PASS" ]] || topic_gap_fail=$((topic_gap_fail + 1))
+    [[ "$last_topic_m1" == "PASS" ]] || topic_m1_fail=$((topic_m1_fail + 1))
     [[ "$last_topic_transition" == "PASS" ]] || topic_transition_fail=$((topic_transition_fail + 1))
     [[ "$last_topic_cross_seed" == "PASS" ]] || topic_cross_seed_fail=$((topic_cross_seed_fail + 1))
     [[ "$last_topic_noise" == "PASS" ]] || topic_noise_fail=$((topic_noise_fail + 1))
 
-    result_line="$(printf "RESULT style=%s cue=%s status=%s snapshots=%s sim_seconds=%s achieved_speed=%s non_finite=%s chord_unique=%s/%s chord_changes=%s cadence_span=%.3f cadence_changes=%s director_delta=[%.3f,%.3f,%.3f] director_changes=%s hf_ratio=%s hf_hot_block_ratio=%s transition_events=%s cross_seed_full_equal=%s cross_seed_early_equal=%s checks={realtime_continuous:%s temporal_controls:%s long_form:%s latency_speed:%s game_pmg_gap:%s cue_transitions:%s cross_seed_divergence:%s choir_hf_artifact:%s numeric:%s duration:%s}" \
-      "$style" "$cue" "$run_status" "$last_snapshots" "$last_sim_seconds" "$last_achieved_speed" "$last_non_finite" "$last_chord_unique" "$last_chord_total" "$last_chord_changes" "$last_cadence_span" "$last_cadence_changes" "$last_dir_i" "$last_dir_c" "$last_dir_m" "$last_dir_changes" "$last_hf_ratio" "$last_hf_hot_ratio" "$last_transition_events" "$last_cross_seed_full_equal" "$last_cross_seed_early_equal" "$last_topic_realtime" "$last_topic_temporal" "$last_topic_long_form" "$last_topic_latency" "$last_topic_gap" "$last_topic_transition" "$last_topic_cross_seed" "$last_topic_noise" "$last_numeric" "$last_duration")"
+    result_line="$(printf "RESULT style=%s cue=%s status=%s snapshots=%s sim_seconds=%s achieved_speed=%s non_finite=%s chord_unique=%s/%s chord_changes=%s cadence_span=%.3f cadence_changes=%s director_delta=[%.3f,%.3f,%.3f] director_changes=%s section_transitions=%s section_distinct_transitions=%s section_unique=%s section_pingpong_max_alt_run=%s section_changes=%s hf_ratio=%s hf_hot_block_ratio=%s transition_events=%s cross_seed_full_equal=%s cross_seed_early_equal=%s checks={realtime_continuous:%s temporal_controls:%s long_form:%s latency_speed:%s game_pmg_gap:%s m1_macro_form:%s cue_transitions:%s cross_seed_divergence:%s choir_hf_artifact:%s numeric:%s duration:%s}" \
+      "$style" "$cue" "$run_status" "$last_snapshots" "$last_sim_seconds" "$last_achieved_speed" "$last_non_finite" "$last_chord_unique" "$last_chord_total" "$last_chord_changes" "$last_cadence_span" "$last_cadence_changes" "$last_dir_i" "$last_dir_c" "$last_dir_m" "$last_dir_changes" "$last_section_transition_count" "$last_section_distinct_transition_count" "$last_section_unique_count" "$last_section_pingpong_max_alt_run" "$last_section_changes" "$last_hf_ratio" "$last_hf_hot_ratio" "$last_transition_events" "$last_cross_seed_full_equal" "$last_cross_seed_early_equal" "$last_topic_realtime" "$last_topic_temporal" "$last_topic_long_form" "$last_topic_latency" "$last_topic_gap" "$last_topic_m1" "$last_topic_transition" "$last_topic_cross_seed" "$last_topic_noise" "$last_numeric" "$last_duration")"
     echo "$result_line" | tee -a "$LOG_FILE"
 
     rm -f "$run_tmp" "$transition_tmp" "$divergence_a_tmp" "$divergence_b_tmp"
@@ -665,6 +746,7 @@ done
   echo "topic_long_form_failures=$topic_long_form_fail"
   echo "topic_latency_speed_failures=$topic_latency_fail"
   echo "topic_game_pmg_gap_failures=$topic_gap_fail"
+  echo "topic_m1_macro_form_failures=$topic_m1_fail"
   echo "topic_cue_transitions_failures=$topic_transition_fail"
   echo "topic_cross_seed_divergence_failures=$topic_cross_seed_fail"
   echo "topic_choir_hf_artifact_failures=$topic_noise_fail"

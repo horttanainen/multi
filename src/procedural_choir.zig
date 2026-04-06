@@ -30,8 +30,8 @@ pub var chant_mix: f32 = 0.58;
 pub var selected_cue: CuePreset = .cathedral;
 
 const ChoirReverb = StereoReverb(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 });
-var reverb: ChoirReverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
-var rng: dsp.Rng = dsp.Rng.init(0x4300_9000);
+var reverb: ChoirReverb = dsp.stereoReverbInit(.{2039, 1877, 1733, 1601}, .{307, 709}, .{ 0.93, 0.94, 0.93, 0.92 });
+var rng: dsp.Rng = dsp.rngInit(0x4300_9000);
 
 var engine: composition.CompositionEngine = .{};
 
@@ -256,10 +256,10 @@ fn blendedRuntimeCue() ChoirRuntimeCue {
 }
 
 pub fn reset() void {
-    reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
-    rng = dsp.Rng.init(entropy.nextSeed(0x4300_9000, @intFromEnum(selected_cue)));
+    reverb = dsp.stereoReverbInit(.{2039, 1877, 1733, 1601}, .{307, 709}, .{ 0.93, 0.94, 0.93, 0.92 });
+    rng = dsp.rngInit(entropy.nextSeed(0x4300_9000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
-    engine.reset(.{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
+    composition.compositionEngineReset(&engine, .{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
     lfo_reverb = .{ .period_beats = 180, .depth = 0.04 };
     drone_target = 0.9;
     pad_target = 0.75;
@@ -277,7 +277,7 @@ pub fn reset() void {
         .primary_mix = 0.78,
         .secondary_mix = 0.32,
         .volume = 0.32,
-        .filter = dsp.LPF.init(180.0),
+        .filter = dsp.lpfInit(180.0),
     });
     layers.resetBreathLayer(&breath_layer);
     chant_beat_counter = 0.0;
@@ -305,6 +305,10 @@ pub const DebugSnapshot = struct {
     longform_intensity: f32,
     longform_cadence: f32,
     longform_modulation: f32,
+    section_id: u8,
+    section_progress: f32,
+    section_transition_count: u32,
+    section_distinct_transition_count: u8,
     chord_change_beats: f32,
     next_chord_change_beats: f32,
     chant_beat_counter: f32,
@@ -328,12 +332,16 @@ pub fn debugSnapshot() DebugSnapshot {
         .key_scale = engine.key.scale_type,
         .chord_index = engine.harmony.current,
         .chord_count = engine.harmony.num_chords,
-        .micro = engine.arcs.micro.tension(),
-        .meso = engine.arcs.meso.tension(),
-        .macro = engine.arcs.macro.tension(),
-        .longform_intensity = engine.longFormIntensity(),
-        .longform_cadence = engine.longFormCadenceSpread(),
-        .longform_modulation = engine.longFormModulationDrive(),
+        .micro = composition.arcControllerTension(&engine.arcs.micro),
+        .meso = composition.arcControllerTension(&engine.arcs.meso),
+        .macro = composition.arcControllerTension(&engine.arcs.macro),
+        .longform_intensity = composition.compositionEngineLongFormIntensity(&engine),
+        .longform_cadence = composition.compositionEngineLongFormCadenceSpread(&engine),
+        .longform_modulation = composition.compositionEngineLongFormModulationDrive(&engine),
+        .section_id = composition.compositionEngineSectionId(&engine),
+        .section_progress = composition.compositionEngineSectionProgress(&engine),
+        .section_transition_count = composition.compositionEngineSectionTransitionCount(&engine),
+        .section_distinct_transition_count = composition.compositionEngineSectionDistinctTransitionCount(&engine),
         .chord_change_beats = engine.chord_change_beats,
         .next_chord_change_beats = engine.next_chord_change_beats,
         .chant_beat_counter = chant_beat_counter,
@@ -356,17 +364,17 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         cue_morph.advance(CuePreset, &cue_state, spb);
         const cue = blendedRuntimeCue();
         layers.applyDroneCue(&drone_layer, cue.drone_filter_hz, cue.drone_detune_ratio);
-        lfo_reverb.advanceSample(eff_bpm);
-        const tick = engine.advanceSample(&rng, eff_bpm);
-        const director_intensity = engine.longFormIntensity();
-        const director_cadence = engine.longFormCadenceSpread();
-        const director_mod = engine.longFormModulationDrive();
+        composition.slowLfoAdvanceSample(&lfo_reverb, eff_bpm);
+        const tick = composition.compositionEngineAdvanceSample(&engine, &rng, eff_bpm);
+        const director_intensity = composition.compositionEngineLongFormIntensity(&engine);
+        const director_cadence = composition.compositionEngineLongFormCadenceSpread(&engine);
+        const director_mod = composition.compositionEngineLongFormModulationDrive(&engine);
         if (tick.chord_changed) {
             advanceChord(&cue);
         }
 
         chant_beat_counter += 1.0 / spb;
-        const chant_beat_len = std.math.clamp(cue.chant_beat_len * (1.0 + (director_cadence - 0.16) * 0.45 + lfo_reverb.value() * 0.7), 0.6, 6.0);
+        const chant_beat_len = std.math.clamp(cue.chant_beat_len * (1.0 + (director_cadence - 0.16) * 0.45 + composition.slowLfoValue(&lfo_reverb) * 0.7), 0.6, 6.0);
         if (chant_beat_counter >= chant_beat_len) {
             chant_beat_counter -= chant_beat_len;
             triggerChantNote(tick.meso, tick.micro, &cue, director_intensity, director_cadence);
@@ -398,9 +406,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         left += breath_out[0];
         right += breath_out[1];
 
-        const wet = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * lfo_reverb.modulate(), 0.0, 0.99);
+        const wet = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * composition.slowLfoModulate(&lfo_reverb), 0.0, 0.99);
         const dry = 1.0 - wet;
-        const rev = reverb.process(.{ left, right });
+        const rev = dsp.stereoReverbProcess(.{2039, 1877, 1733, 1601}, .{307, 709}, &reverb, .{ left, right });
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
 
@@ -416,7 +424,7 @@ fn applyCueParams() void {
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
     engine.modulation_mode = spec.modulation_mode;
-    engine.setChordChangeBeats(spec.chord_change_beats);
+    composition.compositionEngineSetChordChangeBeats(&engine, spec.chord_change_beats);
     layers.applyChoirChantCue(&chant_layer, .{
         .phrase = .{ .rest_chance = chant_layer.phrase.rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
         .min_notes = spec.chant_min_notes,

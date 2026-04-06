@@ -31,8 +31,8 @@ pub var slap_mix: f32 = 0.5;
 pub var selected_cue: CuePreset = .kuku;
 
 const DrumReverb = StereoReverb(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 });
-var reverb: DrumReverb = DrumReverb.init(.{ 0.82, 0.83, 0.81, 0.84 });
-var rng: dsp.Rng = dsp.Rng.init(0xAF10_2000);
+var reverb: DrumReverb = dsp.stereoReverbInit(.{1327, 1451, 1559, 1613}, .{181, 487}, .{ 0.82, 0.83, 0.81, 0.84 });
+var rng: dsp.Rng = dsp.rngInit(0xAF10_2000);
 
 var engine: composition.CompositionEngine = .{};
 
@@ -137,7 +137,7 @@ const PendingTrigger = struct {
 var pending: [NUM_VOICES]PendingTrigger = .{PendingTrigger{}} ** NUM_VOICES;
 
 fn scheduleTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
-    const offset = VOICE_OFFSETS[voice] + (rng.float() * 2.0 - 1.0) * JITTER_SAMPLES;
+    const offset = VOICE_OFFSETS[voice] + (dsp.rngFloat(&rng) * 2.0 - 1.0) * JITTER_SAMPLES;
     pending[voice] = .{
         .trigger_type = ttype,
         .delay = @max(offset, 0.0),
@@ -162,43 +162,43 @@ fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
         V_DJEMBE_LEAD, V_DJEMBE_ACC1, V_DJEMBE_ACC2 => {
             const djembe = &djembes[voice];
             switch (ttype) {
-                .djembe_bass => djembe.triggerBass(vel),
-                .djembe_tone => djembe.triggerTone(vel),
-                .djembe_slap => djembe.triggerSlap(vel),
-                .djembe_ghost_tone => djembe.triggerGhost(vel, .tone),
-                .djembe_ghost_slap => djembe.triggerGhost(vel, .slap),
+                .djembe_bass => instruments.djembeTriggerBass(djembe, vel),
+                .djembe_tone => instruments.djembeTriggerTone(djembe, vel),
+                .djembe_slap => instruments.djembeTriggerSlap(djembe, vel),
+                .djembe_ghost_tone => instruments.djembeTriggerGhost(djembe, vel, .tone),
+                .djembe_ghost_slap => instruments.djembeTriggerGhost(djembe, vel, .slap),
                 else => {},
             }
         },
         V_DUNDUNBA => switch (ttype) {
-            .dunun_drum => dundunba.triggerDrum(vel),
-            .dunun_bell => dundunba.triggerBell(),
+            .dunun_drum => instruments.dununTriggerDrum(&dundunba, vel),
+            .dunun_bell => instruments.dununTriggerBell(&dundunba),
             .dunun_both => {
-                dundunba.triggerDrum(vel);
-                dundunba.triggerBell();
+                instruments.dununTriggerDrum(&dundunba, vel);
+                instruments.dununTriggerBell(&dundunba);
             },
             else => {},
         },
         V_SANGBAN => switch (ttype) {
-            .dunun_drum => sangban.triggerDrum(vel),
-            .dunun_bell => sangban.triggerBell(),
+            .dunun_drum => instruments.dununTriggerDrum(&sangban, vel),
+            .dunun_bell => instruments.dununTriggerBell(&sangban),
             .dunun_both => {
-                sangban.triggerDrum(vel);
-                sangban.triggerBell();
+                instruments.dununTriggerDrum(&sangban, vel);
+                instruments.dununTriggerBell(&sangban);
             },
             else => {},
         },
         V_KENKENI => switch (ttype) {
-            .dunun_drum => kenkeni.triggerDrum(vel),
-            .dunun_bell => kenkeni.triggerBell(),
+            .dunun_drum => instruments.dununTriggerDrum(&kenkeni, vel),
+            .dunun_bell => instruments.dununTriggerBell(&kenkeni),
             .dunun_both => {
-                kenkeni.triggerDrum(vel);
-                kenkeni.triggerBell();
+                instruments.dununTriggerDrum(&kenkeni, vel);
+                instruments.dununTriggerBell(&kenkeni);
             },
             else => {},
         },
         V_SHEKERE => {
-            if (ttype == .shekere) shekere.trigger();
+            if (ttype == .shekere) instruments.hiHatTrigger(&shekere);
         },
         else => {},
     }
@@ -218,7 +218,7 @@ var dundunba: instruments.Dunun = .{
     .base_freq = 82.0,
     .sweep = 35.0,
     .volume = 1.1,
-    .body_lpf = dsp.LPF.init(200.0),
+    .body_lpf = dsp.lpfInit(200.0),
     .bell_freq = 520.0,
     .bell_volume = 0.3,
 };
@@ -226,7 +226,7 @@ var sangban: instruments.Dunun = .{
     .base_freq = 135.0,
     .sweep = 28.0,
     .volume = 0.95,
-    .body_lpf = dsp.LPF.init(320.0),
+    .body_lpf = dsp.lpfInit(320.0),
     .bell_freq = 680.0,
     .bell_volume = 0.28,
 };
@@ -234,14 +234,14 @@ var kenkeni: instruments.Dunun = .{
     .base_freq = 215.0,
     .sweep = 18.0,
     .volume = 0.85,
-    .body_lpf = dsp.LPF.init(420.0),
+    .body_lpf = dsp.lpfInit(420.0),
     .bell_freq = 920.0,
     .bell_volume = 0.25,
 };
 var shekere: instruments.HiHat = .{
     .volume = 0.48,
-    .hpf = dsp.HPF.init(3800.0),
-    .env = dsp.Envelope.init(0.001, 0.022, 0.0, 0.012),
+    .hpf = dsp.hpfInit(3800.0),
+    .env = dsp.envelopeInit(0.001, 0.022, 0.0, 0.012),
 };
 
 // Stereo pan positions: -1 left, +1 right
@@ -273,7 +273,7 @@ fn hashLeadPattern() u32 {
 
 
 fn randomLeadHit(is_strong: bool) LeadHit {
-    const r = rng.float();
+    const r = dsp.rngFloat(&rng);
     if (is_strong and r < 0.22) return .bass;
     if (r < 0.48) return .tone;
     if (r < 0.72) return .slap;
@@ -282,13 +282,13 @@ fn randomLeadHit(is_strong: bool) LeadHit {
 }
 
 fn mutateLeadPattern(spec: *const CueSpec, meso: f32) void {
-    const mutations: u8 = 2 + @as(u8, @intCast(rng.next() % 3));
+    const mutations: u8 = 2 + @as(u8, @intCast(dsp.rngNext(&rng) % 3));
     const keep_chance = std.math.clamp(0.55 + spec.energy * 0.25 + meso * 0.15, 0.0, 0.98);
     for (0..mutations) |_| {
-        const idx: usize = @intCast(rng.next() % @as(u32, NUM_STEPS));
+        const idx: usize = @intCast(dsp.rngNext(&rng) % @as(u32, NUM_STEPS));
         const step: u8 = @intCast(idx);
         const is_strong = (step % 3 == 0);
-        if (rng.float() < keep_chance) {
+        if (dsp.rngFloat(&rng) < keep_chance) {
             lead_pattern[idx] = randomLeadHit(is_strong);
         } else {
             lead_pattern[idx] = .none;
@@ -297,7 +297,7 @@ fn mutateLeadPattern(spec: *const CueSpec, meso: f32) void {
 }
 
 fn forceLeadPerturbation() void {
-    const idx: usize = @intCast(rng.next() % @as(u32, NUM_STEPS));
+    const idx: usize = @intCast(dsp.rngNext(&rng) % @as(u32, NUM_STEPS));
     const step: u8 = @intCast(idx);
     lead_pattern[idx] = randomLeadHit(step % 3 == 0);
 }
@@ -315,7 +315,7 @@ fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
         const base_chance = lerpF32(baseChanceForCue(from_cue, is_strong), baseChanceForCue(to_cue, is_strong), morph_t);
         const chance = base_chance * energy * spec.lead_density;
 
-        if (rng.float() < chance) {
+        if (dsp.rngFloat(&rng) < chance) {
             lead_pattern[i] = randomLeadHit(is_strong);
             hit_count += 1;
         } else {
@@ -324,7 +324,7 @@ fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
     }
 
     if (hit_count == 0) {
-        const strong_slot: u8 = @intCast(rng.next() % 4);
+        const strong_slot: u8 = @intCast(dsp.rngNext(&rng) % 4);
         const idx: usize = @intCast(strong_slot * 3);
         lead_pattern[idx] = .tone;
     }
@@ -349,9 +349,9 @@ fn buildBreakPattern() void {
     for (0..NUM_STEPS) |i| {
         const step: u8 = @intCast(i);
         if (step % 3 == 0) {
-            lead_pattern[i] = if (rng.float() < 0.7) .bass else .tone;
+            lead_pattern[i] = if (dsp.rngFloat(&rng) < 0.7) .bass else .tone;
         } else {
-            lead_pattern[i] = if (rng.float() < 0.15) .ghost_tone else .none;
+            lead_pattern[i] = if (dsp.rngFloat(&rng) < 0.15) .ghost_tone else .none;
         }
     }
 }
@@ -567,11 +567,11 @@ fn cueBellBias(cue: CuePreset) f32 {
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(entropy.nextSeed(0xAF10_2000, @intFromEnum(selected_cue)));
+    rng = dsp.rngInit(entropy.nextSeed(0xAF10_2000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
-    reverb = DrumReverb.init(.{ 0.82, 0.83, 0.81, 0.84 });
+    reverb = dsp.stereoReverbInit(.{1327, 1451, 1559, 1613}, .{181, 487}, .{ 0.82, 0.83, 0.81, 0.84 });
 
-    engine.reset(
+    composition.compositionEngineReset(&engine, 
         .{ .root = 38, .scale_type = .dorian },
         initHarmony(),
         AFRICAN_ARCS,
@@ -602,7 +602,7 @@ fn resetInstruments() void {
         .base_freq = 82.0,
         .sweep = 35.0,
         .volume = 1.1,
-        .body_lpf = dsp.LPF.init(200.0),
+        .body_lpf = dsp.lpfInit(200.0),
         .bell_freq = 520.0,
         .bell_volume = 0.3,
     };
@@ -610,7 +610,7 @@ fn resetInstruments() void {
         .base_freq = 135.0,
         .sweep = 28.0,
         .volume = 0.95,
-        .body_lpf = dsp.LPF.init(320.0),
+        .body_lpf = dsp.lpfInit(320.0),
         .bell_freq = 680.0,
         .bell_volume = 0.28,
     };
@@ -618,14 +618,14 @@ fn resetInstruments() void {
         .base_freq = 215.0,
         .sweep = 18.0,
         .volume = 0.85,
-        .body_lpf = dsp.LPF.init(420.0),
+        .body_lpf = dsp.lpfInit(420.0),
         .bell_freq = 920.0,
         .bell_volume = 0.25,
     };
     shekere = .{
         .volume = 0.48,
-        .hpf = dsp.HPF.init(3800.0),
-        .env = dsp.Envelope.init(0.001, 0.022, 0.0, 0.012),
+        .hpf = dsp.hpfInit(3800.0),
+        .env = dsp.envelopeInit(0.001, 0.022, 0.0, 0.012),
     };
 }
 
@@ -648,6 +648,10 @@ pub const DebugSnapshot = struct {
     longform_intensity: f32,
     longform_cadence: f32,
     longform_modulation: f32,
+    section_id: u8,
+    section_progress: f32,
+    section_transition_count: u32,
+    section_distinct_transition_count: u8,
     chord_change_beats: f32,
     next_chord_change_beats: f32,
     current_step: u8,
@@ -666,12 +670,16 @@ pub fn debugSnapshot() DebugSnapshot {
         .key_scale = engine.key.scale_type,
         .chord_index = engine.harmony.current,
         .chord_count = engine.harmony.num_chords,
-        .micro = engine.arcs.micro.tension(),
-        .meso = engine.arcs.meso.tension(),
-        .macro = engine.arcs.macro.tension(),
-        .longform_intensity = engine.longFormIntensity(),
-        .longform_cadence = engine.longFormCadenceSpread(),
-        .longform_modulation = engine.longFormModulationDrive(),
+        .micro = composition.arcControllerTension(&engine.arcs.micro),
+        .meso = composition.arcControllerTension(&engine.arcs.meso),
+        .macro = composition.arcControllerTension(&engine.arcs.macro),
+        .longform_intensity = composition.compositionEngineLongFormIntensity(&engine),
+        .longform_cadence = composition.compositionEngineLongFormCadenceSpread(&engine),
+        .longform_modulation = composition.compositionEngineLongFormModulationDrive(&engine),
+        .section_id = composition.compositionEngineSectionId(&engine),
+        .section_progress = composition.compositionEngineSectionProgress(&engine),
+        .section_transition_count = composition.compositionEngineSectionTransitionCount(&engine),
+        .section_distinct_transition_count = composition.compositionEngineSectionDistinctTransitionCount(&engine),
         .chord_change_beats = engine.chord_change_beats,
         .next_chord_change_beats = engine.next_chord_change_beats,
         .current_step = current_step,
@@ -689,9 +697,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         cue_morph.advance(CuePreset, &cue_state, cue_spb);
         var spec = blendedCueSpec();
         // Macro arc-driven tempo drift: rising BPM at climax
-        const macro_t = engine.arcs.macro.tension();
+        const macro_t = composition.arcControllerTension(&engine.arcs.macro);
         const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
-        const tick = engine.advanceSample(&rng, effective_bpm);
+        const tick = composition.compositionEngineAdvanceSample(&engine, &rng, effective_bpm);
         shekere.volume = 0.35 + spec.shekere_density * 0.25;
 
         if (advanceStep12(effective_bpm, spec.swing)) |step| {
@@ -704,9 +712,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                     lead_cycle_count = 0;
 
                     // Check for break
-                    if (!in_break and rng.float() < spec.break_chance * tick.macro) {
+                    if (!in_break and dsp.rngFloat(&rng) < spec.break_chance * tick.macro) {
                         in_break = true;
-                        break_remaining = 1 + @as(u8, @intCast(rng.next() % 2));
+                        break_remaining = 1 + @as(u8, @intCast(dsp.rngNext(&rng) % 2));
                         buildBreakPattern();
                     } else if (in_break) {
                         break_remaining -|= 1;
@@ -731,7 +739,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
         // Mix djembes
         for (0..3) |d| {
-            const s = djembes[d].process(&rng) * drum_mix;
+            const s = instruments.djembeProcess(&djembes[d], &rng) * drum_mix;
             const pan_out = dsp.panStereo(s, VOICE_PAN[d]);
             left += pan_out[0];
             right += pan_out[1];
@@ -743,7 +751,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             .{ &sangban, V_SANGBAN },
             .{ &kenkeni, V_KENKENI },
         }) |pair| {
-            const out = pair[0].process(&rng);
+            const out = instruments.dununProcess(pair[0], &rng);
             const drum_s = out[0] * drum_mix * tone_mix;
             const bell_s = out[1] * drum_mix * slap_mix;
             const pan = VOICE_PAN[pair[1]];
@@ -754,7 +762,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         }
 
         // Mix shekere
-        const shekere_s = shekere.process(&rng) * shaker_mix;
+        const shekere_s = instruments.hiHatProcess(&shekere, &rng) * shaker_mix;
         const shekere_pan = dsp.panStereo(shekere_s, VOICE_PAN[V_SHEKERE]);
         left += shekere_pan[0];
         right += shekere_pan[1];
@@ -762,7 +770,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         // Reverb
         const wet = reverb_mix + spec.reverb_boost + tick.meso * 0.03;
         const dry = 1.0 - wet;
-        const rev = reverb.process(.{ left, right });
+        const rev = dsp.stereoReverbProcess(.{1327, 1451, 1559, 1613}, .{181, 487}, &reverb, .{ left, right });
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
 
@@ -801,10 +809,10 @@ fn advanceStepAll(step: u8, meso: f32, micro: f32, spec: *const CueSpec) void {
         if (stepActive12(spec.acc1_tone_mask, step)) {
             scheduleTrigger(V_DJEMBE_ACC1, .djembe_tone, vel_base * accent * 0.82);
         } else if (stepActive12(spec.acc1_slap_mask, step)) {
-            if (rng.float() < 0.55 + meso * 0.35) {
+            if (dsp.rngFloat(&rng) < 0.55 + meso * 0.35) {
                 scheduleTrigger(V_DJEMBE_ACC1, .djembe_slap, vel_base * 0.7);
             }
-        } else if (rng.float() < spec.ghost_density * meso) {
+        } else if (dsp.rngFloat(&rng) < spec.ghost_density * meso) {
             scheduleTrigger(V_DJEMBE_ACC1, .djembe_ghost_tone, vel_base * 0.4);
         }
 
@@ -813,7 +821,7 @@ fn advanceStepAll(step: u8, meso: f32, micro: f32, spec: *const CueSpec) void {
             scheduleTrigger(V_DJEMBE_ACC2, .djembe_tone, vel_base * accent * 0.78);
         } else if (stepActive12(spec.acc2_bass_mask, step)) {
             scheduleTrigger(V_DJEMBE_ACC2, .djembe_bass, vel_base * 0.85);
-        } else if (rng.float() < spec.ghost_density * meso * 0.7) {
+        } else if (dsp.rngFloat(&rng) < spec.ghost_density * meso * 0.7) {
             scheduleTrigger(V_DJEMBE_ACC2, .djembe_ghost_slap, vel_base * 0.35);
         }
     }
@@ -821,13 +829,13 @@ fn advanceStepAll(step: u8, meso: f32, micro: f32, spec: *const CueSpec) void {
     // Dundunba: sparse heavy foundation
     if (stepActive12(spec.dundunba_mask, step)) {
         scheduleTrigger(V_DUNDUNBA, .dunun_drum, vel_base);
-    } else if (rng.float() < spec.fill_chance * meso) {
+    } else if (dsp.rngFloat(&rng) < spec.fill_chance * meso) {
         scheduleTrigger(V_DUNDUNBA, .dunun_drum, vel_base * 0.6);
     }
     if (stepActive12(spec.dundunba_bell_mask, step)) {
-        if (pending[V_DUNDUNBA].trigger_type == .dunun_drum and rng.float() < bellChance(spec, V_DUNDUNBA, meso)) {
+        if (pending[V_DUNDUNBA].trigger_type == .dunun_drum and dsp.rngFloat(&rng) < bellChance(spec, V_DUNDUNBA, meso)) {
             pending[V_DUNDUNBA].trigger_type = .dunun_both;
-        } else if (rng.float() < bellChance(spec, V_DUNDUNBA, meso) * 0.7) {
+        } else if (dsp.rngFloat(&rng) < bellChance(spec, V_DUNDUNBA, meso) * 0.7) {
             scheduleTrigger(V_DUNDUNBA, .dunun_bell, 0.0);
         }
     }
@@ -837,29 +845,29 @@ fn advanceStepAll(step: u8, meso: f32, micro: f32, spec: *const CueSpec) void {
         scheduleTrigger(V_SANGBAN, .dunun_drum, vel_base * 0.9);
     }
     if (stepActive12(spec.sangban_bell_mask, step)) {
-        if (pending[V_SANGBAN].trigger_type == .dunun_drum and rng.float() < bellChance(spec, V_SANGBAN, meso)) {
+        if (pending[V_SANGBAN].trigger_type == .dunun_drum and dsp.rngFloat(&rng) < bellChance(spec, V_SANGBAN, meso)) {
             pending[V_SANGBAN].trigger_type = .dunun_both;
-        } else if (rng.float() < bellChance(spec, V_SANGBAN, meso)) {
+        } else if (dsp.rngFloat(&rng) < bellChance(spec, V_SANGBAN, meso)) {
             scheduleTrigger(V_SANGBAN, .dunun_bell, 0.0);
         }
     }
 
     // Kenkeni: steady pulse, always plays
     if (stepActive12(spec.kenkeni_mask, step)) {
-        if (rng.float() < bellChance(spec, V_KENKENI, meso)) {
+        if (dsp.rngFloat(&rng) < bellChance(spec, V_KENKENI, meso)) {
             scheduleTrigger(V_KENKENI, .dunun_both, vel_base * 0.85);
         } else {
             scheduleTrigger(V_KENKENI, .dunun_drum, vel_base * 0.85);
         }
     } else if (stepActive12(spec.kenkeni_bell_mask, step)) {
-        if (rng.float() < bellChance(spec, V_KENKENI, meso) * 0.9) {
+        if (dsp.rngFloat(&rng) < bellChance(spec, V_KENKENI, meso) * 0.9) {
             scheduleTrigger(V_KENKENI, .dunun_bell, 0.0);
         }
     }
 
     // Shekere: density-gated with swing feel
     const shekere_chance: f32 = if (step % 3 == 0) spec.shekere_density else spec.shekere_density * 0.6 * (0.5 + meso * 0.5);
-    if (rng.float() < shekere_chance) {
+    if (dsp.rngFloat(&rng) < shekere_chance) {
         scheduleTrigger(V_SHEKERE, .shekere, 0.0);
     }
 }
@@ -894,7 +902,7 @@ fn applyCueParams() void {
     engine.key.root = spec.root;
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
-    engine.setChordChangeBeats(spec.chord_change_beats);
+    composition.compositionEngineSetChordChangeBeats(&engine, spec.chord_change_beats);
 
     // Tune dunun frequencies slightly per cue for variety
     const cue_idx: f32 = @floatFromInt(@intFromEnum(cue_state.to));

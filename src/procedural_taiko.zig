@@ -37,8 +37,8 @@ pub var selected_cue: CuePreset = .matsuri;
 // ============================================================
 
 const TaikoReverb = StereoReverb(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 });
-var reverb: TaikoReverb = TaikoReverb.init(.{ 0.87, 0.88, 0.86, 0.89 });
-var rng: dsp.Rng = dsp.Rng.init(0xDA1C_0000);
+var reverb: TaikoReverb = dsp.stereoReverbInit(.{1801, 1907, 2053, 2111}, .{241, 557}, .{ 0.87, 0.88, 0.86, 0.89 });
+var rng: dsp.Rng = dsp.rngInit(0xDA1C_0000);
 
 fn initHarmony() composition.ChordMarkov {
     // Taiko is primarily rhythmic, but we use chord progressions
@@ -310,22 +310,22 @@ fn randomizeTemporalState(initial_bpm: f32) void {
         std.log.warn("procedural_taiko.randomizeTemporalState: invalid bpm={d}, skipping randomization", .{initial_bpm});
         return;
     }
-    runner.engine.arcs.micro.beat_count = rng.float() * runner.engine.arcs.micro.section_beats;
-    runner.engine.arcs.meso.beat_count = rng.float() * runner.engine.arcs.meso.section_beats;
-    runner.engine.arcs.macro.beat_count = rng.float() * runner.engine.arcs.macro.section_beats;
+    runner.engine.arcs.micro.beat_count = dsp.rngFloat(&rng) * runner.engine.arcs.micro.section_beats;
+    runner.engine.arcs.meso.beat_count = dsp.rngFloat(&rng) * runner.engine.arcs.meso.section_beats;
+    runner.engine.arcs.macro.beat_count = dsp.rngFloat(&rng) * runner.engine.arcs.macro.section_beats;
     const macro_quarter_f = runner.engine.arcs.macro.beat_count / runner.engine.arcs.macro.section_beats * 4.0;
     runner.engine.last_macro_quarter = @intFromFloat(std.math.clamp(macro_quarter_f, 0.0, 3.0));
 
-    runner.sequencer.step = @intCast(rng.next() % 16);
+    runner.sequencer.step = @intCast(dsp.rngNext(&rng) % 16);
     const samples_per_step = dsp.SAMPLE_RATE * 60.0 / initial_bpm / 4.0;
     if (samples_per_step <= 1.0) {
         std.log.warn("procedural_taiko.randomizeTemporalState: invalid samples_per_step={d}", .{samples_per_step});
         runner.sequencer.step_counter = 0.0;
     } else {
-        runner.sequencer.step_counter = rng.float() * samples_per_step;
+        runner.sequencer.step_counter = dsp.rngFloat(&rng) * samples_per_step;
     }
 
-    runner.engine.chord_beat_counter = rng.float() * @max(runner.engine.chord_change_beats, 1.0);
+    runner.engine.chord_beat_counter = dsp.rngFloat(&rng) * @max(runner.engine.chord_change_beats, 1.0);
 }
 
 fn maybeAdvanceStructuralCue(step: u8) void {
@@ -334,12 +334,12 @@ fn maybeAdvanceStructuralCue(step: u8) void {
     if (structural_cue == target_cue) return;
 
     const switch_p = std.math.clamp((cue_state.progress - 0.15) / 0.85, 0.0, 1.0);
-    if (rng.float() >= switch_p) return;
+    if (dsp.rngFloat(&rng) >= switch_p) return;
 
     structural_cue = target_cue;
     const target = CUE_SPECS[@intFromEnum(structural_cue)];
-    runner.engine.setChordChangeBeats(target.chord_change_beats);
-    runner.engine.key.modulateTo(target.root);
+    composition.compositionEngineSetChordChangeBeats(&runner.engine, target.chord_change_beats);
+    composition.keyStateModulateTo(&runner.engine.key, target.root);
     pending_scale_type = target.scale_type;
 }
 
@@ -404,7 +404,7 @@ const PendingTrigger = struct {
 var pending: [NUM_VOICES]PendingTrigger = .{PendingTrigger{}} ** NUM_VOICES;
 
 fn scheduleTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
-    const offset = VOICE_OFFSETS[voice] + (rng.float() * 2.0 - 1.0) * JITTER_SAMPLES;
+    const offset = VOICE_OFFSETS[voice] + (dsp.rngFloat(&rng) * 2.0 - 1.0) * JITTER_SAMPLES;
     pending[voice] = .{
         .trigger_type = ttype,
         .delay = @max(offset, 0.0),
@@ -427,37 +427,37 @@ fn processPendingTriggers() void {
 fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
     switch (voice) {
         V_ODAIKO => switch (ttype) {
-            .don => odaiko.triggerDon(vel),
-            .ghost => odaiko.triggerGhost(vel),
+            .don => instruments.odaikoTriggerDon(&odaiko, vel),
+            .ghost => instruments.odaikoTriggerGhost(&odaiko, vel),
             else => {},
         },
         V_NAGADO1 => switch (ttype) {
-            .don => nagado1.triggerDon(vel),
-            .ka => nagado1.triggerKa(vel),
-            .ghost => nagado1.triggerGhost(vel),
+            .don => instruments.nagadoTriggerDon(&nagado1, vel),
+            .ka => instruments.nagadoTriggerKa(&nagado1, vel),
+            .ghost => instruments.nagadoTriggerGhost(&nagado1, vel),
             else => {},
         },
         V_NAGADO2 => switch (ttype) {
-            .don => nagado2.triggerDon(vel),
-            .ka => nagado2.triggerKa(vel),
-            .ghost => nagado2.triggerGhost(vel),
+            .don => instruments.nagadoTriggerDon(&nagado2, vel),
+            .ka => instruments.nagadoTriggerKa(&nagado2, vel),
+            .ghost => instruments.nagadoTriggerGhost(&nagado2, vel),
             else => {},
         },
         V_SHIME1 => switch (ttype) {
-            .don => shime1.triggerDon(vel),
-            .ka => shime1.triggerKa(vel),
-            .roll => shime1.triggerRoll(vel),
+            .don => instruments.shimeTriggerDon(&shime1, vel),
+            .ka => instruments.shimeTriggerKa(&shime1, vel),
+            .roll => instruments.shimeTriggerRoll(&shime1, vel),
             else => {},
         },
         V_SHIME2 => switch (ttype) {
-            .don => shime2.triggerDon(vel),
-            .ka => shime2.triggerKa(vel),
-            .roll => shime2.triggerRoll(vel),
+            .don => instruments.shimeTriggerDon(&shime2, vel),
+            .ka => instruments.shimeTriggerKa(&shime2, vel),
+            .roll => instruments.shimeTriggerRoll(&shime2, vel),
             else => {},
         },
         V_KANE => switch (ttype) {
-            .open => kane.triggerOpen(vel),
-            .muted => kane.triggerMuted(vel),
+            .open => instruments.atariganeTriggerOpen(&kane, vel),
+            .muted => instruments.atariganeTriggerMuted(&kane, vel),
             else => {},
         },
         else => {},
@@ -485,7 +485,7 @@ fn hashLeadPattern() u32 {
 
 
 fn randomTaikoLeadHit(is_strong: bool) LeadHit {
-    const r = rng.float();
+    const r = dsp.rngFloat(&rng);
     if (is_strong and r < 0.22) return .don_don;
     if (r < 0.52) return .don;
     if (r < 0.84) return .ka;
@@ -493,12 +493,12 @@ fn randomTaikoLeadHit(is_strong: bool) LeadHit {
 }
 
 fn mutateLeadPattern(spec: *const TaikoCueSpec, meso: f32) void {
-    const mutations: u8 = 2 + @as(u8, @intCast(rng.next() % 4));
+    const mutations: u8 = 2 + @as(u8, @intCast(dsp.rngNext(&rng) % 4));
     const keep_chance = std.math.clamp(0.5 + spec.energy * 0.26 + meso * 0.18, 0.0, 0.98);
     for (0..mutations) |_| {
-        const idx: usize = @intCast(rng.next() % 16);
+        const idx: usize = @intCast(dsp.rngNext(&rng) % 16);
         const step: u8 = @intCast(idx);
-        if (rng.float() < keep_chance) {
+        if (dsp.rngFloat(&rng) < keep_chance) {
             lead_pattern[idx] = randomTaikoLeadHit(step % 4 == 0);
             continue;
         }
@@ -507,7 +507,7 @@ fn mutateLeadPattern(spec: *const TaikoCueSpec, meso: f32) void {
 }
 
 fn forceLeadPerturbation() void {
-    const idx: usize = @intCast(rng.next() % 16);
+    const idx: usize = @intCast(dsp.rngNext(&rng) % 16);
     const step: u8 = @intCast(idx);
     lead_pattern[idx] = randomTaikoLeadHit(step % 4 == 0);
 }
@@ -522,7 +522,7 @@ fn generateLeadPattern(meso: f32, spec: *const TaikoCueSpec) void {
         const is_mid = (step % 2 == 0);
         const base_chance: f32 = if (is_strong) 0.72 else if (is_mid) 0.4 + spec.swing_amount * 0.45 else 0.16 + spec.swing_amount * 0.35;
         const chance = base_chance * energy * spec.lead_density;
-        if (rng.float() >= chance) {
+        if (dsp.rngFloat(&rng) >= chance) {
             lead_pattern[i] = .none;
             continue;
         }
@@ -550,7 +550,7 @@ fn generateLeadPattern(meso: f32, spec: *const TaikoCueSpec) void {
     }
 
     if (hit_count == 0) {
-        const idx: usize = @intCast((rng.next() % 4) * 4);
+        const idx: usize = @intCast((dsp.rngNext(&rng) % 4) * 4);
         lead_pattern[idx] = .don;
     }
 }
@@ -608,8 +608,8 @@ fn buildCallPattern() void {
         if (step < 8) {
             // Call: leader plays
             const chance: f32 = if (step % 2 == 0) 0.7 else 0.3;
-            if (rng.float() < chance) {
-                lead_pattern[i] = if (step % 4 == 0) .don_don else if (rng.float() < 0.6) .don else .ka;
+            if (dsp.rngFloat(&rng) < chance) {
+                lead_pattern[i] = if (step % 4 == 0) .don_don else if (dsp.rngFloat(&rng) < 0.6) .don else .ka;
             } else {
                 lead_pattern[i] = .none;
             }
@@ -625,14 +625,14 @@ fn buildCallPattern() void {
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(entropy.nextSeed(0xDA1C_0000, @intFromEnum(selected_cue)));
+    rng = dsp.rngInit(entropy.nextSeed(0xDA1C_0000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
     structural_cue = selected_cue;
     pending_scale_type = null;
-    reverb = TaikoReverb.init(.{ 0.87, 0.88, 0.86, 0.89 });
+    reverb = dsp.stereoReverbInit(.{1801, 1907, 2053, 2111}, .{241, 557}, .{ 0.87, 0.88, 0.86, 0.89 });
     lfo_space = .{ .period_beats = 96, .depth = 0.03 };
 
-    runner.reset(&STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
+    composition.stepStyleRunnerReset(TaikoCueSpec, 4, &runner, &STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
 
     resetInstruments();
     pending = .{PendingTrigger{}} ** NUM_VOICES;
@@ -650,7 +650,7 @@ pub fn reset() void {
     runner.engine.key.root = initial.root;
     runner.engine.key.target_root = initial.root;
     runner.engine.key.scale_type = initial.scale_type;
-    runner.engine.setChordChangeBeats(initial.chord_change_beats);
+    composition.compositionEngineSetChordChangeBeats(&runner.engine, initial.chord_change_beats);
     applyInstrumentTuning(cueIndexF32(selected_cue));
     const reset_bpm = @max(CUE_SPECS[@intFromEnum(structural_cue)].base_bpm * bpm, 1.0);
     randomizeTemporalState(reset_bpm);
@@ -689,6 +689,13 @@ pub const DebugSnapshot = struct {
     longform_intensity: f32,
     longform_cadence: f32,
     longform_modulation: f32,
+    section_id: u8,
+    section_progress: f32,
+    section_transition_count: u32,
+    section_distinct_transition_count: u8,
+    section_density: f32,
+    section_harmonic_motion: f32,
+    section_cadence_scale: f32,
     chord_change_beats: f32,
     next_chord_change_beats: f32,
     sequencer_step: u8,
@@ -709,12 +716,19 @@ pub fn debugSnapshot() DebugSnapshot {
         .key_scale = runner.engine.key.scale_type,
         .chord_index = runner.engine.harmony.current,
         .chord_count = runner.engine.harmony.num_chords,
-        .micro = runner.engine.arcs.micro.tension(),
-        .meso = runner.engine.arcs.meso.tension(),
-        .macro = runner.engine.arcs.macro.tension(),
-        .longform_intensity = runner.engine.longFormIntensity(),
-        .longform_cadence = runner.engine.longFormCadenceSpread(),
-        .longform_modulation = runner.engine.longFormModulationDrive(),
+        .micro = composition.arcControllerTension(&runner.engine.arcs.micro),
+        .meso = composition.arcControllerTension(&runner.engine.arcs.meso),
+        .macro = composition.arcControllerTension(&runner.engine.arcs.macro),
+        .longform_intensity = composition.compositionEngineLongFormIntensity(&runner.engine),
+        .longform_cadence = composition.compositionEngineLongFormCadenceSpread(&runner.engine),
+        .longform_modulation = composition.compositionEngineLongFormModulationDrive(&runner.engine),
+        .section_id = composition.compositionEngineSectionId(&runner.engine),
+        .section_progress = composition.compositionEngineSectionProgress(&runner.engine),
+        .section_transition_count = composition.compositionEngineSectionTransitionCount(&runner.engine),
+        .section_distinct_transition_count = composition.compositionEngineSectionDistinctTransitionCount(&runner.engine),
+        .section_density = composition.compositionEngineSectionDensity(&runner.engine),
+        .section_harmonic_motion = composition.compositionEngineSectionHarmonicMotion(&runner.engine),
+        .section_cadence_scale = composition.compositionEngineSectionCadenceScale(&runner.engine),
         .chord_change_beats = runner.engine.chord_change_beats,
         .next_chord_change_beats = runner.engine.next_chord_change_beats,
         .sequencer_step = runner.sequencer.step,
@@ -732,15 +746,25 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
     for (0..frames) |i| {
         cue_morph.advance(CuePreset, &cue_state, cue_spb);
         var spec = blendedCueSpec();
+        const section_density = composition.compositionEngineSectionDensity(&runner.engine);
+        const section_harmonic = composition.compositionEngineSectionHarmonicMotion(&runner.engine);
         const from_cue = cue_state.from;
         const to_cue = cue_state.to;
         const cue_idx = lerpF32(cueIndexF32(from_cue), cueIndexF32(to_cue), cue_state.progress);
+
+        spec.lead_density = std.math.clamp(spec.lead_density * (0.72 + section_density * 0.62), 0.04, 0.98);
+        spec.ghost_density = std.math.clamp(spec.ghost_density * (0.7 + section_density * 0.65), 0.02, 0.9);
+        spec.fill_density = std.math.clamp(spec.fill_density * (0.7 + section_density * 0.75), 0.03, 0.95);
+        spec.energy = std.math.clamp(spec.energy * (0.78 + section_density * 0.42), 0.1, 1.0);
+        spec.call_response_chance = std.math.clamp(spec.call_response_chance * (0.75 + section_harmonic * 0.55), 0.0, 0.95);
+        spec.roll_chance = std.math.clamp(spec.roll_chance * (0.8 + section_harmonic * 0.45), 0.0, 0.95);
+
         applyInstrumentTuning(cue_idx);
         // Jo-Ha-Kyu tempo drift: macro arc pushes tempo up at climax
-        const macro_t = runner.engine.arcs.macro.tension();
+        const macro_t = composition.arcControllerTension(&runner.engine.arcs.macro);
         const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
-        lfo_space.advanceSample(effective_bpm);
-        const frame = runner.advanceFrame(&rng, &STYLE, effective_bpm, LAYER_FADE_RATE);
+        composition.slowLfoAdvanceSample(&lfo_space, effective_bpm);
+        const frame = composition.stepStyleRunnerAdvanceFrame(TaikoCueSpec, 4, &runner, &rng, &STYLE, effective_bpm, LAYER_FADE_RATE);
 
         if (frame.tick.chord_changed and pending_scale_type != null and cue_state.progress >= 0.5) {
             runner.engine.key.scale_type = pending_scale_type.?;
@@ -758,7 +782,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                     lead_cycle_count = 0;
 
                     // Check for break ("ma" moment)
-                    if (!in_break and !in_call_response and rng.float() < spec.break_chance * frame.tick.macro) {
+                    if (!in_break and !in_call_response and dsp.rngFloat(&rng) < spec.break_chance * frame.tick.macro) {
                         in_break = true;
                         break_remaining = 1;
                         buildBreakPattern();
@@ -770,9 +794,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                     }
 
                     // Check for call-and-response
-                    if (!in_break and !in_call_response and rng.float() < spec.call_response_chance * frame.tick.meso) {
+                    if (!in_break and !in_call_response and dsp.rngFloat(&rng) < spec.call_response_chance * frame.tick.meso) {
                         in_call_response = true;
-                        call_response_remaining = 2 + @as(u8, @intCast(rng.next() % 3));
+                        call_response_remaining = 2 + @as(u8, @intCast(dsp.rngNext(&rng) % 3));
                         is_response_phase = false;
                         buildCallPattern();
                     } else if (in_call_response) {
@@ -799,41 +823,41 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var right: f32 = 0.0;
 
         // Odaiko — massive center presence
-        const odaiko_s = odaiko.process() * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2;
+        const odaiko_s = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2;
         left += odaiko_s;
         right += odaiko_s;
 
         // Nagados
-        const n1_s = nagado1.process(&rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
+        const n1_s = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
         const n1_pan = dsp.panStereo(n1_s, VOICE_PAN[V_NAGADO1]);
         left += n1_pan[0];
         right += n1_pan[1];
 
-        const n2_s = nagado2.process(&rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
+        const n2_s = instruments.nagadoProcess(&nagado2, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
         const n2_pan = dsp.panStereo(n2_s, VOICE_PAN[V_NAGADO2]);
         left += n2_pan[0];
         right += n2_pan[1];
 
         // Shimes
-        const s1_s = shime1.process(&rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
+        const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
         const s1_pan = dsp.panStereo(s1_s, VOICE_PAN[V_SHIME1]);
         left += s1_pan[0];
         right += s1_pan[1];
 
-        const s2_s = shime2.process(&rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
+        const s2_s = instruments.shimeProcess(&shime2, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
         const s2_pan = dsp.panStereo(s2_s, VOICE_PAN[V_SHIME2]);
         left += s2_pan[0];
         right += s2_pan[1];
 
         // Atarigane
-        const kane_s = kane.process(&rng) * slap_mix * runner.layer_levels[KANE_LAYER];
+        const kane_s = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER];
         left += kane_s; // center
         right += kane_s;
 
         // Reverb — large space
-        const wet = (reverb_mix + spec.reverb_boost) * lfo_space.modulate();
+        const wet = (reverb_mix + spec.reverb_boost) * composition.slowLfoModulate(&lfo_space);
         const dry = 1.0 - wet;
-        const rev = reverb.process(.{ left, right });
+        const rev = dsp.stereoReverbProcess(.{1801, 1907, 2053, 2111}, .{241, 557}, &reverb, .{ left, right });
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
 
@@ -848,7 +872,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
 fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void {
     _ = micro;
-    const macro_t = runner.engine.arcs.macro.tension();
+    const macro_t = composition.arcControllerTension(&runner.engine.arcs.macro);
     const vel_base: f32 = (0.48 + meso * 0.36) * (0.82 + spec.energy * 0.28);
     const accent: f32 = if (step % 4 == 0) 1.0 else if (step % 2 == 0) 0.76 + spec.swing_amount * 0.35 else 0.56 + spec.swing_amount * 0.4;
 
@@ -863,9 +887,9 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
         scheduleTrigger(V_ODAIKO, .don, vel_base * 0.9);
     } else if (composition.stepActive(spec.odaiko_mask, step)) {
         scheduleTrigger(V_ODAIKO, .don, vel_base * accent);
-    } else if (composition.stepActive(spec.odaiko_fill_mask, step) and rng.float() < spec.fill_density * macro_t) {
+    } else if (composition.stepActive(spec.odaiko_fill_mask, step) and dsp.rngFloat(&rng) < spec.fill_density * macro_t) {
         scheduleTrigger(V_ODAIKO, .don, vel_base * 0.6);
-    } else if (rng.float() < spec.ghost_density * macro_t * 0.3) {
+    } else if (dsp.rngFloat(&rng) < spec.ghost_density * macro_t * 0.3) {
         scheduleTrigger(V_ODAIKO, .ghost, vel_base * 0.3);
     }
 
@@ -903,10 +927,10 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
         if (composition.stepActive(spec.nagado2_don_mask, step)) {
             scheduleTrigger(V_NAGADO2, .don, vel_base * accent * 0.78);
         } else if (composition.stepActive(spec.nagado2_ka_mask, step)) {
-            if (rng.float() < 0.5 + meso * 0.4) {
+            if (dsp.rngFloat(&rng) < 0.5 + meso * 0.4) {
                 scheduleTrigger(V_NAGADO2, .ka, vel_base * 0.65);
             }
-        } else if (rng.float() < spec.ghost_density * meso * 0.5) {
+        } else if (dsp.rngFloat(&rng) < spec.ghost_density * meso * 0.5) {
             scheduleTrigger(V_NAGADO2, .ghost, vel_base * 0.3);
         }
     }
@@ -920,23 +944,23 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
         scheduleTrigger(V_SHIME1, .don, shime_vel);
 
         // Shime 2: interlocking — plays the off-positions or rolls
-        if (!composition.stepActive(spec.shime_ji_mask, (step + 1) % 16) or rng.float() < 0.12 + spec.energy * 0.22) {
+        if (!composition.stepActive(spec.shime_ji_mask, (step + 1) % 16) or dsp.rngFloat(&rng) < 0.12 + spec.energy * 0.22) {
             scheduleTrigger(V_SHIME2, .don, shime_vel * 0.85);
         }
     }
     // Shime rolls during high tension
-    if (rng.float() < spec.roll_chance * macro_t and step % 4 == 3) {
+    if (dsp.rngFloat(&rng) < spec.roll_chance * macro_t and step % 4 == 3) {
         scheduleTrigger(V_SHIME1, .roll, vel_base * 0.6);
         scheduleTrigger(V_SHIME2, .roll, vel_base * 0.5);
     }
 
     // ---- Atarigane ----
     if (composition.stepActive(spec.kane_open_mask, step)) {
-        if (rng.float() < kaneOpenChance(spec, meso, macro_t)) {
+        if (dsp.rngFloat(&rng) < kaneOpenChance(spec, meso, macro_t)) {
             scheduleTrigger(V_KANE, .open, vel_base * 0.62);
         }
     } else if (composition.stepActive(spec.kane_muted_mask, step)) {
-        if (rng.float() < kaneMutedChance(spec, meso, macro_t)) {
+        if (dsp.rngFloat(&rng) < kaneMutedChance(spec, meso, macro_t)) {
             scheduleTrigger(V_KANE, .muted, vel_base * 0.42);
         }
     }
@@ -959,7 +983,7 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
     const nagado_vel = vel_base * (0.58 + macro_t * 0.28) * accent;
 
     if (!composition.stepActive(density_mask, step)) {
-        if (macro_t > 0.9 and step == 15 and rng.float() < 0.65) {
+        if (macro_t > 0.9 and step == 15 and dsp.rngFloat(&rng) < 0.65) {
             scheduleTrigger(V_SHIME1, .roll, vel_base * 0.52);
             scheduleTrigger(V_SHIME2, .roll, vel_base * 0.46);
         }
@@ -968,30 +992,30 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
 
     if (macro_t < 0.24) {
         if (composition.stepActive(half_mask, step)) {
-            const lead_on_n1 = rng.float() < 0.58 + meso * 0.22;
+            const lead_on_n1 = dsp.rngFloat(&rng) < 0.58 + meso * 0.22;
             const lead_voice: usize = if (lead_on_n1) V_NAGADO1 else V_NAGADO2;
             const support_voice: usize = if (lead_on_n1) V_NAGADO2 else V_NAGADO1;
             scheduleTrigger(lead_voice, .don, nagado_vel * 0.9);
-            if (rng.float() < 0.2 + meso * 0.2) {
-                const support_hit: TriggerType = if (rng.float() < 0.58) .ghost else .ka;
+            if (dsp.rngFloat(&rng) < 0.2 + meso * 0.2) {
+                const support_hit: TriggerType = if (dsp.rngFloat(&rng) < 0.58) .ghost else .ka;
                 scheduleTrigger(support_voice, support_hit, nagado_vel * 0.5);
             }
-        } else if (composition.stepActive(quarter_mask, step) and rng.float() < 0.18 + meso * 0.2) {
+        } else if (composition.stepActive(quarter_mask, step) and dsp.rngFloat(&rng) < 0.18 + meso * 0.2) {
             scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.64);
         }
-        if (step == 0 or (step == 8 and rng.float() < 0.52 + meso * 0.2)) {
-            scheduleTrigger(V_SHIME1, .don, shime_vel * (0.74 + rng.float() * 0.18));
-        } else if (step == 12 and rng.float() < 0.16 + meso * 0.16) {
+        if (step == 0 or (step == 8 and dsp.rngFloat(&rng) < 0.52 + meso * 0.2)) {
+            scheduleTrigger(V_SHIME1, .don, shime_vel * (0.74 + dsp.rngFloat(&rng) * 0.18));
+        } else if (step == 12 and dsp.rngFloat(&rng) < 0.16 + meso * 0.16) {
             scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.56);
         }
-        if (step % 8 == 4 and rng.float() < 0.07 + meso * 0.12) {
+        if (step % 8 == 4 and dsp.rngFloat(&rng) < 0.07 + meso * 0.12) {
             scheduleTrigger(V_ODAIKO, .ghost, vel_base * 0.32);
         }
     } else if (macro_t < 0.52) {
         scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.88);
         if (composition.stepActive(quarter_mask, step)) {
             scheduleTrigger(V_SHIME1, .don, shime_vel);
-        } else if (rng.float() < 0.35 + meso * 0.2) {
+        } else if (dsp.rngFloat(&rng) < 0.35 + meso * 0.2) {
             scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.72);
         }
     } else if (macro_t < 0.82) {
@@ -1011,7 +1035,7 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
             scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.9);
         }
 
-        if (rng.float() < 0.18 + macro_t * 0.2) {
+        if (dsp.rngFloat(&rng) < 0.18 + macro_t * 0.2) {
             scheduleTrigger(V_SHIME1, .roll, vel_base * 0.34);
         }
     }
@@ -1022,9 +1046,9 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
 
     if (step == 0) {
         scheduleTrigger(V_KANE, .open, vel_base * (0.34 + macro_t * 0.16));
-    } else if (macro_t > 0.72 and step == 8 and rng.float() < 0.5) {
+    } else if (macro_t > 0.72 and step == 8 and dsp.rngFloat(&rng) < 0.5) {
         scheduleTrigger(V_KANE, .muted, vel_base * 0.28);
-    } else if (macro_t > 0.9 and step == 12 and rng.float() < 0.38) {
+    } else if (macro_t > 0.9 and step == 12 and dsp.rngFloat(&rng) < 0.38) {
         scheduleTrigger(V_KANE, .open, vel_base * 0.32);
     }
 }
@@ -1052,7 +1076,7 @@ fn applyCueParams() void {
         return;
     }
     const target = CUE_SPECS[@intFromEnum(cue_state.to)];
-    runner.engine.setChordChangeBeats(target.chord_change_beats);
-    runner.engine.key.modulateTo(target.root);
+    composition.compositionEngineSetChordChangeBeats(&runner.engine, target.chord_change_beats);
+    composition.keyStateModulateTo(&runner.engine.key, target.root);
     pending_scale_type = target.scale_type;
 }

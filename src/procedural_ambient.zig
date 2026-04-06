@@ -39,7 +39,7 @@ pub var selected_cue: CuePreset = .dawn;
 // ============================================================
 
 const AmbientReverb = StereoReverb(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 });
-var reverb: AmbientReverb = AmbientReverb.init(.{ 0.87, 0.88, 0.89, 0.86 });
+var reverb: AmbientReverb = dsp.stereoReverbInit(.{1759, 1693, 1623, 1548}, .{245, 605}, .{ 0.87, 0.88, 0.89, 0.86 });
 
 // ============================================================
 // Composition engine & harmony
@@ -105,7 +105,7 @@ var arp_layer: layers.AmbientArpLayer = .{};
 // RNG
 // ============================================================
 
-var rng: dsp.Rng = dsp.Rng.init(12345);
+var rng: dsp.Rng = dsp.rngInit(12345);
 
 // ============================================================
 // Cue specs (static data describing each flavor)
@@ -390,6 +390,10 @@ pub const DebugSnapshot = struct {
     longform_intensity: f32,
     longform_cadence: f32,
     longform_modulation: f32,
+    section_id: u8,
+    section_progress: f32,
+    section_transition_count: u32,
+    section_distinct_transition_count: u8,
     chord_change_beats: f32,
     next_chord_change_beats: f32,
     drone_level: f32,
@@ -412,12 +416,16 @@ pub fn debugSnapshot() DebugSnapshot {
         .key_scale = engine.key.scale_type,
         .chord_index = engine.harmony.current,
         .chord_count = engine.harmony.num_chords,
-        .micro = engine.arcs.micro.tension(),
-        .meso = engine.arcs.meso.tension(),
-        .macro = engine.arcs.macro.tension(),
-        .longform_intensity = engine.longFormIntensity(),
-        .longform_cadence = engine.longFormCadenceSpread(),
-        .longform_modulation = engine.longFormModulationDrive(),
+        .micro = composition.arcControllerTension(&engine.arcs.micro),
+        .meso = composition.arcControllerTension(&engine.arcs.meso),
+        .macro = composition.arcControllerTension(&engine.arcs.macro),
+        .longform_intensity = composition.compositionEngineLongFormIntensity(&engine),
+        .longform_cadence = composition.compositionEngineLongFormCadenceSpread(&engine),
+        .longform_modulation = composition.compositionEngineLongFormModulationDrive(&engine),
+        .section_id = composition.compositionEngineSectionId(&engine),
+        .section_progress = composition.compositionEngineSectionProgress(&engine),
+        .section_transition_count = composition.compositionEngineSectionTransitionCount(&engine),
+        .section_distinct_transition_count = composition.compositionEngineSectionDistinctTransitionCount(&engine),
         .chord_change_beats = engine.chord_change_beats,
         .next_chord_change_beats = engine.next_chord_change_beats,
         .drone_level = drone_level,
@@ -442,12 +450,12 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         lfo_filter.depth = cue.lfo_filter_depth;
         lfo_reverb.period_beats = cue.lfo_reverb_period;
         lfo_reverb.depth = cue.lfo_reverb_depth;
-        lfo_filter.advanceSample(eff_bpm);
-        lfo_reverb.advanceSample(eff_bpm);
-        const director_intensity = engine.longFormIntensity();
-        const director_cadence = engine.longFormCadenceSpread();
-        const director_mod = engine.longFormModulationDrive();
-        const cadence_warp = std.math.clamp(1.0 + (director_cadence - 0.16) * 0.34 + lfo_filter.value() * 0.55, 0.72, 1.35);
+        composition.slowLfoAdvanceSample(&lfo_filter, eff_bpm);
+        composition.slowLfoAdvanceSample(&lfo_reverb, eff_bpm);
+        const director_intensity = composition.compositionEngineLongFormIntensity(&engine);
+        const director_cadence = composition.compositionEngineLongFormCadenceSpread(&engine);
+        const director_mod = composition.compositionEngineLongFormModulationDrive(&engine);
+        const cadence_warp = std.math.clamp(1.0 + (director_cadence - 0.16) * 0.34 + composition.slowLfoValue(&lfo_filter) * 0.55, 0.72, 1.35);
         inline for (0..2) |j| {
             drone_layer.beat_len[j] = cue.drone_beat_len[j] * cadence_warp;
             melody_layer.beat_len[j] = cue.melody_beat_len[j] * cadence_warp;
@@ -462,7 +470,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         for (0..layers.AmbientArpLayer.COUNT) |a| {
             arp_layer.phrases[a].rest_chance = cue.arp_rest_chance;
         }
-        const tick = engine.advanceSample(&rng, eff_bpm);
+        const tick = composition.compositionEngineAdvanceSample(&engine, &rng, eff_bpm);
 
         if (tick.chord_changed) {
             advanceChord();
@@ -484,8 +492,8 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var left: f32 = 0;
         var right: f32 = 0;
 
-        layers.advanceAmbientDroneLayer(&drone_layer, &rng, &engine.key, spb, tick.meso, cue.drone_filter_base, cue.drone_filter_range, lfo_filter.modulate(), cue.drone_env_attack, cue.drone_env_release);
-        layers.advanceAmbientPadLayer(&pad_layer, &engine.key, spb, tick.meso, cue.pad_filter_base, cue.pad_filter_range, lfo_filter.modulate(), cue.pad_env_attack, cue.pad_env_release);
+        layers.advanceAmbientDroneLayer(&drone_layer, &rng, &engine.key, spb, tick.meso, cue.drone_filter_base, cue.drone_filter_range, composition.slowLfoModulate(&lfo_filter), cue.drone_env_attack, cue.drone_env_release);
+        layers.advanceAmbientPadLayer(&pad_layer, &engine.key, spb, tick.meso, cue.pad_filter_base, cue.pad_filter_range, composition.slowLfoModulate(&lfo_filter), cue.pad_env_attack, cue.pad_env_release);
         const melody_recall = std.math.clamp(cue.melody_recall_chance * (0.95 - director_cadence * 0.45) + (1.0 - director_intensity) * 0.08, 0.04, 0.86);
         layers.advanceAmbientMelodyLayer(&melody_layer, &rng, &engine.key, spb, tick.meso, tick.micro, melody_recall, cue.melody_env_attack, cue.melody_env_decay, cue.melody_env_release);
         layers.advanceAmbientArpLayer(&arp_layer, &rng, &engine.key, spb, tick.meso, tick.micro, cue.arp_env_decay, cue.arp_env_release);
@@ -507,9 +515,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         right += arp_out[1];
 
         // === Reverb ===
-        const rev_mix = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * lfo_reverb.modulate(), 0.0, 0.98);
+        const rev_mix = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * composition.slowLfoModulate(&lfo_reverb), 0.0, 0.98);
         const dry = 1.0 - rev_mix;
-        const rev = reverb.process(.{ left, right });
+        const rev = dsp.stereoReverbProcess(.{1759, 1693, 1623, 1548}, .{245, 605}, &reverb, .{ left, right });
         left = left * dry + rev[0] * rev_mix;
         right = right * dry + rev[1] * rev_mix;
 
@@ -526,7 +534,7 @@ fn applyCueParams() void {
     cue_morph.setTarget(CuePreset, &cue_state, selected_cue);
     const spec = CUE_SPECS[@intFromEnum(cue_state.to)];
     engine.key.scale_type = spec.scale_type;
-    engine.setChordChangeBeats(spec.chord_change_beats);
+    composition.compositionEngineSetChordChangeBeats(&engine, spec.chord_change_beats);
     for (0..layers.AmbientMelodyLayer.COUNT) |m| {
         melody_layer.phrases[m].region_low = spec.melody_phrase.region_low;
         melody_layer.phrases[m].region_high = spec.melody_phrase.region_high;
@@ -557,9 +565,9 @@ fn advanceChord() void {
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(entropy.nextSeed(0xA6B1_0001, @intFromEnum(selected_cue)));
+    rng = dsp.rngInit(entropy.nextSeed(0xA6B1_0001, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
-    engine.reset(.{ .root = 36, .scale_type = .minor_pentatonic }, initHarmony(), AMBIENT_ARCS, 16.0, .mixed);
+    composition.compositionEngineReset(&engine, .{ .root = 36, .scale_type = .minor_pentatonic }, initHarmony(), AMBIENT_ARCS, 16.0, .mixed);
     lfo_filter = .{ .period_beats = 90, .depth = 0.08 };
     lfo_reverb = .{ .period_beats = 150, .depth = 0.04 };
     layers.resetAmbientDroneLayer(&drone_layer);
@@ -576,7 +584,7 @@ pub fn reset() void {
     melody_level = 0.0;
     arp_level = 0.0;
 
-    reverb = AmbientReverb.init(.{ 0.87, 0.88, 0.89, 0.86 });
+    reverb = dsp.stereoReverbInit(.{1759, 1693, 1623, 1548}, .{245, 605}, .{ 0.87, 0.88, 0.89, 0.86 });
     applyCueParams();
     advanceChord();
 }
