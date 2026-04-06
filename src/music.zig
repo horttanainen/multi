@@ -3,10 +3,6 @@ const sdl = @import("sdl.zig");
 const c = sdl.c;
 const audio = @import("audio.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
-const procedural_house = @import("procedural_house.zig");
-const procedural_piano = @import("procedural_piano.zig");
-const procedural_minecraft = @import("procedural_minecraft.zig");
-const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
@@ -15,11 +11,7 @@ const AtomicU32 = std.atomic.Value(u32);
 
 pub const Style = enum {
     ambient,
-    house,
-    piano,
     choir,
-    minecraft,
-    rock80s,
     african_drums,
     taiko,
 };
@@ -201,11 +193,7 @@ pub fn getReactiveVisual() ReactiveVisual {
 fn resetCurrentStyle() void {
     switch (current_style) {
         .ambient => procedural_ambient.reset(),
-        .house => procedural_house.reset(),
-        .piano => procedural_piano.reset(),
         .choir => procedural_choir.reset(),
-        .minecraft => procedural_minecraft.reset(),
-        .rock80s => procedural_80s_rock.reset(),
         .african_drums => procedural_african_drums.reset(),
         .taiko => procedural_taiko.reset(),
     }
@@ -251,11 +239,7 @@ fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_in
 
                 switch (current_style) {
                     .ambient => procedural_ambient.fillBuffer(&buf, chunk_frames),
-                    .house => procedural_house.fillBuffer(&buf, chunk_frames),
-                    .piano => procedural_piano.fillBuffer(&buf, chunk_frames),
                     .choir => procedural_choir.fillBuffer(&buf, chunk_frames),
-                    .minecraft => procedural_minecraft.fillBuffer(&buf, chunk_frames),
-                    .rock80s => procedural_80s_rock.fillBuffer(&buf, chunk_frames),
                     .african_drums => procedural_african_drums.fillBuffer(&buf, chunk_frames),
                     .taiko => procedural_taiko.fillBuffer(&buf, chunk_frames),
                 }

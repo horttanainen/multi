@@ -6,17 +6,13 @@ const lut = @import("lut.zig");
 const background_paint = @import("background_paint.zig");
 const music = @import("music.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
-const procedural_house = @import("procedural_house.zig");
-const procedural_piano = @import("procedural_piano.zig");
-const procedural_minecraft = @import("procedural_minecraft.zig");
-const procedural_80s_rock = @import("procedural_80s_rock.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
-const DEFAULT_MUSIC_STYLE: music.Style = .house;
+const DEFAULT_MUSIC_STYLE: music.Style = .ambient;
 const DEFAULT_MUSIC_BPM: f32 = 1.0;
 const DEFAULT_MUSIC_REVERB_MIX: f32 = 0.35;
 const DEFAULT_AMBIENT_DRONE_VOL: f32 = 0.15;
@@ -24,36 +20,7 @@ const DEFAULT_AMBIENT_PAD_VOL: f32 = 0.08;
 const DEFAULT_AMBIENT_MELODY_VOL: f32 = 0.06;
 const DEFAULT_AMBIENT_ARP_VOL: f32 = 0.025;
 const DEFAULT_AMBIENT_CUE: u8 = @intFromEnum(procedural_ambient.CuePreset.dawn);
-const DEFAULT_HOUSE_KICK_VOL: f32 = 0.25;
-const DEFAULT_HOUSE_HIHAT_VOL: f32 = 0.12;
-const DEFAULT_HOUSE_BASS_VOL: f32 = 0.2;
-const DEFAULT_HOUSE_PAD_VOL: f32 = 0.06;
-const DEFAULT_HOUSE_STAB_CHANCE: f32 = 0.4;
-const DEFAULT_HOUSE_CUE: u8 = @intFromEnum(procedural_house.CuePreset.deep_night);
-const DEFAULT_PIANO_NOTE_VOL: f32 = 0.12;
-const DEFAULT_PIANO_REST_CHANCE: f32 = 0.5;
-const DEFAULT_PIANO_BRIGHTNESS: f32 = 0.5;
-const DEFAULT_PIANO_CUE: u8 = @intFromEnum(procedural_piano.CuePreset.solace);
 const DEFAULT_MUSIC_VOLUME: f32 = 0.5;
-const DEFAULT_MINECRAFT_BED_MIX: f32 = 0.8;
-const DEFAULT_MINECRAFT_CLOUD_MIX: f32 = 0.7;
-const DEFAULT_MINECRAFT_HARMONY_MIX: f32 = 0.55;
-const DEFAULT_MINECRAFT_BELL_AMOUNT: f32 = 0.45;
-const DEFAULT_MINECRAFT_HAMMER_MIX: f32 = 0.25;
-const DEFAULT_MINECRAFT_CUE: u8 = @intFromEnum(procedural_minecraft.CuePreset.washed_open);
-const DEFAULT_MINECRAFT_CUE_GAP: f32 = 28.0;
-const DEFAULT_MINECRAFT_CUE_LENGTH: f32 = 32.0;
-const DEFAULT_MINECRAFT_CUE_DENSITY: f32 = 0.45;
-const DEFAULT_MINECRAFT_WOW: f32 = 0.2;
-const DEFAULT_MINECRAFT_BLUR: f32 = 0.4;
-const DEFAULT_MINECRAFT_ATTACK_SOFTNESS: f32 = 0.35;
-const DEFAULT_ROCK80S_LEAD_MIX: f32 = 0.5;
-const DEFAULT_ROCK80S_CHORD_MIX: f32 = 0.34;
-const DEFAULT_ROCK80S_DRIVE: f32 = 0.55;
-const DEFAULT_ROCK80S_DRUM_MIX: f32 = 0.8;
-const DEFAULT_ROCK80S_BASS_MIX: f32 = 0.7;
-const DEFAULT_ROCK80S_GATE: f32 = 0.45;
-const DEFAULT_ROCK80S_CUE: u8 = @intFromEnum(procedural_80s_rock.CuePreset.arena);
 const DEFAULT_CHOIR_VOL: f32 = 0.15;
 const DEFAULT_CHOIR_BREATHINESS: f32 = 0.3;
 const DEFAULT_CHOIR_DRONE_MIX: f32 = 0.55;
@@ -120,7 +87,7 @@ const StoredSettings = struct {
     bg_loudness_strength: ?f32 = null,
     bg_onset_mode: ?f32 = null,
     bg_onset_strength: ?f32 = null,
-    music_style: ?u8 = null,
+    music_style: ?music.Style = null,
     music_volume: ?f32 = null,
     music_bpm: ?f32 = null,
     music_reverb_mix: ?f32 = null,
@@ -129,35 +96,6 @@ const StoredSettings = struct {
     music_ambient_melody_vol: ?f32 = null,
     music_ambient_arp_vol: ?f32 = null,
     music_ambient_cue: ?u8 = null,
-    music_house_kick_vol: ?f32 = null,
-    music_house_hihat_vol: ?f32 = null,
-    music_house_bass_vol: ?f32 = null,
-    music_house_pad_vol: ?f32 = null,
-    music_house_stab_chance: ?f32 = null,
-    music_house_cue: ?u8 = null,
-    music_piano_note_vol: ?f32 = null,
-    music_piano_rest_chance: ?f32 = null,
-    music_piano_brightness: ?f32 = null,
-    music_piano_cue: ?u8 = null,
-    music_minecraft_bed_mix: ?f32 = null,
-    music_minecraft_cloud_mix: ?f32 = null,
-    music_minecraft_harmony_mix: ?f32 = null,
-    music_minecraft_bell_amount: ?f32 = null,
-    music_minecraft_hammer_mix: ?f32 = null,
-    music_minecraft_cue: ?u8 = null,
-    music_minecraft_cue_gap: ?f32 = null,
-    music_minecraft_cue_length: ?f32 = null,
-    music_minecraft_cue_density: ?f32 = null,
-    music_minecraft_wow: ?f32 = null,
-    music_minecraft_blur: ?f32 = null,
-    music_minecraft_attack_softness: ?f32 = null,
-    music_rock80s_lead_mix: ?f32 = null,
-    music_rock80s_chord_mix: ?f32 = null,
-    music_rock80s_drive: ?f32 = null,
-    music_rock80s_drum_mix: ?f32 = null,
-    music_rock80s_bass_mix: ?f32 = null,
-    music_rock80s_gate: ?f32 = null,
-    music_rock80s_cue: ?u8 = null,
     music_choir_vol: ?f32 = null,
     music_choir_breathiness: ?f32 = null,
     music_choir_drone_mix: ?f32 = null,
@@ -188,35 +126,6 @@ pub var music_ambient_pad_vol: f32 = DEFAULT_AMBIENT_PAD_VOL;
 pub var music_ambient_melody_vol: f32 = DEFAULT_AMBIENT_MELODY_VOL;
 pub var music_ambient_arp_vol: f32 = DEFAULT_AMBIENT_ARP_VOL;
 pub var music_ambient_cue: u8 = DEFAULT_AMBIENT_CUE;
-pub var music_house_kick_vol: f32 = DEFAULT_HOUSE_KICK_VOL;
-pub var music_house_hihat_vol: f32 = DEFAULT_HOUSE_HIHAT_VOL;
-pub var music_house_bass_vol: f32 = DEFAULT_HOUSE_BASS_VOL;
-pub var music_house_pad_vol: f32 = DEFAULT_HOUSE_PAD_VOL;
-pub var music_house_stab_chance: f32 = DEFAULT_HOUSE_STAB_CHANCE;
-pub var music_house_cue: u8 = DEFAULT_HOUSE_CUE;
-pub var music_piano_note_vol: f32 = DEFAULT_PIANO_NOTE_VOL;
-pub var music_piano_rest_chance: f32 = DEFAULT_PIANO_REST_CHANCE;
-pub var music_piano_brightness: f32 = DEFAULT_PIANO_BRIGHTNESS;
-pub var music_piano_cue: u8 = DEFAULT_PIANO_CUE;
-pub var music_minecraft_bed_mix: f32 = DEFAULT_MINECRAFT_BED_MIX;
-pub var music_minecraft_cloud_mix: f32 = DEFAULT_MINECRAFT_CLOUD_MIX;
-pub var music_minecraft_harmony_mix: f32 = DEFAULT_MINECRAFT_HARMONY_MIX;
-pub var music_minecraft_bell_amount: f32 = DEFAULT_MINECRAFT_BELL_AMOUNT;
-pub var music_minecraft_hammer_mix: f32 = DEFAULT_MINECRAFT_HAMMER_MIX;
-pub var music_minecraft_cue: u8 = DEFAULT_MINECRAFT_CUE;
-pub var music_minecraft_cue_gap: f32 = DEFAULT_MINECRAFT_CUE_GAP;
-pub var music_minecraft_cue_length: f32 = DEFAULT_MINECRAFT_CUE_LENGTH;
-pub var music_minecraft_cue_density: f32 = DEFAULT_MINECRAFT_CUE_DENSITY;
-pub var music_minecraft_wow: f32 = DEFAULT_MINECRAFT_WOW;
-pub var music_minecraft_blur: f32 = DEFAULT_MINECRAFT_BLUR;
-pub var music_minecraft_attack_softness: f32 = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
-pub var music_rock80s_lead_mix: f32 = DEFAULT_ROCK80S_LEAD_MIX;
-pub var music_rock80s_chord_mix: f32 = DEFAULT_ROCK80S_CHORD_MIX;
-pub var music_rock80s_drive: f32 = DEFAULT_ROCK80S_DRIVE;
-pub var music_rock80s_drum_mix: f32 = DEFAULT_ROCK80S_DRUM_MIX;
-pub var music_rock80s_bass_mix: f32 = DEFAULT_ROCK80S_BASS_MIX;
-pub var music_rock80s_gate: f32 = DEFAULT_ROCK80S_GATE;
-pub var music_rock80s_cue: u8 = DEFAULT_ROCK80S_CUE;
 pub var music_choir_vol: f32 = DEFAULT_CHOIR_VOL;
 pub var music_choir_breathiness: f32 = DEFAULT_CHOIR_BREATHINESS;
 pub var music_choir_drone_mix: f32 = DEFAULT_CHOIR_DRONE_MIX;
@@ -247,7 +156,6 @@ pub fn init() !void {
             return;
         },
     };
-
     const parsed = std.json.parseFromSlice(StoredSettings, allocator, json_data, .{
         .allocate = .alloc_always,
         .ignore_unknown_fields = true,
@@ -275,20 +183,6 @@ pub fn init() !void {
 fn loadBgPreset(s: StoredSettings) void {
     const spin_rotation = s.bg_spin_rotation orelse return;
     const spin_speed = s.bg_spin_speed orelse return;
-    const has_extended_music_mapping = s.bg_loudness_mode != null or s.bg_onset_mode != null;
-    const bass_mode_loaded = if (has_extended_music_mapping)
-        (s.bg_bass_mode orelse 3.0)
-    else
-        remapLegacyTargetMode(s.bg_bass_mode orelse 1.0);
-    const texture_mode_loaded = if (has_extended_music_mapping)
-        (s.bg_texture_mode orelse 5.0)
-    else
-        remapLegacyTargetMode(s.bg_texture_mode orelse 5.0);
-    const accent_mode_loaded = if (has_extended_music_mapping)
-        (s.bg_accent_mode orelse 8.0)
-    else
-        remapLegacyTargetMode(s.bg_accent_mode orelse 7.0);
-
     has_bg_preset = true;
     bg_preset = .{
         .resolution = .{ 0, 0 },
@@ -319,51 +213,18 @@ fn loadBgPreset(s: StoredSettings) void {
         .noise_amplitude = s.bg_noise_amplitude orelse 1.0,
         .color_speed = s.bg_color_speed orelse 0.0,
         .swirl_falloff = s.bg_swirl_falloff orelse 5.0,
-        .bass_mode = remapRemovedConeMode(bass_mode_loaded, 3.0),
+        .bass_mode = s.bg_bass_mode orelse 3.0,
         .bass_strength = s.bg_bass_strength orelse 0.45,
-        .texture_mode = texture_mode_loaded,
+        .texture_mode = s.bg_texture_mode orelse 5.0,
         .texture_strength = s.bg_texture_strength orelse 0.35,
-        .accent_mode = remapUnsupportedAccentMode(remapRemovedContrastMode(accent_mode_loaded, 8.0), 8.0),
+        .accent_mode = s.bg_accent_mode orelse 8.0,
         .accent_strength = s.bg_accent_strength orelse 0.28,
-        .loudness_mode = remapRemovedContrastMode(s.bg_loudness_mode orelse 8.0, 8.0),
+        .loudness_mode = s.bg_loudness_mode orelse 8.0,
         .loudness_strength = s.bg_loudness_strength orelse 0.22,
-        .onset_mode = remapUnsupportedOnsetMode(remapRemovedContrastMode(s.bg_onset_mode orelse 10.0, 10.0), 10.0),
+        .onset_mode = s.bg_onset_mode orelse 10.0,
         .onset_strength = s.bg_onset_strength orelse 0.24,
     };
     normalizeBackgroundPreset(&bg_preset);
-}
-
-fn remapLegacyTargetMode(mode: f32) f32 {
-    if (mode <= 0.0) return 0.0;
-    return std.math.clamp(mode + 1.0, 0.0, 10.0);
-}
-
-fn remapRemovedConeMode(mode: f32, replacement: f32) f32 {
-    const clamped = std.math.clamp(mode, 0.0, 255.0);
-    const mode_u8: u8 = @intFromFloat(@round(clamped));
-    if (mode_u8 == 1) return replacement;
-    return mode;
-}
-
-fn remapRemovedContrastMode(mode: f32, replacement: f32) f32 {
-    const clamped = std.math.clamp(mode, 0.0, 255.0);
-    const mode_u8: u8 = @intFromFloat(@round(clamped));
-    if (mode_u8 == 9) return replacement;
-    return mode;
-}
-
-fn remapUnsupportedOnsetMode(mode: f32, replacement: f32) f32 {
-    const clamped = std.math.clamp(mode, 0.0, 255.0);
-    const mode_u8: u8 = @intFromFloat(@round(clamped));
-    if (mode_u8 == 0 or mode_u8 == 8 or mode_u8 == 10) return mode;
-    return replacement;
-}
-
-fn remapUnsupportedAccentMode(mode: f32, replacement: f32) f32 {
-    const clamped = std.math.clamp(mode, 0.0, 255.0);
-    const mode_u8: u8 = @intFromFloat(@round(clamped));
-    if (mode_u8 == 0 or mode_u8 == 8 or mode_u8 == 10) return mode;
-    return replacement;
 }
 
 pub fn cleanup() void {
@@ -410,50 +271,6 @@ pub fn applyMusic() void {
     procedural_ambient.melody_vol = music_ambient_melody_vol;
     procedural_ambient.arp_vol = music_ambient_arp_vol;
     procedural_ambient.selected_cue = @enumFromInt(music_ambient_cue);
-
-    procedural_house.bpm = music_bpm;
-    procedural_house.reverb_mix = music_reverb_mix;
-    procedural_house.kick_vol = music_house_kick_vol;
-    procedural_house.hihat_vol = music_house_hihat_vol;
-    procedural_house.bass_vol = music_house_bass_vol;
-    procedural_house.pad_vol = music_house_pad_vol;
-    procedural_house.stab_chance = music_house_stab_chance;
-    procedural_house.selected_cue = @enumFromInt(music_house_cue);
-
-    procedural_piano.bpm = music_bpm;
-    procedural_piano.reverb_mix = music_reverb_mix;
-    procedural_piano.note_vol = music_piano_note_vol;
-    procedural_piano.rest_chance = music_piano_rest_chance;
-    procedural_piano.brightness = music_piano_brightness;
-    procedural_piano.selected_cue = @enumFromInt(music_piano_cue);
-
-    procedural_minecraft.bpm = music_bpm;
-    procedural_minecraft.reverb_mix = music_reverb_mix;
-    procedural_minecraft.note_vol = music_piano_note_vol;
-    procedural_minecraft.rest_chance = music_piano_rest_chance;
-    procedural_minecraft.brightness = music_piano_brightness;
-    procedural_minecraft.bed_mix = music_minecraft_bed_mix;
-    procedural_minecraft.cloud_mix = music_minecraft_cloud_mix;
-    procedural_minecraft.harmony_mix = music_minecraft_harmony_mix;
-    procedural_minecraft.bell_amount = music_minecraft_bell_amount;
-    procedural_minecraft.hammer_mix = music_minecraft_hammer_mix;
-    procedural_minecraft.selected_cue = @enumFromInt(music_minecraft_cue);
-    procedural_minecraft.cue_gap = music_minecraft_cue_gap;
-    procedural_minecraft.cue_length = music_minecraft_cue_length;
-    procedural_minecraft.cue_density = music_minecraft_cue_density;
-    procedural_minecraft.wow = music_minecraft_wow;
-    procedural_minecraft.blur = music_minecraft_blur;
-    procedural_minecraft.attack_softness = music_minecraft_attack_softness;
-
-    procedural_80s_rock.bpm = music_bpm;
-    procedural_80s_rock.reverb_mix = music_reverb_mix;
-    procedural_80s_rock.lead_mix = music_rock80s_lead_mix;
-    procedural_80s_rock.chord_mix = music_rock80s_chord_mix;
-    procedural_80s_rock.drive = music_rock80s_drive;
-    procedural_80s_rock.drum_mix = music_rock80s_drum_mix;
-    procedural_80s_rock.bass_mix = music_rock80s_bass_mix;
-    procedural_80s_rock.gate = music_rock80s_gate;
-    procedural_80s_rock.selected_cue = @enumFromInt(music_rock80s_cue);
 
     procedural_choir.bpm = music_bpm;
     procedural_choir.reverb_mix = music_reverb_mix;
@@ -516,12 +333,6 @@ fn normalizeBackgroundPreset(u: *gpu.PaintUniforms) void {
         return;
     }
 
-    u.bass_mode = remapRemovedConeMode(u.bass_mode, 3.0);
-    u.accent_mode = remapUnsupportedAccentMode(remapRemovedContrastMode(u.accent_mode, 8.0), 8.0);
-    u.loudness_mode = remapRemovedContrastMode(u.loudness_mode, 8.0);
-    u.onset_mode = remapRemovedContrastMode(u.onset_mode, 10.0);
-    u.onset_mode = remapUnsupportedOnsetMode(u.onset_mode, 10.0);
-
     u.bass_mode = std.math.clamp(u.bass_mode, 0.0, 10.0);
     u.bass_strength = std.math.clamp(u.bass_strength, 0.0, 1.0);
     u.texture_mode = std.math.clamp(u.texture_mode, 0.0, 10.0);
@@ -539,7 +350,7 @@ pub fn save() !void {
     var stored = StoredSettings{
         .lut_strength = lut_strength,
         .preferred_color_grading = if (preferred_color_grading) |p| @as(?[]const u8, p) else null,
-        .music_style = @intFromEnum(music_style),
+        .music_style = music_style,
         .music_volume = music_volume,
         .music_bpm = music_bpm,
         .music_reverb_mix = music_reverb_mix,
@@ -548,35 +359,6 @@ pub fn save() !void {
         .music_ambient_melody_vol = music_ambient_melody_vol,
         .music_ambient_arp_vol = music_ambient_arp_vol,
         .music_ambient_cue = music_ambient_cue,
-        .music_house_kick_vol = music_house_kick_vol,
-        .music_house_hihat_vol = music_house_hihat_vol,
-        .music_house_bass_vol = music_house_bass_vol,
-        .music_house_pad_vol = music_house_pad_vol,
-        .music_house_stab_chance = music_house_stab_chance,
-        .music_house_cue = music_house_cue,
-        .music_piano_note_vol = music_piano_note_vol,
-        .music_piano_rest_chance = music_piano_rest_chance,
-        .music_piano_brightness = music_piano_brightness,
-        .music_piano_cue = music_piano_cue,
-        .music_minecraft_bed_mix = music_minecraft_bed_mix,
-        .music_minecraft_cloud_mix = music_minecraft_cloud_mix,
-        .music_minecraft_harmony_mix = music_minecraft_harmony_mix,
-        .music_minecraft_bell_amount = music_minecraft_bell_amount,
-        .music_minecraft_hammer_mix = music_minecraft_hammer_mix,
-        .music_minecraft_cue = music_minecraft_cue,
-        .music_minecraft_cue_gap = music_minecraft_cue_gap,
-        .music_minecraft_cue_length = music_minecraft_cue_length,
-        .music_minecraft_cue_density = music_minecraft_cue_density,
-        .music_minecraft_wow = music_minecraft_wow,
-        .music_minecraft_blur = music_minecraft_blur,
-        .music_minecraft_attack_softness = music_minecraft_attack_softness,
-        .music_rock80s_lead_mix = music_rock80s_lead_mix,
-        .music_rock80s_chord_mix = music_rock80s_chord_mix,
-        .music_rock80s_drive = music_rock80s_drive,
-        .music_rock80s_drum_mix = music_rock80s_drum_mix,
-        .music_rock80s_bass_mix = music_rock80s_bass_mix,
-        .music_rock80s_gate = music_rock80s_gate,
-        .music_rock80s_cue = music_rock80s_cue,
         .music_choir_vol = music_choir_vol,
         .music_choir_breathiness = music_choir_breathiness,
         .music_choir_drone_mix = music_choir_drone_mix,
@@ -671,35 +453,6 @@ fn resetMusicSettings() void {
     music_ambient_melody_vol = DEFAULT_AMBIENT_MELODY_VOL;
     music_ambient_arp_vol = DEFAULT_AMBIENT_ARP_VOL;
     music_ambient_cue = DEFAULT_AMBIENT_CUE;
-    music_house_kick_vol = DEFAULT_HOUSE_KICK_VOL;
-    music_house_hihat_vol = DEFAULT_HOUSE_HIHAT_VOL;
-    music_house_bass_vol = DEFAULT_HOUSE_BASS_VOL;
-    music_house_pad_vol = DEFAULT_HOUSE_PAD_VOL;
-    music_house_stab_chance = DEFAULT_HOUSE_STAB_CHANCE;
-    music_house_cue = DEFAULT_HOUSE_CUE;
-    music_piano_note_vol = DEFAULT_PIANO_NOTE_VOL;
-    music_piano_rest_chance = DEFAULT_PIANO_REST_CHANCE;
-    music_piano_brightness = DEFAULT_PIANO_BRIGHTNESS;
-    music_piano_cue = DEFAULT_PIANO_CUE;
-    music_minecraft_bed_mix = DEFAULT_MINECRAFT_BED_MIX;
-    music_minecraft_cloud_mix = DEFAULT_MINECRAFT_CLOUD_MIX;
-    music_minecraft_harmony_mix = DEFAULT_MINECRAFT_HARMONY_MIX;
-    music_minecraft_bell_amount = DEFAULT_MINECRAFT_BELL_AMOUNT;
-    music_minecraft_hammer_mix = DEFAULT_MINECRAFT_HAMMER_MIX;
-    music_minecraft_cue = DEFAULT_MINECRAFT_CUE;
-    music_minecraft_cue_gap = DEFAULT_MINECRAFT_CUE_GAP;
-    music_minecraft_cue_length = DEFAULT_MINECRAFT_CUE_LENGTH;
-    music_minecraft_cue_density = DEFAULT_MINECRAFT_CUE_DENSITY;
-    music_minecraft_wow = DEFAULT_MINECRAFT_WOW;
-    music_minecraft_blur = DEFAULT_MINECRAFT_BLUR;
-    music_minecraft_attack_softness = DEFAULT_MINECRAFT_ATTACK_SOFTNESS;
-    music_rock80s_lead_mix = DEFAULT_ROCK80S_LEAD_MIX;
-    music_rock80s_chord_mix = DEFAULT_ROCK80S_CHORD_MIX;
-    music_rock80s_drive = DEFAULT_ROCK80S_DRIVE;
-    music_rock80s_drum_mix = DEFAULT_ROCK80S_DRUM_MIX;
-    music_rock80s_bass_mix = DEFAULT_ROCK80S_BASS_MIX;
-    music_rock80s_gate = DEFAULT_ROCK80S_GATE;
-    music_rock80s_cue = DEFAULT_ROCK80S_CUE;
     music_choir_vol = DEFAULT_CHOIR_VOL;
     music_choir_breathiness = DEFAULT_CHOIR_BREATHINESS;
     music_choir_drone_mix = DEFAULT_CHOIR_DRONE_MIX;
@@ -718,55 +471,18 @@ fn resetMusicSettings() void {
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
-    const stored_music_bpm = s.music_bpm orelse DEFAULT_MUSIC_BPM;
-    if (s.music_style) |style_int| {
-        if (style_int < 8) {
-            music_style = @enumFromInt(style_int);
-        }
+    if (s.music_style) |style| {
+        music_style = style;
     }
 
     music_volume = std.math.clamp(s.music_volume orelse DEFAULT_MUSIC_VOLUME, 0.0, 1.0);
-    if (stored_music_bpm > 2.0) {
-        std.log.warn("loadMusicSettings: music_bpm {d} looks like an old absolute BPM value, resetting to neutral 1.0", .{stored_music_bpm});
-        music_bpm = DEFAULT_MUSIC_BPM;
-    } else {
-        music_bpm = std.math.clamp(stored_music_bpm, 0.0, 2.0);
-    }
+    music_bpm = std.math.clamp(s.music_bpm orelse DEFAULT_MUSIC_BPM, 0.0, 2.0);
     music_reverb_mix = std.math.clamp(s.music_reverb_mix orelse DEFAULT_MUSIC_REVERB_MIX, 0.0, 1.0);
     music_ambient_drone_vol = std.math.clamp(s.music_ambient_drone_vol orelse DEFAULT_AMBIENT_DRONE_VOL, 0.0, 1.0);
     music_ambient_pad_vol = std.math.clamp(s.music_ambient_pad_vol orelse DEFAULT_AMBIENT_PAD_VOL, 0.0, 1.0);
     music_ambient_melody_vol = std.math.clamp(s.music_ambient_melody_vol orelse DEFAULT_AMBIENT_MELODY_VOL, 0.0, 1.0);
     music_ambient_arp_vol = std.math.clamp(s.music_ambient_arp_vol orelse DEFAULT_AMBIENT_ARP_VOL, 0.0, 1.0);
     music_ambient_cue = std.math.clamp(s.music_ambient_cue orelse DEFAULT_AMBIENT_CUE, 0, 3);
-    music_house_kick_vol = std.math.clamp(s.music_house_kick_vol orelse DEFAULT_HOUSE_KICK_VOL, 0.0, 1.0);
-    music_house_hihat_vol = std.math.clamp(s.music_house_hihat_vol orelse DEFAULT_HOUSE_HIHAT_VOL, 0.0, 1.0);
-    music_house_bass_vol = std.math.clamp(s.music_house_bass_vol orelse DEFAULT_HOUSE_BASS_VOL, 0.0, 1.0);
-    music_house_pad_vol = std.math.clamp(s.music_house_pad_vol orelse DEFAULT_HOUSE_PAD_VOL, 0.0, 1.0);
-    music_house_stab_chance = std.math.clamp(s.music_house_stab_chance orelse DEFAULT_HOUSE_STAB_CHANCE, 0.0, 1.0);
-    music_house_cue = std.math.clamp(s.music_house_cue orelse DEFAULT_HOUSE_CUE, 0, 3);
-    music_piano_note_vol = std.math.clamp(s.music_piano_note_vol orelse DEFAULT_PIANO_NOTE_VOL, 0.0, 1.0);
-    music_piano_rest_chance = std.math.clamp(s.music_piano_rest_chance orelse DEFAULT_PIANO_REST_CHANCE, 0.0, 1.0);
-    music_piano_brightness = std.math.clamp(s.music_piano_brightness orelse DEFAULT_PIANO_BRIGHTNESS, 0.0, 1.0);
-    music_piano_cue = std.math.clamp(s.music_piano_cue orelse DEFAULT_PIANO_CUE, 0, 3);
-    music_minecraft_bed_mix = std.math.clamp(s.music_minecraft_bed_mix orelse DEFAULT_MINECRAFT_BED_MIX, 0.0, 1.0);
-    music_minecraft_cloud_mix = std.math.clamp(s.music_minecraft_cloud_mix orelse DEFAULT_MINECRAFT_CLOUD_MIX, 0.0, 1.0);
-    music_minecraft_harmony_mix = std.math.clamp(s.music_minecraft_harmony_mix orelse DEFAULT_MINECRAFT_HARMONY_MIX, 0.0, 1.0);
-    music_minecraft_bell_amount = std.math.clamp(s.music_minecraft_bell_amount orelse DEFAULT_MINECRAFT_BELL_AMOUNT, 0.0, 1.0);
-    music_minecraft_hammer_mix = std.math.clamp(s.music_minecraft_hammer_mix orelse DEFAULT_MINECRAFT_HAMMER_MIX, 0.0, 1.0);
-    music_minecraft_cue = std.math.clamp(s.music_minecraft_cue orelse DEFAULT_MINECRAFT_CUE, 0, 4);
-    music_minecraft_cue_gap = std.math.clamp(s.music_minecraft_cue_gap orelse DEFAULT_MINECRAFT_CUE_GAP, 4.0, 120.0);
-    music_minecraft_cue_length = std.math.clamp(s.music_minecraft_cue_length orelse DEFAULT_MINECRAFT_CUE_LENGTH, 8.0, 120.0);
-    music_minecraft_cue_density = std.math.clamp(s.music_minecraft_cue_density orelse DEFAULT_MINECRAFT_CUE_DENSITY, 0.0, 1.0);
-    music_minecraft_wow = std.math.clamp(s.music_minecraft_wow orelse DEFAULT_MINECRAFT_WOW, 0.0, 1.0);
-    music_minecraft_blur = std.math.clamp(s.music_minecraft_blur orelse DEFAULT_MINECRAFT_BLUR, 0.0, 1.0);
-    music_minecraft_attack_softness = std.math.clamp(s.music_minecraft_attack_softness orelse DEFAULT_MINECRAFT_ATTACK_SOFTNESS, 0.0, 1.0);
-    music_rock80s_lead_mix = std.math.clamp(s.music_rock80s_lead_mix orelse DEFAULT_ROCK80S_LEAD_MIX, 0.0, 1.0);
-    music_rock80s_chord_mix = std.math.clamp(s.music_rock80s_chord_mix orelse DEFAULT_ROCK80S_CHORD_MIX, 0.0, 1.0);
-    music_rock80s_drive = std.math.clamp(s.music_rock80s_drive orelse DEFAULT_ROCK80S_DRIVE, 0.0, 1.0);
-    music_rock80s_drum_mix = std.math.clamp(s.music_rock80s_drum_mix orelse DEFAULT_ROCK80S_DRUM_MIX, 0.0, 1.0);
-    music_rock80s_bass_mix = std.math.clamp(s.music_rock80s_bass_mix orelse DEFAULT_ROCK80S_BASS_MIX, 0.0, 1.0);
-    music_rock80s_gate = std.math.clamp(s.music_rock80s_gate orelse DEFAULT_ROCK80S_GATE, 0.0, 1.0);
-    music_rock80s_cue = std.math.clamp(s.music_rock80s_cue orelse DEFAULT_ROCK80S_CUE, 0, 3);
     music_choir_vol = std.math.clamp(s.music_choir_vol orelse DEFAULT_CHOIR_VOL, 0.0, 1.0);
     music_choir_breathiness = std.math.clamp(s.music_choir_breathiness orelse DEFAULT_CHOIR_BREATHINESS, 0.0, 1.0);
     music_choir_drone_mix = std.math.clamp(s.music_choir_drone_mix orelse DEFAULT_CHOIR_DRONE_MIX, 0.0, 1.0);
