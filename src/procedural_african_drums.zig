@@ -6,7 +6,9 @@
 // lead improvisation, periodic breaks, and macro arc-driven evolution.
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const cue_morph = @import("music/cue_morph.zig");
 const entropy = @import("music/entropy.zig");
+const pattern_history = @import("music/pattern_history.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
 
@@ -20,7 +22,6 @@ pub const CuePreset = enum(u8) {
     soli,
 };
 
-// Public vars for settings compatibility.
 pub var bpm: f32 = 1.0;
 pub var reverb_mix: f32 = 0.28;
 pub var drum_mix: f32 = 0.9;
@@ -264,38 +265,12 @@ var lead_cycle_count: u16 = 0;
 var in_break: bool = false;
 var break_remaining: u8 = 0;
 const LEAD_HISTORY_SIZE: usize = 8;
-var lead_history: [LEAD_HISTORY_SIZE]u32 = .{0} ** LEAD_HISTORY_SIZE;
-var lead_history_count: u8 = 0;
-var lead_history_pos: u8 = 0;
-
-fn clearLeadHistory() void {
-    lead_history = .{0} ** LEAD_HISTORY_SIZE;
-    lead_history_count = 0;
-    lead_history_pos = 0;
-}
+var lead_history: pattern_history.PatternHistory = .{ .capacity = LEAD_HISTORY_SIZE };
 
 fn hashLeadPattern() u32 {
-    var hash: u32 = 2166136261;
-    for (lead_pattern) |hit| {
-        hash = (hash ^ @intFromEnum(hit)) *% 16777619;
-    }
-    return hash;
+    return pattern_history.hashEnumPattern(LeadHit, lead_pattern[0..]);
 }
 
-fn isLeadPatternRecent(hash: u32) bool {
-    for (0..lead_history_count) |i| {
-        if (lead_history[i] == hash) return true;
-    }
-    return false;
-}
-
-fn rememberLeadPattern(hash: u32) void {
-    lead_history[lead_history_pos] = hash;
-    lead_history_pos = (lead_history_pos + 1) % @as(u8, LEAD_HISTORY_SIZE);
-    if (lead_history_count < LEAD_HISTORY_SIZE) {
-        lead_history_count += 1;
-    }
-}
 
 fn randomLeadHit(is_strong: bool) LeadHit {
     const r = rng.float();
@@ -330,16 +305,14 @@ fn forceLeadPerturbation() void {
 fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
     var hit_count: u8 = 0;
     const energy = std.math.clamp(spec.energy * (0.4 + meso * 0.65), 0.0, 1.0);
+    const from_cue = cue_state.from;
+    const to_cue = cue_state.to;
+    const morph_t = cue_state.progress;
     for (0..NUM_STEPS) |i| {
         const step: u8 = @intCast(i);
         // Strong beats (0, 3, 6, 9) get more hits
         const is_strong = (step % 3 == 0);
-        const base_chance: f32 = switch (selected_cue) {
-            .fanga => if (is_strong) 0.62 else 0.16,
-            .soli => if (is_strong) 0.82 else 0.42,
-            .djole => if (is_strong) 0.74 else 0.36,
-            .kuku => if (is_strong) 0.7 else 0.3,
-        };
+        const base_chance = lerpF32(baseChanceForCue(from_cue, is_strong), baseChanceForCue(to_cue, is_strong), morph_t);
         const chance = base_chance * energy * spec.lead_density;
 
         if (rng.float() < chance) {
@@ -360,15 +333,15 @@ fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
 fn rebuildLeadPattern(meso: f32, spec: *const CueSpec) void {
     generateLeadPattern(meso, spec);
     var hash = hashLeadPattern();
-    if (isLeadPatternRecent(hash)) {
+    if (pattern_history.seenRecently(&lead_history, hash)) {
         mutateLeadPattern(spec, meso);
         hash = hashLeadPattern();
-        if (isLeadPatternRecent(hash)) {
+        if (pattern_history.seenRecently(&lead_history, hash)) {
             forceLeadPerturbation();
             hash = hashLeadPattern();
         }
     }
-    rememberLeadPattern(hash);
+    pattern_history.remember(&lead_history, hash);
 }
 
 fn buildBreakPattern() void {
@@ -539,12 +512,63 @@ const CUE_SPECS: [4]CueSpec = .{
     },
 };
 
+const AfricanCueMorph = cue_morph.CueMorph(CuePreset);
+var cue_state: AfricanCueMorph = .{
+    .from = .kuku,
+    .to = .kuku,
+    .progress = 1.0,
+    .morph_beats = 24.0,
+};
+
+fn lerpF32(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
+}
+
+fn blendedCueSpec() CueSpec {
+    const from = CUE_SPECS[@intFromEnum(cue_state.from)];
+    const to = CUE_SPECS[@intFromEnum(cue_state.to)];
+    const t = cue_state.progress;
+    var spec = to;
+    spec.base_bpm = lerpF32(from.base_bpm, to.base_bpm, t);
+    spec.swing[0] = lerpF32(from.swing[0], to.swing[0], t);
+    spec.swing[1] = lerpF32(from.swing[1], to.swing[1], t);
+    spec.swing[2] = lerpF32(from.swing[2], to.swing[2], t);
+    spec.shekere_density = lerpF32(from.shekere_density, to.shekere_density, t);
+    spec.lead_density = lerpF32(from.lead_density, to.lead_density, t);
+    spec.ghost_density = lerpF32(from.ghost_density, to.ghost_density, t);
+    spec.fill_chance = lerpF32(from.fill_chance, to.fill_chance, t);
+    spec.break_chance = lerpF32(from.break_chance, to.break_chance, t);
+    spec.reverb_boost = lerpF32(from.reverb_boost, to.reverb_boost, t);
+    spec.energy = lerpF32(from.energy, to.energy, t);
+    spec.tempo_drift = lerpF32(from.tempo_drift, to.tempo_drift, t);
+    return spec;
+}
+
+fn baseChanceForCue(cue: CuePreset, is_strong: bool) f32 {
+    return switch (cue) {
+        .fanga => if (is_strong) 0.62 else 0.16,
+        .soli => if (is_strong) 0.82 else 0.42,
+        .djole => if (is_strong) 0.74 else 0.36,
+        .kuku => if (is_strong) 0.7 else 0.3,
+    };
+}
+
+fn cueBellBias(cue: CuePreset) f32 {
+    return switch (cue) {
+        .kuku => 0.42,
+        .djole => 0.58,
+        .fanga => 0.28,
+        .soli => 0.34,
+    };
+}
+
 // ============================================================
 // Public API
 // ============================================================
 
 pub fn reset() void {
     rng = dsp.Rng.init(entropy.nextSeed(0xAF10_2000, @intFromEnum(selected_cue)));
+    cue_morph.reset(CuePreset, &cue_state, selected_cue);
     reverb = DrumReverb.init(.{ 0.82, 0.83, 0.81, 0.84 });
 
     engine.reset(
@@ -561,7 +585,7 @@ pub fn reset() void {
     lead_cycle_count = 0;
     in_break = false;
     break_remaining = 0;
-    clearLeadHistory();
+    pattern_history.clear(&lead_history);
     pending = .{PendingTrigger{}} ** NUM_VOICES;
 
     applyCueParams();
@@ -607,20 +631,71 @@ fn resetInstruments() void {
 
 pub fn triggerCue() void {
     applyCueParams();
-    rebuildLeadPattern(0.5, &CUE_SPECS[@intFromEnum(selected_cue)]);
+}
+
+pub const DebugSnapshot = struct {
+    cue_from: u8,
+    cue_to: u8,
+    cue_selected: u8,
+    cue_progress: f32,
+    key_root: u8,
+    key_scale: composition.ScaleType,
+    chord_index: u8,
+    chord_count: u8,
+    micro: f32,
+    meso: f32,
+    macro: f32,
+    longform_intensity: f32,
+    longform_cadence: f32,
+    longform_modulation: f32,
+    chord_change_beats: f32,
+    next_chord_change_beats: f32,
+    current_step: u8,
+    lead_cycle_count: u16,
+    in_break: bool,
+    break_remaining: u8,
+};
+
+pub fn debugSnapshot() DebugSnapshot {
+    return .{
+        .cue_from = @intFromEnum(cue_state.from),
+        .cue_to = @intFromEnum(cue_state.to),
+        .cue_selected = @intFromEnum(selected_cue),
+        .cue_progress = cue_state.progress,
+        .key_root = engine.key.root,
+        .key_scale = engine.key.scale_type,
+        .chord_index = engine.harmony.current,
+        .chord_count = engine.harmony.num_chords,
+        .micro = engine.arcs.micro.tension(),
+        .meso = engine.arcs.meso.tension(),
+        .macro = engine.arcs.macro.tension(),
+        .longform_intensity = engine.longFormIntensity(),
+        .longform_cadence = engine.longFormCadenceSpread(),
+        .longform_modulation = engine.longFormModulationDrive(),
+        .chord_change_beats = engine.chord_change_beats,
+        .next_chord_change_beats = engine.next_chord_change_beats,
+        .current_step = current_step,
+        .lead_cycle_count = lead_cycle_count,
+        .in_break = in_break,
+        .break_remaining = break_remaining,
+    };
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
-    // Macro arc-driven tempo drift: rising BPM at climax
-    const macro_t = engine.arcs.macro.tension();
-    const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
+    const nominal_bpm = @max(CUE_SPECS[@intFromEnum(cue_state.to)].base_bpm * bpm, 1.0);
+    const cue_spb = dsp.samplesPerBeat(nominal_bpm);
 
     for (0..frames) |i| {
+        cue_morph.advance(CuePreset, &cue_state, cue_spb);
+        var spec = blendedCueSpec();
+        // Macro arc-driven tempo drift: rising BPM at climax
+        const macro_t = engine.arcs.macro.tension();
+        const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
         const tick = engine.advanceSample(&rng, effective_bpm);
+        shekere.volume = 0.35 + spec.shekere_density * 0.25;
 
         if (advanceStep12(effective_bpm, spec.swing)) |step| {
-            advanceStepAll(step, tick.meso, tick.micro, spec);
+            advanceStepAll(step, tick.meso, tick.micro, &spec);
 
             // End of 12-step cycle
             if (step == 11) {
@@ -643,7 +718,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                     }
 
                     if (!in_break) {
-                        rebuildLeadPattern(tick.meso, spec);
+                        rebuildLeadPattern(tick.meso, &spec);
                     }
                 }
             }
@@ -790,12 +865,9 @@ fn advanceStepAll(step: u8, meso: f32, micro: f32, spec: *const CueSpec) void {
 }
 
 fn bellChance(spec: *const CueSpec, voice: usize, meso: f32) f32 {
-    const cue_bias: f32 = switch (selected_cue) {
-        .kuku => 0.42,
-        .djole => 0.58,
-        .fanga => 0.28,
-        .soli => 0.34,
-    };
+    const from_cue = cue_state.from;
+    const to_cue = cue_state.to;
+    const cue_bias = lerpF32(cueBellBias(from_cue), cueBellBias(to_cue), cue_state.progress);
     const voice_bias: f32 = switch (voice) {
         V_DUNDUNBA => 0.65,
         V_SANGBAN => 0.85,
@@ -817,14 +889,15 @@ fn leadHitToTrigger(hit: LeadHit) TriggerType {
 }
 
 fn applyCueParams() void {
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
+    cue_morph.setTarget(CuePreset, &cue_state, selected_cue);
+    const spec = &CUE_SPECS[@intFromEnum(cue_state.to)];
     engine.key.root = spec.root;
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
     engine.setChordChangeBeats(spec.chord_change_beats);
 
     // Tune dunun frequencies slightly per cue for variety
-    const cue_idx: f32 = @floatFromInt(@intFromEnum(selected_cue));
+    const cue_idx: f32 = @floatFromInt(@intFromEnum(cue_state.to));
     dundunba.base_freq = 78.0 + cue_idx * 4.0;
     sangban.base_freq = 130.0 + cue_idx * 5.0;
     kenkeni.base_freq = 210.0 + cue_idx * 6.0;

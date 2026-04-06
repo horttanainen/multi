@@ -5,7 +5,9 @@
 // vertical layer activation, and slow LFO modulation.
 // Cues are parameter sets ("flavors"): dawn, twilight, space, forest.
 const dsp = @import("music/dsp.zig");
+const std = @import("std");
 const composition = @import("music/composition.zig");
+const cue_morph = @import("music/cue_morph.zig");
 const entropy = @import("music/entropy.zig");
 const layers = @import("music/layers.zig");
 
@@ -282,23 +284,184 @@ const CUE_SPECS: [4]AmbientCueSpec = .{
     },
 };
 
+const AmbientCueMorph = cue_morph.CueMorph(CuePreset);
+var cue_state: AmbientCueMorph = .{
+    .from = .dawn,
+    .to = .dawn,
+    .progress = 1.0,
+    .morph_beats = 24.0,
+};
+
+const AmbientRuntimeCue = struct {
+    reverb_boost: f32,
+    melody_thresh: f32,
+    arp_thresh: f32,
+    drone_filter_base: f32,
+    drone_filter_range: f32,
+    pad_filter_base: f32,
+    pad_filter_range: f32,
+    melody_recall_chance: f32,
+    drone_env_attack: f32,
+    drone_env_release: f32,
+    pad_env_attack: f32,
+    pad_env_release: f32,
+    melody_env_attack: f32,
+    melody_env_decay: f32,
+    melody_env_release: f32,
+    arp_env_decay: f32,
+    arp_env_release: f32,
+    drone_beat_len: [2]f32,
+    pad_beat_len: [3]f32,
+    melody_beat_len: [2]f32,
+    arp_beat_len: [3]f32,
+    lfo_filter_period: f32,
+    lfo_filter_depth: f32,
+    lfo_reverb_period: f32,
+    lfo_reverb_depth: f32,
+    melody_rest_chance: f32,
+    arp_rest_chance: f32,
+};
+
+fn lerpF32(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
+}
+
+fn blendedRuntimeCue() AmbientRuntimeCue {
+    const from = CUE_SPECS[@intFromEnum(cue_state.from)];
+    const to = CUE_SPECS[@intFromEnum(cue_state.to)];
+    const t = cue_state.progress;
+
+    var cue: AmbientRuntimeCue = undefined;
+    cue.reverb_boost = lerpF32(from.reverb_boost, to.reverb_boost, t);
+    cue.melody_thresh = lerpF32(from.melody_thresh, to.melody_thresh, t);
+    cue.arp_thresh = lerpF32(from.arp_thresh, to.arp_thresh, t);
+    cue.drone_filter_base = lerpF32(from.drone_filter_base, to.drone_filter_base, t);
+    cue.drone_filter_range = lerpF32(from.drone_filter_range, to.drone_filter_range, t);
+    cue.pad_filter_base = lerpF32(from.pad_filter_base, to.pad_filter_base, t);
+    cue.pad_filter_range = lerpF32(from.pad_filter_range, to.pad_filter_range, t);
+    cue.melody_recall_chance = lerpF32(from.melody_recall_chance, to.melody_recall_chance, t);
+    cue.drone_env_attack = lerpF32(from.drone_env_attack, to.drone_env_attack, t);
+    cue.drone_env_release = lerpF32(from.drone_env_release, to.drone_env_release, t);
+    cue.pad_env_attack = lerpF32(from.pad_env_attack, to.pad_env_attack, t);
+    cue.pad_env_release = lerpF32(from.pad_env_release, to.pad_env_release, t);
+    cue.melody_env_attack = lerpF32(from.melody_env_attack, to.melody_env_attack, t);
+    cue.melody_env_decay = lerpF32(from.melody_env_decay, to.melody_env_decay, t);
+    cue.melody_env_release = lerpF32(from.melody_env_release, to.melody_env_release, t);
+    cue.arp_env_decay = lerpF32(from.arp_env_decay, to.arp_env_decay, t);
+    cue.arp_env_release = lerpF32(from.arp_env_release, to.arp_env_release, t);
+    cue.lfo_filter_period = lerpF32(from.lfo_filter.period_beats, to.lfo_filter.period_beats, t);
+    cue.lfo_filter_depth = lerpF32(from.lfo_filter.depth, to.lfo_filter.depth, t);
+    cue.lfo_reverb_period = lerpF32(from.lfo_reverb.period_beats, to.lfo_reverb.period_beats, t);
+    cue.lfo_reverb_depth = lerpF32(from.lfo_reverb.depth, to.lfo_reverb.depth, t);
+    cue.melody_rest_chance = lerpF32(from.melody_phrase.rest_chance, to.melody_phrase.rest_chance, t);
+    cue.arp_rest_chance = lerpF32(from.arp_phrase.rest_chance, to.arp_phrase.rest_chance, t);
+
+    inline for (0..2) |i| {
+        cue.drone_beat_len[i] = lerpF32(from.drone_beat_len[i], to.drone_beat_len[i], t);
+        cue.melody_beat_len[i] = lerpF32(from.melody_beat_len[i], to.melody_beat_len[i], t);
+    }
+    inline for (0..3) |i| {
+        cue.pad_beat_len[i] = lerpF32(from.pad_beat_len[i], to.pad_beat_len[i], t);
+        cue.arp_beat_len[i] = lerpF32(from.arp_beat_len[i], to.arp_beat_len[i], t);
+    }
+    return cue;
+}
+
 // ============================================================
 // Public API
 // ============================================================
 
 pub fn triggerCue() void {
     applyCueParams();
-    advanceChord();
+}
+
+pub const DebugSnapshot = struct {
+    cue_from: u8,
+    cue_to: u8,
+    cue_selected: u8,
+    cue_progress: f32,
+    key_root: u8,
+    key_scale: composition.ScaleType,
+    chord_index: u8,
+    chord_count: u8,
+    micro: f32,
+    meso: f32,
+    macro: f32,
+    longform_intensity: f32,
+    longform_cadence: f32,
+    longform_modulation: f32,
+    chord_change_beats: f32,
+    next_chord_change_beats: f32,
+    drone_level: f32,
+    pad_level: f32,
+    melody_level: f32,
+    arp_level: f32,
+    drone_target: f32,
+    pad_target: f32,
+    melody_target: f32,
+    arp_target: f32,
+};
+
+pub fn debugSnapshot() DebugSnapshot {
+    return .{
+        .cue_from = @intFromEnum(cue_state.from),
+        .cue_to = @intFromEnum(cue_state.to),
+        .cue_selected = @intFromEnum(selected_cue),
+        .cue_progress = cue_state.progress,
+        .key_root = engine.key.root,
+        .key_scale = engine.key.scale_type,
+        .chord_index = engine.harmony.current,
+        .chord_count = engine.harmony.num_chords,
+        .micro = engine.arcs.micro.tension(),
+        .meso = engine.arcs.meso.tension(),
+        .macro = engine.arcs.macro.tension(),
+        .longform_intensity = engine.longFormIntensity(),
+        .longform_cadence = engine.longFormCadenceSpread(),
+        .longform_modulation = engine.longFormModulationDrive(),
+        .chord_change_beats = engine.chord_change_beats,
+        .next_chord_change_beats = engine.next_chord_change_beats,
+        .drone_level = drone_level,
+        .pad_level = pad_level,
+        .melody_level = melody_level,
+        .arp_level = arp_level,
+        .drone_target = drone_target,
+        .pad_target = pad_target,
+        .melody_target = melody_target,
+        .arp_target = arp_target,
+    };
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
     const eff_bpm = BASE_BPM * bpm;
     const spb = dsp.samplesPerBeat(eff_bpm);
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
 
     for (0..frames) |i| {
+        cue_morph.advance(CuePreset, &cue_state, spb);
+        const cue = blendedRuntimeCue();
+        lfo_filter.period_beats = cue.lfo_filter_period;
+        lfo_filter.depth = cue.lfo_filter_depth;
+        lfo_reverb.period_beats = cue.lfo_reverb_period;
+        lfo_reverb.depth = cue.lfo_reverb_depth;
         lfo_filter.advanceSample(eff_bpm);
         lfo_reverb.advanceSample(eff_bpm);
+        const director_intensity = engine.longFormIntensity();
+        const director_cadence = engine.longFormCadenceSpread();
+        const director_mod = engine.longFormModulationDrive();
+        const cadence_warp = std.math.clamp(1.0 + (director_cadence - 0.16) * 0.34 + lfo_filter.value() * 0.55, 0.72, 1.35);
+        inline for (0..2) |j| {
+            drone_layer.beat_len[j] = cue.drone_beat_len[j] * cadence_warp;
+            melody_layer.beat_len[j] = cue.melody_beat_len[j] * cadence_warp;
+        }
+        inline for (0..3) |j| {
+            pad_layer.beat_len[j] = cue.pad_beat_len[j] * cadence_warp;
+            arp_layer.beat_len[j] = cue.arp_beat_len[j] * cadence_warp;
+        }
+        for (0..layers.AmbientMelodyLayer.COUNT) |m| {
+            melody_layer.phrases[m].rest_chance = cue.melody_rest_chance;
+        }
+        for (0..layers.AmbientArpLayer.COUNT) |a| {
+            arp_layer.phrases[a].rest_chance = cue.arp_rest_chance;
+        }
         const tick = engine.advanceSample(&rng, eff_bpm);
 
         if (tick.chord_changed) {
@@ -306,10 +469,12 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         }
 
         // === Vertical layer activation ===
-        drone_target = 0.8 + tick.macro * 0.2;
-        pad_target = 0.2 + tick.macro * 0.8;
-        melody_target = if (tick.macro > spec.melody_thresh) @min((tick.macro - spec.melody_thresh) * 1.2, 0.8) else 0.0;
-        arp_target = if (tick.macro > spec.arp_thresh) @min((tick.macro - spec.arp_thresh) * 1.5, 0.6) else 0.0;
+        const melody_thresh = std.math.clamp(cue.melody_thresh + (0.5 - director_intensity) * 0.18, 0.05, 0.94);
+        const arp_thresh = std.math.clamp(cue.arp_thresh + (0.42 - director_intensity) * 0.22 + director_mod * 0.08, 0.08, 0.97);
+        drone_target = std.math.clamp(0.76 + tick.macro * 0.21 + (1.0 - director_intensity) * 0.08, 0.0, 1.0);
+        pad_target = std.math.clamp(0.18 + tick.macro * 0.79 + director_mod * 0.05, 0.0, 1.0);
+        melody_target = if (tick.macro > melody_thresh) std.math.clamp((tick.macro - melody_thresh) * (1.0 + director_intensity * 0.45), 0.0, 0.88) else 0.0;
+        arp_target = if (tick.macro > arp_thresh) std.math.clamp((tick.macro - arp_thresh) * (1.05 + director_cadence * 0.7), 0.0, 0.7) else 0.0;
 
         drone_level += (drone_target - drone_level) * LAYER_FADE_RATE;
         pad_level += (pad_target - pad_level) * LAYER_FADE_RATE;
@@ -319,10 +484,11 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var left: f32 = 0;
         var right: f32 = 0;
 
-        layers.advanceAmbientDroneLayer(&drone_layer, &rng, &engine.key, spb, tick.meso, spec.drone_filter_base, spec.drone_filter_range, lfo_filter.modulate(), spec.drone_env_attack, spec.drone_env_release);
-        layers.advanceAmbientPadLayer(&pad_layer, &engine.key, spb, tick.meso, spec.pad_filter_base, spec.pad_filter_range, lfo_filter.modulate(), spec.pad_env_attack, spec.pad_env_release);
-        layers.advanceAmbientMelodyLayer(&melody_layer, &rng, &engine.key, spb, tick.meso, tick.micro, spec.melody_recall_chance, spec.melody_env_attack, spec.melody_env_decay, spec.melody_env_release);
-        layers.advanceAmbientArpLayer(&arp_layer, &rng, &engine.key, spb, tick.meso, tick.micro, spec.arp_env_decay, spec.arp_env_release);
+        layers.advanceAmbientDroneLayer(&drone_layer, &rng, &engine.key, spb, tick.meso, cue.drone_filter_base, cue.drone_filter_range, lfo_filter.modulate(), cue.drone_env_attack, cue.drone_env_release);
+        layers.advanceAmbientPadLayer(&pad_layer, &engine.key, spb, tick.meso, cue.pad_filter_base, cue.pad_filter_range, lfo_filter.modulate(), cue.pad_env_attack, cue.pad_env_release);
+        const melody_recall = std.math.clamp(cue.melody_recall_chance * (0.95 - director_cadence * 0.45) + (1.0 - director_intensity) * 0.08, 0.04, 0.86);
+        layers.advanceAmbientMelodyLayer(&melody_layer, &rng, &engine.key, spb, tick.meso, tick.micro, melody_recall, cue.melody_env_attack, cue.melody_env_decay, cue.melody_env_release);
+        layers.advanceAmbientArpLayer(&arp_layer, &rng, &engine.key, spb, tick.meso, tick.micro, cue.arp_env_decay, cue.arp_env_release);
 
         const drone_out = layers.mixAmbientDroneLayer(&drone_layer, drone_vol * drone_level);
         left += drone_out[0];
@@ -341,7 +507,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         right += arp_out[1];
 
         // === Reverb ===
-        const rev_mix = (reverb_mix + spec.reverb_boost) * lfo_reverb.modulate();
+        const rev_mix = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * lfo_reverb.modulate(), 0.0, 0.98);
         const dry = 1.0 - rev_mix;
         const rev = reverb.process(.{ left, right });
         left = left * dry + rev[0] * rev_mix;
@@ -357,24 +523,17 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 // ============================================================
 
 fn applyCueParams() void {
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
+    cue_morph.setTarget(CuePreset, &cue_state, selected_cue);
+    const spec = CUE_SPECS[@intFromEnum(cue_state.to)];
     engine.key.scale_type = spec.scale_type;
     engine.setChordChangeBeats(spec.chord_change_beats);
-    lfo_filter = spec.lfo_filter;
-    lfo_reverb = spec.lfo_reverb;
-    drone_layer.beat_len = spec.drone_beat_len;
-    pad_layer.beat_len = spec.pad_beat_len;
-    melody_layer.beat_len = spec.melody_beat_len;
-    arp_layer.beat_len = spec.arp_beat_len;
     for (0..layers.AmbientMelodyLayer.COUNT) |m| {
-        melody_layer.phrases[m].rest_chance = spec.melody_phrase.rest_chance;
         melody_layer.phrases[m].region_low = spec.melody_phrase.region_low;
         melody_layer.phrases[m].region_high = spec.melody_phrase.region_high;
         melody_layer.phrases[m].min_notes = spec.melody_min_notes;
         melody_layer.phrases[m].max_notes = spec.melody_max_notes;
     }
     for (0..layers.AmbientArpLayer.COUNT) |a| {
-        arp_layer.phrases[a].rest_chance = spec.arp_phrase.rest_chance;
         arp_layer.phrases[a].region_low = spec.arp_phrase.region_low;
         arp_layer.phrases[a].region_high = spec.arp_phrase.region_high;
         arp_layer.phrases[a].min_notes = spec.arp_min_notes;
@@ -399,6 +558,7 @@ fn advanceChord() void {
 
 pub fn reset() void {
     rng = dsp.Rng.init(entropy.nextSeed(0xA6B1_0001, @intFromEnum(selected_cue)));
+    cue_morph.reset(CuePreset, &cue_state, selected_cue);
     engine.reset(.{ .root = 36, .scale_type = .minor_pentatonic }, initHarmony(), AMBIENT_ARCS, 16.0, .mixed);
     lfo_filter = .{ .period_beats = 90, .depth = 0.08 };
     lfo_reverb = .{ .period_beats = 150, .depth = 0.04 };

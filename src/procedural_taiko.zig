@@ -6,7 +6,9 @@
 // call-and-response passages, and dramatic breaks with "ma" (silence).
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const cue_morph = @import("music/cue_morph.zig");
 const entropy = @import("music/entropy.zig");
+const pattern_history = @import("music/pattern_history.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
 const layers = @import("music/layers.zig");
@@ -21,7 +23,6 @@ pub const CuePreset = enum(u8) {
     oroshi,
 };
 
-// Public vars for settings compatibility.
 pub var bpm: f32 = 1.0;
 const BASE_BPM: f32 = 120.0;
 pub var reverb_mix: f32 = 0.32;
@@ -38,12 +39,6 @@ pub var selected_cue: CuePreset = .matsuri;
 const TaikoReverb = StereoReverb(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 });
 var reverb: TaikoReverb = TaikoReverb.init(.{ 0.87, 0.88, 0.86, 0.89 });
 var rng: dsp.Rng = dsp.Rng.init(0xDA1C_0000);
-
-// ============================================================
-// Composition engine
-// ============================================================
-
-var engine: composition.CompositionEngine = .{};
 
 fn initHarmony() composition.ChordMarkov {
     // Taiko is primarily rhythmic, but we use chord progressions
@@ -264,6 +259,90 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
     },
 };
 
+const TaikoCueMorph = cue_morph.CueMorph(CuePreset);
+var cue_state: TaikoCueMorph = .{
+    .from = .matsuri,
+    .to = .matsuri,
+    .progress = 1.0,
+    .morph_beats = 24.0,
+};
+var structural_cue: CuePreset = .matsuri;
+var pending_scale_type: ?composition.ScaleType = null;
+
+fn lerpF32(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
+}
+
+fn blendedCueSpec() TaikoCueSpec {
+    const from = CUE_SPECS[@intFromEnum(cue_state.from)];
+    const to = CUE_SPECS[@intFromEnum(cue_state.to)];
+    const t = cue_state.progress;
+    var spec = CUE_SPECS[@intFromEnum(structural_cue)];
+    spec.base_bpm = lerpF32(from.base_bpm, to.base_bpm, t);
+    spec.swing_amount = lerpF32(from.swing_amount, to.swing_amount, t);
+    spec.lead_density = lerpF32(from.lead_density, to.lead_density, t);
+    spec.ghost_density = lerpF32(from.ghost_density, to.ghost_density, t);
+    spec.fill_density = lerpF32(from.fill_density, to.fill_density, t);
+    spec.break_chance = lerpF32(from.break_chance, to.break_chance, t);
+    spec.call_response_chance = lerpF32(from.call_response_chance, to.call_response_chance, t);
+    spec.roll_chance = lerpF32(from.roll_chance, to.roll_chance, t);
+    spec.energy = lerpF32(from.energy, to.energy, t);
+    spec.reverb_boost = lerpF32(from.reverb_boost, to.reverb_boost, t);
+    spec.tempo_drift = lerpF32(from.tempo_drift, to.tempo_drift, t);
+    return spec;
+}
+
+fn cueIndexF32(cue: CuePreset) f32 {
+    return @floatFromInt(@intFromEnum(cue));
+}
+
+fn applyInstrumentTuning(cue_idx: f32) void {
+    odaiko.base_freq = 44.0 + cue_idx * 4.0;
+    nagado1.base_freq = 130.0 + cue_idx * 12.0;
+    nagado2.base_freq = 155.0 + cue_idx * 12.0;
+    shime1.base_freq = 400.0 + cue_idx * 20.0;
+    shime2.base_freq = 440.0 + cue_idx * 20.0;
+    kane.base_freq = 880.0 + cue_idx * 40.0;
+}
+
+fn randomizeTemporalState(initial_bpm: f32) void {
+    if (initial_bpm <= 0.0) {
+        std.log.warn("procedural_taiko.randomizeTemporalState: invalid bpm={d}, skipping randomization", .{initial_bpm});
+        return;
+    }
+    runner.engine.arcs.micro.beat_count = rng.float() * runner.engine.arcs.micro.section_beats;
+    runner.engine.arcs.meso.beat_count = rng.float() * runner.engine.arcs.meso.section_beats;
+    runner.engine.arcs.macro.beat_count = rng.float() * runner.engine.arcs.macro.section_beats;
+    const macro_quarter_f = runner.engine.arcs.macro.beat_count / runner.engine.arcs.macro.section_beats * 4.0;
+    runner.engine.last_macro_quarter = @intFromFloat(std.math.clamp(macro_quarter_f, 0.0, 3.0));
+
+    runner.sequencer.step = @intCast(rng.next() % 16);
+    const samples_per_step = dsp.SAMPLE_RATE * 60.0 / initial_bpm / 4.0;
+    if (samples_per_step <= 1.0) {
+        std.log.warn("procedural_taiko.randomizeTemporalState: invalid samples_per_step={d}", .{samples_per_step});
+        runner.sequencer.step_counter = 0.0;
+    } else {
+        runner.sequencer.step_counter = rng.float() * samples_per_step;
+    }
+
+    runner.engine.chord_beat_counter = rng.float() * @max(runner.engine.chord_change_beats, 1.0);
+}
+
+fn maybeAdvanceStructuralCue(step: u8) void {
+    if (step != 15) return;
+    const target_cue = cue_state.to;
+    if (structural_cue == target_cue) return;
+
+    const switch_p = std.math.clamp((cue_state.progress - 0.15) / 0.85, 0.0, 1.0);
+    if (rng.float() >= switch_p) return;
+
+    structural_cue = target_cue;
+    const target = CUE_SPECS[@intFromEnum(structural_cue)];
+    runner.engine.setChordChangeBeats(target.chord_change_beats);
+    runner.engine.key.modulateTo(target.root);
+    pending_scale_type = target.scale_type;
+}
+
 // ============================================================
 // Instruments
 // ============================================================
@@ -398,38 +477,12 @@ var in_call_response: bool = false;
 var call_response_remaining: u8 = 0;
 var is_response_phase: bool = false;
 const LEAD_HISTORY_SIZE: usize = 10;
-var lead_history: [LEAD_HISTORY_SIZE]u32 = .{0} ** LEAD_HISTORY_SIZE;
-var lead_history_count: u8 = 0;
-var lead_history_pos: u8 = 0;
-
-fn clearLeadHistory() void {
-    lead_history = .{0} ** LEAD_HISTORY_SIZE;
-    lead_history_count = 0;
-    lead_history_pos = 0;
-}
+var lead_history: pattern_history.PatternHistory = .{ .capacity = LEAD_HISTORY_SIZE };
 
 fn hashLeadPattern() u32 {
-    var hash: u32 = 2166136261;
-    for (lead_pattern) |hit| {
-        hash = (hash ^ @intFromEnum(hit)) *% 16777619;
-    }
-    return hash;
+    return pattern_history.hashEnumPattern(LeadHit, lead_pattern[0..]);
 }
 
-fn isLeadPatternRecent(hash: u32) bool {
-    for (0..lead_history_count) |i| {
-        if (lead_history[i] == hash) return true;
-    }
-    return false;
-}
-
-fn rememberLeadPattern(hash: u32) void {
-    lead_history[lead_history_pos] = hash;
-    lead_history_pos = (lead_history_pos + 1) % @as(u8, LEAD_HISTORY_SIZE);
-    if (lead_history_count < LEAD_HISTORY_SIZE) {
-        lead_history_count += 1;
-    }
-}
 
 fn randomTaikoLeadHit(is_strong: bool) LeadHit {
     const r = rng.float();
@@ -517,15 +570,15 @@ var lead_memory: composition.PhraseMemory = .{};
 fn rebuildLeadPattern(meso: f32, spec: *const TaikoCueSpec) void {
     generateLeadPattern(meso, spec);
     var hash = hashLeadPattern();
-    if (isLeadPatternRecent(hash)) {
+    if (pattern_history.seenRecently(&lead_history, hash)) {
         mutateLeadPattern(spec, meso);
         hash = hashLeadPattern();
-        if (isLeadPatternRecent(hash)) {
+        if (pattern_history.seenRecently(&lead_history, hash)) {
             forceLeadPerturbation();
             hash = hashLeadPattern();
         }
     }
-    rememberLeadPattern(hash);
+    pattern_history.remember(&lead_history, hash);
 }
 
 fn buildBreakPattern() void {
@@ -573,16 +626,11 @@ fn buildCallPattern() void {
 
 pub fn reset() void {
     rng = dsp.Rng.init(entropy.nextSeed(0xDA1C_0000, @intFromEnum(selected_cue)));
+    cue_morph.reset(CuePreset, &cue_state, selected_cue);
+    structural_cue = selected_cue;
+    pending_scale_type = null;
     reverb = TaikoReverb.init(.{ 0.87, 0.88, 0.86, 0.89 });
     lfo_space = .{ .period_beats = 96, .depth = 0.03 };
-
-    engine.reset(
-        .{ .root = 36, .scale_type = .dorian },
-        initHarmony(),
-        TAIKO_ARCS,
-        16.0,
-        .none,
-    );
 
     runner.reset(&STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
 
@@ -594,12 +642,19 @@ pub fn reset() void {
     in_call_response = false;
     call_response_remaining = 0;
     is_response_phase = false;
-    clearLeadHistory();
+    pattern_history.clear(&lead_history);
     lead_phrase = .{ .anchor = 4, .region_low = 0, .region_high = 8, .rest_chance = 0.2, .min_notes = 3, .max_notes = 7, .gravity = 2.5 };
     lead_memory = .{};
 
-    applyCueParams();
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
+    const initial = CUE_SPECS[@intFromEnum(selected_cue)];
+    runner.engine.key.root = initial.root;
+    runner.engine.key.target_root = initial.root;
+    runner.engine.key.scale_type = initial.scale_type;
+    runner.engine.setChordChangeBeats(initial.chord_change_beats);
+    applyInstrumentTuning(cueIndexF32(selected_cue));
+    const reset_bpm = @max(CUE_SPECS[@intFromEnum(structural_cue)].base_bpm * bpm, 1.0);
+    randomizeTemporalState(reset_bpm);
+    const spec = &CUE_SPECS[@intFromEnum(cue_state.to)];
     if (!spec.progressive_roll) {
         rebuildLeadPattern(0.3, spec);
     }
@@ -616,25 +671,85 @@ fn resetInstruments() void {
 
 pub fn triggerCue() void {
     applyCueParams();
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
-    if (!spec.progressive_roll) {
-        rebuildLeadPattern(0.5, spec);
-    }
+}
+
+pub const DebugSnapshot = struct {
+    cue_from: u8,
+    cue_to: u8,
+    cue_structural: u8,
+    cue_selected: u8,
+    cue_progress: f32,
+    key_root: u8,
+    key_scale: composition.ScaleType,
+    chord_index: u8,
+    chord_count: u8,
+    micro: f32,
+    meso: f32,
+    macro: f32,
+    longform_intensity: f32,
+    longform_cadence: f32,
+    longform_modulation: f32,
+    chord_change_beats: f32,
+    next_chord_change_beats: f32,
+    sequencer_step: u8,
+    lead_cycle_count: u16,
+    in_break: bool,
+    in_call_response: bool,
+    is_response_phase: bool,
+};
+
+pub fn debugSnapshot() DebugSnapshot {
+    return .{
+        .cue_from = @intFromEnum(cue_state.from),
+        .cue_to = @intFromEnum(cue_state.to),
+        .cue_structural = @intFromEnum(structural_cue),
+        .cue_selected = @intFromEnum(selected_cue),
+        .cue_progress = cue_state.progress,
+        .key_root = runner.engine.key.root,
+        .key_scale = runner.engine.key.scale_type,
+        .chord_index = runner.engine.harmony.current,
+        .chord_count = runner.engine.harmony.num_chords,
+        .micro = runner.engine.arcs.micro.tension(),
+        .meso = runner.engine.arcs.meso.tension(),
+        .macro = runner.engine.arcs.macro.tension(),
+        .longform_intensity = runner.engine.longFormIntensity(),
+        .longform_cadence = runner.engine.longFormCadenceSpread(),
+        .longform_modulation = runner.engine.longFormModulationDrive(),
+        .chord_change_beats = runner.engine.chord_change_beats,
+        .next_chord_change_beats = runner.engine.next_chord_change_beats,
+        .sequencer_step = runner.sequencer.step,
+        .lead_cycle_count = lead_cycle_count,
+        .in_break = in_break,
+        .in_call_response = in_call_response,
+        .is_response_phase = is_response_phase,
+    };
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
-
-    // Jo-Ha-Kyu tempo drift: macro arc pushes tempo up at climax
-    const macro_t = runner.engine.arcs.macro.tension();
-    const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
+    const nominal_bpm = @max(CUE_SPECS[@intFromEnum(cue_state.to)].base_bpm * bpm, 1.0);
+    const cue_spb = dsp.samplesPerBeat(nominal_bpm);
 
     for (0..frames) |i| {
+        cue_morph.advance(CuePreset, &cue_state, cue_spb);
+        var spec = blendedCueSpec();
+        const from_cue = cue_state.from;
+        const to_cue = cue_state.to;
+        const cue_idx = lerpF32(cueIndexF32(from_cue), cueIndexF32(to_cue), cue_state.progress);
+        applyInstrumentTuning(cue_idx);
+        // Jo-Ha-Kyu tempo drift: macro arc pushes tempo up at climax
+        const macro_t = runner.engine.arcs.macro.tension();
+        const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
         lfo_space.advanceSample(effective_bpm);
         const frame = runner.advanceFrame(&rng, &STYLE, effective_bpm, LAYER_FADE_RATE);
 
+        if (frame.tick.chord_changed and pending_scale_type != null and cue_state.progress >= 0.5) {
+            runner.engine.key.scale_type = pending_scale_type.?;
+            pending_scale_type = null;
+        }
+
         if (frame.step) |step| {
-            advanceStep(step, frame.tick.meso, frame.tick.micro, spec);
+            maybeAdvanceStructuralCue(step);
+            advanceStep(step, frame.tick.meso, frame.tick.micro, &spec);
 
             // End of 16-step bar
             if (step == 15 and !spec.progressive_roll) {
@@ -671,7 +786,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
                     }
 
                     if (!in_break and !in_call_response) {
-                        rebuildLeadPattern(frame.tick.meso, spec);
+                        rebuildLeadPattern(frame.tick.meso, &spec);
                     }
                 }
             }
@@ -853,10 +968,24 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
 
     if (macro_t < 0.24) {
         if (composition.stepActive(half_mask, step)) {
-            scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.92);
+            const lead_on_n1 = rng.float() < 0.58 + meso * 0.22;
+            const lead_voice: usize = if (lead_on_n1) V_NAGADO1 else V_NAGADO2;
+            const support_voice: usize = if (lead_on_n1) V_NAGADO2 else V_NAGADO1;
+            scheduleTrigger(lead_voice, .don, nagado_vel * 0.9);
+            if (rng.float() < 0.2 + meso * 0.2) {
+                const support_hit: TriggerType = if (rng.float() < 0.58) .ghost else .ka;
+                scheduleTrigger(support_voice, support_hit, nagado_vel * 0.5);
+            }
+        } else if (composition.stepActive(quarter_mask, step) and rng.float() < 0.18 + meso * 0.2) {
+            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.64);
         }
-        if (step == 0) {
-            scheduleTrigger(V_SHIME1, .don, shime_vel * 0.82);
+        if (step == 0 or (step == 8 and rng.float() < 0.52 + meso * 0.2)) {
+            scheduleTrigger(V_SHIME1, .don, shime_vel * (0.74 + rng.float() * 0.18));
+        } else if (step == 12 and rng.float() < 0.16 + meso * 0.16) {
+            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.56);
+        }
+        if (step % 8 == 4 and rng.float() < 0.07 + meso * 0.12) {
+            scheduleTrigger(V_ODAIKO, .ghost, vel_base * 0.32);
         }
     } else if (macro_t < 0.52) {
         scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.88);
@@ -917,18 +1046,13 @@ fn leadHitToTrigger(hit: LeadHit) TriggerType {
 }
 
 fn applyCueParams() void {
-    const spec = &CUE_SPECS[@intFromEnum(selected_cue)];
-    runner.engine.key.root = spec.root;
-    runner.engine.key.target_root = spec.root;
-    runner.engine.key.scale_type = spec.scale_type;
-    runner.engine.setChordChangeBeats(spec.chord_change_beats);
-
-    // Tune instruments per cue
-    const cue_idx: f32 = @floatFromInt(@intFromEnum(selected_cue));
-    odaiko.base_freq = 44.0 + cue_idx * 4.0;
-    nagado1.base_freq = 130.0 + cue_idx * 12.0;
-    nagado2.base_freq = 155.0 + cue_idx * 12.0;
-    shime1.base_freq = 400.0 + cue_idx * 20.0;
-    shime2.base_freq = 440.0 + cue_idx * 20.0;
-    kane.base_freq = 880.0 + cue_idx * 40.0;
+    const prev_to = cue_state.to;
+    cue_morph.setTarget(CuePreset, &cue_state, selected_cue);
+    if (cue_state.to == prev_to and cue_state.progress >= 1.0) {
+        return;
+    }
+    const target = CUE_SPECS[@intFromEnum(cue_state.to)];
+    runner.engine.setChordChangeBeats(target.chord_change_beats);
+    runner.engine.key.modulateTo(target.root);
+    pending_scale_type = target.scale_type;
 }

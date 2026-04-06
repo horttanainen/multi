@@ -5,6 +5,7 @@ const gpu = @import("gpu.zig");
 const lut = @import("lut.zig");
 const background_paint = @import("background_paint.zig");
 const music = @import("music.zig");
+const entropy = @import("music/entropy.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
@@ -15,6 +16,8 @@ const DEFAULT_LUT_STRENGTH: f32 = 1.0;
 const DEFAULT_MUSIC_STYLE: music.Style = .ambient;
 const DEFAULT_MUSIC_BPM: f32 = 1.0;
 const DEFAULT_MUSIC_REVERB_MIX: f32 = 0.35;
+const DEFAULT_MUSIC_SEED_ENABLED: bool = false;
+const DEFAULT_MUSIC_SEED: u64 = 0xC0FF_EE12_3456_789A;
 const DEFAULT_AMBIENT_DRONE_VOL: f32 = 0.15;
 const DEFAULT_AMBIENT_PAD_VOL: f32 = 0.08;
 const DEFAULT_AMBIENT_MELODY_VOL: f32 = 0.06;
@@ -91,6 +94,8 @@ const StoredSettings = struct {
     music_volume: ?f32 = null,
     music_bpm: ?f32 = null,
     music_reverb_mix: ?f32 = null,
+    music_seed_enabled: ?bool = null,
+    music_seed: ?u64 = null,
     music_ambient_drone_vol: ?f32 = null,
     music_ambient_pad_vol: ?f32 = null,
     music_ambient_melody_vol: ?f32 = null,
@@ -121,6 +126,8 @@ pub var music_style: music.Style = DEFAULT_MUSIC_STYLE;
 pub var music_volume: f32 = DEFAULT_MUSIC_VOLUME;
 pub var music_bpm: f32 = DEFAULT_MUSIC_BPM;
 pub var music_reverb_mix: f32 = DEFAULT_MUSIC_REVERB_MIX;
+pub var music_seed_enabled: bool = DEFAULT_MUSIC_SEED_ENABLED;
+pub var music_seed: u64 = DEFAULT_MUSIC_SEED;
 pub var music_ambient_drone_vol: f32 = DEFAULT_AMBIENT_DRONE_VOL;
 pub var music_ambient_pad_vol: f32 = DEFAULT_AMBIENT_PAD_VOL;
 pub var music_ambient_melody_vol: f32 = DEFAULT_AMBIENT_MELODY_VOL;
@@ -262,6 +269,7 @@ pub fn apply() void {
 
 pub fn applyMusic() void {
     const style_changed = music.current_style != music_style;
+    const seed_changed = entropy.configureFixedSeed(music_seed_enabled, music_seed);
     music.setVolume(music_volume);
 
     procedural_ambient.bpm = music_bpm;
@@ -296,7 +304,7 @@ pub fn applyMusic() void {
     procedural_taiko.slap_mix = music_taiko_kane_mix;
     procedural_taiko.selected_cue = @enumFromInt(music_taiko_cue);
 
-    if (!style_changed) return;
+    if (!style_changed and !seed_changed) return;
     music.playStyle(music_style);
 }
 
@@ -354,6 +362,8 @@ pub fn save() !void {
         .music_volume = music_volume,
         .music_bpm = music_bpm,
         .music_reverb_mix = music_reverb_mix,
+        .music_seed_enabled = music_seed_enabled,
+        .music_seed = music_seed,
         .music_ambient_drone_vol = music_ambient_drone_vol,
         .music_ambient_pad_vol = music_ambient_pad_vol,
         .music_ambient_melody_vol = music_ambient_melody_vol,
@@ -448,6 +458,8 @@ fn resetMusicSettings() void {
     music_volume = DEFAULT_MUSIC_VOLUME;
     music_bpm = DEFAULT_MUSIC_BPM;
     music_reverb_mix = DEFAULT_MUSIC_REVERB_MIX;
+    music_seed_enabled = DEFAULT_MUSIC_SEED_ENABLED;
+    music_seed = DEFAULT_MUSIC_SEED;
     music_ambient_drone_vol = DEFAULT_AMBIENT_DRONE_VOL;
     music_ambient_pad_vol = DEFAULT_AMBIENT_PAD_VOL;
     music_ambient_melody_vol = DEFAULT_AMBIENT_MELODY_VOL;
@@ -478,6 +490,8 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_volume = std.math.clamp(s.music_volume orelse DEFAULT_MUSIC_VOLUME, 0.0, 1.0);
     music_bpm = std.math.clamp(s.music_bpm orelse DEFAULT_MUSIC_BPM, 0.0, 2.0);
     music_reverb_mix = std.math.clamp(s.music_reverb_mix orelse DEFAULT_MUSIC_REVERB_MIX, 0.0, 1.0);
+    music_seed_enabled = s.music_seed_enabled orelse DEFAULT_MUSIC_SEED_ENABLED;
+    music_seed = s.music_seed orelse DEFAULT_MUSIC_SEED;
     music_ambient_drone_vol = std.math.clamp(s.music_ambient_drone_vol orelse DEFAULT_AMBIENT_DRONE_VOL, 0.0, 1.0);
     music_ambient_pad_vol = std.math.clamp(s.music_ambient_pad_vol orelse DEFAULT_AMBIENT_PAD_VOL, 0.0, 1.0);
     music_ambient_melody_vol = std.math.clamp(s.music_ambient_melody_vol orelse DEFAULT_AMBIENT_MELODY_VOL, 0.0, 1.0);

@@ -234,13 +234,6 @@ pub fn StyleSpec(comptime CueSpecType: type, comptime LayerCount: usize, comptim
     };
 }
 
-pub fn StyleFrame(comptime VoiceCount: usize) type {
-    return struct {
-        tick: CompositionTick,
-        voice_triggers: [VoiceCount]bool,
-    };
-}
-
 pub const StepStyleFrame = struct {
     tick: CompositionTick,
     step: ?u8,
@@ -297,13 +290,6 @@ pub fn leadStepChance(step: u8, density: f32, meso: f32, offbeat_scale: f32) f32
     return density * offbeat_scale * meso;
 }
 
-pub fn advanceBeatCounter(counter: *f32, beat_len: f32, samples_per_beat: f32) bool {
-    counter.* += 1.0 / samples_per_beat;
-    if (counter.* < beat_len) return false;
-    counter.* -= beat_len;
-    return true;
-}
-
 pub const VoiceTimingSpec = struct {
     base_beats: f32,
     random_beats: f32 = 0.0,
@@ -312,59 +298,6 @@ pub const VoiceTimingSpec = struct {
         return self.base_beats + rng.float() * self.random_beats;
     }
 };
-
-pub fn sampleVoiceTimings(comptime N: usize, specs: *const [N]VoiceTimingSpec, rng: *dsp.Rng, out: *[N]f32) void {
-    for (0..N) |i| {
-        out[i] = specs[i].sample(rng);
-    }
-}
-
-pub fn StyleRunner(comptime CueSpecType: type, comptime LayerCount: usize, comptime VoiceCount: usize) type {
-    return struct {
-        engine: CompositionEngine = .{},
-        layer_targets: [LayerCount]f32 = .{0.0} ** LayerCount,
-        layer_levels: [LayerCount]f32 = .{0.0} ** LayerCount,
-        voice_beat_counter: [VoiceCount]f32 = .{0.0} ** VoiceCount,
-        voice_beat_len: [VoiceCount]f32 = .{0.0} ** VoiceCount,
-
-        pub fn reset(
-            self: *@This(),
-            rng: *dsp.Rng,
-            style: *const StyleSpec(CueSpecType, LayerCount, VoiceCount),
-            key_state: KeyState,
-            harmony_state: ChordMarkov,
-            chord_beats: f32,
-            mode: ModulationMode,
-            initial_targets: [LayerCount]f32,
-            initial_levels: [LayerCount]f32,
-        ) void {
-            self.engine.reset(key_state, harmony_state, style.arcs, chord_beats, mode);
-            self.layer_targets = initial_targets;
-            self.layer_levels = initial_levels;
-            self.voice_beat_counter = .{0.0} ** VoiceCount;
-            sampleVoiceTimings(VoiceCount, &style.voice_timings, rng, &self.voice_beat_len);
-        }
-
-        pub fn advanceFrame(
-            self: *@This(),
-            rng: *dsp.Rng,
-            style: *const StyleSpec(CueSpecType, LayerCount, VoiceCount),
-            bpm_val: f32,
-            fade_rate: f32,
-        ) StyleFrame(VoiceCount) {
-            const tick = self.engine.advanceSample(rng, bpm_val);
-            applyLayerCurves(LayerCount, &style.layer_curves, tick.macro, &self.layer_targets);
-            easeLevels(LayerCount, &self.layer_levels, &self.layer_targets, fade_rate);
-
-            const spb = dsp.samplesPerBeat(bpm_val);
-            var voice_triggers: [VoiceCount]bool = .{false} ** VoiceCount;
-            for (0..VoiceCount) |i| {
-                voice_triggers[i] = advanceBeatCounter(&self.voice_beat_counter[i], self.voice_beat_len[i], spb);
-            }
-            return .{ .tick = tick, .voice_triggers = voice_triggers };
-        }
-    };
-}
 
 pub fn StepStyleRunner(comptime CueSpecType: type, comptime LayerCount: usize) type {
     return struct {
@@ -408,11 +341,78 @@ pub fn StepStyleRunner(comptime CueSpecType: type, comptime LayerCount: usize) t
 }
 
 pub const CompositionEngine = struct {
+    const CHORD_HISTORY_SIZE: usize = 12;
+
+    const LongFormDirector = struct {
+        beat_counter: f32 = 0.0,
+        section_beats: f32 = 384.0,
+        intensity: f32 = 0.46,
+        target_intensity: f32 = 0.46,
+        cadence_spread: f32 = 0.16,
+        target_cadence_spread: f32 = 0.16,
+        modulation_drive: f32 = 0.52,
+        target_modulation_drive: f32 = 0.52,
+        primed: bool = false,
+
+        fn reset(self: *LongFormDirector) void {
+            self.beat_counter = 0.0;
+            self.intensity = 0.46;
+            self.target_intensity = 0.46;
+            self.cadence_spread = 0.16;
+            self.target_cadence_spread = 0.16;
+            self.modulation_drive = 0.52;
+            self.target_modulation_drive = 0.52;
+            self.primed = false;
+        }
+
+        fn advanceSample(self: *LongFormDirector, rng: *dsp.Rng, spb: f32) void {
+            if (self.section_beats <= 0.0) {
+                std.log.warn("CompositionEngine.LongFormDirector.advanceSample: invalid section_beats={d}, using 384", .{self.section_beats});
+                self.section_beats = 384.0;
+            }
+
+            if (!self.primed) {
+                self.pickTargets(rng);
+                self.primed = true;
+            }
+
+            self.intensity += (self.target_intensity - self.intensity) * 0.00024;
+            self.cadence_spread += (self.target_cadence_spread - self.cadence_spread) * 0.0002;
+            self.modulation_drive += (self.target_modulation_drive - self.modulation_drive) * 0.00022;
+
+            self.beat_counter += 1.0 / spb;
+            if (self.beat_counter < self.section_beats) return;
+            while (self.beat_counter >= self.section_beats) {
+                self.beat_counter -= self.section_beats;
+            }
+            self.pickTargets(rng);
+        }
+
+        fn pickTargets(self: *LongFormDirector, rng: *dsp.Rng) void {
+            const intensity_step = (rng.float() * 2.0 - 1.0) * 0.24;
+            const cadence_step = (rng.float() * 2.0 - 1.0) * 0.1;
+            const modulation_step = (rng.float() * 2.0 - 1.0) * 0.16;
+
+            var next_intensity = self.target_intensity + intensity_step;
+            if (rng.float() < 0.18) {
+                next_intensity += if (rng.float() < 0.5) -0.2 else 0.2;
+            }
+            self.target_intensity = std.math.clamp(next_intensity, 0.12, 0.96);
+            self.target_cadence_spread = std.math.clamp(self.target_cadence_spread + cadence_step, 0.05, 0.42);
+            self.target_modulation_drive = std.math.clamp(self.target_modulation_drive + modulation_step, 0.08, 0.94);
+        }
+    };
+
     arcs: ArcSystem = .{},
     key: KeyState = .{},
     harmony: ChordMarkov = .{},
+    director: LongFormDirector = .{},
+    recent_chords: [CHORD_HISTORY_SIZE]u8 = .{0} ** CHORD_HISTORY_SIZE,
+    recent_chord_count: u8 = 0,
+    recent_chord_pos: u8 = 0,
     chord_beat_counter: f32 = 0.0,
     chord_change_beats: f32 = 16.0,
+    chord_change_target_beats: f32 = 16.0,
     next_chord_change_beats: f32 = 16.0,
     last_macro_quarter: u8 = 0,
     modulation_mode: ModulationMode = .mixed,
@@ -420,12 +420,22 @@ pub const CompositionEngine = struct {
     pub fn setChordChangeBeats(self: *CompositionEngine, beats: f32) void {
         if (beats <= 0.0) {
             std.log.warn("CompositionEngine.setChordChangeBeats: invalid beats {d}, clamping to 1.0", .{beats});
-            self.chord_change_beats = 1.0;
-            self.next_chord_change_beats = 1.0;
+            self.chord_change_target_beats = 1.0;
             return;
         }
-        self.chord_change_beats = beats;
-        self.next_chord_change_beats = beats;
+        self.chord_change_target_beats = beats;
+    }
+
+    pub fn longFormIntensity(self: *const CompositionEngine) f32 {
+        return self.director.intensity;
+    }
+
+    pub fn longFormCadenceSpread(self: *const CompositionEngine) f32 {
+        return self.director.cadence_spread;
+    }
+
+    pub fn longFormModulationDrive(self: *const CompositionEngine) f32 {
+        return self.director.modulation_drive;
     }
 
     pub fn reset(self: *CompositionEngine, key_state: KeyState, harmony_state: ChordMarkov, arc_state: ArcSystem, chord_beats: f32, mode: ModulationMode) void {
@@ -433,9 +443,19 @@ pub const CompositionEngine = struct {
         self.harmony = harmony_state;
         self.arcs = arc_state;
         self.chord_beat_counter = 0.0;
-        self.setChordChangeBeats(chord_beats);
+        const clamped_beats = @max(chord_beats, 1.0);
+        self.chord_change_beats = clamped_beats;
+        self.chord_change_target_beats = clamped_beats;
+        self.next_chord_change_beats = clamped_beats;
         self.last_macro_quarter = 0;
         self.modulation_mode = mode;
+        self.director.reset();
+        self.clearRecentChordHistory();
+        if (self.harmony.num_chords == 0) {
+            std.log.warn("CompositionEngine.reset: harmony has no chords; novelty history disabled", .{});
+            return;
+        }
+        self.rememberChord(self.harmony.current);
     }
 
     pub fn advanceSample(self: *CompositionEngine, rng: *dsp.Rng, bpm_val: f32) CompositionTick {
@@ -456,6 +476,9 @@ pub const CompositionEngine = struct {
                 .chord_changed = false,
             };
         }
+
+        self.director.advanceSample(rng, spb);
+        self.advanceChordCadenceMorph(spb);
         self.chord_beat_counter += 1.0 / spb;
         var chord_changed = false;
         if (self.next_chord_change_beats <= 0.0) {
@@ -464,22 +487,31 @@ pub const CompositionEngine = struct {
         }
         if (self.chord_beat_counter >= self.next_chord_change_beats) {
             self.chord_beat_counter -= self.next_chord_change_beats;
-            _ = self.harmony.nextChord(rng);
-            chord_changed = true;
-            self.next_chord_change_beats = self.sampleNextChordChangeBeats(rng, meso_t, macro_t);
-            self.nudgeHarmonyTransitions(rng, macro_t);
+            chord_changed = self.advanceHarmonyWithNovelty(rng, meso_t, macro_t);
+            self.next_chord_change_beats = self.sampleNextChordChangeBeats(rng, meso_t, macro_t, self.director.cadence_spread, self.director.intensity);
+            self.nudgeHarmonyTransitions(rng, macro_t, self.director.intensity);
         }
 
         const macro_quarter: u8 = @intFromFloat(self.arcs.macro.beat_count / self.arcs.macro.section_beats * 4.0);
         if (macro_quarter != self.last_macro_quarter) {
             self.last_macro_quarter = macro_quarter;
             if (macro_quarter == 0) {
+                const modulation_gate = std.math.clamp(0.25 + self.director.modulation_drive * 0.55 + macro_t * 0.15, 0.0, 1.0);
+                if (rng.float() >= modulation_gate) {
+                    return .{
+                        .micro = micro_t,
+                        .meso = meso_t,
+                        .macro = macro_t,
+                        .chord_changed = chord_changed,
+                    };
+                }
                 switch (self.modulation_mode) {
                     .none => {},
                     .fourth => self.key.modulateByFourth(),
                     .fifth => self.key.modulateByFifth(),
                     .mixed => {
-                        if (rng.float() < 0.5) {
+                        const prefer_fourth = 0.5 + (self.director.intensity - 0.5) * 0.25;
+                        if (rng.float() < prefer_fourth) {
                             self.key.modulateByFourth();
                         } else {
                             self.key.modulateByFifth();
@@ -497,16 +529,35 @@ pub const CompositionEngine = struct {
         };
     }
 
-    fn sampleNextChordChangeBeats(self: *CompositionEngine, rng: *dsp.Rng, meso_t: f32, macro_t: f32) f32 {
-        const base = @max(self.chord_change_beats, 1.0);
-        const spread = 0.08 + macro_t * 0.2 + meso_t * 0.1;
-        const ratio = 1.0 + (rng.float() * 2.0 - 1.0) * spread;
-        return std.math.clamp(base * ratio, base * 0.55, base * 1.65);
+    fn advanceChordCadenceMorph(self: *CompositionEngine, spb: f32) void {
+        const delta = self.chord_change_target_beats - self.chord_change_beats;
+        if (@abs(delta) < 0.0001) {
+            self.chord_change_beats = self.chord_change_target_beats;
+            return;
+        }
+        const samples_per_morph = spb * 16.0;
+        if (samples_per_morph <= 1.0) {
+            std.log.warn("CompositionEngine.advanceChordCadenceMorph: invalid morph window spb={d}", .{spb});
+            self.chord_change_beats = self.chord_change_target_beats;
+            return;
+        }
+        const rate = 1.0 / samples_per_morph;
+        self.chord_change_beats += delta * rate;
     }
 
-    fn nudgeHarmonyTransitions(self: *CompositionEngine, rng: *dsp.Rng, macro_t: f32) void {
+    fn sampleNextChordChangeBeats(self: *CompositionEngine, rng: *dsp.Rng, meso_t: f32, macro_t: f32, cadence_spread: f32, director_intensity: f32) f32 {
+        const base = @max(self.chord_change_beats, 1.0);
+        const spread = std.math.clamp(0.06 + macro_t * 0.14 + meso_t * 0.08 + cadence_spread * 0.55 + director_intensity * 0.1, 0.04, 0.62);
+        const direction_bias = (director_intensity - 0.5) * 0.12;
+        const ratio = 1.0 + (rng.float() * 2.0 - 1.0) * spread + direction_bias;
+        const min_ratio = std.math.clamp(0.55 - cadence_spread * 0.32, 0.32, 0.75);
+        const max_ratio = std.math.clamp(1.6 + cadence_spread * 0.9, 1.2, 2.2);
+        return std.math.clamp(base * ratio, base * min_ratio, base * max_ratio);
+    }
+
+    fn nudgeHarmonyTransitions(self: *CompositionEngine, rng: *dsp.Rng, macro_t: f32, director_intensity: f32) void {
         if (self.harmony.num_chords < 2) return;
-        if (rng.float() > 0.11 + macro_t * 0.17) return;
+        if (rng.float() > 0.09 + macro_t * 0.16 + director_intensity * 0.14) return;
 
         const row_idx: usize = self.harmony.current;
         const chord_count: usize = @intCast(self.harmony.num_chords);
@@ -517,7 +568,7 @@ pub const CompositionEngine = struct {
 
         var row = &self.harmony.transitions[row_idx];
         const target: usize = @intCast(rng.next() % @as(u32, @intCast(chord_count)));
-        const delta = 0.025 + rng.float() * 0.055;
+        const delta = 0.02 + rng.float() * (0.04 + director_intensity * 0.05);
         row[target] += delta;
         row[row_idx] = @max(0.005, row[row_idx] - delta * 0.45);
 
@@ -535,6 +586,74 @@ pub const CompositionEngine = struct {
         }
         for (0..chord_count) |i| {
             row[i] /= sum;
+        }
+    }
+
+    fn advanceHarmonyWithNovelty(self: *CompositionEngine, rng: *dsp.Rng, meso_t: f32, macro_t: f32) bool {
+        if (self.harmony.num_chords == 0) {
+            std.log.warn("CompositionEngine.advanceHarmonyWithNovelty: no chords available", .{});
+            return false;
+        }
+        if (self.harmony.num_chords == 1) {
+            self.rememberChord(self.harmony.current);
+            return true;
+        }
+
+        const attempt_count: usize = if (self.harmony.num_chords <= 3) 3 else 5;
+        var best: ChordMarkov = self.harmony;
+        var best_score: f32 = 9_999.0;
+
+        for (0..attempt_count) |_| {
+            var trial = self.harmony;
+            _ = trial.nextChord(rng);
+            const score = self.chordNoveltyScore(trial.current, meso_t, macro_t);
+            if (score >= best_score) continue;
+            best = trial;
+            best_score = score;
+            if (best_score <= 0.0) break;
+        }
+
+        self.harmony = best;
+        self.rememberChord(self.harmony.current);
+        return true;
+    }
+
+    fn chordNoveltyScore(self: *const CompositionEngine, chord_idx: u8, meso_t: f32, macro_t: f32) f32 {
+        if (self.recent_chord_count == 0) return 0.0;
+
+        var matches: u8 = 0;
+        var recency_weight: f32 = 0.0;
+        const count: usize = self.recent_chord_count;
+
+        for (0..count) |offset| {
+            const hist_pos = (CHORD_HISTORY_SIZE + self.recent_chord_pos - 1 - offset) % CHORD_HISTORY_SIZE;
+            if (self.recent_chords[hist_pos] != chord_idx) continue;
+            matches += 1;
+            const w = 1.0 - @as(f32, @floatFromInt(offset)) / @as(f32, @floatFromInt(count));
+            recency_weight += w;
+        }
+
+        var score = @as(f32, @floatFromInt(matches)) * 0.65 + recency_weight * 0.9;
+        const last_pos = (CHORD_HISTORY_SIZE + self.recent_chord_pos - 1) % CHORD_HISTORY_SIZE;
+        if (self.recent_chords[last_pos] == chord_idx) {
+            score += 1.1 + macro_t * 0.45;
+        }
+        score -= meso_t * 0.22;
+        score -= self.director.cadence_spread * 0.35;
+        return score;
+    }
+
+    fn clearRecentChordHistory(self: *CompositionEngine) void {
+        self.recent_chords = .{0} ** CHORD_HISTORY_SIZE;
+        self.recent_chord_count = 0;
+        self.recent_chord_pos = 0;
+    }
+
+    fn rememberChord(self: *CompositionEngine, chord_idx: u8) void {
+        self.recent_chords[self.recent_chord_pos] = chord_idx;
+        self.recent_chord_pos = @intCast((@as(usize, self.recent_chord_pos) + 1) % CHORD_HISTORY_SIZE);
+        if (self.recent_chord_count < CHORD_HISTORY_SIZE) {
+            self.recent_chord_count += 1;
         }
     }
 };
@@ -783,52 +902,6 @@ pub fn applyChordTonesToPhrases(harmony: *const ChordMarkov, scale_type: ScaleTy
         phrase.setChordTones(degrees.tones[0..degrees.count]);
     }
 }
-
-pub const CueParams = struct {
-    density: f32 = 0.5,
-    energy: f32 = 0.5,
-    harmonic_tension: f32 = 0.3,
-    register_low: u8 = 5,
-    register_high: u8 = 17,
-    scale_type: ScaleType = .minor_pentatonic,
-    tempo_mult: f32 = 1.0,
-    layer_weights: [6]f32 = .{ 1, 1, 1, 1, 1, 1 },
-
-    pub fn lerp(a: CueParams, b: CueParams, t: f32) CueParams {
-        var result: CueParams = undefined;
-        result.density = a.density + (b.density - a.density) * t;
-        result.energy = a.energy + (b.energy - a.energy) * t;
-        result.harmonic_tension = a.harmonic_tension + (b.harmonic_tension - a.harmonic_tension) * t;
-        result.register_low = if (t < 0.5) a.register_low else b.register_low;
-        result.register_high = if (t < 0.5) a.register_high else b.register_high;
-        result.scale_type = if (t < 0.5) a.scale_type else b.scale_type;
-        result.tempo_mult = a.tempo_mult + (b.tempo_mult - a.tempo_mult) * t;
-        for (0..6) |i| {
-            result.layer_weights[i] = a.layer_weights[i] + (b.layer_weights[i] - a.layer_weights[i]) * t;
-        }
-        return result;
-    }
-};
-
-pub const CueInterpolator = struct {
-    from: CueParams = .{},
-    to: CueParams = .{},
-    current: CueParams = .{},
-    progress: f32 = 1.0,
-    speed: f32 = 0.00002,
-
-    pub fn setCue(self: *CueInterpolator, target: CueParams) void {
-        self.from = self.current;
-        self.to = target;
-        self.progress = 0;
-    }
-
-    pub fn advanceSample(self: *CueInterpolator) void {
-        if (self.progress >= 1.0) return;
-        self.progress = @min(self.progress + self.speed, 1.0);
-        self.current = CueParams.lerp(self.from, self.to, self.progress);
-    }
-};
 
 pub const SlowLfo = struct {
     phase: f32 = 0,

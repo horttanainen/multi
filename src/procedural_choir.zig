@@ -4,7 +4,9 @@
 // movement, and cue-specific timing so the presets diverge both harmonically
 // and behaviorally over time.
 const dsp = @import("music/dsp.zig");
+const std = @import("std");
 const composition = @import("music/composition.zig");
+const cue_morph = @import("music/cue_morph.zig");
 const entropy = @import("music/entropy.zig");
 const layers = @import("music/layers.zig");
 
@@ -206,9 +208,57 @@ const CUE_SPECS: [4]ChoirCueSpec = .{
     },
 };
 
+const ChoirCueMorph = cue_morph.CueMorph(CuePreset);
+var cue_state: ChoirCueMorph = .{
+    .from = .cathedral,
+    .to = .cathedral,
+    .progress = 1.0,
+    .morph_beats = 24.0,
+};
+
+const ChoirRuntimeCue = struct {
+    chant_beat_len: f32,
+    reverb_boost: f32,
+    breath_boost: f32,
+    chant_threshold: f32,
+    pad_attack: f32,
+    pad_release: f32,
+    chant_rest_chance: f32,
+    chant_recall_chance: f32,
+    chant_attack: f32,
+    chant_release: f32,
+    drone_filter_hz: f32,
+    drone_detune_ratio: f32,
+};
+
+fn lerpF32(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
+}
+
+fn blendedRuntimeCue() ChoirRuntimeCue {
+    const from = CUE_SPECS[@intFromEnum(cue_state.from)];
+    const to = CUE_SPECS[@intFromEnum(cue_state.to)];
+    const t = cue_state.progress;
+    return .{
+        .chant_beat_len = lerpF32(from.chant_beat_len, to.chant_beat_len, t),
+        .reverb_boost = lerpF32(from.reverb_boost, to.reverb_boost, t),
+        .breath_boost = lerpF32(from.breath_boost, to.breath_boost, t),
+        .chant_threshold = lerpF32(from.chant_threshold, to.chant_threshold, t),
+        .pad_attack = lerpF32(from.pad_attack, to.pad_attack, t),
+        .pad_release = lerpF32(from.pad_release, to.pad_release, t),
+        .chant_rest_chance = lerpF32(from.chant_rest_chance, to.chant_rest_chance, t),
+        .chant_recall_chance = lerpF32(from.chant_recall_chance, to.chant_recall_chance, t),
+        .chant_attack = lerpF32(from.chant_attack, to.chant_attack, t),
+        .chant_release = lerpF32(from.chant_release, to.chant_release, t),
+        .drone_filter_hz = lerpF32(from.drone_filter_hz, to.drone_filter_hz, t),
+        .drone_detune_ratio = lerpF32(from.drone_detune_ratio, to.drone_detune_ratio, t),
+    };
+}
+
 pub fn reset() void {
     reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
     rng = dsp.Rng.init(entropy.nextSeed(0x4300_9000, @intFromEnum(selected_cue)));
+    cue_morph.reset(CuePreset, &cue_state, selected_cue);
     engine.reset(.{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
     lfo_reverb = .{ .period_beats = 180, .depth = 0.04 };
     drone_target = 0.9;
@@ -232,34 +282,98 @@ pub fn reset() void {
     layers.resetBreathLayer(&breath_layer);
     chant_beat_counter = 0.0;
     applyCueParams();
-    advanceChord();
+    const cue = blendedRuntimeCue();
+    advanceChord(&cue);
 }
 
 pub fn triggerCue() void {
     applyCueParams();
-    advanceChord();
-    chant_beat_counter = 0.0;
+}
+
+pub const DebugSnapshot = struct {
+    cue_from: u8,
+    cue_to: u8,
+    cue_selected: u8,
+    cue_progress: f32,
+    key_root: u8,
+    key_scale: composition.ScaleType,
+    chord_index: u8,
+    chord_count: u8,
+    micro: f32,
+    meso: f32,
+    macro: f32,
+    longform_intensity: f32,
+    longform_cadence: f32,
+    longform_modulation: f32,
+    chord_change_beats: f32,
+    next_chord_change_beats: f32,
+    chant_beat_counter: f32,
+    drone_level: f32,
+    pad_level: f32,
+    chant_level: f32,
+    breath_level: f32,
+    drone_target: f32,
+    pad_target: f32,
+    chant_target: f32,
+    breath_target: f32,
+};
+
+pub fn debugSnapshot() DebugSnapshot {
+    return .{
+        .cue_from = @intFromEnum(cue_state.from),
+        .cue_to = @intFromEnum(cue_state.to),
+        .cue_selected = @intFromEnum(selected_cue),
+        .cue_progress = cue_state.progress,
+        .key_root = engine.key.root,
+        .key_scale = engine.key.scale_type,
+        .chord_index = engine.harmony.current,
+        .chord_count = engine.harmony.num_chords,
+        .micro = engine.arcs.micro.tension(),
+        .meso = engine.arcs.meso.tension(),
+        .macro = engine.arcs.macro.tension(),
+        .longform_intensity = engine.longFormIntensity(),
+        .longform_cadence = engine.longFormCadenceSpread(),
+        .longform_modulation = engine.longFormModulationDrive(),
+        .chord_change_beats = engine.chord_change_beats,
+        .next_chord_change_beats = engine.next_chord_change_beats,
+        .chant_beat_counter = chant_beat_counter,
+        .drone_level = drone_level,
+        .pad_level = pad_level,
+        .chant_level = chant_level,
+        .breath_level = breath_level,
+        .drone_target = drone_target,
+        .pad_target = pad_target,
+        .chant_target = chant_target,
+        .breath_target = breath_target,
+    };
 }
 
 pub fn fillBuffer(buf: [*]f32, frames: usize) void {
     const eff_bpm = BASE_BPM * bpm;
     const spb = dsp.samplesPerBeat(eff_bpm);
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
 
     for (0..frames) |i| {
+        cue_morph.advance(CuePreset, &cue_state, spb);
+        const cue = blendedRuntimeCue();
+        layers.applyDroneCue(&drone_layer, cue.drone_filter_hz, cue.drone_detune_ratio);
         lfo_reverb.advanceSample(eff_bpm);
         const tick = engine.advanceSample(&rng, eff_bpm);
+        const director_intensity = engine.longFormIntensity();
+        const director_cadence = engine.longFormCadenceSpread();
+        const director_mod = engine.longFormModulationDrive();
         if (tick.chord_changed) {
-            advanceChord();
+            advanceChord(&cue);
         }
 
         chant_beat_counter += 1.0 / spb;
-        if (chant_beat_counter >= spec.chant_beat_len) {
-            chant_beat_counter -= spec.chant_beat_len;
-            triggerChantNote(tick.meso, tick.micro);
+        const chant_beat_len = std.math.clamp(cue.chant_beat_len * (1.0 + (director_cadence - 0.16) * 0.45 + lfo_reverb.value() * 0.7), 0.6, 6.0);
+        if (chant_beat_counter >= chant_beat_len) {
+            chant_beat_counter -= chant_beat_len;
+            triggerChantNote(tick.meso, tick.micro, &cue, director_intensity, director_cadence);
         }
 
-        updateLayerTargets(tick.macro);
+        const chant_threshold = std.math.clamp(cue.chant_threshold + (0.5 - director_intensity) * 0.14 - director_mod * 0.06, 0.04, 0.92);
+        updateLayerTargets(tick.macro, chant_threshold, director_intensity, director_mod);
         drone_level += (drone_target - drone_level) * LAYER_FADE_RATE;
         pad_level += (pad_target - pad_level) * LAYER_FADE_RATE;
         chant_level += (chant_target - chant_level) * LAYER_FADE_RATE;
@@ -280,11 +394,11 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         left += chant_out[0];
         right += chant_out[1];
 
-        const breath_out = layers.mixBreathLayer(&breath_layer, &rng, breathiness, spec.breath_boost, tick.meso, breath_level);
+        const breath_out = layers.mixBreathLayer(&breath_layer, &rng, breathiness, cue.breath_boost, tick.meso, breath_level);
         left += breath_out[0];
         right += breath_out[1];
 
-        const wet = (reverb_mix + spec.reverb_boost) * lfo_reverb.modulate();
+        const wet = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * lfo_reverb.modulate(), 0.0, 0.99);
         const dry = 1.0 - wet;
         const rev = reverb.process(.{ left, right });
         left = left * dry + rev[0] * wet;
@@ -296,47 +410,48 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 }
 
 fn applyCueParams() void {
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
+    cue_morph.setTarget(CuePreset, &cue_state, selected_cue);
+    const spec = CUE_SPECS[@intFromEnum(cue_state.to)];
     engine.key.root = spec.root;
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
     engine.modulation_mode = spec.modulation_mode;
     engine.setChordChangeBeats(spec.chord_change_beats);
     layers.applyChoirChantCue(&chant_layer, .{
-        .phrase = .{ .rest_chance = spec.chant_rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
+        .phrase = .{ .rest_chance = chant_layer.phrase.rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
         .min_notes = spec.chant_min_notes,
         .max_notes = spec.chant_max_notes,
-        .recall_chance = spec.chant_recall_chance,
-        .attack = spec.chant_attack,
-        .release = spec.chant_release,
+        .recall_chance = 0.0,
+        .attack = 0.1,
+        .release = 0.1,
     });
-    layers.applyDroneCue(&drone_layer, spec.drone_filter_hz, spec.drone_detune_ratio);
 }
 
-fn advanceChord() void {
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
+fn advanceChord(cue: *const ChoirRuntimeCue) void {
     const chord = engine.harmony.chords[engine.harmony.current];
-    layers.applyChoirPadChord(&pad_layer, engine.key.root, chord, spec.pad_attack, spec.pad_release, @intFromEnum(selected_cue), engine.harmony.current);
-    layers.applyChoirChantChord(&chant_layer, engine.key.root, &engine.harmony, engine.key.scale_type, @intFromEnum(selected_cue));
+    const cue_id = @intFromEnum(cue_state.to);
+    layers.applyChoirPadChord(&pad_layer, engine.key.root, chord, cue.pad_attack, cue.pad_release, cue_id, engine.harmony.current);
+    layers.applyChoirChantChord(&chant_layer, engine.key.root, &engine.harmony, engine.key.scale_type, cue_id);
     layers.applyDroneChord(&drone_layer, engine.key.root, chord, -1);
 }
 
-fn triggerChantNote(meso: f32, micro: f32) void {
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
+fn triggerChantNote(meso: f32, micro: f32, cue: *const ChoirRuntimeCue, director_intensity: f32, director_cadence: f32) void {
+    const target_spec = CUE_SPECS[@intFromEnum(cue_state.to)];
+    const recall = std.math.clamp(cue.chant_recall_chance * (0.96 - director_cadence * 0.5) + (1.0 - director_intensity) * 0.08, 0.04, 0.86);
+    const rest = std.math.clamp(cue.chant_rest_chance + director_cadence * 0.08 - director_intensity * 0.05, 0.03, 0.78);
     layers.maybeTriggerChoirChant(&chant_layer, &rng, &engine.key, chant_level, meso, micro, .{
-        .phrase = .{ .rest_chance = spec.chant_rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
-        .min_notes = spec.chant_min_notes,
-        .max_notes = spec.chant_max_notes,
-        .recall_chance = spec.chant_recall_chance,
-        .attack = spec.chant_attack,
-        .release = spec.chant_release,
+        .phrase = .{ .rest_chance = rest, .region_low = target_spec.chant_region_low, .region_high = target_spec.chant_region_high },
+        .min_notes = target_spec.chant_min_notes,
+        .max_notes = target_spec.chant_max_notes,
+        .recall_chance = recall,
+        .attack = cue.chant_attack,
+        .release = cue.chant_release,
     });
 }
 
-fn updateLayerTargets(macro: f32) void {
-    const spec = CUE_SPECS[@intFromEnum(selected_cue)];
-    drone_target = 0.65 + macro * 0.35;
-    pad_target = 0.3 + macro * 0.7;
-    chant_target = if (macro > spec.chant_threshold) @min((macro - spec.chant_threshold) * 1.25, 0.95) else 0.0;
-    breath_target = 0.18 + (1.0 - macro) * 0.35;
+fn updateLayerTargets(macro: f32, chant_threshold: f32, director_intensity: f32, director_mod: f32) void {
+    drone_target = std.math.clamp(0.62 + macro * 0.35 + (1.0 - director_intensity) * 0.1, 0.0, 1.0);
+    pad_target = std.math.clamp(0.26 + macro * 0.72 + director_mod * 0.05, 0.0, 1.0);
+    chant_target = if (macro > chant_threshold) std.math.clamp((macro - chant_threshold) * (1.22 + director_intensity * 0.35), 0.0, 1.0) else 0.0;
+    breath_target = std.math.clamp(0.16 + (1.0 - macro) * 0.35 + director_mod * 0.06, 0.0, 1.0);
 }
