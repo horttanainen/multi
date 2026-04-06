@@ -413,15 +413,27 @@ pub const CompositionEngine = struct {
     harmony: ChordMarkov = .{},
     chord_beat_counter: f32 = 0.0,
     chord_change_beats: f32 = 16.0,
+    next_chord_change_beats: f32 = 16.0,
     last_macro_quarter: u8 = 0,
     modulation_mode: ModulationMode = .mixed,
+
+    pub fn setChordChangeBeats(self: *CompositionEngine, beats: f32) void {
+        if (beats <= 0.0) {
+            std.log.warn("CompositionEngine.setChordChangeBeats: invalid beats {d}, clamping to 1.0", .{beats});
+            self.chord_change_beats = 1.0;
+            self.next_chord_change_beats = 1.0;
+            return;
+        }
+        self.chord_change_beats = beats;
+        self.next_chord_change_beats = beats;
+    }
 
     pub fn reset(self: *CompositionEngine, key_state: KeyState, harmony_state: ChordMarkov, arc_state: ArcSystem, chord_beats: f32, mode: ModulationMode) void {
         self.key = key_state;
         self.harmony = harmony_state;
         self.arcs = arc_state;
         self.chord_beat_counter = 0.0;
-        self.chord_change_beats = chord_beats;
+        self.setChordChangeBeats(chord_beats);
         self.last_macro_quarter = 0;
         self.modulation_mode = mode;
     }
@@ -430,13 +442,32 @@ pub const CompositionEngine = struct {
         self.arcs.advanceSample(bpm_val);
         self.key.advanceSample();
 
+        const micro_t = self.arcs.micro.tension();
+        const meso_t = self.arcs.meso.tension();
+        const macro_t = self.arcs.macro.tension();
+
         const spb = dsp.samplesPerBeat(bpm_val);
+        if (spb <= 0.0) {
+            std.log.warn("CompositionEngine.advanceSample: invalid samples-per-beat for bpm={d}, using fallback tick", .{bpm_val});
+            return .{
+                .micro = micro_t,
+                .meso = meso_t,
+                .macro = macro_t,
+                .chord_changed = false,
+            };
+        }
         self.chord_beat_counter += 1.0 / spb;
         var chord_changed = false;
-        if (self.chord_beat_counter >= self.chord_change_beats) {
-            self.chord_beat_counter -= self.chord_change_beats;
+        if (self.next_chord_change_beats <= 0.0) {
+            std.log.warn("CompositionEngine.advanceSample: next_chord_change_beats <= 0 ({d}), resetting cadence", .{self.next_chord_change_beats});
+            self.next_chord_change_beats = @max(self.chord_change_beats, 1.0);
+        }
+        if (self.chord_beat_counter >= self.next_chord_change_beats) {
+            self.chord_beat_counter -= self.next_chord_change_beats;
             _ = self.harmony.nextChord(rng);
             chord_changed = true;
+            self.next_chord_change_beats = self.sampleNextChordChangeBeats(rng, meso_t, macro_t);
+            self.nudgeHarmonyTransitions(rng, macro_t);
         }
 
         const macro_quarter: u8 = @intFromFloat(self.arcs.macro.beat_count / self.arcs.macro.section_beats * 4.0);
@@ -459,11 +490,52 @@ pub const CompositionEngine = struct {
         }
 
         return .{
-            .micro = self.arcs.micro.tension(),
-            .meso = self.arcs.meso.tension(),
-            .macro = self.arcs.macro.tension(),
+            .micro = micro_t,
+            .meso = meso_t,
+            .macro = macro_t,
             .chord_changed = chord_changed,
         };
+    }
+
+    fn sampleNextChordChangeBeats(self: *CompositionEngine, rng: *dsp.Rng, meso_t: f32, macro_t: f32) f32 {
+        const base = @max(self.chord_change_beats, 1.0);
+        const spread = 0.08 + macro_t * 0.2 + meso_t * 0.1;
+        const ratio = 1.0 + (rng.float() * 2.0 - 1.0) * spread;
+        return std.math.clamp(base * ratio, base * 0.55, base * 1.65);
+    }
+
+    fn nudgeHarmonyTransitions(self: *CompositionEngine, rng: *dsp.Rng, macro_t: f32) void {
+        if (self.harmony.num_chords < 2) return;
+        if (rng.float() > 0.11 + macro_t * 0.17) return;
+
+        const row_idx: usize = self.harmony.current;
+        const chord_count: usize = @intCast(self.harmony.num_chords);
+        if (row_idx >= chord_count) {
+            std.log.warn("CompositionEngine.nudgeHarmonyTransitions: row idx {d} out of range {d}", .{ row_idx, chord_count });
+            return;
+        }
+
+        var row = &self.harmony.transitions[row_idx];
+        const target: usize = @intCast(rng.next() % @as(u32, @intCast(chord_count)));
+        const delta = 0.025 + rng.float() * 0.055;
+        row[target] += delta;
+        row[row_idx] = @max(0.005, row[row_idx] - delta * 0.45);
+
+        var sum: f32 = 0.0;
+        for (0..chord_count) |i| {
+            sum += row[i];
+        }
+        if (sum <= 0.00001) {
+            std.log.warn("CompositionEngine.nudgeHarmonyTransitions: transition sum collapsed, restoring uniform row", .{});
+            const uniform = 1.0 / @as(f32, @floatFromInt(chord_count));
+            for (0..chord_count) |i| {
+                row[i] = uniform;
+            }
+            return;
+        }
+        for (0..chord_count) |i| {
+            row[i] /= sum;
+        }
     }
 };
 

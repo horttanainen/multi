@@ -6,6 +6,7 @@
 // Cues are parameter sets ("flavors"): dawn, twilight, space, forest.
 const dsp = @import("music/dsp.zig");
 const composition = @import("music/composition.zig");
+const entropy = @import("music/entropy.zig");
 const layers = @import("music/layers.zig");
 
 const StereoReverb = dsp.StereoReverb;
@@ -358,7 +359,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 fn applyCueParams() void {
     const spec = CUE_SPECS[@intFromEnum(selected_cue)];
     engine.key.scale_type = spec.scale_type;
-    engine.chord_change_beats = spec.chord_change_beats;
+    engine.setChordChangeBeats(spec.chord_change_beats);
     lfo_filter = spec.lfo_filter;
     lfo_reverb = spec.lfo_reverb;
     drone_layer.beat_len = spec.drone_beat_len;
@@ -397,7 +398,7 @@ fn advanceChord() void {
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(12345 + @as(u32, @intFromEnum(selected_cue)) * 7);
+    rng = dsp.Rng.init(entropy.nextSeed(0xA6B1_0001, @intFromEnum(selected_cue)));
     engine.reset(.{ .root = 36, .scale_type = .minor_pentatonic }, initHarmony(), AMBIENT_ARCS, 16.0, .mixed);
     lfo_filter = .{ .period_beats = 90, .depth = 0.08 };
     lfo_reverb = .{ .period_beats = 150, .depth = 0.04 };

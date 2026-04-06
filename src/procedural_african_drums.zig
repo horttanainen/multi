@@ -6,6 +6,7 @@
 // lead improvisation, periodic breaks, and macro arc-driven evolution.
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const entropy = @import("music/entropy.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
 
@@ -262,8 +263,72 @@ var lead_pattern: [NUM_STEPS]LeadHit = .{.none} ** NUM_STEPS;
 var lead_cycle_count: u16 = 0;
 var in_break: bool = false;
 var break_remaining: u8 = 0;
+const LEAD_HISTORY_SIZE: usize = 8;
+var lead_history: [LEAD_HISTORY_SIZE]u32 = .{0} ** LEAD_HISTORY_SIZE;
+var lead_history_count: u8 = 0;
+var lead_history_pos: u8 = 0;
 
-fn rebuildLeadPattern(meso: f32, spec: *const CueSpec) void {
+fn clearLeadHistory() void {
+    lead_history = .{0} ** LEAD_HISTORY_SIZE;
+    lead_history_count = 0;
+    lead_history_pos = 0;
+}
+
+fn hashLeadPattern() u32 {
+    var hash: u32 = 2166136261;
+    for (lead_pattern) |hit| {
+        hash = (hash ^ @intFromEnum(hit)) *% 16777619;
+    }
+    return hash;
+}
+
+fn isLeadPatternRecent(hash: u32) bool {
+    for (0..lead_history_count) |i| {
+        if (lead_history[i] == hash) return true;
+    }
+    return false;
+}
+
+fn rememberLeadPattern(hash: u32) void {
+    lead_history[lead_history_pos] = hash;
+    lead_history_pos = (lead_history_pos + 1) % @as(u8, LEAD_HISTORY_SIZE);
+    if (lead_history_count < LEAD_HISTORY_SIZE) {
+        lead_history_count += 1;
+    }
+}
+
+fn randomLeadHit(is_strong: bool) LeadHit {
+    const r = rng.float();
+    if (is_strong and r < 0.22) return .bass;
+    if (r < 0.48) return .tone;
+    if (r < 0.72) return .slap;
+    if (r < 0.9) return .ghost_tone;
+    return .ghost_slap;
+}
+
+fn mutateLeadPattern(spec: *const CueSpec, meso: f32) void {
+    const mutations: u8 = 2 + @as(u8, @intCast(rng.next() % 3));
+    const keep_chance = std.math.clamp(0.55 + spec.energy * 0.25 + meso * 0.15, 0.0, 0.98);
+    for (0..mutations) |_| {
+        const idx: usize = @intCast(rng.next() % @as(u32, NUM_STEPS));
+        const step: u8 = @intCast(idx);
+        const is_strong = (step % 3 == 0);
+        if (rng.float() < keep_chance) {
+            lead_pattern[idx] = randomLeadHit(is_strong);
+        } else {
+            lead_pattern[idx] = .none;
+        }
+    }
+}
+
+fn forceLeadPerturbation() void {
+    const idx: usize = @intCast(rng.next() % @as(u32, NUM_STEPS));
+    const step: u8 = @intCast(idx);
+    lead_pattern[idx] = randomLeadHit(step % 3 == 0);
+}
+
+fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
+    var hit_count: u8 = 0;
     const energy = std.math.clamp(spec.energy * (0.4 + meso * 0.65), 0.0, 1.0);
     for (0..NUM_STEPS) |i| {
         const step: u8 = @intCast(i);
@@ -278,22 +343,32 @@ fn rebuildLeadPattern(meso: f32, spec: *const CueSpec) void {
         const chance = base_chance * energy * spec.lead_density;
 
         if (rng.float() < chance) {
-            const r = rng.float();
-            if (is_strong and r < 0.25) {
-                lead_pattern[i] = .bass;
-            } else if (r < 0.5) {
-                lead_pattern[i] = .tone;
-            } else if (r < 0.75) {
-                lead_pattern[i] = .slap;
-            } else if (r < 0.9) {
-                lead_pattern[i] = .ghost_tone;
-            } else {
-                lead_pattern[i] = .ghost_slap;
-            }
+            lead_pattern[i] = randomLeadHit(is_strong);
+            hit_count += 1;
         } else {
             lead_pattern[i] = .none;
         }
     }
+
+    if (hit_count == 0) {
+        const strong_slot: u8 = @intCast(rng.next() % 4);
+        const idx: usize = @intCast(strong_slot * 3);
+        lead_pattern[idx] = .tone;
+    }
+}
+
+fn rebuildLeadPattern(meso: f32, spec: *const CueSpec) void {
+    generateLeadPattern(meso, spec);
+    var hash = hashLeadPattern();
+    if (isLeadPatternRecent(hash)) {
+        mutateLeadPattern(spec, meso);
+        hash = hashLeadPattern();
+        if (isLeadPatternRecent(hash)) {
+            forceLeadPerturbation();
+            hash = hashLeadPattern();
+        }
+    }
+    rememberLeadPattern(hash);
 }
 
 fn buildBreakPattern() void {
@@ -469,7 +544,7 @@ const CUE_SPECS: [4]CueSpec = .{
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(0xAF10_2000 + @as(u32, @intFromEnum(selected_cue)) * 37);
+    rng = dsp.Rng.init(entropy.nextSeed(0xAF10_2000, @intFromEnum(selected_cue)));
     reverb = DrumReverb.init(.{ 0.82, 0.83, 0.81, 0.84 });
 
     engine.reset(
@@ -486,6 +561,7 @@ pub fn reset() void {
     lead_cycle_count = 0;
     in_break = false;
     break_remaining = 0;
+    clearLeadHistory();
     pending = .{PendingTrigger{}} ** NUM_VOICES;
 
     applyCueParams();
@@ -745,7 +821,7 @@ fn applyCueParams() void {
     engine.key.root = spec.root;
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
-    engine.chord_change_beats = spec.chord_change_beats;
+    engine.setChordChangeBeats(spec.chord_change_beats);
 
     // Tune dunun frequencies slightly per cue for variety
     const cue_idx: f32 = @floatFromInt(@intFromEnum(selected_cue));

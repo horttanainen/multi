@@ -6,6 +6,7 @@
 // call-and-response passages, and dramatic breaks with "ma" (silence).
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const entropy = @import("music/entropy.zig");
 const instruments = @import("music/instruments.zig");
 const composition = @import("music/composition.zig");
 const layers = @import("music/layers.zig");
@@ -396,6 +397,110 @@ var break_remaining: u8 = 0;
 var in_call_response: bool = false;
 var call_response_remaining: u8 = 0;
 var is_response_phase: bool = false;
+const LEAD_HISTORY_SIZE: usize = 10;
+var lead_history: [LEAD_HISTORY_SIZE]u32 = .{0} ** LEAD_HISTORY_SIZE;
+var lead_history_count: u8 = 0;
+var lead_history_pos: u8 = 0;
+
+fn clearLeadHistory() void {
+    lead_history = .{0} ** LEAD_HISTORY_SIZE;
+    lead_history_count = 0;
+    lead_history_pos = 0;
+}
+
+fn hashLeadPattern() u32 {
+    var hash: u32 = 2166136261;
+    for (lead_pattern) |hit| {
+        hash = (hash ^ @intFromEnum(hit)) *% 16777619;
+    }
+    return hash;
+}
+
+fn isLeadPatternRecent(hash: u32) bool {
+    for (0..lead_history_count) |i| {
+        if (lead_history[i] == hash) return true;
+    }
+    return false;
+}
+
+fn rememberLeadPattern(hash: u32) void {
+    lead_history[lead_history_pos] = hash;
+    lead_history_pos = (lead_history_pos + 1) % @as(u8, LEAD_HISTORY_SIZE);
+    if (lead_history_count < LEAD_HISTORY_SIZE) {
+        lead_history_count += 1;
+    }
+}
+
+fn randomTaikoLeadHit(is_strong: bool) LeadHit {
+    const r = rng.float();
+    if (is_strong and r < 0.22) return .don_don;
+    if (r < 0.52) return .don;
+    if (r < 0.84) return .ka;
+    return .ghost;
+}
+
+fn mutateLeadPattern(spec: *const TaikoCueSpec, meso: f32) void {
+    const mutations: u8 = 2 + @as(u8, @intCast(rng.next() % 4));
+    const keep_chance = std.math.clamp(0.5 + spec.energy * 0.26 + meso * 0.18, 0.0, 0.98);
+    for (0..mutations) |_| {
+        const idx: usize = @intCast(rng.next() % 16);
+        const step: u8 = @intCast(idx);
+        if (rng.float() < keep_chance) {
+            lead_pattern[idx] = randomTaikoLeadHit(step % 4 == 0);
+            continue;
+        }
+        lead_pattern[idx] = .none;
+    }
+}
+
+fn forceLeadPerturbation() void {
+    const idx: usize = @intCast(rng.next() % 16);
+    const step: u8 = @intCast(idx);
+    lead_pattern[idx] = randomTaikoLeadHit(step % 4 == 0);
+}
+
+fn generateLeadPattern(meso: f32, spec: *const TaikoCueSpec) void {
+    var hit_count: u8 = 0;
+    const energy = std.math.clamp(spec.energy * (0.35 + meso * 0.75), 0.0, 1.0);
+
+    for (0..16) |i| {
+        const step: u8 = @intCast(i);
+        const is_strong = (step % 4 == 0);
+        const is_mid = (step % 2 == 0);
+        const base_chance: f32 = if (is_strong) 0.72 else if (is_mid) 0.4 + spec.swing_amount * 0.45 else 0.16 + spec.swing_amount * 0.35;
+        const chance = base_chance * energy * spec.lead_density;
+        if (rng.float() >= chance) {
+            lead_pattern[i] = .none;
+            continue;
+        }
+
+        // Use phrase generator for pitch-aware hit selection.
+        const pick = composition.nextPhraseNoteWithMemory(&rng, &lead_phrase, &lead_memory, 0.3);
+        if (pick == null) {
+            lead_pattern[i] = .ghost;
+            hit_count += 1;
+            continue;
+        }
+        const p = pick.?;
+        if (is_strong and p.note % 3 == 0) {
+            lead_pattern[i] = .don_don;
+            hit_count += 1;
+            continue;
+        }
+        if (p.note % 2 == 0) {
+            lead_pattern[i] = .don;
+            hit_count += 1;
+            continue;
+        }
+        lead_pattern[i] = .ka;
+        hit_count += 1;
+    }
+
+    if (hit_count == 0) {
+        const idx: usize = @intCast((rng.next() % 4) * 4);
+        lead_pattern[idx] = .don;
+    }
+}
 
 // Phrase memory for lead nagado — motif recall for musical coherence
 var lead_phrase: composition.PhraseGenerator = .{
@@ -410,34 +515,17 @@ var lead_phrase: composition.PhraseGenerator = .{
 var lead_memory: composition.PhraseMemory = .{};
 
 fn rebuildLeadPattern(meso: f32, spec: *const TaikoCueSpec) void {
-    const energy = std.math.clamp(spec.energy * (0.35 + meso * 0.75), 0.0, 1.0);
-
-    for (0..16) |i| {
-        const step: u8 = @intCast(i);
-        const is_strong = (step % 4 == 0);
-        const is_mid = (step % 2 == 0);
-        const base_chance: f32 = if (is_strong) 0.72 else if (is_mid) 0.4 + spec.swing_amount * 0.45 else 0.16 + spec.swing_amount * 0.35;
-        const chance = base_chance * energy * spec.lead_density;
-
-        if (rng.float() < chance) {
-            // Use phrase generator for pitch-aware hit selection
-            const pick = composition.nextPhraseNoteWithMemory(&rng, &lead_phrase, &lead_memory, 0.3);
-            if (pick) |p| {
-                // Map scale degree to stroke type
-                if (is_strong and p.note % 3 == 0) {
-                    lead_pattern[i] = .don_don;
-                } else if (p.note % 2 == 0) {
-                    lead_pattern[i] = .don;
-                } else {
-                    lead_pattern[i] = .ka;
-                }
-            } else {
-                lead_pattern[i] = .ghost;
-            }
-        } else {
-            lead_pattern[i] = .none;
+    generateLeadPattern(meso, spec);
+    var hash = hashLeadPattern();
+    if (isLeadPatternRecent(hash)) {
+        mutateLeadPattern(spec, meso);
+        hash = hashLeadPattern();
+        if (isLeadPatternRecent(hash)) {
+            forceLeadPerturbation();
+            hash = hashLeadPattern();
         }
     }
+    rememberLeadPattern(hash);
 }
 
 fn buildBreakPattern() void {
@@ -484,7 +572,7 @@ fn buildCallPattern() void {
 // ============================================================
 
 pub fn reset() void {
-    rng = dsp.Rng.init(0xDA1C_0000 + @as(u32, @intFromEnum(selected_cue)) * 41);
+    rng = dsp.Rng.init(entropy.nextSeed(0xDA1C_0000, @intFromEnum(selected_cue)));
     reverb = TaikoReverb.init(.{ 0.87, 0.88, 0.86, 0.89 });
     lfo_space = .{ .period_beats = 96, .depth = 0.03 };
 
@@ -506,6 +594,7 @@ pub fn reset() void {
     in_call_response = false;
     call_response_remaining = 0;
     is_response_phase = false;
+    clearLeadHistory();
     lead_phrase = .{ .anchor = 4, .region_low = 0, .region_high = 8, .rest_chance = 0.2, .min_notes = 3, .max_notes = 7, .gravity = 2.5 };
     lead_memory = .{};
 
@@ -832,7 +921,7 @@ fn applyCueParams() void {
     runner.engine.key.root = spec.root;
     runner.engine.key.target_root = spec.root;
     runner.engine.key.scale_type = spec.scale_type;
-    runner.engine.chord_change_beats = spec.chord_change_beats;
+    runner.engine.setChordChangeBeats(spec.chord_change_beats);
 
     // Tune instruments per cue
     const cue_idx: f32 = @floatFromInt(@intFromEnum(selected_cue));

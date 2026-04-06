@@ -5,6 +5,7 @@
 // and behaviorally over time.
 const dsp = @import("music/dsp.zig");
 const composition = @import("music/composition.zig");
+const entropy = @import("music/entropy.zig");
 const layers = @import("music/layers.zig");
 
 const StereoReverb = dsp.StereoReverb;
@@ -207,7 +208,7 @@ const CUE_SPECS: [4]ChoirCueSpec = .{
 
 pub fn reset() void {
     reverb = ChoirReverb.init(.{ 0.93, 0.94, 0.93, 0.92 });
-    rng = dsp.Rng.init(0x4300_9000 + @as(u32, @intFromEnum(selected_cue)) * 23);
+    rng = dsp.Rng.init(entropy.nextSeed(0x4300_9000, @intFromEnum(selected_cue)));
     engine.reset(.{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
     lfo_reverb = .{ .period_beats = 180, .depth = 0.04 };
     drone_target = 0.9;
@@ -300,7 +301,7 @@ fn applyCueParams() void {
     engine.key.target_root = spec.root;
     engine.key.scale_type = spec.scale_type;
     engine.modulation_mode = spec.modulation_mode;
-    engine.chord_change_beats = spec.chord_change_beats;
+    engine.setChordChangeBeats(spec.chord_change_beats);
     layers.applyChoirChantCue(&chant_layer, .{
         .phrase = .{ .rest_chance = spec.chant_rest_chance, .region_low = spec.chant_region_low, .region_high = spec.chant_region_high },
         .min_notes = spec.chant_min_notes,
