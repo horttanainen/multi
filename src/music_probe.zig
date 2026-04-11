@@ -1,6 +1,7 @@
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const entropy = @import("music/entropy.zig");
+const composition = @import("music/composition.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
@@ -204,6 +205,7 @@ fn configureStyle(cfg: ProbeConfig) void {
             procedural_taiko.reset();
         },
     }
+    composition.phraseVariationStatsReset();
 }
 
 fn applyCue(style: ProbeStyle, cue: u8) void {
@@ -271,6 +273,18 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.arp_level,
                 },
             );
+            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
+                std.log.info(
+                    "music_probe: bridge_state type=cue style=ambient from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
+                );
+            }
+            if (s.section_bridge_active) {
+                std.log.info(
+                    "music_probe: bridge_state type=section style=ambient from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
+                );
+            }
         },
         .choir => {
             const s = procedural_choir.debugSnapshot();
@@ -305,6 +319,18 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.breath_level,
                 },
             );
+            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
+                std.log.info(
+                    "music_probe: bridge_state type=cue style=choir from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
+                );
+            }
+            if (s.section_bridge_active) {
+                std.log.info(
+                    "music_probe: bridge_state type=section style=choir from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
+                );
+            }
         },
         .african_drums => {
             const s = procedural_african_drums.debugSnapshot();
@@ -338,6 +364,18 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.break_remaining,
                 },
             );
+            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
+                std.log.info(
+                    "music_probe: bridge_state type=cue style=african from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
+                );
+            }
+            if (s.section_bridge_active) {
+                std.log.info(
+                    "music_probe: bridge_state type=section style=african from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
+                );
+            }
         },
         .taiko => {
             const s = procedural_taiko.debugSnapshot();
@@ -376,6 +414,18 @@ fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
                     s.is_response_phase,
                 },
             );
+            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
+                std.log.info(
+                    "music_probe: bridge_state type=cue style=taiko from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
+                );
+            }
+            if (s.section_bridge_active) {
+                std.log.info(
+                    "music_probe: bridge_state type=section style=taiko from={d} to={d} progress={d:.2} sim_t={d:.2}",
+                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
+                );
+            }
         },
     }
 }
@@ -537,9 +587,10 @@ pub fn main() !void {
         0.0
     else
         @as(f64, @floatFromInt(stats.diff_hot_blocks)) / @as(f64, @floatFromInt(stats.diff_total_blocks));
+    const motif = composition.phraseVariationStatsSnapshot();
 
     std.log.info(
-        "music_probe summary: sim_seconds={d:.2} wall_seconds={d:.3} achieved_speed_x={d:.2} rms={d:.5} peak={d:.5} finite_samples={d} non_finite_samples={d} hf_ratio={d:.5} hf_peak={d:.5} hf_hot_block_ratio={d:.5}",
+        "music_probe summary: sim_seconds={d:.2} wall_seconds={d:.3} achieved_speed_x={d:.2} rms={d:.5} peak={d:.5} finite_samples={d} non_finite_samples={d} hf_ratio={d:.5} hf_peak={d:.5} hf_hot_block_ratio={d:.5} motif_recall_total={d} motif_recall_transformed={d} motif_recall_exact={d} motif_cooldown_violations={d} motif_transformed_ratio={d:.5} motif_exact_ratio={d:.5} motif_novelty_debt_avg={d:.5} motif_novelty_debt_peak={d:.5}",
         .{
             sim_seconds,
             wall_seconds,
@@ -551,6 +602,14 @@ pub fn main() !void {
             hf_ratio,
             stats.diff_peak_abs,
             hf_hot_block_ratio,
+            motif.recall_total,
+            motif.recall_transformed,
+            motif.recall_exact,
+            motif.cooldown_violations,
+            motif.transformed_ratio,
+            motif.exact_ratio,
+            motif.novelty_debt_avg,
+            motif.novelty_debt_peak,
         },
     );
 }

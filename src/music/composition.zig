@@ -451,6 +451,15 @@ const CompositionSectionState = struct {
     target_harmonic_motion: f32 = 0.3,
     cadence_scale: f32 = 0.9,
     target_cadence_scale: f32 = 0.9,
+    bridge_active: bool = false,
+    bridge_progress: f32 = 1.0,
+    bridge_beats: f32 = 8.0,
+    bridge_beat_counter: f32 = 0.0,
+    bridge_from: SectionId = .a,
+    bridge_to: SectionId = .a,
+    bridge_source_density: f32 = 0.34,
+    bridge_source_harmonic_motion: f32 = 0.3,
+    bridge_source_cadence_scale: f32 = 0.9,
 };
 
 const LongFormDirector = struct {
@@ -550,6 +559,15 @@ fn compositionSectionStateReset(section: *CompositionSectionState) void {
     section.target_harmonic_motion = profile.harmonic_center;
     section.cadence_scale = profile.cadence_scale_center;
     section.target_cadence_scale = profile.cadence_scale_center;
+    section.bridge_active = false;
+    section.bridge_progress = 1.0;
+    section.bridge_beats = 8.0;
+    section.bridge_beat_counter = 0.0;
+    section.bridge_from = section.current;
+    section.bridge_to = section.current;
+    section.bridge_source_density = section.density;
+    section.bridge_source_harmonic_motion = section.harmonic_motion;
+    section.bridge_source_cadence_scale = section.cadence_scale;
 }
 
 fn compositionSectionStateProgress(section: *const CompositionSectionState) f32 {
@@ -649,7 +667,53 @@ fn compositionSectionStateApplyTargets(section: *CompositionSectionState, next: 
     section.section_beats = compositionSectionStateChooseSectionBeats(profile, rng);
 }
 
+fn compositionSectionStateChooseBridgeBeats(profile: SectionProfile, rng: *dsp.Rng) f32 {
+    const min_beats = std.math.clamp(profile.min_beats * 0.08, 4.0, 18.0);
+    const max_beats = std.math.clamp(profile.max_beats * 0.14, min_beats + 0.5, 26.0);
+    if (max_beats <= min_beats) {
+        std.log.warn(
+            "compositionSectionStateChooseBridgeBeats: invalid bridge range min={d} max={d}, using min",
+            .{ min_beats, max_beats },
+        );
+        return min_beats;
+    }
+    const span = max_beats - min_beats;
+    const sampled = min_beats + dsp.rngFloat(rng) * span;
+    if (!std.math.isFinite(sampled) or sampled <= 0.0) {
+        std.log.warn(
+            "compositionSectionStateChooseBridgeBeats: sampled invalid value {d}, using fallback 8",
+            .{sampled},
+        );
+        return 8.0;
+    }
+    return sampled;
+}
+
+fn compositionSectionStateStartBridge(
+    section: *CompositionSectionState,
+    from: SectionId,
+    to: SectionId,
+    source_density: f32,
+    source_harmonic_motion: f32,
+    source_cadence_scale: f32,
+    rng: *dsp.Rng,
+) void {
+    const profile = SECTION_PROFILES[@intFromEnum(to)];
+    section.bridge_active = true;
+    section.bridge_progress = 0.0;
+    section.bridge_beat_counter = 0.0;
+    section.bridge_beats = compositionSectionStateChooseBridgeBeats(profile, rng);
+    section.bridge_from = from;
+    section.bridge_to = to;
+    section.bridge_source_density = source_density;
+    section.bridge_source_harmonic_motion = source_harmonic_motion;
+    section.bridge_source_cadence_scale = source_cadence_scale;
+}
+
 fn compositionSectionStateEnter(section: *CompositionSectionState, next: SectionId, rng: *dsp.Rng, director: *LongFormDirector) void {
+    const source_density = section.density;
+    const source_harmonic_motion = section.harmonic_motion;
+    const source_cadence_scale = section.cadence_scale;
     const from = section.current;
     section.previous = from;
     section.current = next;
@@ -660,9 +724,51 @@ fn compositionSectionStateEnter(section: *CompositionSectionState, next: Section
     section.distinct_transition_mask |= (@as(u32, 1) << edge_bit_index);
 
     compositionSectionStateApplyTargets(section, next, rng, director);
+    compositionSectionStateStartBridge(
+        section,
+        from,
+        next,
+        source_density,
+        source_harmonic_motion,
+        source_cadence_scale,
+        rng,
+    );
 }
 
-fn compositionSectionStateSmoothTargets(section: *CompositionSectionState) void {
+fn compositionSectionStateBridgeTarget(from: f32, to: f32, progress: f32) f32 {
+    const t = std.math.clamp(progress, 0.0, 1.0);
+    const smooth = t * t * (3.0 - 2.0 * t);
+    return from + (to - from) * smooth;
+}
+
+fn compositionSectionStateSmoothTargets(section: *CompositionSectionState, spb: f32) void {
+    if (section.bridge_active) {
+        if (section.bridge_beats <= 0.0) {
+            std.log.warn("compositionSectionStateSmoothTargets: invalid bridge_beats={d}, using fallback 8", .{section.bridge_beats});
+            section.bridge_beats = 8.0;
+        }
+        section.bridge_beat_counter += 1.0 / spb;
+        section.bridge_progress = std.math.clamp(section.bridge_beat_counter / section.bridge_beats, 0.0, 1.0);
+
+        const bridge_density_target = compositionSectionStateBridgeTarget(section.bridge_source_density, section.target_density, section.bridge_progress);
+        const bridge_harmonic_target = compositionSectionStateBridgeTarget(section.bridge_source_harmonic_motion, section.target_harmonic_motion, section.bridge_progress);
+        const bridge_cadence_target = compositionSectionStateBridgeTarget(section.bridge_source_cadence_scale, section.target_cadence_scale, section.bridge_progress);
+
+        section.density += (bridge_density_target - section.density) * 0.00052;
+        section.harmonic_motion += (bridge_harmonic_target - section.harmonic_motion) * 0.00048;
+        section.cadence_scale += (bridge_cadence_target - section.cadence_scale) * 0.00056;
+
+        if (section.bridge_progress < 1.0) return;
+
+        section.bridge_active = false;
+        section.bridge_progress = 1.0;
+        section.bridge_beat_counter = section.bridge_beats;
+        section.bridge_from = section.current;
+        section.bridge_to = section.current;
+        return;
+    }
+
+    section.bridge_progress = 1.0;
     section.density += (section.target_density - section.density) * 0.0003;
     section.harmonic_motion += (section.target_harmonic_motion - section.harmonic_motion) * 0.00028;
     section.cadence_scale += (section.target_cadence_scale - section.cadence_scale) * 0.00032;
@@ -679,7 +785,7 @@ fn compositionSectionStateAdvanceSample(section: *CompositionSectionState, rng: 
         section.section_beats = 72.0;
     }
 
-    compositionSectionStateSmoothTargets(section);
+    compositionSectionStateSmoothTargets(section, spb);
     section.beat_counter += 1.0 / spb;
     if (section.beat_counter < section.section_beats) return;
 
@@ -740,6 +846,22 @@ pub fn compositionEngineSectionHarmonicMotion(engine: *const CompositionEngine) 
 
 pub fn compositionEngineSectionCadenceScale(engine: *const CompositionEngine) f32 {
     return engine.section.cadence_scale;
+}
+
+pub fn compositionEngineSectionBridgeActive(engine: *const CompositionEngine) bool {
+    return engine.section.bridge_active;
+}
+
+pub fn compositionEngineSectionBridgeProgress(engine: *const CompositionEngine) f32 {
+    return engine.section.bridge_progress;
+}
+
+pub fn compositionEngineSectionBridgeFromId(engine: *const CompositionEngine) u8 {
+    return @intFromEnum(engine.section.bridge_from);
+}
+
+pub fn compositionEngineSectionBridgeToId(engine: *const CompositionEngine) u8 {
+    return @intFromEnum(engine.section.bridge_to);
 }
 
 pub fn compositionEngineReset(engine: *CompositionEngine, key_state: KeyState, harmony_state: ChordMarkov, arc_state: ArcSystem, chord_beats: f32, mode: ModulationMode) void {
@@ -1116,38 +1238,163 @@ pub const PhraseMemory = struct {
     lengths: [SIZE]u8 = .{0} ** SIZE,
     count: u8 = 0,
     write_pos: u8 = 0,
+    recent_recall_signatures: [SIZE]u64 = .{0} ** SIZE,
+    recent_recall_count: u8 = 0,
+    recent_recall_pos: u8 = 0,
+    novelty_debt: f32 = 0.0,
 };
 
-pub fn phraseMemoryStore(memory: *PhraseMemory, notes: *const [PhraseGenerator.MAX_LEN]u8, len: u8) void {
-    memory.phrases[memory.write_pos] = notes.*;
-    memory.lengths[memory.write_pos] = len;
-    memory.write_pos = (memory.write_pos + 1) % PhraseMemory.SIZE;
-    if (memory.count < PhraseMemory.SIZE) memory.count += 1;
+pub const PhraseRecallKind = enum {
+    none,
+    exact,
+    transformed,
+};
+
+pub const PhraseVariationSnapshot = struct {
+    total_picks: u32,
+    recall_total: u32,
+    recall_exact: u32,
+    recall_transformed: u32,
+    cooldown_violations: u32,
+    transformed_ratio: f32,
+    exact_ratio: f32,
+    novelty_debt_avg: f32,
+    novelty_debt_peak: f32,
+};
+
+const PhraseVariationStats = struct {
+    total_picks: u32 = 0,
+    recall_total: u32 = 0,
+    recall_exact: u32 = 0,
+    recall_transformed: u32 = 0,
+    cooldown_violations: u32 = 0,
+    novelty_debt_accum: f64 = 0.0,
+    novelty_debt_samples: u32 = 0,
+    novelty_debt_peak: f32 = 0.0,
+};
+
+const PHRASE_SIGNATURE_SEED: u64 = 0xcbf2_9ce4_8422_2325;
+const PHRASE_SIGNATURE_PRIME: u64 = 0x1000_0000_01b3;
+const PHRASE_COOLDOWN_WINDOW: u8 = 3;
+const PHRASE_BASE_TRANSFORM_CHANCE: f32 = 0.72;
+const PHRASE_DEBT_TRANSFORM_GAIN: f32 = 0.28;
+const PHRASE_DEBT_EXACT_INCREMENT: f32 = 0.2;
+const PHRASE_DEBT_COOLDOWN_PENALTY: f32 = 0.28;
+const PHRASE_DEBT_TRANSFORM_DECAY: f32 = 0.16;
+const PHRASE_DEBT_FRESH_DECAY: f32 = 0.08;
+const PHRASE_DEBT_REST_DECAY: f32 = 0.04;
+
+var phrase_variation_stats: PhraseVariationStats = .{};
+
+pub fn phraseVariationStatsReset() void {
+    phrase_variation_stats = .{};
 }
 
-pub fn phraseMemoryRecallVaried(memory: *const PhraseMemory, rng: *dsp.Rng, out: *[PhraseGenerator.MAX_LEN]u8, region_low: u8, region_high: u8) ?u8 {
-    if (memory.count == 0) return null;
-    const idx = @as(u8, @intCast(dsp.rngNext(rng) % memory.count));
-    const src = memory.phrases[idx];
-    const len = memory.lengths[idx];
-    if (len == 0) return null;
+pub fn phraseVariationStatsSnapshot() PhraseVariationSnapshot {
+    const recall_total_f = @as(f32, @floatFromInt(phrase_variation_stats.recall_total));
+    const transformed_ratio = if (phrase_variation_stats.recall_total == 0)
+        0.0
+    else
+        @as(f32, @floatFromInt(phrase_variation_stats.recall_transformed)) / recall_total_f;
+    const exact_ratio = if (phrase_variation_stats.recall_total == 0)
+        0.0
+    else
+        @as(f32, @floatFromInt(phrase_variation_stats.recall_exact)) / recall_total_f;
+    const novelty_debt_avg = if (phrase_variation_stats.novelty_debt_samples == 0)
+        0.0
+    else
+        @as(f32, @floatCast(phrase_variation_stats.novelty_debt_accum / @as(f64, @floatFromInt(phrase_variation_stats.novelty_debt_samples))));
+    return .{
+        .total_picks = phrase_variation_stats.total_picks,
+        .recall_total = phrase_variation_stats.recall_total,
+        .recall_exact = phrase_variation_stats.recall_exact,
+        .recall_transformed = phrase_variation_stats.recall_transformed,
+        .cooldown_violations = phrase_variation_stats.cooldown_violations,
+        .transformed_ratio = transformed_ratio,
+        .exact_ratio = exact_ratio,
+        .novelty_debt_avg = novelty_debt_avg,
+        .novelty_debt_peak = phrase_variation_stats.novelty_debt_peak,
+    };
+}
 
-    const transform = dsp.rngNext(rng) % 4;
+fn phraseVariationStatsRememberDebt(debt: f32) void {
+    phrase_variation_stats.novelty_debt_accum += debt;
+    phrase_variation_stats.novelty_debt_samples +%= 1;
+    if (debt > phrase_variation_stats.novelty_debt_peak) {
+        phrase_variation_stats.novelty_debt_peak = debt;
+    }
+}
+
+fn phraseVariationStatsRememberPick(pick: PhraseNotePick, memory: *const PhraseMemory, cooldown_violation: bool) void {
+    phrase_variation_stats.total_picks +%= 1;
+    if (!pick.recalled) {
+        phraseVariationStatsRememberDebt(memory.novelty_debt);
+        return;
+    }
+    phrase_variation_stats.recall_total +%= 1;
+    if (pick.recall_kind == .exact) {
+        phrase_variation_stats.recall_exact +%= 1;
+    } else if (pick.recall_kind == .transformed) {
+        phrase_variation_stats.recall_transformed +%= 1;
+    } else {
+        std.log.warn("phraseVariationStatsRememberPick: recalled pick missing recall_kind", .{});
+        phrase_variation_stats.recall_exact +%= 1;
+    }
+    if (cooldown_violation) phrase_variation_stats.cooldown_violations +%= 1;
+    phraseVariationStatsRememberDebt(memory.novelty_debt);
+}
+
+fn phraseSignature(notes: *const [PhraseGenerator.MAX_LEN]u8, len: u8) u64 {
+    var sig = PHRASE_SIGNATURE_SEED;
+    sig = (sig ^ len) *% PHRASE_SIGNATURE_PRIME;
+    for (0..len) |i| {
+        sig = (sig ^ notes[i]) *% PHRASE_SIGNATURE_PRIME;
+    }
+    return sig;
+}
+
+fn phraseMemoryRememberRecallSignature(memory: *PhraseMemory, signature: u64) void {
+    memory.recent_recall_signatures[memory.recent_recall_pos] = signature;
+    memory.recent_recall_pos = (memory.recent_recall_pos + 1) % PhraseMemory.SIZE;
+    if (memory.recent_recall_count < PhraseMemory.SIZE) memory.recent_recall_count += 1;
+}
+
+fn phraseMemorySignatureSeenRecently(memory: *const PhraseMemory, signature: u64, depth: u8) bool {
+    const capped_depth = @min(depth, memory.recent_recall_count);
+    if (capped_depth == 0) return false;
+    var offset: u8 = 0;
+    while (offset < capped_depth) : (offset += 1) {
+        const pos = (PhraseMemory.SIZE + memory.recent_recall_pos - 1 - offset) % PhraseMemory.SIZE;
+        if (memory.recent_recall_signatures[pos] == signature) return true;
+    }
+    return false;
+}
+
+fn phraseMemoryCopyExact(src: *const [PhraseMemory.PLEN]u8, len: u8, out: *[PhraseMemory.PLEN]u8) void {
+    for (0..len) |i| {
+        out[i] = src[i];
+    }
+}
+
+fn phraseMemoryApplyVariation(rng: *dsp.Rng, src: *const [PhraseMemory.PLEN]u8, len: u8, out: *[PhraseMemory.PLEN]u8, region_low: u8, region_high: u8) u8 {
+    const transform = dsp.rngNext(rng) % 5;
     switch (transform) {
         0 => {
-            const shift: i8 = switch (dsp.rngNext(rng) % 4) {
+            const shift: i8 = switch (dsp.rngNext(rng) % 6) {
                 0 => 1,
                 1 => -1,
                 2 => 2,
-                else => -2,
+                3 => -2,
+                4 => 3,
+                else => -3,
             };
             for (0..len) |i| {
                 if (src[i] == PhraseMemory.REST) {
                     out[i] = PhraseMemory.REST;
-                } else {
-                    const raw: i16 = @as(i16, src[i]) + shift;
-                    out[i] = @intCast(std.math.clamp(raw, @as(i16, region_low), @as(i16, region_high)));
+                    continue;
                 }
+                const raw: i16 = @as(i16, src[i]) + shift;
+                out[i] = @intCast(std.math.clamp(raw, @as(i16, region_low), @as(i16, region_high)));
             }
             return len;
         },
@@ -1163,36 +1410,128 @@ pub fn phraseMemoryRecallVaried(memory: *const PhraseMemory, rng: *dsp.Rng, out:
                 if (out_len >= PhraseMemory.PLEN) break;
                 out[out_len] = src[i];
                 out_len += 1;
-                if (out_len < PhraseMemory.PLEN and src[i] != PhraseMemory.REST and dsp.rngFloat(rng) < 0.5) {
-                    out[out_len] = PhraseMemory.REST;
-                    out_len += 1;
-                }
+                if (out_len >= PhraseMemory.PLEN) continue;
+                if (src[i] == PhraseMemory.REST) continue;
+                if (dsp.rngFloat(rng) >= 0.5) continue;
+                out[out_len] = PhraseMemory.REST;
+                out_len += 1;
             }
             return out_len;
         },
-        else => {
+        3 => {
             var out_len: u8 = 0;
             for (0..len) |i| {
                 if (out_len >= PhraseMemory.PLEN) break;
                 out[out_len] = src[i];
                 out_len += 1;
-                if (i + 1 < len and src[i] != PhraseMemory.REST and src[i + 1] != PhraseMemory.REST and out_len < PhraseMemory.PLEN) {
-                    const a: i16 = src[i];
-                    const b: i16 = src[i + 1];
-                    if (@abs(b - a) == 2) {
-                        out[out_len] = @intCast(std.math.clamp(@divTrunc(a + b, 2), @as(i16, region_low), @as(i16, region_high)));
-                        out_len += 1;
-                    }
-                }
+                if (i + 1 >= len or out_len >= PhraseMemory.PLEN) continue;
+                if (src[i] == PhraseMemory.REST or src[i + 1] == PhraseMemory.REST) continue;
+                const a: i16 = src[i];
+                const b: i16 = src[i + 1];
+                if (@abs(b - a) != 2) continue;
+                out[out_len] = @intCast(std.math.clamp(@divTrunc(a + b, 2), @as(i16, region_low), @as(i16, region_high)));
+                out_len += 1;
             }
             return out_len;
         },
+        else => {
+            var has_pivot = false;
+            var pivot: i16 = 0;
+            for (0..len) |i| {
+                if (src[i] == PhraseMemory.REST) continue;
+                has_pivot = true;
+                pivot = src[i];
+                break;
+            }
+            if (!has_pivot) {
+                phraseMemoryCopyExact(src, len, out);
+                return len;
+            }
+            for (0..len) |i| {
+                if (src[i] == PhraseMemory.REST) {
+                    out[i] = PhraseMemory.REST;
+                    continue;
+                }
+                const raw = pivot - (@as(i16, src[i]) - pivot);
+                out[i] = @intCast(std.math.clamp(raw, @as(i16, region_low), @as(i16, region_high)));
+            }
+            return len;
+        },
     }
+}
+
+pub fn phraseMemoryStore(memory: *PhraseMemory, notes: *const [PhraseGenerator.MAX_LEN]u8, len: u8) void {
+    memory.phrases[memory.write_pos] = notes.*;
+    memory.lengths[memory.write_pos] = len;
+    memory.write_pos = (memory.write_pos + 1) % PhraseMemory.SIZE;
+    if (memory.count < PhraseMemory.SIZE) memory.count += 1;
+}
+
+pub fn phraseMemoryRecallVaried(memory: *const PhraseMemory, rng: *dsp.Rng, out: *[PhraseGenerator.MAX_LEN]u8, region_low: u8, region_high: u8) ?u8 {
+    if (memory.count == 0) return null;
+    const idx = @as(u8, @intCast(dsp.rngNext(rng) % memory.count));
+    const src = &memory.phrases[idx];
+    const len = memory.lengths[idx];
+    if (len == 0) return null;
+    return phraseMemoryApplyVariation(rng, src, len, out, region_low, region_high);
+}
+
+const PhraseRecallOutcome = struct {
+    len: u8,
+    transformed: bool,
+    cooldown_violation: bool,
+};
+
+fn phraseMemoryRecallWithPolicy(memory: *PhraseMemory, rng: *dsp.Rng, out: *[PhraseGenerator.MAX_LEN]u8, region_low: u8, region_high: u8) ?PhraseRecallOutcome {
+    if (memory.count == 0) return null;
+    const idx = @as(u8, @intCast(dsp.rngNext(rng) % memory.count));
+    const src = &memory.phrases[idx];
+    const len = memory.lengths[idx];
+    if (len == 0) {
+        std.log.warn("phraseMemoryRecallWithPolicy: selected empty phrase idx={d} count={d}", .{ idx, memory.count });
+        return null;
+    }
+
+    const signature = phraseSignature(src, len);
+    const in_cooldown = phraseMemorySignatureSeenRecently(memory, signature, PHRASE_COOLDOWN_WINDOW);
+    const transform_bias = std.math.clamp(PHRASE_BASE_TRANSFORM_CHANCE + memory.novelty_debt * PHRASE_DEBT_TRANSFORM_GAIN, 0.0, 1.0);
+    const transformed = in_cooldown or dsp.rngFloat(rng) < transform_bias;
+
+    var out_len: u8 = len;
+    if (transformed) {
+        out_len = phraseMemoryApplyVariation(rng, src, len, out, region_low, region_high);
+    } else {
+        phraseMemoryCopyExact(src, len, out);
+    }
+    if (out_len == 0) {
+        std.log.warn("phraseMemoryRecallWithPolicy: variation collapsed to zero length idx={d}", .{idx});
+        return null;
+    }
+
+    var cooldown_violation = false;
+    if (!transformed and in_cooldown) cooldown_violation = true;
+
+    if (transformed) {
+        memory.novelty_debt = std.math.clamp(memory.novelty_debt - PHRASE_DEBT_TRANSFORM_DECAY, 0.0, 1.0);
+    } else {
+        memory.novelty_debt = std.math.clamp(memory.novelty_debt + PHRASE_DEBT_EXACT_INCREMENT, 0.0, 1.0);
+        if (cooldown_violation) {
+            memory.novelty_debt = std.math.clamp(memory.novelty_debt + PHRASE_DEBT_COOLDOWN_PENALTY, 0.0, 1.0);
+        }
+    }
+    phraseMemoryRememberRecallSignature(memory, signature);
+
+    return .{
+        .len = out_len,
+        .transformed = transformed,
+        .cooldown_violation = cooldown_violation,
+    };
 }
 
 pub const PhraseNotePick = struct {
     note: u8,
     recalled: bool,
+    recall_kind: PhraseRecallKind = .none,
 };
 
 pub const PhraseConfig = struct {
@@ -1209,20 +1548,54 @@ pub fn applyPhraseConfig(spec: PhraseConfig, phrase: *PhraseGenerator) void {
 
 pub fn nextPhraseNoteWithMemory(rng: *dsp.Rng, phrase: *PhraseGenerator, memory: *PhraseMemory, recall_chance: f32) ?PhraseNotePick {
     if (memory.count > 0 and dsp.rngFloat(rng) < recall_chance) {
-        var varied_notes: [PhraseGenerator.MAX_LEN]u8 = undefined;
-        const varied_len = phraseMemoryRecallVaried(memory, rng, &varied_notes, phrase.region_low, phrase.region_high) orelse return nextPhraseNote(rng, phrase, memory);
-        if (varied_len == 0 or varied_notes[0] == PhraseGenerator.REST) return nextPhraseNote(rng, phrase, memory);
-        return .{ .note = varied_notes[0], .recalled = true };
+        var recalled_notes: [PhraseGenerator.MAX_LEN]u8 = undefined;
+        const recalled = phraseMemoryRecallWithPolicy(memory, rng, &recalled_notes, phrase.region_low, phrase.region_high) orelse return nextPhraseNote(rng, phrase, memory);
+        if (recalled.len == 0) {
+            std.log.warn("nextPhraseNoteWithMemory: recalled zero-length phrase", .{});
+            return nextPhraseNote(rng, phrase, memory);
+        }
+
+        var note = recalled_notes[0];
+        if (note == PhraseGenerator.REST) {
+            var found = false;
+            var i: u8 = 1;
+            while (i < recalled.len) : (i += 1) {
+                if (recalled_notes[i] == PhraseGenerator.REST) continue;
+                note = recalled_notes[i];
+                found = true;
+                break;
+            }
+            if (!found) return nextPhraseNote(rng, phrase, memory);
+        }
+
+        const pick: PhraseNotePick = .{
+            .note = note,
+            .recalled = true,
+            .recall_kind = if (recalled.transformed) .transformed else .exact,
+        };
+        phraseVariationStatsRememberPick(pick, memory, recalled.cooldown_violation);
+        return pick;
     }
     return nextPhraseNote(rng, phrase, memory);
 }
 
 fn nextPhraseNote(rng: *dsp.Rng, phrase: *PhraseGenerator, memory: *PhraseMemory) ?PhraseNotePick {
-    const note = phraseGeneratorAdvance(phrase, rng) orelse return null;
-    if (phrase.pos == 0 and phrase.len > 0) {
+    const note = phraseGeneratorAdvance(phrase, rng) orelse {
+        memory.novelty_debt = std.math.clamp(memory.novelty_debt - PHRASE_DEBT_REST_DECAY, 0.0, 1.0);
+        phraseVariationStatsRememberDebt(memory.novelty_debt);
+        return null;
+    };
+    if (phrase.pos == 1 and phrase.len > 0) {
         phraseMemoryStore(memory, &phrase.notes, phrase.len);
     }
-    return .{ .note = note, .recalled = false };
+    memory.novelty_debt = std.math.clamp(memory.novelty_debt - PHRASE_DEBT_FRESH_DECAY, 0.0, 1.0);
+    const pick: PhraseNotePick = .{
+        .note = note,
+        .recalled = false,
+        .recall_kind = .none,
+    };
+    phraseVariationStatsRememberPick(pick, memory, false);
+    return pick;
 }
 
 pub fn applyChordTonesToPhrases(harmony: *const ChordMarkov, scale_type: ScaleType, phrases: anytype) void {

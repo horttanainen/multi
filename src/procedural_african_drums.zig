@@ -266,6 +266,16 @@ var in_break: bool = false;
 var break_remaining: u8 = 0;
 const LEAD_HISTORY_SIZE: usize = 8;
 var lead_history: pattern_history.PatternHistory = .{ .capacity = LEAD_HISTORY_SIZE };
+var lead_phrase: composition.PhraseGenerator = .{
+    .anchor = 4,
+    .region_low = 0,
+    .region_high = 9,
+    .rest_chance = 0.24,
+    .min_notes = 3,
+    .max_notes = 8,
+    .gravity = 2.3,
+};
+var lead_memory: composition.PhraseMemory = .{};
 
 fn hashLeadPattern() u32 {
     return pattern_history.hashEnumPattern(LeadHit, lead_pattern[0..]);
@@ -279,6 +289,17 @@ fn randomLeadHit(is_strong: bool) LeadHit {
     if (r < 0.72) return .slap;
     if (r < 0.9) return .ghost_tone;
     return .ghost_slap;
+}
+
+fn leadHitFromPhraseNote(note: u8, is_strong: bool) LeadHit {
+    if (is_strong and note % 5 == 0) return .bass;
+    return switch (note % 5) {
+        0 => .tone,
+        1 => .slap,
+        2 => .ghost_tone,
+        3 => .ghost_slap,
+        else => if (is_strong) .bass else .tone,
+    };
 }
 
 fn mutateLeadPattern(spec: *const CueSpec, meso: f32) void {
@@ -305,6 +326,7 @@ fn forceLeadPerturbation() void {
 fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
     var hit_count: u8 = 0;
     const energy = std.math.clamp(spec.energy * (0.4 + meso * 0.65), 0.0, 1.0);
+    const recall_chance = std.math.clamp(0.22 + spec.energy * 0.22 + meso * 0.18, 0.18, 0.78);
     const from_cue = cue_state.from;
     const to_cue = cue_state.to;
     const morph_t = cue_state.progress;
@@ -316,7 +338,13 @@ fn generateLeadPattern(meso: f32, spec: *const CueSpec) void {
         const chance = base_chance * energy * spec.lead_density;
 
         if (dsp.rngFloat(&rng) < chance) {
-            lead_pattern[i] = randomLeadHit(is_strong);
+            const pick = composition.nextPhraseNoteWithMemory(&rng, &lead_phrase, &lead_memory, recall_chance);
+            if (pick == null) {
+                lead_pattern[i] = randomLeadHit(is_strong);
+                hit_count += 1;
+                continue;
+            }
+            lead_pattern[i] = leadHitFromPhraseNote(pick.?.note, is_strong);
             hit_count += 1;
         } else {
             lead_pattern[i] = .none;
@@ -586,7 +614,18 @@ pub fn reset() void {
     in_break = false;
     break_remaining = 0;
     pattern_history.clear(&lead_history);
+    lead_phrase = .{
+        .anchor = 4,
+        .region_low = 0,
+        .region_high = 9,
+        .rest_chance = 0.24,
+        .min_notes = 3,
+        .max_notes = 8,
+        .gravity = 2.3,
+    };
+    lead_memory = .{};
     pending = .{PendingTrigger{}} ** NUM_VOICES;
+    composition.applyChordTonesToPhrases(&engine.harmony, engine.key.scale_type, .{&lead_phrase});
 
     applyCueParams();
     rebuildLeadPattern(0.5, &CUE_SPECS[@intFromEnum(selected_cue)]);
@@ -652,6 +691,10 @@ pub const DebugSnapshot = struct {
     section_progress: f32,
     section_transition_count: u32,
     section_distinct_transition_count: u8,
+    section_bridge_active: bool,
+    section_bridge_progress: f32,
+    section_bridge_from: u8,
+    section_bridge_to: u8,
     chord_change_beats: f32,
     next_chord_change_beats: f32,
     current_step: u8,
@@ -680,6 +723,10 @@ pub fn debugSnapshot() DebugSnapshot {
         .section_progress = composition.compositionEngineSectionProgress(&engine),
         .section_transition_count = composition.compositionEngineSectionTransitionCount(&engine),
         .section_distinct_transition_count = composition.compositionEngineSectionDistinctTransitionCount(&engine),
+        .section_bridge_active = composition.compositionEngineSectionBridgeActive(&engine),
+        .section_bridge_progress = composition.compositionEngineSectionBridgeProgress(&engine),
+        .section_bridge_from = composition.compositionEngineSectionBridgeFromId(&engine),
+        .section_bridge_to = composition.compositionEngineSectionBridgeToId(&engine),
         .chord_change_beats = engine.chord_change_beats,
         .next_chord_change_beats = engine.next_chord_change_beats,
         .current_step = current_step,
@@ -700,6 +747,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         const macro_t = composition.arcControllerTension(&engine.arcs.macro);
         const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
         const tick = composition.compositionEngineAdvanceSample(&engine, &rng, effective_bpm);
+        if (tick.chord_changed) {
+            composition.applyChordTonesToPhrases(&engine.harmony, engine.key.scale_type, .{&lead_phrase});
+        }
         shekere.volume = 0.35 + spec.shekere_density * 0.25;
 
         if (advanceStep12(effective_bpm, spec.swing)) |step| {
