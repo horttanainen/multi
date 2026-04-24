@@ -1,0 +1,115 @@
+{
+  "meta": {
+    "created_utc": "2026-04-11",
+    "supersedes": [
+      "docs/procedural_music_context_2026-04-06.plan.json",
+      "docs/procedural_music_context_2026-04-06_v2.plan.json",
+      "docs/procedural_music_handoff_2026-04-06.md"
+    ],
+    "goal": "ship stronger anti-repetition procedural music with reliable iteration tests and bootstrap a new style from reference audio",
+    "status": "reference_pipeline_phase1_ready_waiting_for_reference_track"
+  },
+  "today_scope": {
+    "phase_1": "M2 theme variation engine implemented test-first",
+    "phase_2": "music testing suite upgraded for fast RED/GREEN iteration",
+    "phase_3": "reference-audio style extraction path and first generated style bootstrap"
+  },
+  "execution_protocol": {
+    "required": [
+      "add or tighten smoke acceptance checks first",
+      "run smoke and capture RED evidence",
+      "implement engine changes",
+      "run smoke and confirm GREEN",
+      "inspect representative probe lines manually"
+    ]
+  },
+  "roadmap": [
+    {
+      "milestone": "M2_theme_variation_engine",
+      "status": "completed_2026-04-11",
+      "priority": 1,
+      "description": "explicit motif variation operators, signature cooldown policy, and novelty debt pressure",
+      "implementation_notes": [
+        "add transform classes for exact recall vs transformed recall",
+        "track motif signatures and cooldown-window violations",
+        "increase mutation pressure when novelty debt rises",
+        "expose motif telemetry in probe snapshots/summary"
+      ],
+      "acceptance_checks": [
+        "cooldown violations <= configured maximum",
+        "transformed motif ratio >= configured minimum",
+        "exact motif reuse ratio <= configured maximum",
+        "novelty debt remains below collapse threshold"
+      ]
+    },
+    {
+      "milestone": "M2_test_suite_upgrade",
+      "status": "completed_2026-04-11",
+      "priority": 2,
+      "description": "add M2-focused checks to smoke for deterministic RED/GREEN loops",
+      "implementation_notes": [
+        "extend scripts/music_smoke_test.sh parsing for motif metrics",
+        "add configurable thresholds via env vars",
+        "emit RESULT fields and summary topic counters for M2"
+      ],
+      "acceptance_checks": [
+        "intentional bad threshold run produces RED",
+        "default thresholds pass after M2 implementation",
+        "result lines show motif metrics for every style"
+      ]
+    },
+    {
+      "milestone": "M3_transition_composer_foundation",
+      "status": "completed_2026-04-11",
+      "priority": 3,
+      "description": "prepare seam-aware transition instrumentation for next pass",
+      "implementation_notes": [
+        "log explicit bridge/transition states",
+        "reserve smoke checks for boundary continuity"
+      ],
+      "acceptance_checks": [
+        "bridge-state logs present during cue transitions"
+      ]
+    },
+    {
+      "milestone": "M5_eval_upgrade",
+      "status": "completed_2026-04-11",
+      "priority": 4,
+      "description": "upgrade procedural music evaluation with sequence-level anti-repetition signals",
+      "implementation_notes": [
+        "derive per-snapshot structural tokens from probe output",
+        "track repeated 3-gram ratio as a direct repetition proxy",
+        "track novelty slope from early vs late quartile token diversity",
+        "track cross-seed aligned-token divergence, including late-phase divergence"
+      ],
+      "acceptance_checks": [
+        "result lines include M5 token metrics for every style",
+        "M5 checks fail under intentionally strict thresholds",
+        "default thresholds pass on baseline styles"
+      ]
+    },
+    {
+      "milestone": "M6_reference_audio_style_bootstrap",
+      "status": "in_progress_2026-04-11",
+      "priority": 5,
+      "description": "bootstrap one new procedural style using a reference track's feel/genre",
+      "implementation_notes": [
+        "phase-1 tooling implemented: stem extraction, stem QC, stem instrument profiling",
+        "add offline style-profile extractor from reference audio",
+        "derive tempo/rhythm-density/spectral-envelope feature targets",
+        "add new procedural style module seeded by extracted profile",
+        "wire style into settings and probe"
+      ],
+      "acceptance_checks": [
+        "new style appears in music style selection and probe",
+        "new style passes smoke baseline + M2 checks",
+        "profile file is reproducible from same reference input"
+      ]
+    }
+  ],
+  "risk_controls": [
+    "feature-flag high-impact behavior until smoke passes",
+    "keep each style stable by default and opt into stronger mutation gradually",
+    "avoid destructive timbre shifts while improving structure"
+  ]
+}
