@@ -6,10 +6,8 @@ usage() {
 Usage:
   scripts/fetch_reference_wav.sh <youtube_url>
 
-Downloads audio using yt-dlp, then normalizes it for M6 profiling:
-- mono (-ac 1)
-- 48kHz (-ar 48000)
-- 16-bit PCM WAV (-c:a pcm_s16le)
+Downloads audio using yt-dlp, then converts it to a predictable WAV container
+without changing channel count or sample rate.
 
 Optional env overrides:
   SECTION   optional yt-dlp --download-sections value (default: disabled)
@@ -40,9 +38,6 @@ fi
 url="$1"
 section="${SECTION:-}"
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/.." && pwd)"
-
 if [ -z "${OUTPUT:-}" ]; then
   echo "Fetching video title..."
   raw_title="$(yt-dlp --print title "$url")"
@@ -54,7 +49,7 @@ if [ -z "${OUTPUT:-}" ]; then
 else
   output_rel="$OUTPUT"
 fi
-output_path="$repo_root/$output_rel"
+output_path="$output_rel"
 
 mkdir -p "$(dirname -- "$output_path")"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/m6_ref.XXXXXX")"
@@ -66,7 +61,7 @@ trap cleanup EXIT
 echo "Downloading reference audio..."
 yt_dlp_cmd=(
   yt-dlp "$url"
-  -x --audio-format wav --audio-quality 0
+  -f bestaudio
   -o "$tmp_dir/source.%(ext)s"
 )
 if [ -n "$section" ]; then
@@ -81,11 +76,11 @@ if [ -z "$source_path" ]; then
   exit 2
 fi
 
-echo "Converting to profiling format (mono, 48kHz, PCM16 WAV)..."
+echo "Converting to PCM16 WAV without changing channels or sample rate..."
 ffmpeg -y -hide_banner -loglevel error \
   -i "$source_path" \
-  -ac 1 -ar 48000 -c:a pcm_s16le \
+  -c:a pcm_s16le \
   "$output_path"
 
 echo "done: $output_path"
-echo "next: scripts/music_profile_from_wav.py \"$output_path\" --style-name <new_style_name> --output docs/<new_style_name>.profile.json"
+echo "next: scripts/split_reference_stems.sh \"$output_path\" <style_name>"
