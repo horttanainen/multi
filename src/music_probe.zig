@@ -13,6 +13,10 @@ const InstrumentName = enum {
     sine_drone,
     choir,
     guitar_modal,
+    guitar_contact_pick_modal,
+    guitar_two_pol_modal,
+    guitar_commuted,
+    guitar_sms_fit,
     guitar_ks,
     guitar_waveguide_raw,
 };
@@ -175,6 +179,18 @@ fn parseInstrumentName(name: []const u8) ?InstrumentName {
     if (std.mem.eql(u8, name, "guitar-modal") or std.mem.eql(u8, name, "guitar_modal")) {
         return .guitar_modal;
     }
+    if (std.mem.eql(u8, name, "guitar-contact-pick-modal") or std.mem.eql(u8, name, "guitar_contact_pick_modal")) {
+        return .guitar_contact_pick_modal;
+    }
+    if (std.mem.eql(u8, name, "guitar-two-pol-modal") or std.mem.eql(u8, name, "guitar_two_pol_modal")) {
+        return .guitar_two_pol_modal;
+    }
+    if (std.mem.eql(u8, name, "guitar-commuted") or std.mem.eql(u8, name, "guitar_commuted")) {
+        return .guitar_commuted;
+    }
+    if (std.mem.eql(u8, name, "guitar-sms-fit") or std.mem.eql(u8, name, "guitar_sms_fit")) {
+        return .guitar_sms_fit;
+    }
     if (std.mem.eql(u8, name, "guitar-ks") or std.mem.eql(u8, name, "guitar_ks")) {
         return .guitar_ks;
     }
@@ -289,12 +305,20 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
     var sine = instruments.sineDroneInit(frequency_hz, @max(frequency_hz * 8.0, 800.0), 1.0008, 1.0, 0.12, 0.42);
     var choir = instruments.choirPartInit(0.006, 0.0, 1);
     var guitar_modal: guitar_probe.GuitarModal = .{};
+    var guitar_contact_pick_modal: guitar_probe.GuitarContactPickModal = .{};
+    var guitar_two_pol_modal: guitar_probe.GuitarTwoPolModal = .{};
+    var guitar_commuted: guitar_probe.GuitarCommuted = .{};
+    var guitar_sms_fit: guitar_probe.GuitarSmsFit = .{};
     var guitar_ks: guitar_probe.GuitarKs = .{};
     var guitar_waveguide_raw: guitar_probe.GuitarWaveguideRaw = .{};
 
     switch (cfg.instrument) {
         .choir => instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32)),
         .guitar_modal => guitar_probe.guitarModalTrigger(&guitar_modal, frequency_hz, cfg.velocity),
+        .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalTrigger(&guitar_contact_pick_modal, frequency_hz, cfg.velocity),
+        .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalTrigger(&guitar_two_pol_modal, frequency_hz, cfg.velocity),
+        .guitar_commuted => guitar_probe.guitarCommutedTrigger(&guitar_commuted, frequency_hz, cfg.velocity),
+        .guitar_sms_fit => guitar_probe.guitarSmsFitTrigger(&guitar_sms_fit, frequency_hz, cfg.velocity),
         .guitar_ks => guitar_probe.guitarKsTrigger(&guitar_ks, frequency_hz, cfg.velocity),
         .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTrigger(&guitar_waveguide_raw, frequency_hz, cfg.velocity),
         .sine_drone => {},
@@ -315,6 +339,10 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
                 .sine_drone => renderSineDroneSample(&sine, frame_idx, total_frames),
                 .choir => renderChoirSample(&choir, &choir_note_off_sent, frame_idx, choir_note_off_frame),
                 .guitar_modal => guitar_probe.guitarModalProcess(&guitar_modal),
+                .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalProcess(&guitar_contact_pick_modal),
+                .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalProcess(&guitar_two_pol_modal),
+                .guitar_commuted => guitar_probe.guitarCommutedProcess(&guitar_commuted),
+                .guitar_sms_fit => guitar_probe.guitarSmsFitProcess(&guitar_sms_fit),
                 .guitar_ks => guitar_probe.guitarKsProcess(&guitar_ks),
                 .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawProcess(&guitar_waveguide_raw),
             };
@@ -410,6 +438,10 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
         .sine_drone => "sine-drone",
         .choir => "choir",
         .guitar_modal => "guitar-modal",
+        .guitar_contact_pick_modal => "guitar-contact-pick-modal",
+        .guitar_two_pol_modal => "guitar-two-pol-modal",
+        .guitar_commuted => "guitar-commuted",
+        .guitar_sms_fit => "guitar-sms-fit",
         .guitar_ks => "guitar-ks",
         .guitar_waveguide_raw => "guitar-waveguide-raw",
     };
@@ -417,7 +449,7 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
 
 fn instrumentHandlesVelocity(instrument: InstrumentName) bool {
     return switch (instrument) {
-        .guitar_modal, .guitar_ks, .guitar_waveguide_raw => true,
+        .guitar_modal, .guitar_contact_pick_modal, .guitar_two_pol_modal, .guitar_commuted, .guitar_sms_fit, .guitar_ks, .guitar_waveguide_raw => true,
         .sine_drone, .choir => false,
     };
 }
@@ -431,6 +463,10 @@ fn printUsage() void {
         \\  sine | sine-drone
         \\  choir | choir-part
         \\  guitar-modal
+        \\  guitar-contact-pick-modal
+        \\  guitar-two-pol-modal
+        \\  guitar-commuted
+        \\  guitar-sms-fit
         \\  guitar-ks
         \\  guitar-waveguide-raw
         \\
