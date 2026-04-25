@@ -1,615 +1,411 @@
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
-const entropy = @import("music/entropy.zig");
-const composition = @import("music/composition.zig");
-const procedural_ambient = @import("procedural_ambient.zig");
-const procedural_choir = @import("procedural_choir.zig");
-const procedural_african_drums = @import("procedural_african_drums.zig");
-const procedural_taiko = @import("procedural_taiko.zig");
+const instruments = @import("music/instruments.zig");
 
-const ProbeStyle = enum {
-    ambient,
+const SAMPLE_RATE_U32: u32 = 48000;
+const CHANNEL_COUNT: u16 = 2;
+const BYTES_PER_SAMPLE: u16 = 2;
+const BYTES_PER_FRAME: u32 = CHANNEL_COUNT * BYTES_PER_SAMPLE;
+const DEFAULT_OUT_PATH = "artifacts/instrument_renders/music_probe.wav";
+
+const InstrumentName = enum {
+    sine_drone,
     choir,
-    african_drums,
-    taiko,
 };
 
-const ProbeConfig = struct {
-    style: ProbeStyle = .taiko,
-    cue_index: ?u8 = null,
-    speed_x: f32 = 100.0,
-    wall_seconds: f32 = 5.0,
-    report_sim_seconds: f32 = 8.0,
-    fixed_seed: ?u64 = null,
-    transition_one: ?CueTransitionSpec = null,
-    transition_two: ?CueTransitionSpec = null,
+const RenderConfig = struct {
+    instrument: InstrumentName = .sine_drone,
+    note: u8 = 52,
+    frequency_hz: ?f32 = null,
+    velocity: f32 = 0.8,
+    duration_seconds: f32 = 1.2,
+    out_path: []const u8 = DEFAULT_OUT_PATH,
 };
 
-const ProbeStats = struct {
+const RenderStats = struct {
     samples: u64 = 0,
     finite_samples: u64 = 0,
     non_finite_samples: u64 = 0,
     sum_sq: f64 = 0.0,
     peak_abs: f32 = 0.0,
-    diff_sum_sq: f64 = 0.0,
-    diff_peak_abs: f32 = 0.0,
-    prev_lr: [2]f32 = .{ 0.0, 0.0 },
-    diff_hot_blocks: u64 = 0,
-    diff_total_blocks: u64 = 0,
 };
 
-const CueTransitionSpec = struct {
-    cue_index: u8,
-    at_sim_seconds: f32,
-};
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-fn parseStyle(name: []const u8) ?ProbeStyle {
-    if (std.mem.eql(u8, name, "ambient")) return .ambient;
-    if (std.mem.eql(u8, name, "choir")) return .choir;
-    if (std.mem.eql(u8, name, "african")) return .african_drums;
-    if (std.mem.eql(u8, name, "african_drums")) return .african_drums;
-    if (std.mem.eql(u8, name, "taiko")) return .taiko;
-    return null;
-}
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-fn parseF32Arg(label: []const u8, arg: []const u8) !f32 {
-    const parsed = std.fmt.parseFloat(f32, arg) catch |err| {
-        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
-        return error.InvalidArgument;
+    var show_help = false;
+    const cfg = parseConfig(args, &show_help) catch |err| {
+        printUsage();
+        return err;
     };
-    return parsed;
+    if (show_help) {
+        printUsage();
+        return;
+    }
+
+    const frequency_hz = renderFrequency(cfg);
+    const total_frames = try frameCount(cfg.duration_seconds);
+
+    try ensureParentDir(cfg.out_path);
+    const file = try std.fs.cwd().createFile(cfg.out_path, .{ .truncate = true });
+    defer file.close();
+
+    try writeWavHeader(file, total_frames);
+    const stats = try writeInstrumentFrames(file, cfg, frequency_hz, total_frames);
+
+    if (stats.non_finite_samples > 0) {
+        std.log.warn("music_probe: replaced {d} non-finite samples with silence", .{stats.non_finite_samples});
+    }
+
+    std.log.info(
+        "music_probe: wrote {s} instrument={s} note={d} frequency_hz={d:.3} velocity={d:.3} duration_seconds={d:.3} frames={d} rms={d:.5} peak={d:.5}",
+        .{
+            cfg.out_path,
+            instrumentLabel(cfg.instrument),
+            cfg.note,
+            frequency_hz,
+            cfg.velocity,
+            cfg.duration_seconds,
+            total_frames,
+            renderRms(stats),
+            stats.peak_abs,
+        },
+    );
 }
 
-fn parseU8Arg(label: []const u8, arg: []const u8) !u8 {
-    const parsed_u32 = std.fmt.parseInt(u32, arg, 10) catch |err| {
-        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
-        return error.InvalidArgument;
-    };
-    if (parsed_u32 > 255) {
-        std.log.err("music_probe: {s}={d} out of range for u8", .{ label, parsed_u32 });
-        return error.InvalidArgument;
-    }
-    return @intCast(parsed_u32);
-}
+fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
+    var cfg: RenderConfig = .{};
+    var instrument_set = false;
+    var idx: usize = 1;
 
-fn parseU64Arg(label: []const u8, arg: []const u8) !u64 {
-    const parsed_u64 = std.fmt.parseInt(u64, arg, 10) catch |err| {
-        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
-        return error.InvalidArgument;
-    };
-    return parsed_u64;
-}
-
-fn argIsUnset(arg: []const u8) bool {
-    return arg.len == 0 or
-        std.mem.eql(u8, arg, "-") or
-        std.mem.eql(u8, arg, "none") or
-        std.mem.eql(u8, arg, "null");
-}
-
-fn parseConfig(args: []const []const u8) !ProbeConfig {
-    var cfg: ProbeConfig = .{};
-    if (args.len <= 1) return cfg;
-
-    const parsed_style = parseStyle(args[1]);
-    if (parsed_style == null) {
-        std.log.err("music_probe: unknown style '{s}'", .{args[1]});
-        return error.InvalidArgument;
-    }
-    cfg.style = parsed_style.?;
-
-    if (args.len > 2) {
-        cfg.cue_index = try parseU8Arg("cue_index", args[2]);
-    }
-    if (args.len > 3) {
-        cfg.speed_x = try parseF32Arg("speed_x", args[3]);
-    }
-    if (args.len > 4) {
-        cfg.wall_seconds = try parseF32Arg("wall_seconds", args[4]);
-    }
-    if (args.len > 5) {
-        cfg.report_sim_seconds = try parseF32Arg("report_sim_seconds", args[5]);
-    }
-    if (args.len > 6 and !argIsUnset(args[6])) {
-        cfg.fixed_seed = try parseU64Arg("fixed_seed", args[6]);
-    }
-
-    if (args.len > 7) {
-        const has_cue = args.len > 7 and !argIsUnset(args[7]);
-        const has_time = args.len > 8 and !argIsUnset(args[8]);
-        if (has_cue != has_time) {
-            std.log.err("music_probe: transition_one requires both cue and at_seconds (args[7], args[8])", .{});
-            return error.InvalidArgument;
+    while (idx < args.len) {
+        const arg = args[idx];
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            show_help.* = true;
+            return cfg;
         }
-        if (has_cue and has_time) {
-            cfg.transition_one = .{
-                .cue_index = try parseU8Arg("transition_one_cue", args[7]),
-                .at_sim_seconds = try parseF32Arg("transition_one_at_seconds", args[8]),
-            };
-        }
-    }
 
-    if (args.len > 9) {
-        const has_cue = args.len > 9 and !argIsUnset(args[9]);
-        const has_time = args.len > 10 and !argIsUnset(args[10]);
-        if (has_cue != has_time) {
-            std.log.err("music_probe: transition_two requires both cue and at_seconds (args[9], args[10])", .{});
-            return error.InvalidArgument;
+        if (!std.mem.startsWith(u8, arg, "--")) {
+            if (instrument_set) {
+                std.log.err("music_probe: unexpected positional argument '{s}'", .{arg});
+                return error.InvalidArgument;
+            }
+            cfg.instrument = try parseInstrumentArg(arg);
+            instrument_set = true;
+            idx += 1;
+            continue;
         }
-        if (has_cue and has_time) {
-            cfg.transition_two = .{
-                .cue_index = try parseU8Arg("transition_two_cue", args[9]),
-                .at_sim_seconds = try parseF32Arg("transition_two_at_seconds", args[10]),
-            };
-        }
-    }
 
-    if (cfg.speed_x <= 0.0) {
-        std.log.err("music_probe: speed_x must be > 0 (got {d})", .{cfg.speed_x});
-        return error.InvalidArgument;
-    }
-    if (cfg.wall_seconds <= 0.0) {
-        std.log.err("music_probe: wall_seconds must be > 0 (got {d})", .{cfg.wall_seconds});
-        return error.InvalidArgument;
-    }
-    if (cfg.report_sim_seconds <= 0.0) {
-        std.log.err("music_probe: report_sim_seconds must be > 0 (got {d})", .{cfg.report_sim_seconds});
-        return error.InvalidArgument;
-    }
-    if (cfg.transition_one) |transition| {
-        if (transition.at_sim_seconds <= 0.0) {
-            std.log.err("music_probe: transition_one_at_seconds must be > 0 (got {d})", .{transition.at_sim_seconds});
-            return error.InvalidArgument;
+        if (std.mem.eql(u8, arg, "--instrument")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.instrument = try parseInstrumentArg(value);
+            instrument_set = true;
+            idx += 2;
+            continue;
         }
-    }
-    if (cfg.transition_two) |transition| {
-        if (transition.at_sim_seconds <= 0.0) {
-            std.log.err("music_probe: transition_two_at_seconds must be > 0 (got {d})", .{transition.at_sim_seconds});
-            return error.InvalidArgument;
+        if (std.mem.eql(u8, arg, "--note")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.note = try parseMidiNoteArg(value);
+            idx += 2;
+            continue;
         }
-    }
-    if (cfg.transition_one != null and cfg.transition_two != null) {
-        if (cfg.transition_two.?.at_sim_seconds <= cfg.transition_one.?.at_sim_seconds) {
-            std.log.err(
-                "music_probe: transition_two_at_seconds ({d}) must be > transition_one_at_seconds ({d})",
-                .{ cfg.transition_two.?.at_sim_seconds, cfg.transition_one.?.at_sim_seconds },
-            );
-            return error.InvalidArgument;
+        if (std.mem.eql(u8, arg, "--freq") or std.mem.eql(u8, arg, "--frequency")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.frequency_hz = try parseFrequencyArg(value);
+            idx += 2;
+            continue;
         }
+        if (std.mem.eql(u8, arg, "--velocity")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.velocity = try parseUnitFloatArg("velocity", value);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--duration")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.duration_seconds = try parsePositiveFloatArg("duration", value);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--out")) {
+            cfg.out_path = try optionValue(args, idx, arg);
+            idx += 2;
+            continue;
+        }
+
+        std.log.err("music_probe: unknown option '{s}'", .{arg});
+        return error.InvalidArgument;
     }
 
     return cfg;
 }
 
-fn clampCue(cue: u8) u8 {
-    return std.math.clamp(cue, 0, 3);
-}
-
-fn configureStyle(cfg: ProbeConfig) void {
-    const cue = if (cfg.cue_index) |c| clampCue(c) else null;
-    switch (cfg.style) {
-        .ambient => {
-            if (cue != null) procedural_ambient.selected_cue = @enumFromInt(cue.?);
-            procedural_ambient.reset();
-        },
-        .choir => {
-            if (cue != null) procedural_choir.selected_cue = @enumFromInt(cue.?);
-            procedural_choir.reset();
-        },
-        .african_drums => {
-            if (cue != null) procedural_african_drums.selected_cue = @enumFromInt(cue.?);
-            procedural_african_drums.reset();
-        },
-        .taiko => {
-            if (cue != null) procedural_taiko.selected_cue = @enumFromInt(cue.?);
-            procedural_taiko.reset();
-        },
+fn optionValue(args: []const []const u8, option_idx: usize, option_name: []const u8) ![]const u8 {
+    if (option_idx + 1 >= args.len) {
+        std.log.err("music_probe: option {s} requires a value", .{option_name});
+        return error.InvalidArgument;
     }
-    composition.phraseVariationStatsReset();
+    return args[option_idx + 1];
 }
 
-fn applyCue(style: ProbeStyle, cue: u8) void {
-    const clamped = clampCue(cue);
-    switch (style) {
-        .ambient => {
-            procedural_ambient.selected_cue = @enumFromInt(clamped);
-            procedural_ambient.triggerCue();
-        },
-        .choir => {
-            procedural_choir.selected_cue = @enumFromInt(clamped);
-            procedural_choir.triggerCue();
-        },
-        .african_drums => {
-            procedural_african_drums.selected_cue = @enumFromInt(clamped);
-            procedural_african_drums.triggerCue();
-        },
-        .taiko => {
-            procedural_taiko.selected_cue = @enumFromInt(clamped);
-            procedural_taiko.triggerCue();
-        },
-    }
-}
-
-fn fillStyle(style: ProbeStyle, buf: [*]f32, frames: usize) void {
-    switch (style) {
-        .ambient => procedural_ambient.fillBuffer(buf, frames),
-        .choir => procedural_choir.fillBuffer(buf, frames),
-        .african_drums => procedural_african_drums.fillBuffer(buf, frames),
-        .taiko => procedural_taiko.fillBuffer(buf, frames),
-    }
-}
-
-fn logStyleSnapshot(style: ProbeStyle, sim_seconds: f64) void {
-    switch (style) {
-        .ambient => {
-            const s = procedural_ambient.debugSnapshot();
-            std.log.info(
-                "probe ambient t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
-                .{
-                    sim_seconds,
-                    s.cue_from,
-                    s.cue_to,
-                    s.cue_selected,
-                    s.cue_progress,
-                    s.key_root,
-                    @tagName(s.key_scale),
-                    s.chord_index,
-                    s.chord_count,
-                    s.micro,
-                    s.meso,
-                    s.macro,
-                    s.longform_intensity,
-                    s.longform_cadence,
-                    s.longform_modulation,
-                    s.section_id,
-                    s.section_progress,
-                    s.section_transition_count,
-                    s.section_distinct_transition_count,
-                    s.chord_change_beats,
-                    s.next_chord_change_beats,
-                    s.drone_level,
-                    s.pad_level,
-                    s.melody_level,
-                    s.arp_level,
-                },
-            );
-            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
-                std.log.info(
-                    "music_probe: bridge_state type=cue style=ambient from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
-                );
-            }
-            if (s.section_bridge_active) {
-                std.log.info(
-                    "music_probe: bridge_state type=section style=ambient from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
-                );
-            }
-        },
-        .choir => {
-            const s = procedural_choir.debugSnapshot();
-            std.log.info(
-                "probe choir t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} chant_ctr={d:.2} layers={d:.2},{d:.2},{d:.2},{d:.2}",
-                .{
-                    sim_seconds,
-                    s.cue_from,
-                    s.cue_to,
-                    s.cue_selected,
-                    s.cue_progress,
-                    s.key_root,
-                    @tagName(s.key_scale),
-                    s.chord_index,
-                    s.chord_count,
-                    s.micro,
-                    s.meso,
-                    s.macro,
-                    s.longform_intensity,
-                    s.longform_cadence,
-                    s.longform_modulation,
-                    s.section_id,
-                    s.section_progress,
-                    s.section_transition_count,
-                    s.section_distinct_transition_count,
-                    s.chord_change_beats,
-                    s.next_chord_change_beats,
-                    s.chant_beat_counter,
-                    s.drone_level,
-                    s.pad_level,
-                    s.chant_level,
-                    s.breath_level,
-                },
-            );
-            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
-                std.log.info(
-                    "music_probe: bridge_state type=cue style=choir from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
-                );
-            }
-            if (s.section_bridge_active) {
-                std.log.info(
-                    "music_probe: bridge_state type=section style=choir from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
-                );
-            }
-        },
-        .african_drums => {
-            const s = procedural_african_drums.debugSnapshot();
-            std.log.info(
-                "probe african t={d:.2}s cue={d}->{d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any}/{d}",
-                .{
-                    sim_seconds,
-                    s.cue_from,
-                    s.cue_to,
-                    s.cue_selected,
-                    s.cue_progress,
-                    s.key_root,
-                    @tagName(s.key_scale),
-                    s.chord_index,
-                    s.chord_count,
-                    s.micro,
-                    s.meso,
-                    s.macro,
-                    s.longform_intensity,
-                    s.longform_cadence,
-                    s.longform_modulation,
-                    s.section_id,
-                    s.section_progress,
-                    s.section_transition_count,
-                    s.section_distinct_transition_count,
-                    s.chord_change_beats,
-                    s.next_chord_change_beats,
-                    s.current_step,
-                    s.lead_cycle_count,
-                    s.in_break,
-                    s.break_remaining,
-                },
-            );
-            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
-                std.log.info(
-                    "music_probe: bridge_state type=cue style=african from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
-                );
-            }
-            if (s.section_bridge_active) {
-                std.log.info(
-                    "music_probe: bridge_state type=section style=african from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
-                );
-            }
-        },
-        .taiko => {
-            const s = procedural_taiko.debugSnapshot();
-            std.log.info(
-                "probe taiko t={d:.2}s cue={d}->{d} structural={d} sel={d} p={d:.2} root={d} scale={s} chord={d}/{d} arcs={d:.2}/{d:.2}/{d:.2} dir={d:.2}/{d:.2}/{d:.2} sec={d}:{d:.2}/{d}/{d} sec_targets={d:.2}/{d:.2}/{d:.2} cadence={d:.2}->{d:.2} step={d} lead_cycle={d} break={any} call={any}/{any}",
-                .{
-                    sim_seconds,
-                    s.cue_from,
-                    s.cue_to,
-                    s.cue_structural,
-                    s.cue_selected,
-                    s.cue_progress,
-                    s.key_root,
-                    @tagName(s.key_scale),
-                    s.chord_index,
-                    s.chord_count,
-                    s.micro,
-                    s.meso,
-                    s.macro,
-                    s.longform_intensity,
-                    s.longform_cadence,
-                    s.longform_modulation,
-                    s.section_id,
-                    s.section_progress,
-                    s.section_transition_count,
-                    s.section_distinct_transition_count,
-                    s.section_density,
-                    s.section_harmonic_motion,
-                    s.section_cadence_scale,
-                    s.chord_change_beats,
-                    s.next_chord_change_beats,
-                    s.sequencer_step,
-                    s.lead_cycle_count,
-                    s.in_break,
-                    s.in_call_response,
-                    s.is_response_phase,
-                },
-            );
-            if (s.cue_from != s.cue_to or s.cue_progress < 0.999) {
-                std.log.info(
-                    "music_probe: bridge_state type=cue style=taiko from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.cue_from, s.cue_to, s.cue_progress, sim_seconds },
-                );
-            }
-            if (s.section_bridge_active) {
-                std.log.info(
-                    "music_probe: bridge_state type=section style=taiko from={d} to={d} progress={d:.2} sim_t={d:.2}",
-                    .{ s.section_bridge_from, s.section_bridge_to, s.section_bridge_progress, sim_seconds },
-                );
-            }
-        },
-    }
-}
-
-fn updateStats(stats: *ProbeStats, buf: []const f32) void {
-    var block_sum_sq: f64 = 0.0;
-    var block_diff_sum_sq: f64 = 0.0;
-    var block_finite: u64 = 0;
-
-    for (buf, 0..) |sample, idx| {
-        stats.samples += 1;
-        if (!std.math.isFinite(sample)) {
-            stats.non_finite_samples += 1;
-            continue;
-        }
-        stats.finite_samples += 1;
-        block_finite += 1;
-
-        const sample_f64: f64 = sample;
-        stats.sum_sq += sample_f64 * sample_f64;
-        block_sum_sq += sample_f64 * sample_f64;
-
-        const abs_sample = @abs(sample);
-        stats.peak_abs = @max(stats.peak_abs, abs_sample);
-
-        const channel: usize = idx & 1;
-        const diff = sample - stats.prev_lr[channel];
-        stats.prev_lr[channel] = sample;
-        const diff_f64: f64 = diff;
-        stats.diff_sum_sq += diff_f64 * diff_f64;
-        block_diff_sum_sq += diff_f64 * diff_f64;
-        stats.diff_peak_abs = @max(stats.diff_peak_abs, @abs(diff));
-    }
-
-    if (block_finite == 0) return;
-
-    const block_rms = @sqrt(block_sum_sq / @as(f64, @floatFromInt(block_finite)));
-    if (block_rms <= 0.000001) return;
-
-    const block_diff_rms = @sqrt(block_diff_sum_sq / @as(f64, @floatFromInt(block_finite)));
-    stats.diff_total_blocks += 1;
-    if (block_diff_rms > 0.003 and block_diff_rms / block_rms > 0.58) {
-        stats.diff_hot_blocks += 1;
-    }
-}
-
-fn usage() void {
-    std.log.info(
-        "usage: zig run src/music_probe.zig --cache-dir .zig-cache --global-cache-dir .zig-global-cache -- [style] [cue_index] [speed_x] [wall_seconds] [report_sim_seconds] [fixed_seed|-] [transition1_cue|-] [transition1_at_seconds|-] [transition2_cue|-] [transition2_at_seconds|-]",
-        .{},
-    );
-    std.log.info("example: zig run src/music_probe.zig --cache-dir .zig-cache --global-cache-dir .zig-global-cache -- taiko 3 100 5 8 1337 0 60 3 120", .{});
-    std.log.info("faster: zig run -O ReleaseFast src/music_probe.zig --cache-dir .zig-cache --global-cache-dir .zig-global-cache -- taiko 3 100 5 8", .{});
-}
-
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    const cfg = parseConfig(args) catch |err| {
-        usage();
-        return err;
+fn parseInstrumentArg(arg: []const u8) !InstrumentName {
+    const instrument = parseInstrumentName(arg) orelse {
+        std.log.err("music_probe: unknown instrument '{s}'", .{arg});
+        return error.InvalidArgument;
     };
+    return instrument;
+}
 
-    if (cfg.fixed_seed) |fixed_seed| {
-        _ = entropy.configureFixedSeed(true, fixed_seed);
+fn parseInstrumentName(name: []const u8) ?InstrumentName {
+    if (std.mem.eql(u8, name, "sine") or std.mem.eql(u8, name, "sine-drone") or std.mem.eql(u8, name, "sine_drone")) {
+        return .sine_drone;
+    }
+    if (std.mem.eql(u8, name, "choir") or std.mem.eql(u8, name, "choir-part") or std.mem.eql(u8, name, "choir_part")) {
+        return .choir;
+    }
+    return null;
+}
+
+fn parseMidiNoteArg(arg: []const u8) !u8 {
+    const parsed = std.fmt.parseInt(u16, arg, 10) catch |err| {
+        std.log.err("music_probe: invalid note='{s}': {}", .{ arg, err });
+        return error.InvalidArgument;
+    };
+    if (parsed > 127) {
+        std.log.err("music_probe: note={d} out of MIDI range 0..127", .{parsed});
+        return error.InvalidArgument;
+    }
+    return @intCast(parsed);
+}
+
+fn parseFrequencyArg(arg: []const u8) !f32 {
+    const parsed = try parsePositiveFloatArg("frequency", arg);
+    if (parsed < 8.0 or parsed > 20000.0) {
+        std.log.err("music_probe: frequency={d} outside supported range 8..20000 Hz", .{parsed});
+        return error.InvalidArgument;
+    }
+    return parsed;
+}
+
+fn parseUnitFloatArg(label: []const u8, arg: []const u8) !f32 {
+    const parsed = std.fmt.parseFloat(f32, arg) catch |err| {
+        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
+        return error.InvalidArgument;
+    };
+    if (!std.math.isFinite(parsed) or parsed < 0.0) {
+        std.log.err("music_probe: {s} must be finite and >= 0 (got {d})", .{ label, parsed });
+        return error.InvalidArgument;
+    }
+    if (parsed > 1.0) {
+        std.log.err("music_probe: {s}={d} must be <= 1.0", .{ label, parsed });
+        return error.InvalidArgument;
+    }
+    return parsed;
+}
+
+fn parsePositiveFloatArg(label: []const u8, arg: []const u8) !f32 {
+    const parsed = std.fmt.parseFloat(f32, arg) catch |err| {
+        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
+        return error.InvalidArgument;
+    };
+    if (!std.math.isFinite(parsed) or parsed <= 0.0) {
+        std.log.err("music_probe: {s} must be finite and > 0 (got {d})", .{ label, parsed });
+        return error.InvalidArgument;
+    }
+    return parsed;
+}
+
+fn renderFrequency(cfg: RenderConfig) f32 {
+    if (cfg.frequency_hz == null) {
+        return dsp.midiToFreq(cfg.note);
+    }
+    return cfg.frequency_hz.?;
+}
+
+fn frameCount(duration_seconds: f32) !u32 {
+    const max_frames = (std.math.maxInt(u32) - 36) / BYTES_PER_FRAME;
+    const frame_count_float = @ceil(duration_seconds * dsp.SAMPLE_RATE);
+    if (frame_count_float > @as(f32, @floatFromInt(max_frames))) {
+        std.log.err("music_probe: duration={d} is too long for a PCM WAV file", .{duration_seconds});
+        return error.InvalidArgument;
+    }
+    return @intFromFloat(frame_count_float);
+}
+
+fn ensureParentDir(path: []const u8) !void {
+    const parent = std.fs.path.dirname(path) orelse return;
+    if (parent.len == 0) return;
+    try std.fs.cwd().makePath(parent);
+}
+
+fn writeWavHeader(file: std.fs.File, total_frames: u32) !void {
+    const data_size = total_frames * BYTES_PER_FRAME;
+    const riff_size = 36 + data_size;
+    const byte_rate = SAMPLE_RATE_U32 * BYTES_PER_FRAME;
+    const block_align: u16 = CHANNEL_COUNT * BYTES_PER_SAMPLE;
+    const bits_per_sample: u16 = BYTES_PER_SAMPLE * 8;
+
+    var header: [44]u8 = undefined;
+    @memcpy(header[0..4], "RIFF");
+    writeU32Le(header[4..8], riff_size);
+    @memcpy(header[8..12], "WAVE");
+    @memcpy(header[12..16], "fmt ");
+    writeU32Le(header[16..20], 16);
+    writeU16Le(header[20..22], 1);
+    writeU16Le(header[22..24], CHANNEL_COUNT);
+    writeU32Le(header[24..28], SAMPLE_RATE_U32);
+    writeU32Le(header[28..32], byte_rate);
+    writeU16Le(header[32..34], block_align);
+    writeU16Le(header[34..36], bits_per_sample);
+    @memcpy(header[36..40], "data");
+    writeU32Le(header[40..44], data_size);
+
+    try file.writeAll(&header);
+}
+
+fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32, total_frames: u32) !RenderStats {
+    const CHUNK_FRAMES = 1024;
+    var bytes: [CHUNK_FRAMES * BYTES_PER_FRAME]u8 = undefined;
+    var stats: RenderStats = .{};
+
+    var sine = instruments.sineDroneInit(frequency_hz, @max(frequency_hz * 8.0, 800.0), 1.0008, 1.0, 0.12, 0.42);
+    var choir = instruments.choirPartInit(0.006, 0.0, 1);
+    if (cfg.instrument == .choir) {
+        instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32));
     }
 
-    configureStyle(cfg);
-    std.log.info(
-        "music_probe: style={s} cue={s} speed_x={d:.2} wall_seconds={d:.2} report_sim_seconds={d:.2} seed={s}",
-        .{
-            @tagName(cfg.style),
-            if (cfg.cue_index) |_| args[2] else "default",
-            cfg.speed_x,
-            cfg.wall_seconds,
-            cfg.report_sim_seconds,
-            if (cfg.fixed_seed == null) "random" else "fixed",
-        },
-    );
-    if (cfg.fixed_seed) |fixed_seed| {
-        std.log.info("music_probe: fixed_seed={d}", .{fixed_seed});
-    }
-    if (cfg.transition_one) |transition| {
-        std.log.info("music_probe: transition_one cue={d} at={d:.2}s", .{ transition.cue_index, transition.at_sim_seconds });
-    }
-    if (cfg.transition_two) |transition| {
-        std.log.info("music_probe: transition_two cue={d} at={d:.2}s", .{ transition.cue_index, transition.at_sim_seconds });
-    }
+    const choir_note_off_frame = noteOffFrame(total_frames, 0.34);
+    var choir_note_off_sent = false;
+    var frames_written: u32 = 0;
 
-    const block_frames: usize = 2048;
-    var buf: [block_frames * 2]f32 = undefined;
-    const target_sim_seconds: f64 = @max(
-        @as(f64, cfg.speed_x) * @as(f64, cfg.wall_seconds),
-        @as(f64, cfg.report_sim_seconds),
-    );
-    var sim_seconds: f64 = 0.0;
-    var next_report_seconds: f64 = @as(f64, cfg.report_sim_seconds);
-    var stats: ProbeStats = .{};
-    var transition_one_done = cfg.transition_one == null;
-    var transition_two_done = cfg.transition_two == null;
+    while (frames_written < total_frames) {
+        const remaining = total_frames - frames_written;
+        const chunk_frames: u32 = @min(remaining, CHUNK_FRAMES);
+        var byte_idx: usize = 0;
 
-    // Emit initial state so smoke tests can compare "start point" behavior across seeds.
-    logStyleSnapshot(cfg.style, sim_seconds);
+        for (0..chunk_frames) |chunk_idx| {
+            const frame_idx = frames_written + @as(u32, @intCast(chunk_idx));
+            var mono = switch (cfg.instrument) {
+                .sine_drone => renderSineDroneSample(&sine, frame_idx, total_frames),
+                .choir => renderChoirSample(&choir, &choir_note_off_sent, frame_idx, choir_note_off_frame),
+            };
+            mono *= cfg.velocity;
 
-    var timer = try std.time.Timer.start();
-    while (sim_seconds < target_sim_seconds) {
-        if (!transition_one_done) {
-            const transition = cfg.transition_one.?;
-            if (sim_seconds >= @as(f64, transition.at_sim_seconds)) {
-                applyCue(cfg.style, transition.cue_index);
-                std.log.info(
-                    "music_probe: cue_transition stage=1 cue={d} sim_t={d:.2}",
-                    .{ transition.cue_index, sim_seconds },
-                );
-                transition_one_done = true;
-            }
+            const sample = sanitizeSample(&stats, mono);
+            const pcm = floatToPcm16(sample);
+            writeI16Le(bytes[byte_idx .. byte_idx + 2], pcm);
+            writeI16Le(bytes[byte_idx + 2 .. byte_idx + 4], pcm);
+            byte_idx += BYTES_PER_FRAME;
         }
-        if (!transition_two_done) {
-            const transition = cfg.transition_two.?;
-            if (sim_seconds >= @as(f64, transition.at_sim_seconds)) {
-                applyCue(cfg.style, transition.cue_index);
-                std.log.info(
-                    "music_probe: cue_transition stage=2 cue={d} sim_t={d:.2}",
-                    .{ transition.cue_index, sim_seconds },
-                );
-                transition_two_done = true;
-            }
-        }
 
-        fillStyle(cfg.style, &buf, block_frames);
-        updateStats(&stats, buf[0 .. block_frames * 2]);
-        sim_seconds += @as(f64, @floatFromInt(block_frames)) / @as(f64, dsp.SAMPLE_RATE);
-        if (sim_seconds < next_report_seconds and sim_seconds < target_sim_seconds) continue;
-        logStyleSnapshot(cfg.style, sim_seconds);
-        if (stats.non_finite_samples > 0) {
-            std.log.warn("music_probe: detected non-finite samples={d}", .{stats.non_finite_samples});
-        }
-        next_report_seconds += @as(f64, cfg.report_sim_seconds);
+        try file.writeAll(bytes[0..byte_idx]);
+        frames_written += chunk_frames;
     }
 
-    const wall_seconds = @as(f64, @floatFromInt(timer.read())) / @as(f64, std.time.ns_per_s);
-    if (wall_seconds <= 0.0) {
-        std.log.warn("music_probe: measured non-positive wall time, reporting with fallback", .{});
-    }
-    const safe_wall = @max(wall_seconds, 0.000001);
-    const achieved_speed_x = sim_seconds / safe_wall;
-    const rms = if (stats.finite_samples == 0)
-        0.0
-    else
-        @sqrt(stats.sum_sq / @as(f64, @floatFromInt(stats.finite_samples)));
-    const diff_rms = if (stats.finite_samples == 0)
-        0.0
-    else
-        @sqrt(stats.diff_sum_sq / @as(f64, @floatFromInt(stats.finite_samples)));
-    const hf_ratio = if (rms <= 0.000001) 0.0 else diff_rms / rms;
-    const hf_hot_block_ratio = if (stats.diff_total_blocks == 0)
-        0.0
-    else
-        @as(f64, @floatFromInt(stats.diff_hot_blocks)) / @as(f64, @floatFromInt(stats.diff_total_blocks));
-    const motif = composition.phraseVariationStatsSnapshot();
+    return stats;
+}
 
-    std.log.info(
-        "music_probe summary: sim_seconds={d:.2} wall_seconds={d:.3} achieved_speed_x={d:.2} rms={d:.5} peak={d:.5} finite_samples={d} non_finite_samples={d} hf_ratio={d:.5} hf_peak={d:.5} hf_hot_block_ratio={d:.5} motif_recall_total={d} motif_recall_transformed={d} motif_recall_exact={d} motif_cooldown_violations={d} motif_transformed_ratio={d:.5} motif_exact_ratio={d:.5} motif_novelty_debt_avg={d:.5} motif_novelty_debt_peak={d:.5}",
-        .{
-            sim_seconds,
-            wall_seconds,
-            achieved_speed_x,
-            rms,
-            stats.peak_abs,
-            stats.finite_samples,
-            stats.non_finite_samples,
-            hf_ratio,
-            stats.diff_peak_abs,
-            hf_hot_block_ratio,
-            motif.recall_total,
-            motif.recall_transformed,
-            motif.recall_exact,
-            motif.cooldown_violations,
-            motif.transformed_ratio,
-            motif.exact_ratio,
-            motif.novelty_debt_avg,
-            motif.novelty_debt_peak,
-        },
-    );
+fn noteOffFrame(total_frames: u32, release_seconds: f32) u32 {
+    const release_frames: u32 = @intFromFloat(@ceil(release_seconds * dsp.SAMPLE_RATE));
+    if (release_frames >= total_frames) return total_frames / 2;
+    return total_frames - release_frames;
+}
+
+fn renderSineDroneSample(sine: *instruments.SineDrone, frame_idx: u32, total_frames: u32) f32 {
+    const edge_fade = edgeFade(frame_idx, total_frames, 0.006);
+    return instruments.sineDroneProcess(sine) * edge_fade;
+}
+
+fn renderChoirSample(choir: *instruments.ChoirPart, note_off_sent: *bool, frame_idx: u32, note_off_frame: u32) f32 {
+    if (!note_off_sent.* and frame_idx >= note_off_frame) {
+        dsp.voiceNoteOff(3, 4, &choir.voice);
+        note_off_sent.* = true;
+    }
+    return instruments.choirPartProcess(choir) * 0.42;
+}
+
+fn edgeFade(frame_idx: u32, total_frames: u32, fade_seconds: f32) f32 {
+    const fade_frames: u32 = @max(1, @as(u32, @intFromFloat(@ceil(fade_seconds * dsp.SAMPLE_RATE))));
+    const attack = std.math.clamp(@as(f32, @floatFromInt(frame_idx)) / @as(f32, @floatFromInt(fade_frames)), 0.0, 1.0);
+    const frames_left = if (frame_idx + 1 >= total_frames) 0 else total_frames - frame_idx - 1;
+    const release = std.math.clamp(@as(f32, @floatFromInt(frames_left)) / @as(f32, @floatFromInt(fade_frames)), 0.0, 1.0);
+    return @min(attack, release);
+}
+
+fn sanitizeSample(stats: *RenderStats, sample: f32) f32 {
+    stats.samples += 1;
+    if (!std.math.isFinite(sample)) {
+        stats.non_finite_samples += 1;
+        return 0.0;
+    }
+
+    stats.finite_samples += 1;
+    const abs_sample = @abs(sample);
+    stats.peak_abs = @max(stats.peak_abs, abs_sample);
+    const sample_f64: f64 = sample;
+    stats.sum_sq += sample_f64 * sample_f64;
+    return std.math.clamp(sample, -1.0, 1.0);
+}
+
+fn floatToPcm16(sample: f32) i16 {
+    const clipped = std.math.clamp(sample, -1.0, 1.0);
+    return @intFromFloat(clipped * 32767.0);
+}
+
+fn renderRms(stats: RenderStats) f64 {
+    if (stats.finite_samples == 0) return 0.0;
+    return @sqrt(stats.sum_sq / @as(f64, @floatFromInt(stats.finite_samples)));
+}
+
+fn writeU16Le(out: []u8, value: u16) void {
+    out[0] = @intCast(value & 0x00FF);
+    out[1] = @intCast((value >> 8) & 0x00FF);
+}
+
+fn writeU32Le(out: []u8, value: u32) void {
+    out[0] = @intCast(value & 0x000000FF);
+    out[1] = @intCast((value >> 8) & 0x000000FF);
+    out[2] = @intCast((value >> 16) & 0x000000FF);
+    out[3] = @intCast((value >> 24) & 0x000000FF);
+}
+
+fn writeI16Le(out: []u8, value: i16) void {
+    const bits: u16 = @bitCast(value);
+    writeU16Le(out, bits);
+}
+
+fn instrumentLabel(instrument: InstrumentName) []const u8 {
+    return switch (instrument) {
+        .sine_drone => "sine-drone",
+        .choir => "choir",
+    };
+}
+
+fn printUsage() void {
+    std.debug.print(
+        \\usage:
+        \\  zig build music-probe -- [instrument] [options]
+        \\
+        \\instruments:
+        \\  sine | sine-drone
+        \\  choir | choir-part
+        \\
+        \\options:
+        \\  --instrument <name>      instrument to render
+        \\  --note <midi>            MIDI note 0..127, default 52
+        \\  --freq <hz>              frequency override, range 8..20000
+        \\  --velocity <0..1>        output velocity, default 0.8
+        \\  --duration <seconds>     output duration, default 1.2
+        \\  --out <path>             output WAV path
+        \\
+        \\examples:
+        \\  zig build music-probe -- sine --note 52 --velocity 0.8 --duration 1.2 --out artifacts/instrument_renders/sine_52.wav
+        \\  zig build music-probe -- choir --freq 164.814 --duration 1.5 --out artifacts/instrument_renders/choir_e3.wav
+        \\
+    , .{});
 }

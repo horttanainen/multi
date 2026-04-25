@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(probe);
 
-    const probe_run = b.step("music-probe", "Run headless procedural music probe");
+    const probe_run = b.step("music-probe", "Render a direct music instrument probe to WAV");
     const probe_run_cmd = b.addRunArtifact(probe);
     if (b.args) |args| {
         probe_run_cmd.addArgs(args);
