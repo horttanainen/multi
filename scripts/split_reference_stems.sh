@@ -57,10 +57,8 @@ if [[ -z "$style_name" ]]; then
   style_name="reference"
 fi
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/.." && pwd)"
 output_root="${OUTPUT_ROOT:-artifacts/stems}"
-output_dir="$repo_root/$output_root/$style_name"
+output_dir="$output_root/$style_name"
 mkdir -p "$output_dir"
 
 mix_wav="$output_dir/mix.wav"
