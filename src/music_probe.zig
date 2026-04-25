@@ -1,5 +1,6 @@
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const guitar_probe = @import("music/guitar_probe.zig");
 const instruments = @import("music/instruments.zig");
 
 const SAMPLE_RATE_U32: u32 = 48000;
@@ -11,6 +12,9 @@ const DEFAULT_OUT_PATH = "artifacts/instrument_renders/music_probe.wav";
 const InstrumentName = enum {
     sine_drone,
     choir,
+    guitar_modal,
+    guitar_ks,
+    guitar_waveguide_raw,
 };
 
 const RenderConfig = struct {
@@ -168,6 +172,15 @@ fn parseInstrumentName(name: []const u8) ?InstrumentName {
     if (std.mem.eql(u8, name, "choir") or std.mem.eql(u8, name, "choir-part") or std.mem.eql(u8, name, "choir_part")) {
         return .choir;
     }
+    if (std.mem.eql(u8, name, "guitar-modal") or std.mem.eql(u8, name, "guitar_modal")) {
+        return .guitar_modal;
+    }
+    if (std.mem.eql(u8, name, "guitar-ks") or std.mem.eql(u8, name, "guitar_ks")) {
+        return .guitar_ks;
+    }
+    if (std.mem.eql(u8, name, "guitar-waveguide-raw") or std.mem.eql(u8, name, "guitar_waveguide_raw")) {
+        return .guitar_waveguide_raw;
+    }
     return null;
 }
 
@@ -275,8 +288,16 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
 
     var sine = instruments.sineDroneInit(frequency_hz, @max(frequency_hz * 8.0, 800.0), 1.0008, 1.0, 0.12, 0.42);
     var choir = instruments.choirPartInit(0.006, 0.0, 1);
-    if (cfg.instrument == .choir) {
-        instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32));
+    var guitar_modal: guitar_probe.GuitarModal = .{};
+    var guitar_ks: guitar_probe.GuitarKs = .{};
+    var guitar_waveguide_raw: guitar_probe.GuitarWaveguideRaw = .{};
+
+    switch (cfg.instrument) {
+        .choir => instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32)),
+        .guitar_modal => guitar_probe.guitarModalTrigger(&guitar_modal, frequency_hz, cfg.velocity),
+        .guitar_ks => guitar_probe.guitarKsTrigger(&guitar_ks, frequency_hz, cfg.velocity),
+        .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTrigger(&guitar_waveguide_raw, frequency_hz, cfg.velocity),
+        .sine_drone => {},
     }
 
     const choir_note_off_frame = noteOffFrame(total_frames, 0.34);
@@ -293,8 +314,13 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
             var mono = switch (cfg.instrument) {
                 .sine_drone => renderSineDroneSample(&sine, frame_idx, total_frames),
                 .choir => renderChoirSample(&choir, &choir_note_off_sent, frame_idx, choir_note_off_frame),
+                .guitar_modal => guitar_probe.guitarModalProcess(&guitar_modal),
+                .guitar_ks => guitar_probe.guitarKsProcess(&guitar_ks),
+                .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawProcess(&guitar_waveguide_raw),
             };
-            mono *= cfg.velocity;
+            if (!instrumentHandlesVelocity(cfg.instrument)) {
+                mono *= cfg.velocity;
+            }
 
             const sample = sanitizeSample(&stats, mono);
             const pcm = floatToPcm16(sample);
@@ -383,6 +409,16 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
     return switch (instrument) {
         .sine_drone => "sine-drone",
         .choir => "choir",
+        .guitar_modal => "guitar-modal",
+        .guitar_ks => "guitar-ks",
+        .guitar_waveguide_raw => "guitar-waveguide-raw",
+    };
+}
+
+fn instrumentHandlesVelocity(instrument: InstrumentName) bool {
+    return switch (instrument) {
+        .guitar_modal, .guitar_ks, .guitar_waveguide_raw => true,
+        .sine_drone, .choir => false,
     };
 }
 
@@ -394,6 +430,9 @@ fn printUsage() void {
         \\instruments:
         \\  sine | sine-drone
         \\  choir | choir-part
+        \\  guitar-modal
+        \\  guitar-ks
+        \\  guitar-waveguide-raw
         \\
         \\options:
         \\  --instrument <name>      instrument to render
@@ -406,6 +445,8 @@ fn printUsage() void {
         \\examples:
         \\  zig build music-probe -- sine --note 52 --velocity 0.8 --duration 1.2 --out artifacts/instrument_renders/sine_52.wav
         \\  zig build music-probe -- choir --freq 164.814 --duration 1.5 --out artifacts/instrument_renders/choir_e3.wav
+        \\  zig build music-probe -- guitar-modal --freq 164.814 --velocity 0.8 --duration 0.8 --out artifacts/instrument_renders/guitar_modal_first.wav
+        \\  zig build music-probe -- guitar-ks --freq 164.814 --velocity 0.8 --duration 0.8 --out artifacts/instrument_renders/guitar_ks_first.wav
         \\
     , .{});
 }
