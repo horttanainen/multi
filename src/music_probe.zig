@@ -29,6 +29,7 @@ const RenderConfig = struct {
     velocity: f32 = 0.8,
     duration_seconds: f32 = 1.2,
     out_path: []const u8 = DEFAULT_OUT_PATH,
+    guitar_params: guitar_probe.GuitarProbeParams = .{},
 };
 
 const RenderStats = struct {
@@ -146,6 +147,108 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
             idx += 2;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--pluck-position")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.pluck_position = try parseBoundedFloatArg("pluck-position", value, 0.05, 0.45);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--pluck-brightness")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.pluck_brightness = try parseBoundedFloatArg("pluck-brightness", value, 0.0, 1.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--string-mix")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.string_mix_scale = try parseBoundedFloatArg("string-mix", value, 0.0, 6.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--body-mix")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.body_mix_scale = try parseBoundedFloatArg("body-mix", value, 0.0, 6.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--attack-mix")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.attack_mix_scale = try parseBoundedFloatArg("attack-mix", value, 0.0, 8.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--mute")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.mute_amount = try parseBoundedFloatArg("mute", value, 0.0, 1.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--string-decay")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.string_decay_scale = try parseBoundedFloatArg("string-decay", value, 0.25, 3.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--body-gain")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.body_gain_scale = try parseBoundedFloatArg("body-gain", value, 0.0, 4.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--body-decay")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.body_decay_scale = try parseBoundedFloatArg("body-decay", value, 0.25, 3.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--body-freq")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.body_freq_scale = try parseBoundedFloatArg("body-freq", value, 0.75, 1.35);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--pick-noise")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.pick_noise_scale = try parseBoundedFloatArg("pick-noise", value, 0.0, 4.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--attack-gain")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.attack_gain_scale = try parseBoundedFloatArg("attack-gain", value, 0.0, 4.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--attack-decay")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.attack_decay_scale = try parseBoundedFloatArg("attack-decay", value, 0.35, 2.5);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--bridge-coupling")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.bridge_coupling_scale = try parseBoundedFloatArg("bridge-coupling", value, 0.0, 4.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--inharmonicity")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.inharmonicity_scale = try parseBoundedFloatArg("inharmonicity", value, 0.0, 3.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--high-decay")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.high_decay_scale = try parseBoundedFloatArg("high-decay", value, 0.35, 2.5);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--output-gain")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.guitar_params.output_gain_scale = try parseBoundedFloatArg("output-gain", value, 0.0, 8.0);
+            idx += 2;
+            continue;
+        }
 
         std.log.err("music_probe: unknown option '{s}'", .{arg});
         return error.InvalidArgument;
@@ -253,6 +356,18 @@ fn parsePositiveFloatArg(label: []const u8, arg: []const u8) !f32 {
     return parsed;
 }
 
+fn parseBoundedFloatArg(label: []const u8, arg: []const u8, min_value: f32, max_value: f32) !f32 {
+    const parsed = std.fmt.parseFloat(f32, arg) catch |err| {
+        std.log.err("music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
+        return error.InvalidArgument;
+    };
+    if (!std.math.isFinite(parsed) or parsed < min_value or parsed > max_value) {
+        std.log.err("music_probe: {s}={d} outside supported range {d}..{d}", .{ label, parsed, min_value, max_value });
+        return error.InvalidArgument;
+    }
+    return parsed;
+}
+
 fn renderFrequency(cfg: RenderConfig) f32 {
     if (cfg.frequency_hz == null) {
         return dsp.midiToFreq(cfg.note);
@@ -319,14 +434,14 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
 
     switch (cfg.instrument) {
         .choir => instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32)),
-        .guitar_modal => guitar_probe.guitarModalTrigger(&guitar_modal, frequency_hz, cfg.velocity),
-        .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalTrigger(&guitar_contact_pick_modal, frequency_hz, cfg.velocity),
-        .guitar_modal_pluck => guitar_probe.guitarModalPluckTrigger(&guitar_modal_pluck, frequency_hz, cfg.velocity),
-        .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalTrigger(&guitar_two_pol_modal, frequency_hz, cfg.velocity),
-        .guitar_commuted => guitar_probe.guitarCommutedTrigger(&guitar_commuted, frequency_hz, cfg.velocity),
-        .guitar_sms_fit => guitar_probe.guitarSmsFitTrigger(&guitar_sms_fit, frequency_hz, cfg.velocity),
-        .guitar_ks => guitar_probe.guitarKsTrigger(&guitar_ks, frequency_hz, cfg.velocity),
-        .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTrigger(&guitar_waveguide_raw, frequency_hz, cfg.velocity),
+        .guitar_modal => guitar_probe.guitarModalTriggerWithParams(&guitar_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalTriggerWithParams(&guitar_contact_pick_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_modal_pluck => guitar_probe.guitarModalPluckTriggerWithParams(&guitar_modal_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalTriggerWithParams(&guitar_two_pol_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_commuted => guitar_probe.guitarCommutedTriggerWithParams(&guitar_commuted, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_sms_fit => guitar_probe.guitarSmsFitTriggerWithParams(&guitar_sms_fit, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_ks => guitar_probe.guitarKsTriggerWithParams(&guitar_ks, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTriggerWithParams(&guitar_waveguide_raw, frequency_hz, cfg.velocity, cfg.guitar_params),
         .sine_drone => {},
     }
 
@@ -486,12 +601,30 @@ fn printUsage() void {
         \\  --velocity <0..1>        output velocity, default 0.8
         \\  --duration <seconds>     output duration, default 1.2
         \\  --out <path>             output WAV path
+        \\  --pluck-position <0.05..0.45>
+        \\  --pluck-brightness <0..1>
+        \\  --string-mix <0..6>
+        \\  --body-mix <0..6>
+        \\  --attack-mix <0..8>
+        \\  --mute <0..1>
+        \\  --string-decay <0.25..3>
+        \\  --body-gain <0..4>
+        \\  --body-decay <0.25..3>
+        \\  --body-freq <0.75..1.35>
+        \\  --pick-noise <0..4>
+        \\  --attack-gain <0..4>
+        \\  --attack-decay <0.35..2.5>
+        \\  --bridge-coupling <0..4>
+        \\  --inharmonicity <0..3>
+        \\  --high-decay <0.35..2.5>
+        \\  --output-gain <0..8>
         \\
         \\examples:
         \\  zig build music-probe -- sine --note 52 --velocity 0.8 --duration 1.2 --out artifacts/instrument_renders/sine_52.wav
         \\  zig build music-probe -- choir --freq 164.814 --duration 1.5 --out artifacts/instrument_renders/choir_e3.wav
         \\  zig build music-probe -- guitar-modal --freq 164.814 --velocity 0.8 --duration 0.8 --out artifacts/instrument_renders/guitar_modal_first.wav
         \\  zig build music-probe -- guitar-ks --freq 164.814 --velocity 0.8 --duration 0.8 --out artifacts/instrument_renders/guitar_ks_first.wav
+        \\  zig build music-probe -- guitar-modal-pluck --freq 390.2439 --duration 0.22 --pluck-position 0.145 --body-gain 1.1 --out artifacts/instrument_renders/pluck.wav
         \\
     , .{});
 }

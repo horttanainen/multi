@@ -12,12 +12,16 @@ from pathlib import Path
 DEFAULT_TARGET = "artifacts/music_targets/americana_raga/guitar/selected/first_pluck.wav"
 DEFAULT_PREVIOUS_WINNER = (
     "artifacts/instrument_renders/"
-    "first_pluck_research_pass4_guitar_modal_pluck.wav"
+    "first_pluck_param_sweep2_pos175_body115.wav"
 )
 DEFAULT_INSTRUMENT = "guitar-modal-pluck"
 DEFAULT_FREQ_HZ = "390.2439"
 DEFAULT_VELOCITY = "0.8"
 DEFAULT_DURATION = "0.22"
+DEFAULT_GUITAR_PARAMS = {
+    "pluck_position": "0.175",
+    "body_gain": "1.15",
+}
 DEFAULT_PROBE_CANDIDATES = [
     "name=guitar_modal,instrument=guitar-modal",
     "name=guitar_contact_pick_modal,instrument=guitar-contact-pick-modal",
@@ -27,6 +31,29 @@ DEFAULT_PROBE_CANDIDATES = [
     "name=guitar_sms_fit,instrument=guitar-sms-fit",
     "name=guitar_ks,instrument=guitar-ks",
 ]
+GUITAR_PARAM_OPTIONS = {
+    "pluck_position": "--pluck-position",
+    "pluck_brightness": "--pluck-brightness",
+    "string_mix": "--string-mix",
+    "body_mix": "--body-mix",
+    "attack_mix": "--attack-mix",
+    "mute": "--mute",
+    "string_decay": "--string-decay",
+    "body_gain": "--body-gain",
+    "body_decay": "--body-decay",
+    "body_freq": "--body-freq",
+    "pick_noise": "--pick-noise",
+    "attack_gain": "--attack-gain",
+    "attack_decay": "--attack-decay",
+    "bridge_coupling": "--bridge-coupling",
+    "inharmonicity": "--inharmonicity",
+    "high_decay": "--high-decay",
+    "output_gain": "--output-gain",
+}
+SUPPORTED_CANDIDATE_KEYS = (
+    ["name", "instrument", "freq", "note", "velocity", "duration", "out"]
+    + list(GUITAR_PARAM_OPTIONS.keys())
+)
 
 
 def parse_args():
@@ -49,7 +76,7 @@ def parse_args():
         default=[],
         help=(
             "candidate spec; either a name or comma-separated key=value pairs. "
-            "Supported keys: name,instrument,freq,note,velocity,duration,out. "
+            "Supported keys: " + ",".join(SUPPORTED_CANDIDATE_KEYS) + ". "
             "If omitted, renders the standard guitar probe suite."
         ),
     )
@@ -58,6 +85,8 @@ def parse_args():
     parser.add_argument("--note", default=None)
     parser.add_argument("--velocity", default=DEFAULT_VELOCITY)
     parser.add_argument("--duration", default=DEFAULT_DURATION)
+    for key, option in GUITAR_PARAM_OPTIONS.items():
+        parser.add_argument(option, dest=key, default=DEFAULT_GUITAR_PARAMS.get(key))
     parser.add_argument(
         "--render-dir",
         default="artifacts/instrument_renders",
@@ -101,13 +130,13 @@ def parse_candidate_spec(spec, defaults, round_id):
             if "=" not in part:
                 raise ValueError(f"candidate field lacks '=': {part}")
             key, value = part.split("=", 1)
-            key = key.strip()
+            key = normalize_candidate_key(key)
             value = value.strip()
             if key not in candidate and key != "out":
                 raise ValueError(f"unsupported candidate key: {key}")
             if key == "note":
                 candidate["freq"] = None
-            if key == "freq" and value.lower() in {"", "none", "null"}:
+            if value.lower() in {"", "none", "null"}:
                 value = None
             candidate[key] = value
 
@@ -124,6 +153,10 @@ def parse_candidate_spec(spec, defaults, round_id):
     return candidate
 
 
+def normalize_candidate_key(key):
+    return key.strip().replace("-", "_")
+
+
 def default_candidates(args):
     if args.candidate:
         return args.candidate
@@ -131,7 +164,7 @@ def default_candidates(args):
 
 
 def candidate_defaults(args):
-    return {
+    defaults = {
         "name": None,
         "instrument": args.instrument,
         "freq": args.freq,
@@ -141,6 +174,9 @@ def candidate_defaults(args):
         "out": None,
         "render_dir": args.render_dir,
     }
+    for key in GUITAR_PARAM_OPTIONS:
+        defaults[key] = getattr(args, key)
+    return defaults
 
 
 def render_candidate(root, candidate):
@@ -161,6 +197,12 @@ def render_candidate(root, candidate):
         command.extend(["--freq", candidate["freq"]])
     else:
         command.extend(["--note", candidate["note"]])
+
+    for key, option in GUITAR_PARAM_OPTIONS.items():
+        value = candidate.get(key)
+        if value is None:
+            continue
+        command.extend([option, value])
 
     run_quietly(root, command)
 
