@@ -495,10 +495,22 @@ def spectral_window_stats(samples, sample_rate, start_seconds, duration_seconds)
         "peak_ratio": max(normalized_powers) if normalized_powers else 0.0,
         "low_ratio": band_power_ratio(freqs, normalized_powers, 0.0, 250.0),
         "mid_ratio": band_power_ratio(freqs, normalized_powers, 250.0, 1500.0),
+        "low_mid_ratio": band_power_ratio(freqs, normalized_powers, 90.0, 500.0),
+        "body_ratio": band_power_ratio(freqs, normalized_powers, 90.0, 900.0),
         "upper_mid_ratio": band_power_ratio(
             freqs, normalized_powers, 500.0, 2500.0
         ),
         "high_ratio": band_power_ratio(freqs, normalized_powers, 1000.0, 12000.0),
+        "bright_ratio": band_power_ratio(
+            freqs, normalized_powers, 1500.0, 12000.0
+        ),
+        "body_to_bright_ratio": (
+            band_power_ratio(freqs, normalized_powers, 90.0, 900.0) + EPSILON
+        )
+        / (
+            band_power_ratio(freqs, normalized_powers, 1500.0, 12000.0)
+            + EPSILON
+        ),
         "centroid_hz": profile["centroid_hz"],
         "tilt_db_per_octave": profile["tilt_db_per_octave"],
     }
@@ -642,13 +654,47 @@ def texture_loss(target_features, generated_features):
     )
 
 
+def body_depth_loss(target_features, generated_features):
+    target_sustain = target_features["sustain"]
+    generated_sustain = generated_features["sustain"]
+    peak_loss = undershoot_loss(
+        target_sustain["peak_ratio"], generated_sustain["peak_ratio"]
+    )
+    entropy_loss = overshoot_loss(
+        target_sustain["entropy"], generated_sustain["entropy"], 0.50
+    )
+    body_loss = ratio_loss(
+        target_sustain["body_ratio"], generated_sustain["body_ratio"], 1.5
+    )
+    low_mid_loss = ratio_loss(
+        target_sustain["low_mid_ratio"], generated_sustain["low_mid_ratio"], 1.6
+    )
+    body_to_bright_loss = undershoot_loss(
+        target_sustain["body_to_bright_ratio"],
+        generated_sustain["body_to_bright_ratio"],
+    )
+    bright_overshoot_loss = overshoot_loss(
+        target_sustain["bright_ratio"],
+        generated_sustain["bright_ratio"],
+        max(target_sustain["bright_ratio"] * 4.0, 0.01),
+    )
+    return clamp01(
+        peak_loss * 0.48
+        + entropy_loss * 0.18
+        + body_loss * 0.12
+        + body_to_bright_loss * 0.10
+        + bright_overshoot_loss * 0.07
+        + low_mid_loss * 0.05
+    )
+
+
 def oscillator_loss(target_features, generated_features):
     target_motion = target_features["dominant_motion_octaves"]
     generated_motion = generated_features["dominant_motion_octaves"]
     if target_motion <= EPSILON:
         motion_loss = 0.0
     else:
-        motion_loss = clamp01(max(0.0, target_motion - generated_motion) / target_motion)
+        motion_loss = clamp01(abs(target_motion - generated_motion) / target_motion)
 
     target_confidence = target_features["sustain_pitch"]["confidence"]
     generated_confidence = generated_features["sustain_pitch"]["confidence"]
@@ -666,6 +712,23 @@ def oscillator_loss(target_features, generated_features):
     )
 
 
+def segment_pitch_loss(target_features, generated_features):
+    attack_loss = pitch_estimate_loss(
+        target_features["attack_pitch"], generated_features["attack_pitch"], 1.6
+    )
+    sustain_loss = pitch_estimate_loss(
+        target_features["sustain_pitch"], generated_features["sustain_pitch"], 0.9
+    )
+    return clamp01(attack_loss * 0.25 + sustain_loss * 0.75)
+
+
+def pitch_estimate_loss(target_pitch, generated_pitch, octave_span):
+    confidence = min(target_pitch["confidence"], generated_pitch["confidence"])
+    return ratio_loss(
+        target_pitch["frequency_hz"], generated_pitch["frequency_hz"], octave_span
+    ) * confidence
+
+
 def rounded_pluck_features(features):
     return {
         "attack_flux": round(features["attack_flux"], 6),
@@ -674,6 +737,12 @@ def rounded_pluck_features(features):
         "attack_mid_ratio": round(features["attack"]["mid_ratio"], 6),
         "attack_upper_mid_ratio": round(features["attack"]["upper_mid_ratio"], 6),
         "attack_high_ratio": round(features["attack"]["high_ratio"], 6),
+        "sustain_low_mid_ratio": round(features["sustain"]["low_mid_ratio"], 6),
+        "sustain_body_ratio": round(features["sustain"]["body_ratio"], 6),
+        "sustain_bright_ratio": round(features["sustain"]["bright_ratio"], 6),
+        "sustain_body_to_bright_ratio": round(
+            features["sustain"]["body_to_bright_ratio"], 6
+        ),
         "sustain_entropy": round(features["sustain"]["entropy"], 6),
         "sustain_peak_ratio": round(features["sustain"]["peak_ratio"], 6),
         "attack_dominant_frequency_hz": round(
@@ -773,6 +842,7 @@ def compare_pair(target, generated, args):
     generated_pluck = pluck_features(generated_norm, sample_rate)
     pluck_transient_loss = transient_loss(target_pluck, generated_pluck)
     sustain_texture_loss = texture_loss(target_pluck, generated_pluck)
+    acoustic_body_depth_loss = body_depth_loss(target_pluck, generated_pluck)
     stable_oscillator_loss = oscillator_loss(target_pluck, generated_pluck)
 
     centroid_loss = ratio_loss(
@@ -789,13 +859,9 @@ def compare_pair(target, generated, args):
         / 18.0
     )
 
-    target_pitch = dominant_frequency(target_norm, sample_rate)
-    generated_pitch = dominant_frequency(generated_norm, sample_rate)
-    pitch_weight = min(target_pitch["confidence"], generated_pitch["confidence"])
-    pitch_loss = ratio_loss(
-        target_pitch["frequency_hz"], generated_pitch["frequency_hz"], 1.0
-    )
-    pitch_loss *= pitch_weight
+    pitch_loss = segment_pitch_loss(target_pluck, generated_pluck)
+    target_pitch = target_pluck["sustain_pitch"]
+    generated_pitch = generated_pluck["sustain_pitch"]
 
     target_rms = rms(target_raw)
     generated_rms = rms(generated_raw)
@@ -803,18 +869,19 @@ def compare_pair(target, generated, args):
     loudness_loss = clamp01(abs(loudness_db) / 18.0)
 
     total_loss = (
-        spectral_loss * 0.16
-        + env_loss * 0.12
-        + pluck_transient_loss * 0.14
-        + attack_loss * 0.04
-        + decay_loss * 0.08
-        + sustain_texture_loss * 0.20
-        + stable_oscillator_loss * 0.14
+        spectral_loss * 0.10
+        + env_loss * 0.07
+        + pluck_transient_loss * 0.16
+        + attack_loss * 0.02
+        + decay_loss * 0.05
+        + sustain_texture_loss * 0.08
+        + acoustic_body_depth_loss * 0.20
+        + stable_oscillator_loss * 0.18
         + centroid_loss * 0.03
-        + rolloff_loss * 0.02
+        + rolloff_loss * 0.01
         + tilt_loss * 0.02
         + pitch_loss * 0.01
-        + loudness_loss * 0.04
+        + loudness_loss * 0.07
     )
     similarity_score = max(0.0, 100.0 * (1.0 - clamp01(total_loss)))
 
@@ -829,6 +896,7 @@ def compare_pair(target, generated, args):
             "attack": round(attack_loss, 6),
             "decay": round(decay_loss, 6),
             "sustain_texture": round(sustain_texture_loss, 6),
+            "acoustic_body_depth": round(acoustic_body_depth_loss, 6),
             "stable_oscillator": round(stable_oscillator_loss, 6),
             "centroid": round(centroid_loss, 6),
             "rolloff": round(rolloff_loss, 6),
@@ -896,6 +964,18 @@ def ratio_loss(reference, candidate, octave_span):
     return clamp01(abs(math.log(candidate / reference, 2.0)) / octave_span)
 
 
+def undershoot_loss(reference, candidate):
+    if reference <= EPSILON:
+        return 0.0
+    return clamp01(max(0.0, reference - candidate) / reference)
+
+
+def overshoot_loss(reference, candidate, span):
+    if span <= EPSILON:
+        return 0.0
+    return clamp01(max(0.0, candidate - reference) / span)
+
+
 def clamp01(value):
     return max(0.0, min(1.0, value))
 
@@ -940,6 +1020,7 @@ def print_text_report(report):
             f"attack={losses['attack']:.3f} "
             f"decay={losses['decay']:.3f} "
             f"texture={losses['sustain_texture']:.3f} "
+            f"body={losses['acoustic_body_depth']:.3f} "
             f"osc={losses['stable_oscillator']:.3f} "
             f"centroid={losses['centroid']:.3f} "
             f"tilt={losses['tilt']:.3f} "
@@ -955,7 +1036,10 @@ def print_text_report(report):
             f"centroid={generated['centroid_hz']:.1f}Hz "
             f"pitch={generated['dominant_frequency_hz']:.1f}Hz "
             f"motion={pluck['dominant_motion_octaves']:.3f}oct "
-            f"flux={pluck['sustain_flux']:.3f}"
+            f"flux={pluck['sustain_flux']:.3f} "
+            f"body={pluck['sustain_body_ratio']:.3f} "
+            f"bright={pluck['sustain_bright_ratio']:.3f} "
+            f"peak={pluck['sustain_peak_ratio']:.3f}"
         )
 
 
@@ -983,16 +1067,18 @@ def main():
     results.sort(key=lambda item: item["score"], reverse=True)
     report = {
         "meta": {
-            "version": 2,
+            "version": 4,
             "purpose": (
                 "Direct audio comparison between selected real-audio target "
                 "and generated probe WAVs."
             ),
             "scoring_note": (
                 "Score is higher-better. Losses are lower-better. "
-                "The pluck transient, sustain texture, and stable oscillator "
-                "losses are intended to catch synthetic oscillator behavior "
-                "that broad spectral averages can miss. Metrics are a "
+                "The pluck transient, sustain texture, acoustic body depth, "
+                "stable oscillator, and segment pitch losses are intended to "
+                "catch synthetic oscillator behavior, shallow-body sounds, "
+                "and narrow pitched artifacts that broad spectral averages "
+                "can miss. Metrics are a "
                 "listening-alignment check, not a final replacement for "
                 "human auditioning."
             ),
