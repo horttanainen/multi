@@ -12,7 +12,7 @@ from pathlib import Path
 DEFAULT_TARGET = "artifacts/music_targets/americana_raga/guitar/selected/first_pluck.wav"
 DEFAULT_PREVIOUS_WINNER = (
     "artifacts/instrument_renders/"
-    "guitar_modal_pluck_iter3_level_pitch_estimate_g4.wav"
+    "first_pluck_research_pass4_guitar_modal_pluck.wav"
 )
 DEFAULT_INSTRUMENT = "guitar-modal-pluck"
 DEFAULT_FREQ_HZ = "390.2439"
