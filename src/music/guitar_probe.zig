@@ -173,6 +173,29 @@ pub const GuitarBridgeBodyPluck = struct {
     velocity: f32 = 0.8,
 };
 
+pub const GuitarAdmittancePluck = struct {
+    vertical_phases: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    vertical_freqs: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    vertical_amps: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    vertical_decays: [STRING_MODE_COUNT]f32 = [_]f32{0.999} ** STRING_MODE_COUNT,
+    vertical_body_gains: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    horizontal_phases: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    horizontal_freqs: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    horizontal_amps: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    horizontal_decays: [STRING_MODE_COUNT]f32 = [_]f32{0.999} ** STRING_MODE_COUNT,
+    horizontal_body_gains: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
+    body: BodyFilterBank = .{},
+    params: GuitarProbeParams = .{},
+    rng: dsp.Rng = dsp.rngInit(0x2F42_C911),
+    bridge_prev: f32 = 0.0,
+    bridge_body_lpf: dsp.LPF = dsp.lpfInit(1800.0),
+    out_hpf: dsp.HPF = dsp.hpfInit(34.0),
+    out_lpf: dsp.LPF = dsp.lpfInit(9200.0),
+    frequency_hz: f32 = 164.814,
+    velocity: f32 = 0.8,
+    age: u32 = 999999,
+};
+
 pub const GuitarTwoPolModal = struct {
     vertical: GuitarModal = .{},
     horizontal: GuitarModal = .{},
@@ -410,6 +433,86 @@ pub fn guitarBridgeBodyPluckProcess(ctx: *GuitarBridgeBodyPluck) f32 {
     return dsp.softClip(filtered * outputGain(ctx.params, 3.55));
 }
 
+pub fn guitarAdmittancePluckTrigger(ctx: *GuitarAdmittancePluck, frequency_hz: f32, velocity: f32) void {
+    guitarAdmittancePluckTriggerWithParams(ctx, frequency_hz, velocity, .{});
+}
+
+pub fn guitarAdmittancePluckTriggerWithParams(ctx: *GuitarAdmittancePluck, frequency_hz: f32, velocity: f32, params: GuitarProbeParams) void {
+    ctx.* = .{};
+    ctx.params = sanitizedParams(params);
+    ctx.rng = dsp.rngInit(0x2F42_C911);
+    ctx.frequency_hz = safeGuitarFrequency(frequency_hz);
+    ctx.velocity = safeVelocity(velocity);
+
+    bodyFilterBankConfigureScaled(&ctx.body, bodyFreq(ctx.params, 1.0), bodyGain(ctx.params, 1.34), bodyDecay(ctx.params, 0.96));
+    guitarAdmittanceConfigureBank(
+        ctx.params,
+        &ctx.rng,
+        ctx.frequency_hz,
+        ctx.velocity * 0.98,
+        pluckPosition(ctx.params, 0.152),
+        pluckBrightness(ctx.params, 0.78),
+        0.122,
+        0.93,
+        1.0,
+        0.0,
+        &ctx.vertical_phases,
+        &ctx.vertical_freqs,
+        &ctx.vertical_amps,
+        &ctx.vertical_decays,
+        &ctx.vertical_body_gains,
+    );
+    guitarAdmittanceConfigureBank(
+        ctx.params,
+        &ctx.rng,
+        ctx.frequency_hz * 1.004,
+        ctx.velocity * 0.46,
+        pluckPosition(ctx.params, 0.205),
+        pluckBrightness(ctx.params, 0.58),
+        0.066,
+        0.76,
+        0.62,
+        0.19,
+        &ctx.horizontal_phases,
+        &ctx.horizontal_freqs,
+        &ctx.horizontal_amps,
+        &ctx.horizontal_decays,
+        &ctx.horizontal_body_gains,
+    );
+    ctx.age = 0;
+}
+
+pub fn guitarAdmittancePluckProcess(ctx: *GuitarAdmittancePluck) f32 {
+    const vertical = guitarAdmittanceProcessBank(
+        &ctx.vertical_phases,
+        &ctx.vertical_freqs,
+        &ctx.vertical_amps,
+        &ctx.vertical_decays,
+        &ctx.vertical_body_gains,
+        1.0,
+    );
+    const horizontal = guitarAdmittanceProcessBank(
+        &ctx.horizontal_phases,
+        &ctx.horizontal_freqs,
+        &ctx.horizontal_amps,
+        &ctx.horizontal_decays,
+        &ctx.horizontal_body_gains,
+        0.58,
+    );
+    const bridge_motion = vertical.bridge_motion * 0.78 + horizontal.bridge_motion * 0.31;
+    const raw_bridge_force = bridgeForceSample(&ctx.bridge_prev, bridge_motion, bridgeCoupling(ctx.params, 3.65));
+    const bridge_force = dsp.lpfProcess(&ctx.bridge_body_lpf, raw_bridge_force);
+    const body_drive = bridge_force * 0.50 + vertical.radiated * 0.095 + horizontal.radiated * 0.038;
+    const body_transient = bodyFilterBankProcess(&ctx.body, body_drive);
+    const body_harmonic = vertical.radiated * 0.285 + horizontal.radiated * 0.105;
+    const direct_string = vertical.direct * 0.058 + horizontal.direct * 0.031;
+    const sharp_edge = vertical.edge * 0.010 + horizontal.edge * 0.004;
+    const mixed = body_transient * bodyMix(ctx.params, 0.92) + body_harmonic * bodyMix(ctx.params, 0.66) + direct_string * stringMix(ctx.params, 1.0) + sharp_edge * attackMix(ctx.params, 0.24);
+    const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, mixed));
+    ctx.age = nextAge(ctx.age);
+    return dsp.softClip(filtered * outputGain(ctx.params, 3.25));
+}
+
 pub fn guitarTwoPolModalTrigger(ctx: *GuitarTwoPolModal, frequency_hz: f32, velocity: f32) void {
     guitarTwoPolModalTriggerWithParams(ctx, frequency_hz, velocity, .{});
 }
@@ -588,6 +691,147 @@ fn modalRevoiceReferencePluck(ctx: *GuitarModal, pluck_position: f32, brightness
             ctx.string_amps[idx] = 0.0;
         }
     }
+}
+
+const AdmittanceBankOutput = struct {
+    direct: f32 = 0.0,
+    bridge_motion: f32 = 0.0,
+    radiated: f32 = 0.0,
+    edge: f32 = 0.0,
+};
+
+fn guitarAdmittanceConfigureBank(
+    params: GuitarProbeParams,
+    rng: *dsp.Rng,
+    frequency_hz: f32,
+    velocity: f32,
+    pluck_position: f32,
+    brightness: f32,
+    gain: f32,
+    decay_scale: f32,
+    admittance_scale: f32,
+    phase_bias: f32,
+    phases: *[STRING_MODE_COUNT]f32,
+    freqs: *[STRING_MODE_COUNT]f32,
+    amps: *[STRING_MODE_COUNT]f32,
+    decays: *[STRING_MODE_COUNT]f32,
+    body_gains: *[STRING_MODE_COUNT]f32,
+) void {
+    const safe_pluck = std.math.clamp(pluck_position, 0.05, 0.45);
+    const safe_brightness = mutedBrightness(params, std.math.clamp(brightness, 0.0, 1.0));
+    const safe_decay_scale = std.math.clamp(decay_scale, 0.05, 2.5);
+    const rolloff = 0.58 + (1.0 - safe_brightness) * 0.48;
+    const air_loss_base = 0.00088 + (1.0 - safe_brightness) * 0.00115;
+    const coupling = std.math.clamp(bridgeCoupling(params, 1.0), 0.0, 4.0);
+
+    for (0..STRING_MODE_COUNT) |idx| {
+        const harmonic: f32 = @floatFromInt(idx + 1);
+        const stiffness = stiffnessRatio(params, harmonic, 0.000040);
+        const mode_freq = frequency_hz * harmonic * stiffness;
+        const admittance = bodyAdmittanceMagnitude(params, mode_freq);
+        const pluck_gain = @abs(@sin(std.math.pi * harmonic * safe_pluck));
+        const harmonic_rolloff = 1.0 / std.math.pow(f32, harmonic, rolloff);
+        const bridge_force_weight = std.math.clamp(harmonic * 0.23, 0.34, 1.65);
+        const air_loss = @exp(-air_loss_base * harmonic * harmonic);
+        const body_loss = std.math.clamp((admittance - 0.74) * coupling * 0.11, 0.0, 0.32);
+        const high_loss = 1.0 - std.math.clamp((harmonic - 1.0) * 0.0065, 0.0, 0.18);
+        const decay_seconds = std.math.clamp((2.36 / @sqrt(harmonic) + 0.09) * safe_decay_scale * highDecay(params, harmonic) * high_loss * (1.0 - body_loss), 0.052, 3.6);
+        const phase_jitter = (dsp.rngFloat(rng) - 0.5) * 0.10;
+        const body_response = std.math.clamp(admittance * (0.52 + coupling * 0.48) * admittance_scale, 0.08, 3.20);
+
+        freqs[idx] = mode_freq;
+        decays[idx] = decayPerSample(decay_seconds);
+        phases[idx] = std.math.pi * 0.5 + phase_bias * harmonic + phase_jitter;
+        amps[idx] = pluck_gain * harmonic_rolloff * bridge_force_weight * air_loss * velocity * gain;
+        body_gains[idx] = body_response;
+
+        if (mode_freq >= dsp.SAMPLE_RATE * 0.48) {
+            amps[idx] = 0.0;
+            body_gains[idx] = 0.0;
+        }
+    }
+}
+
+fn guitarAdmittanceProcessBank(
+    phases: *[STRING_MODE_COUNT]f32,
+    freqs: *[STRING_MODE_COUNT]f32,
+    amps: *[STRING_MODE_COUNT]f32,
+    decays: *[STRING_MODE_COUNT]f32,
+    body_gains: *[STRING_MODE_COUNT]f32,
+    polarization_gain: f32,
+) AdmittanceBankOutput {
+    var out: AdmittanceBankOutput = .{};
+
+    for (0..STRING_MODE_COUNT) |idx| {
+        if (amps[idx] <= 0.000002) continue;
+        if (freqs[idx] >= dsp.SAMPLE_RATE * 0.48) {
+            amps[idx] = 0.0;
+            continue;
+        }
+
+        phases[idx] += freqs[idx] * dsp.INV_SR * dsp.TAU;
+        if (phases[idx] > dsp.TAU) phases[idx] -= dsp.TAU;
+
+        const wave = @sin(phases[idx]);
+        const slope = @cos(phases[idx]) * std.math.clamp(freqs[idx] * 0.00018, 0.015, 1.12);
+        const amp = amps[idx];
+        const body_gain = body_gains[idx] * polarization_gain;
+        const radiation_weight = bodyRadiationWeight(freqs[idx]);
+        const sample = wave * amp;
+
+        out.direct += sample;
+        out.bridge_motion += sample * body_gain;
+        out.radiated += sample * body_gain * radiation_weight;
+        out.edge += slope * amp * body_gain;
+        amps[idx] *= decays[idx];
+    }
+
+    return out;
+}
+
+fn bodyAdmittanceMagnitude(params: GuitarProbeParams, frequency_hz: f32) f32 {
+    var total: f32 = 0.0;
+    for (0..BODY_MODE_COUNT) |idx| {
+        total += bodyModeAdmittanceProximity(params, idx, frequency_hz) * (BODY_MODE_GAINS[idx] / 0.00095);
+    }
+
+    const freq_scale = bodyFreq(params, 1.0);
+    const air_center = 118.8 * freq_scale;
+    const top_center = 204.7 * freq_scale;
+    const air_lift = 1.0 / (1.0 + std.math.pow(f32, (frequency_hz - air_center) / (86.0 * freq_scale), 2.0));
+    const top_lift = 1.0 / (1.0 + std.math.pow(f32, (frequency_hz - top_center) / (140.0 * freq_scale), 2.0));
+    const high_rolloff = 1.0 / (1.0 + std.math.pow(f32, frequency_hz / 6200.0, 1.35));
+    const notch = bodyAdmittanceAntiresonance(params, frequency_hz);
+    const magnitude = (0.30 + total * 0.32 + air_lift * 0.13 + top_lift * 0.11) * high_rolloff * notch * bodyGain(params, 1.0);
+    return std.math.clamp(magnitude, 0.16, 2.95);
+}
+
+fn bodyRadiationWeight(frequency_hz: f32) f32 {
+    const low_body = 1.0 / (1.0 + std.math.pow(f32, frequency_hz / 420.0, 2.0));
+    const lower_top = 1.0 / (1.0 + std.math.pow(f32, (frequency_hz - 205.0) / 180.0, 2.0));
+    const mid_body = 1.0 / (1.0 + std.math.pow(f32, (frequency_hz - 704.0) / 560.0, 2.0));
+    const high_rolloff = 1.0 / (1.0 + std.math.pow(f32, frequency_hz / 5200.0, 1.6));
+    return std.math.clamp((0.72 + low_body * 0.40 + lower_top * 0.18 + mid_body * 0.14) * high_rolloff, 0.60, 1.46);
+}
+
+fn bodyModeAdmittanceProximity(params: GuitarProbeParams, mode_index: usize, frequency_hz: f32) f32 {
+    const mode_freq = BODY_MODE_FREQS[mode_index] * bodyFreq(params, 1.0);
+    const decay = BODY_MODE_DECAYS[mode_index] * bodyDecay(params, 1.0);
+    const width = @max(mode_freq * std.math.clamp(0.024 + decay * 0.24, 0.022, 0.082), 1.0);
+    const distance = (frequency_hz - mode_freq) / width;
+    return 1.0 / (1.0 + distance * distance);
+}
+
+fn bodyAdmittanceAntiresonance(params: GuitarProbeParams, frequency_hz: f32) f32 {
+    const notch_freqs = [_]f32{ 151.0, 244.0, 394.0, 625.0, 790.0 };
+    var notch: f32 = 1.0;
+    for (notch_freqs) |base_freq| {
+        const notch_freq = base_freq * bodyFreq(params, 1.0);
+        const width = @max(notch_freq * 0.075, 1.0);
+        const distance = (frequency_hz - notch_freq) / width;
+        notch -= 0.055 / (1.0 + distance * distance);
+    }
+    return std.math.clamp(notch, 0.76, 1.0);
 }
 
 fn guitarKsFillDelay(ctx: *GuitarKs, brightness: f32) void {
