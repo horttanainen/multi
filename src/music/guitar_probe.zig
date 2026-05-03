@@ -72,6 +72,7 @@ pub const GuitarModal = struct {
     string_freqs: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
     string_amps: [STRING_MODE_COUNT]f32 = [_]f32{0.0} ** STRING_MODE_COUNT,
     string_decays: [STRING_MODE_COUNT]f32 = [_]f32{0.999} ** STRING_MODE_COUNT,
+    bridge_prev: f32 = 0.0,
     body: BodyFilterBank = .{},
     rng: dsp.Rng = dsp.rngInit(0xA78F_23C1),
     pick_hpf: dsp.HPF = dsp.hpfInit(900.0),
@@ -88,6 +89,7 @@ pub const GuitarKs = struct {
     write_pos: usize = 0,
     delay_samples: usize = 256,
     frac: f32 = 0.0,
+    bridge_prev: f32 = 0.0,
     loop_filter: f32 = 0.0,
     loop_filter_coeff: f32 = 0.68,
     feedback: f32 = 0.993,
@@ -144,6 +146,7 @@ pub const GuitarCommuted = struct {
     write_pos: usize = 0,
     delay_samples: usize = 256,
     frac: f32 = 0.0,
+    bridge_prev: f32 = 0.0,
     loop_filter: f32 = 0.0,
     loop_filter_coeff: f32 = 0.58,
     feedback: f32 = 0.991,
@@ -187,12 +190,13 @@ pub fn guitarModalTrigger(ctx: *GuitarModal, frequency_hz: f32, velocity: f32) v
 
 pub fn guitarModalProcess(ctx: *GuitarModal) f32 {
     const string_sample = guitarModalStringProcess(ctx);
+    const bridge_force = bridgeForceSample(&ctx.bridge_prev, string_sample, 5.4);
     const pick = guitarPickBurst(&ctx.rng, &ctx.pick_hpf, &ctx.pick_lpf, ctx.age, ctx.velocity, 0.072);
-    const body = bodyFilterBankProcess(&ctx.body, string_sample * 0.31 + pick * 0.72);
-    const mixed = body * 0.84 + string_sample * 0.13 + pick * 0.045;
+    const body = bodyFilterBankProcess(&ctx.body, bridge_force * 0.44 + string_sample * 0.18 + pick * 0.62);
+    const mixed = body * 1.02 + string_sample * 0.045 + pick * 0.035;
     const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, mixed));
     ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * 0.86);
+    return dsp.softClip(filtered * 1.05);
 }
 
 pub fn guitarKsTrigger(ctx: *GuitarKs, frequency_hz: f32, velocity: f32) void {
@@ -206,11 +210,11 @@ pub fn guitarKsTrigger(ctx: *GuitarKs, frequency_hz: f32, velocity: f32) void {
     ctx.delay_samples = @intFromFloat(delay_floor);
     ctx.frac = delay_f - delay_floor;
 
-    const brightness = 0.44 + ctx.velocity * 0.42;
-    ctx.loop_filter_coeff = 0.50 + brightness * 0.30;
-    ctx.feedback = std.math.clamp(0.9905 + ctx.velocity * 0.0048 - ctx.frequency_hz * 0.0000016, 0.984, 0.997);
+    const brightness = 0.30 + ctx.velocity * 0.30;
+    ctx.loop_filter_coeff = 0.36 + brightness * 0.24;
+    ctx.feedback = std.math.clamp(0.9865 + ctx.velocity * 0.0034 - ctx.frequency_hz * 0.0000022, 0.978, 0.992);
 
-    bodyFilterBankConfigure(&ctx.body, 1.0, 0.9);
+    bodyFilterBankConfigureScaled(&ctx.body, 1.0, 1.22, 1.18);
     guitarKsFillDelay(ctx, brightness);
     ctx.age = 0;
 }
@@ -226,18 +230,19 @@ pub fn guitarKsProcess(ctx: *GuitarKs) f32 {
     const current = ctx.buffer[read_idx];
     const next = ctx.buffer[next_idx];
     const string_sample = current + (next - current) * ctx.frac;
+    const bridge_force = bridgeForceSample(&ctx.bridge_prev, string_sample, 3.6);
     const averaged = (current + next) * 0.5;
 
     ctx.loop_filter += (averaged - ctx.loop_filter) * ctx.loop_filter_coeff;
-    ctx.buffer[read_idx] = dsp.softClip(ctx.loop_filter * ctx.feedback);
+    ctx.buffer[read_idx] = dsp.softClip((ctx.loop_filter * 0.92 + string_sample * 0.08) * ctx.feedback);
     ctx.write_pos = next_idx;
 
-    const pick = guitarPickBurst(&ctx.rng, &ctx.pick_hpf, &ctx.pick_lpf, ctx.age, ctx.velocity, 0.056);
-    const body = bodyFilterBankProcess(&ctx.body, string_sample * 0.36 + pick * 0.58);
-    const mixed = body * 0.78 + string_sample * 0.20 + pick * 0.045;
+    const pick = guitarPickBurst(&ctx.rng, &ctx.pick_hpf, &ctx.pick_lpf, ctx.age, ctx.velocity, 0.036);
+    const body = bodyFilterBankProcess(&ctx.body, bridge_force * 0.48 + string_sample * 0.08 + pick * 0.44);
+    const mixed = body * 1.08 + string_sample * 0.030 + pick * 0.030;
     const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, mixed));
     ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * 0.9);
+    return dsp.softClip(filtered * 0.78);
 }
 
 pub fn guitarWaveguideRawTrigger(ctx: *GuitarWaveguideRaw, frequency_hz: f32, velocity: f32) void {
@@ -299,7 +304,7 @@ pub fn guitarModalPluckProcess(ctx: *GuitarModalPluck) f32 {
     const mixed = body * 0.96 + attack_body * 0.58 + direct;
     const filtered = dsp.lpfProcess(&ctx.vertical.out_lpf, dsp.hpfProcess(&ctx.vertical.out_hpf, mixed));
     ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * 3.0);
+    return dsp.softClip(filtered * 3.55);
 }
 
 pub fn guitarTwoPolModalTrigger(ctx: *GuitarTwoPolModal, frequency_hz: f32, velocity: f32) void {
@@ -331,10 +336,10 @@ pub fn guitarCommutedTrigger(ctx: *GuitarCommuted, frequency_hz: f32, velocity: 
     const delay_floor = @floor(delay_f);
     ctx.delay_samples = @intFromFloat(delay_floor);
     ctx.frac = delay_f - delay_floor;
-    ctx.loop_filter_coeff = 0.54 + ctx.velocity * 0.16;
-    ctx.feedback = std.math.clamp(0.9885 + ctx.velocity * 0.0042 - ctx.frequency_hz * 0.0000013, 0.982, 0.995);
+    ctx.loop_filter_coeff = 0.42 + ctx.velocity * 0.14;
+    ctx.feedback = std.math.clamp(0.986 + ctx.velocity * 0.0036 - ctx.frequency_hz * 0.0000018, 0.978, 0.992);
 
-    bodyFilterBankConfigure(&ctx.body, 1.0, 1.15);
+    bodyFilterBankConfigureScaled(&ctx.body, 1.0, 1.30, 1.25);
     guitarCommutedFillDelay(ctx);
     ctx.age = 0;
 }
@@ -350,17 +355,18 @@ pub fn guitarCommutedProcess(ctx: *GuitarCommuted) f32 {
     const current = ctx.buffer[read_idx];
     const next = ctx.buffer[next_idx];
     const string_sample = current + (next - current) * ctx.frac;
+    const bridge_force = bridgeForceSample(&ctx.bridge_prev, string_sample, 3.2);
     const averaged = (current + next) * 0.5;
 
     ctx.loop_filter += (averaged - ctx.loop_filter) * ctx.loop_filter_coeff;
-    ctx.buffer[read_idx] = dsp.softClip(ctx.loop_filter * ctx.feedback);
+    ctx.buffer[read_idx] = dsp.softClip((ctx.loop_filter * 0.90 + string_sample * 0.10) * ctx.feedback);
     ctx.write_pos = next_idx;
 
-    const pick = guitarPickBurst(&ctx.rng, &ctx.pick_hpf, &ctx.pick_lpf, ctx.age, ctx.velocity, 0.018);
-    const body = bodyFilterBankProcess(&ctx.body, string_sample * 0.30 + pick);
-    const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, body * 0.78 + string_sample * 0.18));
+    const pick = guitarPickBurst(&ctx.rng, &ctx.pick_hpf, &ctx.pick_lpf, ctx.age, ctx.velocity, 0.020);
+    const body = bodyFilterBankProcess(&ctx.body, bridge_force * 0.38 + string_sample * 0.12 + pick * 0.72);
+    const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, body * 1.02 + string_sample * 0.055 + pick * 0.030));
     ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * 0.95);
+    return dsp.softClip(filtered * 0.82);
 }
 
 pub fn guitarSmsFitTrigger(ctx: *GuitarSmsFit, frequency_hz: f32, velocity: f32) void {
@@ -391,7 +397,7 @@ pub fn guitarSmsFitProcess(ctx: *GuitarSmsFit) f32 {
     const mixed = body * 0.72 + tonal * 0.18 + residual * 0.08;
     const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, mixed));
     ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * 0.9);
+    return dsp.softClip(filtered * 3.8);
 }
 
 fn guitarModalConfigureString(ctx: *GuitarModal) void {
@@ -472,17 +478,24 @@ fn guitarKsFillDelay(ctx: *GuitarKs, brightness: f32) void {
         return;
     }
 
-    const pluck_position = 0.19;
+    const pluck_position = 0.16;
     const last_idx_f: f32 = @floatFromInt(ctx.delay_samples - 1);
+    var dc: f32 = 0.0;
 
     for (0..ctx.delay_samples) |idx| {
         const t = @as(f32, @floatFromInt(idx)) / last_idx_f;
         const triangle = if (t < pluck_position) t / pluck_position else (1.0 - t) / (1.0 - pluck_position);
         const taper = @sin(std.math.pi * t);
         const noise = dsp.rngFloat(&ctx.rng) * 2.0 - 1.0;
-        const bright_noise = noise * (0.20 + brightness * 0.36);
-        const displacement = triangle * (0.76 - brightness * 0.28) + bright_noise;
-        ctx.buffer[idx] = displacement * taper * ctx.velocity * 0.54;
+        const bright_noise = noise * (0.040 + brightness * 0.090);
+        const displacement = triangle * (0.82 - brightness * 0.18) + bright_noise;
+        ctx.buffer[idx] = displacement * taper * ctx.velocity * 0.42;
+        dc += ctx.buffer[idx];
+    }
+
+    const dc_offset = dc / @as(f32, @floatFromInt(ctx.delay_samples));
+    for (0..ctx.delay_samples) |idx| {
+        ctx.buffer[idx] -= dc_offset;
     }
 }
 
@@ -496,6 +509,7 @@ fn guitarCommutedFillDelay(ctx: *GuitarCommuted) void {
     bodyFilterBankConfigure(&excitation_body, 1.0, 1.75);
     const pluck_position = 0.16;
     const last_idx_f: f32 = @floatFromInt(ctx.delay_samples - 1);
+    var dc: f32 = 0.0;
 
     for (0..ctx.delay_samples) |idx| {
         const t = @as(f32, @floatFromInt(idx)) / last_idx_f;
@@ -503,17 +517,23 @@ fn guitarCommutedFillDelay(ctx: *GuitarCommuted) void {
         const taper = @sin(std.math.pi * t);
         const impulse = if (idx < 960) guitarCommutedExcitation(&ctx.rng, idx, ctx.velocity) else 0.0;
         const shaped = bodyFilterBankProcess(&excitation_body, impulse);
-        const string_shape = triangle * taper * 0.14;
-        ctx.buffer[idx] = (shaped * 2.8 + string_shape) * ctx.velocity;
+        const string_shape = triangle * taper * 0.34;
+        ctx.buffer[idx] = (shaped * 1.35 + string_shape) * ctx.velocity;
+        dc += ctx.buffer[idx];
+    }
+
+    const dc_offset = dc / @as(f32, @floatFromInt(ctx.delay_samples));
+    for (0..ctx.delay_samples) |idx| {
+        ctx.buffer[idx] -= dc_offset;
     }
 }
 
 fn guitarCommutedExcitation(rng: *dsp.Rng, age: usize, velocity: f32) f32 {
     const age_f: f32 = @floatFromInt(age);
-    const snap = (@sin(age_f * 0.43) + @sin(age_f * 1.31) * 0.42) * @exp(-age_f * 0.015);
-    const brush = (dsp.rngFloat(rng) * 2.0 - 1.0) * @exp(-age_f * 0.006);
-    const release = @exp(-age_f * 0.0022);
-    return (snap * 0.36 + brush * 0.64) * release * (0.42 + velocity * 0.58) * 0.18;
+    const snap = (@sin(age_f * 0.43) + @sin(age_f * 1.31) * 0.42) * @exp(-age_f * 0.018);
+    const brush = (dsp.rngFloat(rng) * 2.0 - 1.0) * @exp(-age_f * 0.0075);
+    const release = @exp(-age_f * 0.0028);
+    return (snap * 0.48 + brush * 0.52) * release * (0.42 + velocity * 0.58) * 0.12;
 }
 
 fn guitarContactPickSample(ctx: *GuitarContactPickModal) f32 {
@@ -632,6 +652,12 @@ fn bodyModeProcess(mode: *BodyMode, input: f32) f32 {
     mode.y2 = mode.y1;
     mode.y1 = y;
     return y;
+}
+
+fn bridgeForceSample(previous: *f32, current: f32, scale: f32) f32 {
+    const force = (current - previous.*) * scale;
+    previous.* = current;
+    return dsp.softClip(force);
 }
 
 fn guitarPickBurst(rng: *dsp.Rng, hpf: *dsp.HPF, lpf: *dsp.LPF, age: u32, velocity: f32, gain: f32) f32 {
