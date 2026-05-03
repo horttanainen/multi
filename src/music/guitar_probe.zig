@@ -159,6 +159,20 @@ pub const GuitarModalPluck = struct {
     velocity: f32 = 0.8,
 };
 
+pub const GuitarBridgeBodyPluck = struct {
+    vertical: GuitarModal = .{},
+    horizontal: GuitarModal = .{},
+    body: BodyFilterBank = .{},
+    params: GuitarProbeParams = .{},
+    rng: dsp.Rng = dsp.rngInit(0x7721_B41D),
+    contact_hpf: dsp.HPF = dsp.hpfInit(1150.0),
+    contact_lpf: dsp.LPF = dsp.lpfInit(10800.0),
+    thump_lpf: dsp.LPF = dsp.lpfInit(1800.0),
+    bridge_prev: f32 = 0.0,
+    age: u32 = 999999,
+    velocity: f32 = 0.8,
+};
+
 pub const GuitarTwoPolModal = struct {
     vertical: GuitarModal = .{},
     horizontal: GuitarModal = .{},
@@ -355,6 +369,42 @@ pub fn guitarModalPluckProcess(ctx: *GuitarModalPluck) f32 {
     const attack_body = bodyFilterBankProcess(&ctx.attack_body, contact * 1.06 + polarization);
     const direct = (vertical * 0.075 + horizontal * 0.036) * stringMix(ctx.params, 1.0) + contact * attackMix(ctx.params, 0.032);
     const mixed = body * bodyMix(ctx.params, 0.96) + attack_body * attackMix(ctx.params, 0.58) + direct;
+    const filtered = dsp.lpfProcess(&ctx.vertical.out_lpf, dsp.hpfProcess(&ctx.vertical.out_hpf, mixed));
+    ctx.age = nextAge(ctx.age);
+    return dsp.softClip(filtered * outputGain(ctx.params, 3.55));
+}
+
+pub fn guitarBridgeBodyPluckTrigger(ctx: *GuitarBridgeBodyPluck, frequency_hz: f32, velocity: f32) void {
+    guitarBridgeBodyPluckTriggerWithParams(ctx, frequency_hz, velocity, .{});
+}
+
+pub fn guitarBridgeBodyPluckTriggerWithParams(ctx: *GuitarBridgeBodyPluck, frequency_hz: f32, velocity: f32, params: GuitarProbeParams) void {
+    ctx.* = .{};
+    ctx.params = sanitizedParams(params);
+    ctx.velocity = safeVelocity(velocity);
+    ctx.rng = dsp.rngInit(0x7721_B41D);
+
+    guitarModalTriggerWithParams(&ctx.vertical, frequency_hz, ctx.velocity * 0.96, ctx.params);
+    guitarModalTriggerWithParams(&ctx.horizontal, frequency_hz * 1.004, ctx.velocity * 0.48, ctx.params);
+    modalRevoiceReferencePluck(&ctx.vertical, pluckPosition(ctx.params, 0.145), pluckBrightness(ctx.params, 0.82), 0.115, stringDecay(ctx.params) * 0.92, 0.0);
+    modalRevoiceReferencePluck(&ctx.horizontal, pluckPosition(ctx.params, 0.185), pluckBrightness(ctx.params, 0.66), 0.058, stringDecay(ctx.params) * 0.72, 0.11);
+
+    bodyFilterBankConfigureScaled(&ctx.body, bodyFreq(ctx.params, 1.0), bodyGain(ctx.params, 1.42), bodyDecay(ctx.params, 1.0));
+    ctx.age = 0;
+}
+
+pub fn guitarBridgeBodyPluckProcess(ctx: *GuitarBridgeBodyPluck) f32 {
+    const vertical = guitarModalStringProcess(&ctx.vertical);
+    const horizontal = guitarModalStringProcess(&ctx.horizontal);
+    const contact = guitarBridgeBodyPluckContact(ctx);
+    const transverse = vertical * 0.34 + horizontal * 0.17;
+    const polarization = (vertical - horizontal) * 0.08;
+    const bridge_motion = transverse + polarization * 0.35;
+    const bridge_force = bridgeForceSample(&ctx.bridge_prev, bridge_motion, bridgeCoupling(ctx.params, 4.2));
+    const body_drive = bridge_force * 0.44 + transverse * 0.18 + polarization * 0.08;
+    const body = bodyFilterBankProcess(&ctx.body, body_drive);
+    const direct = (vertical * 0.075 + horizontal * 0.036) * stringMix(ctx.params, 1.0) + contact * attackMix(ctx.params, 0.032);
+    const mixed = body * bodyMix(ctx.params, 0.96) + direct;
     const filtered = dsp.lpfProcess(&ctx.vertical.out_lpf, dsp.hpfProcess(&ctx.vertical.out_hpf, mixed));
     ctx.age = nextAge(ctx.age);
     return dsp.softClip(filtered * outputGain(ctx.params, 3.55));
@@ -619,20 +669,28 @@ fn guitarContactPickSample(ctx: *GuitarContactPickModal) f32 {
 }
 
 fn guitarModalPluckContact(ctx: *GuitarModalPluck) f32 {
-    const decay_scale = attackDecay(ctx.params);
-    const max_age: u32 = @intFromFloat(@ceil(3600.0 * decay_scale));
-    if (ctx.age > max_age) return 0.0;
+    return guitarPluckContactSample(ctx.params, ctx.velocity, ctx.age, &ctx.rng, &ctx.contact_hpf, &ctx.contact_lpf, &ctx.thump_lpf);
+}
 
-    const age_f: f32 = @floatFromInt(ctx.age);
-    const raw_noise = dsp.rngFloat(&ctx.rng) * 2.0 - 1.0;
-    const filtered_noise = dsp.hpfProcess(&ctx.contact_hpf, dsp.lpfProcess(&ctx.contact_lpf, raw_noise));
+fn guitarBridgeBodyPluckContact(ctx: *GuitarBridgeBodyPluck) f32 {
+    return guitarPluckContactSample(ctx.params, ctx.velocity, ctx.age, &ctx.rng, &ctx.contact_hpf, &ctx.contact_lpf, &ctx.thump_lpf);
+}
+
+fn guitarPluckContactSample(params: GuitarProbeParams, velocity: f32, age: u32, rng: *dsp.Rng, contact_hpf: *dsp.HPF, contact_lpf: *dsp.LPF, thump_lpf: *dsp.LPF) f32 {
+    const decay_scale = attackDecay(params);
+    const max_age: u32 = @intFromFloat(@ceil(3600.0 * decay_scale));
+    if (age > max_age) return 0.0;
+
+    const age_f: f32 = @floatFromInt(age);
+    const raw_noise = dsp.rngFloat(rng) * 2.0 - 1.0;
+    const filtered_noise = dsp.hpfProcess(contact_hpf, dsp.lpfProcess(contact_lpf, raw_noise));
     const scrape_env = @exp(-age_f * (0.0074 / decay_scale));
     const release_env = @exp(-age_f * (0.038 / decay_scale));
     const thump_env = @exp(-age_f * (0.0028 / decay_scale));
     const release = (@sin(age_f * 0.83) + @sin(age_f * 1.71) * 0.34) * release_env;
-    const thump_source = dsp.rngFloat(&ctx.rng) * 2.0 - 1.0;
-    const thump = dsp.lpfProcess(&ctx.thump_lpf, thump_source) * thump_env;
-    return (filtered_noise * scrape_env * 0.72 + release * 0.22 + thump * 0.06) * ctx.velocity * attackGain(ctx.params, pickNoise(ctx.params, 0.12));
+    const thump_source = dsp.rngFloat(rng) * 2.0 - 1.0;
+    const thump = dsp.lpfProcess(thump_lpf, thump_source) * thump_env;
+    return (filtered_noise * scrape_env * 0.72 + release * 0.22 + thump * 0.06) * velocity * attackGain(params, pickNoise(params, 0.12));
 }
 
 fn guitarSmsFitConfigurePartials(ctx: *GuitarSmsFit) void {

@@ -15,6 +15,7 @@ const InstrumentName = enum {
     guitar_modal,
     guitar_contact_pick_modal,
     guitar_modal_pluck,
+    guitar_bridge_body_pluck,
     guitar_two_pol_modal,
     guitar_commuted,
     guitar_sms_fit,
@@ -289,6 +290,9 @@ fn parseInstrumentName(name: []const u8) ?InstrumentName {
     if (std.mem.eql(u8, name, "guitar-modal-pluck") or std.mem.eql(u8, name, "guitar_modal_pluck")) {
         return .guitar_modal_pluck;
     }
+    if (std.mem.eql(u8, name, "guitar-bridge-body-pluck") or std.mem.eql(u8, name, "guitar_bridge_body_pluck")) {
+        return .guitar_bridge_body_pluck;
+    }
     if (std.mem.eql(u8, name, "guitar-two-pol-modal") or std.mem.eql(u8, name, "guitar_two_pol_modal")) {
         return .guitar_two_pol_modal;
     }
@@ -426,6 +430,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
     var guitar_modal: guitar_probe.GuitarModal = .{};
     var guitar_contact_pick_modal: guitar_probe.GuitarContactPickModal = .{};
     var guitar_modal_pluck: guitar_probe.GuitarModalPluck = .{};
+    var guitar_bridge_body_pluck: guitar_probe.GuitarBridgeBodyPluck = .{};
     var guitar_two_pol_modal: guitar_probe.GuitarTwoPolModal = .{};
     var guitar_commuted: guitar_probe.GuitarCommuted = .{};
     var guitar_sms_fit: guitar_probe.GuitarSmsFit = .{};
@@ -437,6 +442,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
         .guitar_modal => guitar_probe.guitarModalTriggerWithParams(&guitar_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalTriggerWithParams(&guitar_contact_pick_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_modal_pluck => guitar_probe.guitarModalPluckTriggerWithParams(&guitar_modal_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_bridge_body_pluck => guitar_probe.guitarBridgeBodyPluckTriggerWithParams(&guitar_bridge_body_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalTriggerWithParams(&guitar_two_pol_modal, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_commuted => guitar_probe.guitarCommutedTriggerWithParams(&guitar_commuted, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_sms_fit => guitar_probe.guitarSmsFitTriggerWithParams(&guitar_sms_fit, frequency_hz, cfg.velocity, cfg.guitar_params),
@@ -462,6 +468,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
                 .guitar_modal => guitar_probe.guitarModalProcess(&guitar_modal),
                 .guitar_contact_pick_modal => guitar_probe.guitarContactPickModalProcess(&guitar_contact_pick_modal),
                 .guitar_modal_pluck => guitar_probe.guitarModalPluckProcess(&guitar_modal_pluck),
+                .guitar_bridge_body_pluck => guitar_probe.guitarBridgeBodyPluckProcess(&guitar_bridge_body_pluck),
                 .guitar_two_pol_modal => guitar_probe.guitarTwoPolModalProcess(&guitar_two_pol_modal),
                 .guitar_commuted => guitar_probe.guitarCommutedProcess(&guitar_commuted),
                 .guitar_sms_fit => guitar_probe.guitarSmsFitProcess(&guitar_sms_fit),
@@ -562,6 +569,7 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
         .guitar_modal => "guitar-modal",
         .guitar_contact_pick_modal => "guitar-contact-pick-modal",
         .guitar_modal_pluck => "guitar-modal-pluck",
+        .guitar_bridge_body_pluck => "guitar-bridge-body-pluck",
         .guitar_two_pol_modal => "guitar-two-pol-modal",
         .guitar_commuted => "guitar-commuted",
         .guitar_sms_fit => "guitar-sms-fit",
@@ -572,7 +580,7 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
 
 fn instrumentHandlesVelocity(instrument: InstrumentName) bool {
     return switch (instrument) {
-        .guitar_modal, .guitar_contact_pick_modal, .guitar_modal_pluck, .guitar_two_pol_modal, .guitar_commuted, .guitar_sms_fit, .guitar_ks, .guitar_waveguide_raw => true,
+        .guitar_modal, .guitar_contact_pick_modal, .guitar_modal_pluck, .guitar_bridge_body_pluck, .guitar_two_pol_modal, .guitar_commuted, .guitar_sms_fit, .guitar_ks, .guitar_waveguide_raw => true,
         .sine_drone, .choir => false,
     };
 }
@@ -588,6 +596,7 @@ fn printUsage() void {
         \\  guitar-modal
         \\  guitar-contact-pick-modal
         \\  guitar-modal-pluck
+        \\  guitar-bridge-body-pluck
         \\  guitar-two-pol-modal
         \\  guitar-commuted
         \\  guitar-sms-fit

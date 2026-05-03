@@ -40,13 +40,7 @@ DEFAULT_GUITAR_PARAMS = {
     "output_gain": "0.9934",
 }
 DEFAULT_PROBE_CANDIDATES = [
-    "name=guitar_modal,instrument=guitar-modal",
-    "name=guitar_contact_pick_modal,instrument=guitar-contact-pick-modal",
     "name=guitar_modal_pluck,instrument=guitar-modal-pluck",
-    "name=guitar_two_pol_modal,instrument=guitar-two-pol-modal",
-    "name=guitar_commuted,instrument=guitar-commuted",
-    "name=guitar_sms_fit,instrument=guitar-sms-fit",
-    "name=guitar_ks,instrument=guitar-ks",
 ]
 GUITAR_PARAM_OPTIONS = {
     "pluck_position": "--pluck-position",
@@ -102,7 +96,8 @@ def parse_args():
         help=(
             "candidate spec; either a name or comma-separated key=value pairs. "
             "Supported keys: " + ",".join(SUPPORTED_CANDIDATE_KEYS) + ". "
-            "If omitted, renders the standard guitar probe suite."
+            "If omitted, renders the maintained guitar-modal-pluck baseline. "
+            "Legacy instruments can still be tested with explicit candidates."
         ),
     )
     parser.add_argument("--instrument", default=DEFAULT_INSTRUMENT)
