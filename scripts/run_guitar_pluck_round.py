@@ -10,6 +10,9 @@ from pathlib import Path
 
 
 DEFAULT_TARGET = "artifacts/music_targets/americana_raga/guitar/selected/first_pluck.wav"
+DEFAULT_TARGET_SET = (
+    "artifacts/music_targets/americana_raga/guitar/selected/pluck_target_set.json"
+)
 DEFAULT_PREVIOUS_WINNER = (
     "artifacts/instrument_renders/"
     "first_pluck_param_sweep2_pos175_body115.wav"
@@ -65,6 +68,14 @@ def parse_args():
     )
     parser.add_argument("--round-id", required=True, help="round label for output files")
     parser.add_argument("--target", default=DEFAULT_TARGET, help="reference target WAV")
+    parser.add_argument(
+        "--target-set",
+        default=None,
+        help=(
+            "validated target set manifest; renders every candidate at every "
+            "target pitch and ranks by average score"
+        ),
+    )
     parser.add_argument(
         "--previous-winner",
         default=DEFAULT_PREVIOUS_WINNER,
@@ -207,6 +218,17 @@ def render_candidate(root, candidate):
     run_quietly(root, command)
 
 
+def target_set_render_candidate(candidate, target, round_id, render_dir):
+    result = dict(candidate)
+    name_slug = slugify(result["name"])
+    target_slug = slugify(target["id"])
+    result["freq"] = f"{target['frequency_hz']:.4f}"
+    result["note"] = None
+    result["duration"] = f"{target['duration_seconds']:.6f}"
+    result["out"] = str(Path(render_dir) / f"{round_id}_{name_slug}_{target_slug}.wav")
+    return result
+
+
 def run_scorer(root, target, generated_paths, report_path):
     command = [
         sys.executable,
@@ -219,6 +241,70 @@ def run_scorer(root, target, generated_paths, report_path):
         report_path,
     ]
     run_quietly(root, command)
+
+
+def load_target_set(root, target_set_path):
+    manifest_path = root / target_set_path
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"target set manifest not found: {target_set_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    targets = []
+    for entry in manifest.get("targets", []):
+        target = normalized_target_entry(root, entry)
+        if target is None:
+            continue
+        targets.append(target)
+
+    if not targets:
+        raise ValueError(f"target set has no accepted targets: {target_set_path}")
+
+    return manifest, targets
+
+
+def normalized_target_entry(root, entry):
+    path = entry.get("path")
+    pitch = entry.get("pitch", {})
+    if not path or not pitch.get("accepted"):
+        return None
+
+    target_path = root / path
+    if not target_path.exists():
+        raise FileNotFoundError(f"target WAV not found: {path}")
+
+    frequency_hz = pitch.get("frequency_hz")
+    if frequency_hz is None:
+        raise ValueError(f"target {entry.get('id')} has no pitch frequency")
+
+    duration = entry.get("duration_seconds")
+    if duration is None:
+        duration = entry.get("audio", {}).get("duration_seconds")
+    if duration is None:
+        raise ValueError(f"target {entry.get('id')} has no duration")
+
+    return {
+        "id": entry.get("id", Path(path).stem),
+        "path": path,
+        "frequency_hz": float(frequency_hz),
+        "duration_seconds": float(duration),
+        "nearest_note": pitch.get("nearest_note", ""),
+        "confidence": pitch.get("confidence", 0.0),
+        "absolute_start_seconds": entry.get("absolute_start_seconds"),
+    }
+
+
+def aggregate_report_path(args, target_id):
+    report = Path(report_path_for(args))
+    stem = report.stem
+    if stem.endswith("_compare"):
+        stem = stem[: -len("_compare")]
+    return str(report.with_name(f"{stem}_{slugify(target_id)}_compare.json"))
+
+
+def write_json_report(root, report_path, report):
+    path = root / report_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
 def run_quietly(root, command):
@@ -260,6 +346,10 @@ def validate_inputs(root, target, previous_winner):
         raise FileNotFoundError(f"previous winner WAV not found: {previous_winner}")
 
 
+def validate_single_target_inputs(root, args):
+    validate_inputs(root, args.target, args.previous_winner)
+
+
 def build_summary(args, candidates, report):
     generated = [candidate["out"] for candidate in candidates]
     ranking = [
@@ -283,7 +373,138 @@ def build_summary(args, candidates, report):
     }
 
 
+def run_target_set_round(root, args, candidates):
+    target_set_manifest, targets = load_target_set(root, args.target_set)
+    per_candidate = {
+        candidate["name"]: {
+            "name": candidate["name"],
+            "instrument": candidate["instrument"],
+            "generated_wavs": [],
+            "target_results": [],
+        }
+        for candidate in candidates
+    }
+    per_target_reports = []
+
+    for target in targets:
+        rendered = []
+        path_to_name = {}
+        for candidate in candidates:
+            target_candidate = target_set_render_candidate(
+                candidate,
+                target,
+                args.round_id,
+                candidate["render_dir"],
+            )
+            render_candidate(root, target_candidate)
+            rendered.append(target_candidate)
+            path_to_name[target_candidate["out"]] = candidate["name"]
+            per_candidate[candidate["name"]]["generated_wavs"].append(
+                target_candidate["out"]
+            )
+
+        generated_paths = [candidate["out"] for candidate in rendered]
+        target_report_path = aggregate_report_path(args, target["id"])
+        run_scorer(root, target["path"], generated_paths, target_report_path)
+        target_report = load_report(root, target_report_path)
+        per_target_reports.append(
+            {
+                "target_id": target["id"],
+                "target_path": target["path"],
+                "report": target_report_path,
+            }
+        )
+
+        for result in target_report["results"]:
+            candidate_name = path_to_name[result["generated"]]
+            per_candidate[candidate_name]["target_results"].append(
+                {
+                    "target_id": target["id"],
+                    "target_path": target["path"],
+                    "generated": result["generated"],
+                    "score": result["score"],
+                    "loss": result["loss"],
+                    "component_losses": result.get("component_losses", {}),
+                }
+            )
+
+    ranking = target_set_ranking(per_candidate.values())
+    report = {
+        "meta": {
+            "version": 1,
+            "purpose": "Aggregate candidate ranking across a validated guitar pluck target set.",
+            "round_id": args.round_id,
+            "target_set": args.target_set,
+            "source_target_set_version": target_set_manifest.get("meta", {}).get("version"),
+            "promotion_rule": "listener confirms improvement and scorer agreement",
+        },
+        "targets": targets,
+        "per_target_reports": per_target_reports,
+        "ranking": ranking,
+    }
+    write_json_report(root, report_path_for(args), report)
+    return target_set_summary(args, report)
+
+
+def target_set_ranking(candidate_entries):
+    ranking = []
+    for entry in candidate_entries:
+        scores = [result["score"] for result in entry["target_results"]]
+        losses = [result["loss"] for result in entry["target_results"]]
+        if not scores:
+            continue
+        ranking.append(
+            {
+                "name": entry["name"],
+                "instrument": entry["instrument"],
+                "score": round(sum(scores) / len(scores), 4),
+                "min_score": round(min(scores), 4),
+                "max_score": round(max(scores), 4),
+                "loss": round(sum(losses) / len(losses), 6),
+                "target_count": len(scores),
+                "generated_wavs": entry["generated_wavs"],
+                "target_results": sorted(
+                    entry["target_results"],
+                    key=lambda item: item["target_id"],
+                ),
+            }
+        )
+
+    ranking.sort(key=lambda item: item["score"], reverse=True)
+    for index, item in enumerate(ranking, start=1):
+        item["rank"] = index
+    return ranking
+
+
+def target_set_summary(args, report):
+    ranking = report["ranking"]
+    highest = ranking[0] if ranking else None
+    return {
+        "target_set": args.target_set,
+        "targets": report["targets"],
+        "report": report_path_for(args),
+        "per_target_reports": report["per_target_reports"],
+        "highest_scorer": highest["name"] if highest else None,
+        "ranking": [
+            {
+                "rank": item["rank"],
+                "score": item["score"],
+                "min_score": item["min_score"],
+                "loss": item["loss"],
+                "name": item["name"],
+                "instrument": item["instrument"],
+            }
+            for item in ranking
+        ],
+        "promotion_rule": "listener confirms improvement and scorer agreement",
+    }
+
+
 def print_text_summary(summary):
+    if "target_set" in summary:
+        print_target_set_summary(summary)
+        return
+
     print("round_paths")
     print(f"target={summary['target']}")
     print(f"previous_winner={summary['previous_winner']}")
@@ -301,16 +522,50 @@ def print_text_summary(summary):
     print(f"promotion_rule={summary['promotion_rule']}")
 
 
+def print_target_set_summary(summary):
+    print("target_set_round")
+    print(f"target_set={summary['target_set']}")
+    print(f"report={summary['report']}")
+    print("targets:")
+    for target in summary["targets"]:
+        print(
+            f"- {target['id']} freq={target['frequency_hz']:.4f} "
+            f"note={target['nearest_note']} path={target['path']}"
+        )
+    print("per_target_reports:")
+    for report in summary["per_target_reports"]:
+        print(f"- {report['target_id']}: {report['report']}")
+    print("ranking:")
+    for item in summary["ranking"]:
+        print(
+            f"{item['rank']}. avg_score={item['score']:.4f} "
+            f"min_score={item['min_score']:.4f} avg_loss={item['loss']:.6f} "
+            f"name={item['name']} instrument={item['instrument']}"
+        )
+    print(f"highest_scorer={summary['highest_scorer']}")
+    print(f"promotion_rule={summary['promotion_rule']}")
+
+
 def main():
     args = parse_args()
     root = repo_root()
-    validate_inputs(root, args.target, args.previous_winner)
 
     defaults = candidate_defaults(args)
     candidates = [
         parse_candidate_spec(spec, defaults, args.round_id)
         for spec in default_candidates(args)
     ]
+
+    if args.target_set:
+        summary = run_target_set_round(root, args, candidates)
+        if args.json:
+            print(json.dumps(summary, indent=2))
+            return
+
+        print_text_summary(summary)
+        return
+
+    validate_single_target_inputs(root, args)
 
     for candidate in candidates:
         render_candidate(root, candidate)
