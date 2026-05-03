@@ -17,8 +17,22 @@ DEFAULT_RENDER_DIR = "artifacts/instrument_renders"
 DEFAULT_REPORT_DIR = "artifacts/music_reports"
 DEFAULT_PRESET_DIR = "artifacts/music_presets"
 BASELINE_PARAMS = {
-    "pluck_position": 0.175,
-    "body_gain": 1.15,
+    "pluck_position": 0.1678,
+    "pluck_brightness": 0.8165,
+    "string_mix": 1.7309,
+    "body_mix": 1.3536,
+    "attack_mix": 0.8253,
+    "mute": 0.114,
+    "string_decay": 0.7765,
+    "body_gain": 1.0442,
+    "body_decay": 0.7817,
+    "body_freq": 0.8752,
+    "pick_noise": 0.6683,
+    "attack_gain": 0.6903,
+    "attack_decay": 0.5456,
+    "inharmonicity": 0.4292,
+    "high_decay": 0.6963,
+    "output_gain": 0.9934,
 }
 SEARCH_SPACE = {
     "pluck_position": (0.115, 0.235),

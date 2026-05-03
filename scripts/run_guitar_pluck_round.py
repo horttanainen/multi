@@ -15,15 +15,29 @@ DEFAULT_TARGET_SET = (
 )
 DEFAULT_PREVIOUS_WINNER = (
     "artifacts/instrument_renders/"
-    "first_pluck_param_sweep2_pos175_body115.wav"
+    "target_set_fit_pass1_scorer2_fit_001_first_pluck.wav"
 )
 DEFAULT_INSTRUMENT = "guitar-modal-pluck"
 DEFAULT_FREQ_HZ = "390.2439"
 DEFAULT_VELOCITY = "0.8"
 DEFAULT_DURATION = "0.22"
 DEFAULT_GUITAR_PARAMS = {
-    "pluck_position": "0.175",
-    "body_gain": "1.15",
+    "pluck_position": "0.1678",
+    "pluck_brightness": "0.8165",
+    "string_mix": "1.7309",
+    "body_mix": "1.3536",
+    "attack_mix": "0.8253",
+    "mute": "0.114",
+    "string_decay": "0.7765",
+    "body_gain": "1.0442",
+    "body_decay": "0.7817",
+    "body_freq": "0.8752",
+    "pick_noise": "0.6683",
+    "attack_gain": "0.6903",
+    "attack_decay": "0.5456",
+    "inharmonicity": "0.4292",
+    "high_decay": "0.6963",
+    "output_gain": "0.9934",
 }
 DEFAULT_PROBE_CANDIDATES = [
     "name=guitar_modal,instrument=guitar-modal",

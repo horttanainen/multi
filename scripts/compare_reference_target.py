@@ -14,6 +14,23 @@ LOG_BIN_COUNT = 48
 LOG_BIN_MIN_HZ = 70.0
 LOG_BIN_MAX_HZ = 12000.0
 EPSILON = 1.0e-12
+SCORER_VERSION = 5
+COMPONENT_WEIGHTS = {
+    "multi_spectral": 0.08,
+    "envelope": 0.11,
+    "pluck_transient": 0.09,
+    "attack": 0.28,
+    "decay": 0.18,
+    "body_bloom": 0.14,
+    "sustain_texture": 0.03,
+    "acoustic_body_depth": 0.02,
+    "stable_oscillator": 0.02,
+    "centroid": 0.02,
+    "rolloff": 0.0,
+    "tilt": 0.01,
+    "pitch": 0.01,
+    "loudness": 0.01,
+}
 
 
 def parse_args():
@@ -130,6 +147,15 @@ def rms(samples):
     for sample in samples:
         total += sample * sample
     return math.sqrt(total / len(samples))
+
+
+def mean_square(samples):
+    if not samples:
+        return 0.0
+    total = 0.0
+    for sample in samples:
+        total += sample * sample
+    return total / len(samples)
 
 
 def peak_abs(samples):
@@ -607,6 +633,48 @@ def pluck_features(samples, sample_rate):
     }
 
 
+def temporal_energy_ratios(samples, sample_rate):
+    attack_energy = mean_square(samples_for_window(samples, sample_rate, 0.0, 0.035))
+    bloom_energy = mean_square(samples_for_window(samples, sample_rate, 0.035, 0.065))
+    body_energy = mean_square(samples_for_window(samples, sample_rate, 0.100, 0.090))
+    tail_energy = mean_square(samples_for_window(samples, sample_rate, 0.190, 0.110))
+    return {
+        "bloom_to_attack": safe_ratio(bloom_energy, attack_energy),
+        "body_to_attack": safe_ratio(body_energy, attack_energy),
+        "tail_to_attack": safe_ratio(tail_energy, attack_energy),
+        "tail_to_bloom": safe_ratio(tail_energy, bloom_energy),
+    }
+
+
+def temporal_body_bloom_loss(target_ratios, generated_ratios):
+    return clamp01(
+        ratio_loss(
+            target_ratios["bloom_to_attack"],
+            generated_ratios["bloom_to_attack"],
+            2.0,
+        )
+        * 0.35
+        + ratio_loss(
+            target_ratios["body_to_attack"],
+            generated_ratios["body_to_attack"],
+            2.0,
+        )
+        * 0.30
+        + ratio_loss(
+            target_ratios["tail_to_attack"],
+            generated_ratios["tail_to_attack"],
+            2.0,
+        )
+        * 0.25
+        + ratio_loss(
+            target_ratios["tail_to_bloom"],
+            generated_ratios["tail_to_bloom"],
+            2.0,
+        )
+        * 0.10
+    )
+
+
 def dominant_frequency_motion(attack_frequency, sustain_frequency):
     if attack_frequency <= EPSILON or sustain_frequency <= EPSILON:
         return 0.0
@@ -760,6 +828,15 @@ def rounded_pluck_features(features):
     }
 
 
+def rounded_temporal_ratios(ratios):
+    return {
+        "bloom_to_attack": round(ratios["bloom_to_attack"], 6),
+        "body_to_attack": round(ratios["body_to_attack"], 6),
+        "tail_to_attack": round(ratios["tail_to_attack"], 6),
+        "tail_to_bloom": round(ratios["tail_to_bloom"], 6),
+    }
+
+
 def dominant_frequency(samples, sample_rate):
     if not samples:
         return {"frequency_hz": 0.0, "confidence": 0.0}
@@ -840,10 +917,13 @@ def compare_pair(target, generated, args):
     generated_profile = spectral["profiles"][1][2]
     target_pluck = pluck_features(target_norm, sample_rate)
     generated_pluck = pluck_features(generated_norm, sample_rate)
+    target_temporal = temporal_energy_ratios(target_norm, sample_rate)
+    generated_temporal = temporal_energy_ratios(generated_norm, sample_rate)
     pluck_transient_loss = transient_loss(target_pluck, generated_pluck)
     sustain_texture_loss = texture_loss(target_pluck, generated_pluck)
     acoustic_body_depth_loss = body_depth_loss(target_pluck, generated_pluck)
     stable_oscillator_loss = oscillator_loss(target_pluck, generated_pluck)
+    body_bloom_loss = temporal_body_bloom_loss(target_temporal, generated_temporal)
 
     centroid_loss = ratio_loss(
         target_profile["centroid_hz"], generated_profile["centroid_hz"], 2.0
@@ -868,42 +948,30 @@ def compare_pair(target, generated, args):
     loudness_db = 20.0 * math.log10((generated_rms + EPSILON) / (target_rms + EPSILON))
     loudness_loss = clamp01(abs(loudness_db) / 18.0)
 
-    total_loss = (
-        spectral_loss * 0.10
-        + env_loss * 0.07
-        + pluck_transient_loss * 0.16
-        + attack_loss * 0.02
-        + decay_loss * 0.05
-        + sustain_texture_loss * 0.08
-        + acoustic_body_depth_loss * 0.20
-        + stable_oscillator_loss * 0.18
-        + centroid_loss * 0.03
-        + rolloff_loss * 0.01
-        + tilt_loss * 0.02
-        + pitch_loss * 0.01
-        + loudness_loss * 0.07
-    )
+    component_losses = {
+        "multi_spectral": spectral_loss,
+        "envelope": env_loss,
+        "pluck_transient": pluck_transient_loss,
+        "attack": attack_loss,
+        "decay": decay_loss,
+        "body_bloom": body_bloom_loss,
+        "sustain_texture": sustain_texture_loss,
+        "acoustic_body_depth": acoustic_body_depth_loss,
+        "stable_oscillator": stable_oscillator_loss,
+        "centroid": centroid_loss,
+        "rolloff": rolloff_loss,
+        "tilt": tilt_loss,
+        "pitch": pitch_loss,
+        "loudness": loudness_loss,
+    }
+    total_loss = weighted_component_loss(component_losses)
     similarity_score = max(0.0, 100.0 * (1.0 - clamp01(total_loss)))
 
     return {
         "generated": relative_path(generated["path"]),
         "score": round(similarity_score, 4),
         "loss": round(total_loss, 6),
-        "component_losses": {
-            "multi_spectral": round(spectral_loss, 6),
-            "envelope": round(env_loss, 6),
-            "pluck_transient": round(pluck_transient_loss, 6),
-            "attack": round(attack_loss, 6),
-            "decay": round(decay_loss, 6),
-            "sustain_texture": round(sustain_texture_loss, 6),
-            "acoustic_body_depth": round(acoustic_body_depth_loss, 6),
-            "stable_oscillator": round(stable_oscillator_loss, 6),
-            "centroid": round(centroid_loss, 6),
-            "rolloff": round(rolloff_loss, 6),
-            "tilt": round(tilt_loss, 6),
-            "pitch": round(pitch_loss, 6),
-            "loudness": round(loudness_loss, 6),
-        },
+        "component_losses": rounded_losses(component_losses),
         "alignment": {
             "target_onset_seconds": round(segments["target_onset_seconds"], 6),
             "generated_onset_seconds": round(
@@ -926,6 +994,7 @@ def compare_pair(target, generated, args):
             "tilt_db_per_octave": round(target_profile["tilt_db_per_octave"], 4),
             "dominant_frequency_hz": round(target_pitch["frequency_hz"], 4),
             "dominant_frequency_confidence": round(target_pitch["confidence"], 4),
+            "temporal_energy_ratios": rounded_temporal_ratios(target_temporal),
             "pluck_features": rounded_pluck_features(target_pluck),
         },
         "generated_stats": {
@@ -946,6 +1015,7 @@ def compare_pair(target, generated, args):
             "dominant_frequency_confidence": round(
                 generated_pitch["confidence"], 4
             ),
+            "temporal_energy_ratios": rounded_temporal_ratios(generated_temporal),
             "pluck_features": rounded_pluck_features(generated_pluck),
         },
         "spectral_resolutions": [
@@ -958,10 +1028,29 @@ def compare_pair(target, generated, args):
     }
 
 
+def rounded_losses(component_losses):
+    return {
+        name: round(component_losses[name], 6)
+        for name in COMPONENT_WEIGHTS
+        if name in component_losses
+    }
+
+
+def weighted_component_loss(component_losses):
+    total = 0.0
+    for name, weight in COMPONENT_WEIGHTS.items():
+        total += component_losses[name] * weight
+    return total
+
+
 def ratio_loss(reference, candidate, octave_span):
     if reference <= EPSILON or candidate <= EPSILON:
         return 1.0
     return clamp01(abs(math.log(candidate / reference, 2.0)) / octave_span)
+
+
+def safe_ratio(numerator, denominator):
+    return numerator / (denominator + EPSILON)
 
 
 def undershoot_loss(reference, candidate):
@@ -1019,6 +1108,7 @@ def print_text_report(report):
             f"pluck={losses['pluck_transient']:.3f} "
             f"attack={losses['attack']:.3f} "
             f"decay={losses['decay']:.3f} "
+            f"bloom={losses['body_bloom']:.3f} "
             f"texture={losses['sustain_texture']:.3f} "
             f"body={losses['acoustic_body_depth']:.3f} "
             f"osc={losses['stable_oscillator']:.3f} "
@@ -1067,18 +1157,19 @@ def main():
     results.sort(key=lambda item: item["score"], reverse=True)
     report = {
         "meta": {
-            "version": 4,
+            "version": SCORER_VERSION,
             "purpose": (
                 "Direct audio comparison between selected real-audio target "
                 "and generated probe WAVs."
             ),
+            "component_weights": COMPONENT_WEIGHTS,
             "scoring_note": (
                 "Score is higher-better. Losses are lower-better. "
-                "The pluck transient, sustain texture, acoustic body depth, "
-                "stable oscillator, and segment pitch losses are intended to "
-                "catch synthetic oscillator behavior, shallow-body sounds, "
-                "and narrow pitched artifacts that broad spectral averages "
-                "can miss. Metrics are a "
+                "This version gives more weight to attack timing, decay, "
+                "and early body bloom because listener comparison is done "
+                "on loudness-normalized audition packs. Raw loudness, "
+                "stable oscillator, and body-depth metrics remain as checks "
+                "but no longer dominate promotion decisions. Metrics are a "
                 "listening-alignment check, not a final replacement for "
                 "human auditioning."
             ),
