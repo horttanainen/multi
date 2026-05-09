@@ -139,6 +139,31 @@ Example guitar parameters:
 - stereo width
 - release/mute behavior
 
+### Acoustic Guitar Research Basis
+
+Use these references when iterating on the single-pluck acoustic guitar model:
+
+- `docs/references/acoustic_guitar_synthesis/j.apacoust.2015.04.006.pdf`
+  - Circuit/transmission-line classical guitar model.
+  - Key implementation idea: treat the string as a plucked transmission-line
+    model and shape it through a guitar body response rather than expecting the
+    string model alone to sound realistic.
+- Woodhouse, "On the synthesis of guitar plucks"
+  - Local file: `docs/references/acoustic_guitar_synthesis/Guitar_I.pdf`
+  - Key implementation idea: realistic plucks depend on coupled string/body
+    transient behavior and correct string damping.
+- Columbia DSP project, "Synthesizing a Guitar Using Physical Modeling
+  Techniques"
+  - URL: `https://www.ee.columbia.edu/~ronw/dsp/`
+  - Key implementation idea: a simple digital waveguide produces a plucked
+    string-like sound but still sounds artificial without filtering/body
+    modeling.
+
+Practical rule for this project: do not assume `WaveguideString` is the
+instrument. First test raw string behavior, then compare it with a modal/body
+response approach against the selected target pluck. Keep each layer audible and
+reversible.
+
 Example drum parameters:
 
 - transient amount
@@ -245,7 +270,7 @@ Do not keep generated caches or bulky outputs in source control:
 
 Before starting new work:
 
-1. Commit source/docs/scripts that are useful and buildable enough to preserve.
+1. Commit source/docs/scripts that are useful enough to preserve.
 2. Keep generated artifacts out of git unless a small fixture is explicitly
    needed.
 3. Record that the current audio quality is poor and why.
@@ -254,16 +279,7 @@ Before starting new work:
 
 ## First Task Tomorrow
 
-Start with toolchain cleanup:
-
-- upgrade the project/developer environment from Zig `0.15.2` to Zig `0.16.0`
-  (`https://ziglang.org/news/0.16.0-released/`)
-- verify `zig build` on the native macOS target
-- re-resolve/fetch Zig package dependencies, including Box2D
-- update any build/source incompatibilities introduced by Zig `0.16.0`
-- run the normal smoke test once the build succeeds
-
-Then implement a small target-validation pass for guitar clips:
+Implement a small target-validation pass for guitar clips:
 
 - read `targets_manifest.json`
 - recompute pitch stats per target

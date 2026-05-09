@@ -4,6 +4,7 @@ zig-out/
 .DS_Store
 __pycache__/
 *.pyc
+.codex_pdf_tools/
 
 # Generated music/reference outputs
 artifacts/

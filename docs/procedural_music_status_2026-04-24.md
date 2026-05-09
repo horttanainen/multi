@@ -30,9 +30,6 @@ The pipeline is broad but not yet successful.
 - Both offline Americana rendering and headless runtime capture currently force
   procedural backends, so the normal evaluation loop cannot validate inverse
   playback.
-- A plain `zig build` currently fails in this environment before project
-  compilation with unresolved macOS system symbols. That needs separate
-  toolchain/environment cleanup before reliable smoke testing.
 
 ## Current Artifacts
 
@@ -369,28 +366,6 @@ That pulse confidence is effectively saying "do not trust this beat estimate."
 Any process that maps this directly into composition timing should treat it as a
 hint, not ground truth.
 
-### 11. Build Verification Is Currently Blocked
-
-On 2026-04-24, `zig build` was attempted both normally and outside the sandbox.
-Both runs failed before source-level compilation with unresolved macOS system
-symbols such as:
-
-- `__availability_version_check`
-- `_abort`
-- `_clock_gettime`
-- `_dispatch_queue_create`
-- `_waitpid`
-
-Environment details:
-
-- Zig: `0.15.2`
-- OS: Darwin `25.3.0` arm64
-- SDK path: `/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk`
-- Apple clang: `21.0.0`
-
-This looks like a Zig/toolchain/platform link issue, not a procedural music
-logic failure, but it blocks reliable build/smoke verification.
-
 ## What Is Missing
 
 Highest-impact missing pieces:
@@ -414,42 +389,37 @@ Highest-impact missing pieces:
   style imitation. The current metrics mix both goals.
 - Human listening gate: metrics are useful for iteration, but promotion should
   require a short A/B listening note because several failures are perceptual.
-- Build/toolchain cleanup so the code path can be verified after every change.
 
 ## Recommended Next Process
 
-1. Fix build verification first.
-   - The current repository cannot be reliably validated with `zig build`.
-   - Do not trust further audio changes until build/smoke is green.
-
-2. Freeze `americana_current_best` as "failing baseline."
+1. Freeze `americana_current_best` as "failing baseline."
    - Keep its reports as the baseline.
    - Rename future promotions or add metadata so failing candidates are not
      confused with passing ones.
 
-3. Make inverse evaluation real.
+2. Make inverse evaluation real.
    - Add inverse-capable render/capture paths.
    - Render drums/guitar from `americana_raga.runtime_manifest.json`.
    - Compare those renders against the same `drums.wav` and `guitar.wav`.
 
-4. Stop optimizing full-track guitar before pitch extraction is fixed.
+3. Stop optimizing full-track guitar before pitch extraction is fixed.
    - Add octave-consistency checks.
    - Reject guitar targets with very low voiced ratio or contradictory median
      pitch.
    - Validate target MIDI against descriptor-level pitch before running
      optimization.
 
-5. Add event-level targets.
+4. Add event-level targets.
    - For guitar: target note sequence, rough onset times, durations, and pitch
      contour.
    - For drums/percussion: target onset classes and spectral bands.
    - Use aggregate descriptors only as secondary checks.
 
-6. Expand synthesis only after target data is trustworthy.
+5. Expand synthesis only after target data is trustworthy.
    - Current knobs cannot fix missing melody and wrong articulation.
    - Add controllable performance parameters before more random-search tuning.
 
-7. Re-run the full loop only when the above is in place.
+6. Re-run the full loop only when the above is in place.
    - Reference pipeline.
    - Procedural render.
    - Inverse render.
