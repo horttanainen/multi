@@ -25,6 +25,10 @@ const MUTED_FRET: i8 = -1;
 const ROOT_D2: u8 = 38;
 const CHORD_CHANGE_BEATS: f32 = 16.0;
 const GESTURE_HISTORY_SIZE: usize = 10;
+const GUITAR_REVERB_SEND_SCALE: f32 = 0.44;
+const GUITAR_REVERB_MAX_WET: f32 = 0.62;
+const GUITAR_REVERB_RETURN_GAIN: f32 = 2.4;
+const GUITAR_REVERB_DRY_DUCK: f32 = 0.35;
 
 const OPEN_STRING_MIDI: [STRING_COUNT]u8 = .{ 38, 45, 50, 55, 59, 64 };
 const STRING_PAN: [STRING_COUNT]f32 = .{ -0.12, -0.08, -0.03, 0.04, 0.09, 0.14 };
@@ -514,8 +518,8 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var stereo = processVoices();
         const room = dsp.stereoReverbProcess(.{ 1301, 1511, 1741, 1999 }, .{ 353, 941 }, &reverb, stereo);
         const wet = guitarReverbWet(spec.reverb_boost) * composition.slowLfoModulate(&lfo_space);
-        stereo[0] = stereo[0] * (1.0 - wet * 0.4) + room[0] * wet;
-        stereo[1] = stereo[1] * (1.0 - wet * 0.4) + room[1] * wet;
+        stereo[0] = stereo[0] * (1.0 - wet * GUITAR_REVERB_DRY_DUCK) + room[0] * wet * GUITAR_REVERB_RETURN_GAIN;
+        stereo[1] = stereo[1] * (1.0 - wet * GUITAR_REVERB_DRY_DUCK) + room[1] * wet * GUITAR_REVERB_RETURN_GAIN;
 
         const out_idx = frame_idx * 2;
         buf[out_idx] = softClip(stereo[0] * guitar_vol * runner.layer_levels[0]);
@@ -796,7 +800,7 @@ fn tempoScale() f32 {
 }
 
 fn guitarReverbWet(reverb_boost: f32) f32 {
-    return std.math.clamp((reverb_mix + reverb_boost) * 0.12, 0.0, 0.16);
+    return std.math.clamp((reverb_mix + reverb_boost) * GUITAR_REVERB_SEND_SCALE, 0.0, GUITAR_REVERB_MAX_WET);
 }
 
 fn randomIndex(count: usize) usize {

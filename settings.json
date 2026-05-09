@@ -48,7 +48,7 @@
   "bg_loudness_strength": 0.6099996566772461,
   "bg_onset_mode": 10,
   "bg_onset_strength": 0.19999995827674866,
-  "music_style": "taiko",
+  "music_style": "americana_guitar",
   "music_volume": 1,
   "music_bpm": 1.0000009536743164,
   "music_reverb_mix": 0.20000001788139343,
@@ -73,5 +73,6 @@
   "music_taiko_shime_mix": 0.550000011920929,
   "music_taiko_nagado_mix": 0.6499999761581421,
   "music_taiko_kane_mix": 0.5,
-  "music_taiko_cue": 3
+  "music_taiko_cue": 3,
+  "music_americana_guitar_cue": 2
 }

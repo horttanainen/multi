@@ -82,28 +82,6 @@ const americana_guitar_cue_names = [AMERICANA_GUITAR_CUE_COUNT][:0]const u8{
 var volume_config = menu.ConfigData{ .value = 0.5, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var reverb_config = menu.ConfigData{ .value = 0.6, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 var bpm_config    = menu.ConfigData{ .value = 1.0, .step = 0.01, .min = 0, .max = 2.0, .repeat_delay_ms = 75 };
-
-// --- Ambient-specific ---
-var amb_drone_vol_config  = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
-var amb_pad_vol_config    = menu.ConfigData{ .value = 0.53, .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.15, .repeat_delay_ms = 75 };
-var amb_melody_vol_config = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.12, .repeat_delay_ms = 75 };
-var amb_arp_vol_config    = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.05, .repeat_delay_ms = 75 };
-
-// --- Choir-specific ---
-var choir_vol_config         = menu.ConfigData{ .value = 0.6,  .step = 0.01, .min = 0, .max = 1.0, .shader_offset = 0.0, .shader_scale = 0.25, .repeat_delay_ms = 75 };
-var choir_breathiness_config = menu.ConfigData{ .value = 0.3,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var choir_drone_mix_config   = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var choir_chant_mix_config   = menu.ConfigData{ .value = 0.58, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var african_drum_mix_config   = menu.ConfigData{ .value = 0.9,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var african_shaker_mix_config = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var african_tone_mix_config   = menu.ConfigData{ .value = 0.62, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var african_slap_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-
-// --- Taiko-specific ---
-var taiko_drum_mix_config   = menu.ConfigData{ .value = 0.9,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var taiko_shime_mix_config  = menu.ConfigData{ .value = 0.55, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var taiko_nagado_mix_config = menu.ConfigData{ .value = 0.65, .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
-var taiko_kane_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min = 0, .max = 1.0, .repeat_delay_ms = 75 };
 // zig fmt: on
 
 // ============================================================
@@ -111,61 +89,15 @@ var taiko_kane_mix_config   = menu.ConfigData{ .value = 0.5,  .step = 0.01, .min
 // ============================================================
 
 const IDX_STYLE: usize = 1;
+const IDX_CUE: usize = 2;
 
 var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
     .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
-    .{ .label = "Tweak", .kind = .{ .button = actionOpenTweak }, .font = .medium },
+    .{ .label = "Cue: Dawn", .kind = .{ .button = actionCycleCue }, .font = .medium, .cycle_names = &ambient_cue_names, .cycle_index = &ambient_cue_value, .on_cycle = onCycleCue },
     .{ .label = "Volume", .kind = .{ .config = &volume_config }, .font = .medium },
     .{ .label = "Tempo Scale", .kind = .{ .config = &bpm_config }, .font = .medium },
     .{ .label = "Reverb", .kind = .{ .config = &reverb_config }, .font = .medium },
-};
-
-// --- Ambient sub-menu ---
-var ambient_items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Cue: Dawn", .kind = .{ .button = actionCycleAmbientCue }, .font = .medium, .cycle_names = &ambient_cue_names, .cycle_index = &ambient_cue_value, .on_cycle = onCycleAmbientCue },
-    .{ .label = "Drone Volume", .kind = .{ .config = &amb_drone_vol_config }, .font = .medium },
-    .{ .label = "Pad Volume", .kind = .{ .config = &amb_pad_vol_config }, .font = .medium },
-    .{ .label = "Melody Volume", .kind = .{ .config = &amb_melody_vol_config }, .font = .medium },
-    .{ .label = "Arp Volume", .kind = .{ .config = &amb_arp_vol_config }, .font = .medium },
-};
-
-// --- Choir sub-menu ---
-var choir_items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerChoirCue }, .font = .medium },
-    .{ .label = "Cue: Cathedral", .kind = .{ .button = actionCycleChoirCue }, .font = .medium, .cycle_names = &choir_cue_names, .cycle_index = &choir_cue_value, .on_cycle = onCycleChoirCue },
-    .{ .label = "Choir Volume", .kind = .{ .config = &choir_vol_config }, .font = .medium },
-    .{ .label = "Breathiness", .kind = .{ .config = &choir_breathiness_config }, .font = .medium },
-    .{ .label = "Drone Presence", .kind = .{ .config = &choir_drone_mix_config }, .font = .medium },
-    .{ .label = "Chant Presence", .kind = .{ .config = &choir_chant_mix_config }, .font = .medium },
-};
-
-var african_items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerAfricanCue }, .font = .medium },
-    .{ .label = "Cue: Kuku", .kind = .{ .button = actionCycleAfricanCue }, .font = .medium, .cycle_names = &african_cue_names, .cycle_index = &african_cue_value, .on_cycle = onCycleAfricanCue },
-    .{ .label = "Drum Presence", .kind = .{ .config = &african_drum_mix_config }, .font = .medium },
-    .{ .label = "Shaker Presence", .kind = .{ .config = &african_shaker_mix_config }, .font = .medium },
-    .{ .label = "Tone Drum", .kind = .{ .config = &african_tone_mix_config }, .font = .medium },
-    .{ .label = "Slap Drum", .kind = .{ .config = &african_slap_mix_config }, .font = .medium },
-};
-
-var taiko_items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerTaikoCue }, .font = .medium },
-    .{ .label = "Cue: Matsuri", .kind = .{ .button = actionCycleTaikoCue }, .font = .medium, .cycle_names = &taiko_cue_names, .cycle_index = &taiko_cue_value, .on_cycle = onCycleTaikoCue },
-    .{ .label = "Drum Presence", .kind = .{ .config = &taiko_drum_mix_config }, .font = .medium },
-    .{ .label = "Shime Volume", .kind = .{ .config = &taiko_shime_mix_config }, .font = .medium },
-    .{ .label = "Nagado Volume", .kind = .{ .config = &taiko_nagado_mix_config }, .font = .medium },
-    .{ .label = "Atarigane Volume", .kind = .{ .config = &taiko_kane_mix_config }, .font = .medium },
-};
-
-var americana_guitar_items = [_]menu.Item{
-    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
-    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerAmericanaGuitarCue }, .font = .medium },
-    .{ .label = "Cue: Open Road", .kind = .{ .button = actionCycleAmericanaGuitarCue }, .font = .medium, .cycle_names = &americana_guitar_cue_names, .cycle_index = &americana_guitar_cue_value, .on_cycle = onCycleAmericanaGuitarCue },
 };
 
 // ============================================================
@@ -217,44 +149,47 @@ fn loadFromParams() void {
     volume_config.value = settings.music_volume;
     fromShader(&bpm_config, settings.music_bpm);
     reverb_config.value = settings.music_reverb_mix;
-
-    switch (settings.music_style) {
-        .ambient => {
-            ambient_cue_value = settings.music_ambient_cue;
-            fromShader(&amb_drone_vol_config, settings.music_ambient_drone_vol);
-            fromShader(&amb_pad_vol_config, settings.music_ambient_pad_vol);
-            fromShader(&amb_melody_vol_config, settings.music_ambient_melody_vol);
-            fromShader(&amb_arp_vol_config, settings.music_ambient_arp_vol);
-        },
-        .choir => {
-            fromShader(&choir_vol_config, settings.music_choir_vol);
-            choir_breathiness_config.value = settings.music_choir_breathiness;
-            choir_drone_mix_config.value = settings.music_choir_drone_mix;
-            choir_chant_mix_config.value = settings.music_choir_chant_mix;
-            choir_cue_value = settings.music_choir_cue;
-        },
-        .african_drums => {
-            african_cue_value = settings.music_african_cue;
-            african_drum_mix_config.value = settings.music_african_drum_mix;
-            african_shaker_mix_config.value = settings.music_african_shaker_mix;
-            african_tone_mix_config.value = settings.music_african_bass_mix;
-            african_slap_mix_config.value = settings.music_african_drone_mix;
-        },
-        .taiko => {
-            taiko_cue_value = settings.music_taiko_cue;
-            taiko_drum_mix_config.value = settings.music_taiko_drum_mix;
-            taiko_shime_mix_config.value = settings.music_taiko_shime_mix;
-            taiko_nagado_mix_config.value = settings.music_taiko_nagado_mix;
-            taiko_kane_mix_config.value = settings.music_taiko_kane_mix;
-        },
-        .americana_guitar => {
-            americana_guitar_cue_value = settings.music_americana_guitar_cue;
-        },
-    }
+    ambient_cue_value = settings.music_ambient_cue;
+    choir_cue_value = settings.music_choir_cue;
+    african_cue_value = settings.music_african_cue;
+    taiko_cue_value = settings.music_taiko_cue;
+    americana_guitar_cue_value = settings.music_americana_guitar_cue;
+    updateCueRow();
 }
 
 fn updateStyleLabel() void {
     main_items[IDX_STYLE].label = style_names[style_value];
+}
+
+fn updateCueRow() void {
+    const item = &main_items[IDX_CUE];
+    switch (style_targets[style_value]) {
+        .ambient => {
+            item.cycle_names = &ambient_cue_names;
+            item.cycle_index = &ambient_cue_value;
+            item.label = ambient_cue_names[ambient_cue_value];
+        },
+        .choir => {
+            item.cycle_names = &choir_cue_names;
+            item.cycle_index = &choir_cue_value;
+            item.label = choir_cue_names[choir_cue_value];
+        },
+        .african_drums => {
+            item.cycle_names = &african_cue_names;
+            item.cycle_index = &african_cue_value;
+            item.label = african_cue_names[african_cue_value];
+        },
+        .taiko => {
+            item.cycle_names = &taiko_cue_names;
+            item.cycle_index = &taiko_cue_value;
+            item.label = taiko_cue_names[taiko_cue_value];
+        },
+        .americana_guitar => {
+            item.cycle_names = &americana_guitar_cue_names;
+            item.cycle_index = &americana_guitar_cue_value;
+            item.label = americana_guitar_cue_names[americana_guitar_cue_value];
+        },
+    }
 }
 
 fn toShader(cfg: *const menu.ConfigData) f32 {
@@ -275,31 +210,15 @@ fn applyMenuToSettings(save_changes: bool) !void {
     switch (settings.music_style) {
         .ambient => {
             settings.music_ambient_cue = ambient_cue_value;
-            settings.music_ambient_drone_vol = toShader(&amb_drone_vol_config);
-            settings.music_ambient_pad_vol = toShader(&amb_pad_vol_config);
-            settings.music_ambient_melody_vol = toShader(&amb_melody_vol_config);
-            settings.music_ambient_arp_vol = toShader(&amb_arp_vol_config);
         },
         .choir => {
-            settings.music_choir_vol = toShader(&choir_vol_config);
-            settings.music_choir_breathiness = choir_breathiness_config.value;
-            settings.music_choir_drone_mix = choir_drone_mix_config.value;
-            settings.music_choir_chant_mix = choir_chant_mix_config.value;
             settings.music_choir_cue = choir_cue_value;
         },
         .african_drums => {
             settings.music_african_cue = african_cue_value;
-            settings.music_african_drum_mix = african_drum_mix_config.value;
-            settings.music_african_shaker_mix = african_shaker_mix_config.value;
-            settings.music_african_bass_mix = african_tone_mix_config.value;
-            settings.music_african_drone_mix = african_slap_mix_config.value;
         },
         .taiko => {
             settings.music_taiko_cue = taiko_cue_value;
-            settings.music_taiko_drum_mix = taiko_drum_mix_config.value;
-            settings.music_taiko_shime_mix = taiko_shime_mix_config.value;
-            settings.music_taiko_nagado_mix = taiko_nagado_mix_config.value;
-            settings.music_taiko_kane_mix = taiko_kane_mix_config.value;
         },
         .americana_guitar => {
             settings.music_americana_guitar_cue = americana_guitar_cue_value;
@@ -329,124 +248,66 @@ fn actionBack() anyerror!void {
     try menu.back();
 }
 
-fn actionBackToMain() anyerror!void {
-    try applyMenuToSettings(false);
-    try menu.back();
-}
-
 fn actionCycleStyle() anyerror!void {
     style_value = (style_value + 1) % @as(u8, @intCast(STYLE_COUNT));
     updateStyleLabel();
+    updateCueRow();
     try applyMenuToSettings(false);
-    loadFromParams();
+    triggerCurrentCue();
 }
 
 fn onCycleStyle() void {
     updateStyleLabel();
+    updateCueRow();
     applyMenuToSettings(false) catch |err| {
         std.log.warn("musicConfigMenu.onCycleStyle: failed to apply settings: {}", .{err});
         return;
     };
-    loadFromParams();
+    triggerCurrentCue();
 }
 
-fn actionOpenTweak() anyerror!void {
+fn actionCycleCue() anyerror!void {
+    const idx = activeCueValue();
+    idx.* = (idx.* + 1) % activeCueCount();
+    updateCueRow();
     try applyMenuToSettings(false);
-    switch (settings.music_style) {
-        .ambient => menu.push(&ambient_items, .{ .minimal_edit = true }),
-        .choir => menu.push(&choir_items, .{ .minimal_edit = true }),
-        .african_drums => menu.push(&african_items, .{ .minimal_edit = true }),
-        .taiko => menu.push(&taiko_items, .{ .minimal_edit = true }),
-        .americana_guitar => menu.push(&americana_guitar_items, .{ .minimal_edit = true }),
+    triggerCurrentCue();
+}
+
+fn onCycleCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    triggerCurrentCue();
+}
+
+fn activeCueValue() *u8 {
+    switch (style_targets[style_value]) {
+        .ambient => return &ambient_cue_value,
+        .choir => return &choir_cue_value,
+        .african_drums => return &african_cue_value,
+        .taiko => return &taiko_cue_value,
+        .americana_guitar => return &americana_guitar_cue_value,
     }
 }
 
-fn actionCycleAmbientCue() anyerror!void {
-    ambient_cue_value = (ambient_cue_value + 1) % AMBIENT_CUE_COUNT;
-    try applyMenuToSettings(false);
-    procedural_ambient.triggerCue();
-}
-
-fn onCycleAmbientCue() void {
-    applyMenuToSettings(false) catch |err| {
-        std.log.warn("musicConfigMenu.onCycleAmbientCue: failed to apply settings: {}", .{err});
-        return;
+fn activeCueCount() u8 {
+    return switch (style_targets[style_value]) {
+        .ambient => AMBIENT_CUE_COUNT,
+        .choir => CHOIR_CUE_COUNT,
+        .african_drums => AFRICAN_CUE_COUNT,
+        .taiko => TAIKO_CUE_COUNT,
+        .americana_guitar => AMERICANA_GUITAR_CUE_COUNT,
     };
-    procedural_ambient.triggerCue();
 }
 
-fn actionTriggerChoirCue() anyerror!void {
-    try applyMenuToSettings(false);
-    procedural_choir.triggerCue();
-}
-
-fn actionCycleChoirCue() anyerror!void {
-    choir_cue_value = (choir_cue_value + 1) % CHOIR_CUE_COUNT;
-    try applyMenuToSettings(false);
-    procedural_choir.triggerCue();
-}
-
-fn onCycleChoirCue() void {
-    applyMenuToSettings(false) catch |err| {
-        std.log.warn("musicConfigMenu.onCycleChoirCue: failed to apply settings: {}", .{err});
-        return;
-    };
-    procedural_choir.triggerCue();
-}
-
-fn actionTriggerAfricanCue() anyerror!void {
-    try applyMenuToSettings(false);
-    procedural_african_drums.triggerCue();
-}
-
-fn actionCycleAfricanCue() anyerror!void {
-    african_cue_value = (african_cue_value + 1) % AFRICAN_CUE_COUNT;
-    try applyMenuToSettings(false);
-    procedural_african_drums.triggerCue();
-}
-
-fn onCycleAfricanCue() void {
-    applyMenuToSettings(false) catch |err| {
-        std.log.warn("musicConfigMenu.onCycleAfricanCue: failed to apply settings: {}", .{err});
-        return;
-    };
-    procedural_african_drums.triggerCue();
-}
-
-fn actionTriggerTaikoCue() anyerror!void {
-    try applyMenuToSettings(false);
-    procedural_taiko.triggerCue();
-}
-
-fn actionCycleTaikoCue() anyerror!void {
-    taiko_cue_value = (taiko_cue_value + 1) % TAIKO_CUE_COUNT;
-    try applyMenuToSettings(false);
-    procedural_taiko.triggerCue();
-}
-
-fn onCycleTaikoCue() void {
-    applyMenuToSettings(false) catch |err| {
-        std.log.warn("musicConfigMenu.onCycleTaikoCue: failed to apply settings: {}", .{err});
-        return;
-    };
-    procedural_taiko.triggerCue();
-}
-
-fn actionTriggerAmericanaGuitarCue() anyerror!void {
-    try applyMenuToSettings(false);
-    procedural_americana_guitar.triggerCue();
-}
-
-fn actionCycleAmericanaGuitarCue() anyerror!void {
-    americana_guitar_cue_value = (americana_guitar_cue_value + 1) % AMERICANA_GUITAR_CUE_COUNT;
-    try applyMenuToSettings(false);
-    procedural_americana_guitar.triggerCue();
-}
-
-fn onCycleAmericanaGuitarCue() void {
-    applyMenuToSettings(false) catch |err| {
-        std.log.warn("musicConfigMenu.onCycleAmericanaGuitarCue: failed to apply settings: {}", .{err});
-        return;
-    };
-    procedural_americana_guitar.triggerCue();
+fn triggerCurrentCue() void {
+    switch (settings.music_style) {
+        .ambient => procedural_ambient.triggerCue(),
+        .choir => procedural_choir.triggerCue(),
+        .african_drums => procedural_african_drums.triggerCue(),
+        .taiko => procedural_taiko.triggerCue(),
+        .americana_guitar => procedural_americana_guitar.triggerCue(),
+    }
 }
