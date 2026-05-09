@@ -26,6 +26,7 @@ pub const GuitarParams = struct {
     inharmonicity_scale: f32 = 1.0,
     high_decay_scale: f32 = 1.0,
     output_gain_scale: f32 = 1.0,
+    rng_seed: ?u32 = null,
 };
 
 pub const GuitarProbeParams = GuitarParams;
@@ -91,7 +92,7 @@ pub fn guitarFaustPluckTrigger(ctx: *GuitarFaustPluck, frequency_hz: f32, veloci
 pub fn guitarFaustPluckTriggerWithParams(ctx: *GuitarFaustPluck, frequency_hz: f32, velocity: f32, params: GuitarParams) void {
     ctx.* = .{};
     ctx.params = guitarParamsSanitized(params);
-    ctx.rng = dsp.rngInit(0xFA57_921D);
+    ctx.rng = dsp.rngInit(ctx.params.rng_seed orelse 0xFA57_921D);
     ctx.frequency_hz = guitarFrequencySafe(frequency_hz);
     ctx.velocity = guitarVelocitySafe(velocity);
 
@@ -283,6 +284,7 @@ fn guitarParamsSanitized(params: GuitarParams) GuitarParams {
         .inharmonicity_scale = guitarScaleSanitized("inharmonicity_scale", params.inharmonicity_scale, 0.0, 3.0),
         .high_decay_scale = guitarScaleSanitized("high_decay_scale", params.high_decay_scale, 0.35, 2.5),
         .output_gain_scale = guitarScaleSanitized("output_gain_scale", params.output_gain_scale, 0.0, 8.0),
+        .rng_seed = params.rng_seed,
     };
 }
 
@@ -477,15 +479,21 @@ pub fn djembeProcess(ctx: *Djembe, rng_inst: *dsp.Rng) f32 {
 
 fn djembeConfigureResonators(ctx: *Djembe, stroke: DjembeStroke) void {
     switch (stroke) {
-        .bass => dsp.resonatorBankConfigure(3, &ctx.resonators,
+        .bass => dsp.resonatorBankConfigure(
+            3,
+            &ctx.resonators,
             .{ ctx.base_freq * 0.19, ctx.base_freq * 0.31, ctx.base_freq * 0.46 },
             .{ 0.99945, 0.9991, 0.9988 },
         ),
-        .tone => dsp.resonatorBankConfigure(3, &ctx.resonators,
+        .tone => dsp.resonatorBankConfigure(
+            3,
+            &ctx.resonators,
             .{ ctx.base_freq, ctx.base_freq * 1.51, ctx.base_freq * 2.18 },
             .{ 0.9991, 0.9986, 0.9982 },
         ),
-        .slap => dsp.resonatorBankConfigure(3, &ctx.resonators,
+        .slap => dsp.resonatorBankConfigure(
+            3,
+            &ctx.resonators,
             .{ ctx.base_freq * 2.3, ctx.base_freq * 3.1, ctx.base_freq * 4.26 },
             .{ 0.9982, 0.9978, 0.9972 },
         ),
@@ -733,7 +741,9 @@ pub fn atariganeProcess(ctx: *Atarigane, rng_inst: *dsp.Rng) f32 {
 }
 
 fn atariganeConfigureModes(ctx: *Atarigane) void {
-    dsp.resonatorBankConfigure(4, &ctx.resonators,
+    dsp.resonatorBankConfigure(
+        4,
+        &ctx.resonators,
         .{
             ctx.base_freq,
             ctx.base_freq * 2.31,
