@@ -34,7 +34,7 @@ const RenderConfig = struct {
     velocity: f32 = 0.8,
     duration_seconds: f32 = 1.2,
     out_path: []const u8 = DEFAULT_OUT_PATH,
-    guitar_params: guitar_probe.GuitarProbeParams = .{},
+    guitar_params: instruments.GuitarParams = .{},
 };
 
 const RenderStats = struct {
@@ -453,7 +453,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
     var guitar_sms_fit: guitar_probe.GuitarSmsFit = .{};
     var guitar_ks: guitar_probe.GuitarKs = .{};
     var guitar_waveguide_raw: guitar_probe.GuitarWaveguideRaw = .{};
-    var guitar_faust_pluck: guitar_probe.GuitarFaustPluck = .{};
+    var guitar_faust_pluck: instruments.GuitarFaustPluck = .{};
     var guitar_faust_bridge_pluck: guitar_probe.GuitarFaustBridgePluck = .{};
     var guitar_faust_body_pluck: guitar_probe.GuitarFaustBodyPluck = .{};
 
@@ -469,7 +469,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
         .guitar_sms_fit => guitar_probe.guitarSmsFitTriggerWithParams(&guitar_sms_fit, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_ks => guitar_probe.guitarKsTriggerWithParams(&guitar_ks, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTriggerWithParams(&guitar_waveguide_raw, frequency_hz, cfg.velocity, cfg.guitar_params),
-        .guitar_faust_pluck => guitar_probe.guitarFaustPluckTriggerWithParams(&guitar_faust_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_faust_pluck => instruments.guitarFaustPluckTriggerWithParams(&guitar_faust_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_faust_bridge_pluck => guitar_probe.guitarFaustBridgePluckTriggerWithParams(&guitar_faust_bridge_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_faust_body_pluck => guitar_probe.guitarFaustBodyPluckTriggerWithParams(&guitar_faust_body_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
         .sine_drone => {},
@@ -499,7 +499,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
                 .guitar_sms_fit => guitar_probe.guitarSmsFitProcess(&guitar_sms_fit),
                 .guitar_ks => guitar_probe.guitarKsProcess(&guitar_ks),
                 .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawProcess(&guitar_waveguide_raw),
-                .guitar_faust_pluck => guitar_probe.guitarFaustPluckProcess(&guitar_faust_pluck),
+                .guitar_faust_pluck => instruments.guitarFaustPluckProcess(&guitar_faust_pluck),
                 .guitar_faust_bridge_pluck => guitar_probe.guitarFaustBridgePluckProcess(&guitar_faust_bridge_pluck),
                 .guitar_faust_body_pluck => guitar_probe.guitarFaustBodyPluckProcess(&guitar_faust_body_pluck),
             };

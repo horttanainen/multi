@@ -11,6 +11,9 @@ candidate WAVs, and a scoring report before any candidate is promoted.
 ## Current Accepted Baseline
 
 - Instrument: `guitar-faust-pluck`
+- Implementation home: `src/music/instruments.zig`. `music_probe` should call
+  the production instrument from there; `src/music/guitar_probe.zig` is only for
+  audition/experimental guitar variants.
 - WAV:
   `artifacts/instrument_renders/target_set_faust_direct_pluck_pass1_audition/by_candidate_03_faust_direct_moredepth.wav`
 - Preset:
