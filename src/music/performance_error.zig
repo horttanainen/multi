@@ -3,7 +3,7 @@ const dsp = @import("dsp.zig");
 
 const MS_TO_SAMPLES: f32 = dsp.SAMPLE_RATE / 1000.0;
 
-pub const TimingProfile = struct {
+pub const TimingErrorProfile = struct {
     base_latency_ms: f32,
     step_random_ms: f32,
     strong_step_scale: f32,
@@ -25,7 +25,7 @@ pub const TimingProfile = struct {
     max_delay_ms: f32,
 };
 
-pub const PitchProfile = struct {
+pub const PitchErrorProfile = struct {
     voice_bias_cents: f32,
     residual_anchor_cents: f32,
     residual_note_cents: f32,
@@ -33,12 +33,12 @@ pub const PitchProfile = struct {
     slip_cents: f32,
 };
 
-pub const PerformerProfile = struct {
-    timing: TimingProfile,
-    pitch: PitchProfile,
+pub const ErrorProfile = struct {
+    timing: TimingErrorProfile,
+    pitch: PitchErrorProfile,
 };
 
-pub const ACOUSTIC_GUITAR_PROFILE: PerformerProfile = .{
+pub const ACOUSTIC_GUITAR_ERROR_PROFILE: ErrorProfile = .{
     .timing = .{
         .base_latency_ms = 9.0,
         .step_random_ms = 1.2,
@@ -69,7 +69,7 @@ pub const ACOUSTIC_GUITAR_PROFILE: PerformerProfile = .{
     },
 };
 
-pub const BANJO_PROFILE: PerformerProfile = .{
+pub const BANJO_ERROR_PROFILE: ErrorProfile = .{
     .timing = .{
         .base_latency_ms = 9.0,
         .step_random_ms = 1.35,
@@ -100,7 +100,7 @@ pub const BANJO_PROFILE: PerformerProfile = .{
     },
 };
 
-pub const ELECTRIC_GUITAR_PROFILE: PerformerProfile = .{
+pub const ELECTRIC_GUITAR_ERROR_PROFILE: ErrorProfile = .{
     .timing = .{
         .base_latency_ms = 8.0,
         .step_random_ms = 0.95,
@@ -131,7 +131,7 @@ pub const ELECTRIC_GUITAR_PROFILE: PerformerProfile = .{
     },
 };
 
-pub fn Performer(comptime step_count: usize, comptime voice_count: usize) type {
+pub fn ErrorState(comptime step_count: usize, comptime voice_count: usize) type {
     return struct {
         step_bias_ms: [step_count]f32 = [_]f32{0.0} ** step_count,
         voice_bias_ms: [voice_count]f32 = [_]f32{0.0} ** voice_count,
@@ -141,13 +141,13 @@ pub fn Performer(comptime step_count: usize, comptime voice_count: usize) type {
     };
 }
 
-pub fn reset(comptime step_count: usize, comptime voice_count: usize, performer: *Performer(step_count, voice_count), rng: *dsp.Rng, profile: PerformerProfile) void {
+pub fn reset(comptime step_count: usize, comptime voice_count: usize, state: *ErrorState(step_count, voice_count), rng: *dsp.Rng, profile: ErrorProfile) void {
     if (step_count == 0) {
-        std.log.warn("human_performance.reset: step_count is zero", .{});
+        std.log.warn("performance_error.reset: step_count is zero", .{});
         return;
     }
     if (voice_count == 0) {
-        std.log.warn("human_performance.reset: voice_count is zero", .{});
+        std.log.warn("performance_error.reset: voice_count is zero", .{});
         return;
     }
 
@@ -169,59 +169,59 @@ pub fn reset(comptime step_count: usize, comptime voice_count: usize, performer:
         if (step + 1 == step_count) {
             bias -= pickup_rush;
         }
-        performer.step_bias_ms[step] = bias;
+        state.step_bias_ms[step] = bias;
     }
 
     const center_voice = (@as(f32, @floatFromInt(voice_count)) - 1.0) * 0.5;
     for (0..voice_count) |voice_idx| {
         const voice_pos: f32 = @floatFromInt(voice_idx);
-        performer.voice_bias_ms[voice_idx] = randomRange(rng, -profile.timing.voice_bias_ms, profile.timing.voice_bias_ms) +
+        state.voice_bias_ms[voice_idx] = randomRange(rng, -profile.timing.voice_bias_ms, profile.timing.voice_bias_ms) +
             (voice_pos - center_voice) * randomRange(rng, -profile.timing.voice_slope_ms, profile.timing.voice_slope_ms);
-        performer.voice_pitch_bias_cents[voice_idx] = randomRange(rng, -profile.pitch.voice_bias_cents, profile.pitch.voice_bias_cents);
+        state.voice_pitch_bias_cents[voice_idx] = randomRange(rng, -profile.pitch.voice_bias_cents, profile.pitch.voice_bias_cents);
     }
 
-    performer.clock_bias_ms = randomRange(rng, -profile.timing.clock_initial_ms, profile.timing.clock_initial_ms);
-    performer.clock_target_ms = performer.clock_bias_ms;
+    state.clock_bias_ms = randomRange(rng, -profile.timing.clock_initial_ms, profile.timing.clock_initial_ms);
+    state.clock_target_ms = state.clock_bias_ms;
 }
 
-pub fn advanceClock(comptime step_count: usize, comptime voice_count: usize, performer: *Performer(step_count, voice_count), rng: *dsp.Rng, profile: PerformerProfile, meso: f32) void {
+pub fn advanceClock(comptime step_count: usize, comptime voice_count: usize, state: *ErrorState(step_count, voice_count), rng: *dsp.Rng, profile: ErrorProfile, meso: f32) void {
     const drift_range = profile.timing.clock_drift_base_ms + meso * profile.timing.clock_drift_meso_ms;
-    performer.clock_target_ms = std.math.clamp(
-        performer.clock_target_ms + randomRange(rng, -profile.timing.clock_drift_step_ms, profile.timing.clock_drift_step_ms),
+    state.clock_target_ms = std.math.clamp(
+        state.clock_target_ms + randomRange(rng, -profile.timing.clock_drift_step_ms, profile.timing.clock_drift_step_ms),
         -drift_range,
         drift_range,
     );
-    performer.clock_bias_ms += (performer.clock_target_ms - performer.clock_bias_ms) * profile.timing.clock_smoothing;
+    state.clock_bias_ms += (state.clock_target_ms - state.clock_bias_ms) * profile.timing.clock_smoothing;
 }
 
-pub fn timingDelaySamples(comptime step_count: usize, comptime voice_count: usize, performer: *const Performer(step_count, voice_count), rng: *dsp.Rng, profile: PerformerProfile, step: u8, voice_idx: usize, is_anchor: bool) f32 {
+pub fn timingDelaySamples(comptime step_count: usize, comptime voice_count: usize, state: *const ErrorState(step_count, voice_count), rng: *dsp.Rng, profile: ErrorProfile, step: u8, voice_idx: usize, is_anchor: bool) f32 {
     if (step_count == 0) {
-        std.log.warn("human_performance.timingDelaySamples: step_count is zero", .{});
+        std.log.warn("performance_error.timingDelaySamples: step_count is zero", .{});
         return 0.0;
     }
     if (voice_idx >= voice_count) {
-        std.log.warn("human_performance.timingDelaySamples: voice_idx={d} out of bounds for {d} voices", .{ voice_idx, voice_count });
+        std.log.warn("performance_error.timingDelaySamples: voice_idx={d} out of bounds for {d} voices", .{ voice_idx, voice_count });
         return 0.0;
     }
 
     const step_idx = @min(@as(usize, @intCast(step)), step_count - 1);
     const residual_ms = if (is_anchor) profile.timing.residual_anchor_ms else profile.timing.residual_note_ms;
     const ms = std.math.clamp(
-        profile.timing.base_latency_ms + performer.clock_bias_ms + performer.step_bias_ms[step_idx] + performer.voice_bias_ms[voice_idx] + randomRange(rng, -residual_ms, residual_ms),
+        profile.timing.base_latency_ms + state.clock_bias_ms + state.step_bias_ms[step_idx] + state.voice_bias_ms[voice_idx] + randomRange(rng, -residual_ms, residual_ms),
         0.0,
         profile.timing.max_delay_ms,
     );
     return ms * MS_TO_SAMPLES;
 }
 
-pub fn pitchCents(comptime step_count: usize, comptime voice_count: usize, performer: *const Performer(step_count, voice_count), rng: *dsp.Rng, profile: PerformerProfile, voice_idx: usize, is_anchor: bool) f32 {
+pub fn pitchCents(comptime step_count: usize, comptime voice_count: usize, state: *const ErrorState(step_count, voice_count), rng: *dsp.Rng, profile: ErrorProfile, voice_idx: usize, is_anchor: bool) f32 {
     if (voice_idx >= voice_count) {
-        std.log.warn("human_performance.pitchCents: voice_idx={d} out of bounds for {d} voices", .{ voice_idx, voice_count });
+        std.log.warn("performance_error.pitchCents: voice_idx={d} out of bounds for {d} voices", .{ voice_idx, voice_count });
         return 0.0;
     }
 
     const residual_cents = if (is_anchor) profile.pitch.residual_anchor_cents else profile.pitch.residual_note_cents;
-    var cents = performer.voice_pitch_bias_cents[voice_idx] + randomRange(rng, -residual_cents, residual_cents);
+    var cents = state.voice_pitch_bias_cents[voice_idx] + randomRange(rng, -residual_cents, residual_cents);
     if (!is_anchor and dsp.rngFloat(rng) < profile.pitch.slip_chance) {
         cents += randomRange(rng, -profile.pitch.slip_cents, profile.pitch.slip_cents);
     }

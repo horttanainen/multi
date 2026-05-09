@@ -3,8 +3,8 @@ const composition = @import("music/composition.zig");
 const cue_morph = @import("music/cue_morph.zig");
 const dsp = @import("music/dsp.zig");
 const entropy = @import("music/entropy.zig");
-const human_performance = @import("music/human_performance.zig");
 const instruments = @import("music/instruments.zig");
+const performance_error = @import("music/performance_error.zig");
 const pattern_history = @import("music/pattern_history.zig");
 
 const softClip = dsp.softClip;
@@ -425,7 +425,7 @@ const STYLE: GuitarStyleSpec = .{
 };
 const GuitarRunner = composition.StepStyleRunner(GuitarCueSpec, 1);
 const AmericanaGuitarCueMorph = cue_morph.CueMorph(CuePreset);
-const GuitarPerformer = human_performance.Performer(16, STRING_COUNT);
+const GuitarErrorState = performance_error.ErrorState(16, STRING_COUNT);
 
 var rng: dsp.Rng = dsp.rngInit(0xA6A1_6A01);
 var runner: GuitarRunner = .{};
@@ -445,7 +445,7 @@ var bars_since_chord: u8 = 0;
 var bars_since_evolution: u8 = 0;
 var bars_on_pattern: u8 = 0;
 var evolution_turn: u8 = 0;
-var performer: GuitarPerformer = .{};
+var performance_errors: GuitarErrorState = .{};
 
 fn lerpF32(a: f32, b: f32, t: f32) f32 {
     return a + (b - a) * t;
@@ -506,18 +506,19 @@ fn applyCueParams() void {
     composition.keyStateModulateTo(&runner.engine.key, target.root);
 }
 
-fn resetHumanTiming() void {
-    human_performance.reset(16, STRING_COUNT, &performer, &rng, performerProfile());
+fn resetPerformanceErrors() void {
+    performance_error.reset(16, STRING_COUNT, &performance_errors, &rng, errorProfile());
 }
 
-fn advanceHumanTiming(meso: f32) void {
-    human_performance.advanceClock(16, STRING_COUNT, &performer, &rng, performerProfile(), meso);
+fn advancePerformanceErrorClock(meso: f32) void {
+    performance_error.advanceClock(16, STRING_COUNT, &performance_errors, &rng, errorProfile(), meso);
 }
 
-fn performerProfile() human_performance.PerformerProfile {
+fn errorProfile() performance_error.ErrorProfile {
     return switch (selected_instrument) {
-        .guitar => human_performance.ACOUSTIC_GUITAR_PROFILE,
-        .banjo => human_performance.BANJO_PROFILE,
+        .guitar => performance_error.ACOUSTIC_GUITAR_ERROR_PROFILE,
+        .banjo => performance_error.BANJO_ERROR_PROFILE,
+        .electric => performance_error.ELECTRIC_GUITAR_ERROR_PROFILE,
     };
 }
 
@@ -557,7 +558,7 @@ pub fn reset() void {
     reverb = dsp.stereoReverbInit(.{ 1301, 1511, 1741, 1999 }, .{ 353, 941 }, .{ 0.78, 0.80, 0.77, 0.79 });
     lfo_space = .{ .period_beats = 96, .depth = 0.025 };
     pattern_history.clear(&gesture_history);
-    resetHumanTiming();
+    resetPerformanceErrors();
     applyStructuralCueState(spec);
     bar_count = 0;
     bars_since_chord = 0;
@@ -656,7 +657,7 @@ fn fillEventForStep(step: u8) StringEvent {
 
 fn advanceBar(meso: f32, spec: *const GuitarCueSpec) void {
     barCountAdvance();
-    advanceHumanTiming(meso);
+    advancePerformanceErrorClock(meso);
     maybeAdvanceStructuralCue();
     bars_since_chord +|= 1;
     bars_since_evolution +|= 1;
@@ -763,10 +764,10 @@ fn scheduleStringEvent(event: StringEvent, meso: f32, spec: *const GuitarCueSpec
     const fret_raw = @as(i16, fret) + @as(i16, event.fret_offset);
     const fret_clamped: u8 = @intCast(std.math.clamp(fret_raw, @as(i16, 0), @as(i16, 14)));
     const midi = openStringMidi(string_idx) + fret_clamped;
-    const freq = dsp.midiToFreq(midi) * centsRatio(humanPitchCents(is_anchor, string_idx));
+    const freq = dsp.midiToFreq(midi) * centsRatio(performancePitchCents(is_anchor, string_idx));
     const velocity = stringEventVelocity(event, meso, spec, is_anchor);
     const pan = std.math.clamp(STRING_PAN[string_idx] + randomRange(-0.035, 0.035), -0.34, 0.34);
-    scheduleNote(freq, velocity, pan, scheduledGuitarParams(is_anchor), selected_instrument, event.delay + randomRange(0.0, 1.2) + humanTimingDelaySamples(is_anchor, event.step, string_idx));
+    scheduleNote(freq, velocity, pan, scheduledGuitarParams(is_anchor), selected_instrument, event.delay + randomRange(0.0, 1.2) + performanceTimingDelaySamples(is_anchor, event.step, string_idx));
 }
 
 fn currentChordShape() ChordShape {
@@ -785,6 +786,7 @@ fn stringEventVelocity(event: StringEvent, meso: f32, spec: *const GuitarCueSpec
     const instrument_bias: f32 = switch (selected_instrument) {
         .guitar => 0.0,
         .banjo => -0.035,
+        .electric => -0.015,
     };
     return std.math.clamp(BASE_VELOCITY * event.velocity_scale + anchor_bias + energy_bias + instrument_bias + randomRange(-0.02, 0.02), 0.34, 0.78);
 }
@@ -794,6 +796,7 @@ fn scheduledGuitarParams(is_anchor: bool) instruments.GuitarParams {
     switch (selected_instrument) {
         .guitar => randomizeGuitarParams(&params, is_anchor),
         .banjo => randomizeBanjoParams(&params, is_anchor),
+        .electric => randomizeElectricParams(&params, is_anchor),
     }
     params.rng_seed = dsp.rngNext(&rng);
     maybeApplyRoughPick(&params, is_anchor);
@@ -804,6 +807,7 @@ fn baseInstrumentParams() instruments.GuitarParams {
     return switch (selected_instrument) {
         .guitar => instruments.GUITAR_FAUST_PROMOTED_PARAMS,
         .banjo => BANJO_PARAMS,
+        .electric => ELECTRIC_PARAMS,
     };
 }
 
@@ -838,10 +842,27 @@ fn randomizeBanjoParams(params: *instruments.GuitarParams, is_anchor: bool) void
     params.output_gain_scale *= randomRange(0.82, 1.0);
 }
 
+fn randomizeElectricParams(params: *instruments.GuitarParams, is_anchor: bool) void {
+    const pluck_position = params.pluck_position orelse 0.18;
+    const pluck_brightness = params.pluck_brightness orelse 0.62;
+    const anchor_brightness: f32 = if (is_anchor) -0.018 else 0.0;
+    params.pluck_position = std.math.clamp(pluck_position + randomRange(-0.015, 0.018), 0.13, 0.24);
+    params.pluck_brightness = std.math.clamp(pluck_brightness + anchor_brightness + randomRange(-0.035, 0.035), 0.5, 0.75);
+    params.attack_mix_scale *= randomRange(0.86, 1.08);
+    params.attack_gain_scale *= randomRange(0.88, 1.08);
+    params.attack_decay_scale *= randomRange(0.92, 1.08);
+    params.string_decay_scale *= randomRange(0.96, 1.06);
+    params.high_decay_scale *= randomRange(0.92, 1.08);
+    params.bridge_coupling_scale *= randomRange(0.9, 1.08);
+    params.mute_amount = std.math.clamp(params.mute_amount + randomRange(-0.02, 0.035), 0.0, 1.0);
+    params.output_gain_scale *= randomRange(0.9, 1.04);
+}
+
 fn maybeApplyRoughPick(params: *instruments.GuitarParams, is_anchor: bool) void {
     const base_chance: f32 = switch (selected_instrument) {
         .guitar => 0.08,
         .banjo => 0.16,
+        .electric => 0.06,
     };
     const chance = if (is_anchor) base_chance * 0.55 else base_chance;
     if (dsp.rngFloat(&rng) >= chance) return;
@@ -853,18 +874,19 @@ fn maybeApplyRoughPick(params: *instruments.GuitarParams, is_anchor: bool) void 
     params.output_gain_scale *= randomRange(0.72, 0.92);
 }
 
-fn humanPitchCents(is_anchor: bool, string_idx: usize) f32 {
-    return human_performance.pitchCents(16, STRING_COUNT, &performer, &rng, performerProfile(), string_idx, is_anchor);
+fn performancePitchCents(is_anchor: bool, string_idx: usize) f32 {
+    return performance_error.pitchCents(16, STRING_COUNT, &performance_errors, &rng, errorProfile(), string_idx, is_anchor);
 }
 
-fn humanTimingDelaySamples(is_anchor: bool, step: u8, string_idx: usize) f32 {
-    return human_performance.timingDelaySamples(16, STRING_COUNT, &performer, &rng, performerProfile(), step, string_idx, is_anchor);
+fn performanceTimingDelaySamples(is_anchor: bool, step: u8, string_idx: usize) f32 {
+    return performance_error.timingDelaySamples(16, STRING_COUNT, &performance_errors, &rng, errorProfile(), step, string_idx, is_anchor);
 }
 
 fn openStringMidi(string_idx: usize) u8 {
     return switch (selected_instrument) {
         .guitar => OPEN_STRING_MIDI[string_idx],
         .banjo => BANJO_STRING_MIDI[string_idx],
+        .electric => ELECTRIC_STRING_MIDI[string_idx],
     };
 }
 
@@ -930,7 +952,8 @@ fn processVoices() [2]f32 {
 
     for (0..VOICE_COUNT) |idx| {
         if (!voices[idx].active) continue;
-        const sample = instruments.guitarFaustPluckProcess(&voices[idx].synth) * instrumentVoiceEnvelope(voices[idx].flavor, voices[idx].synth.age);
+        const raw_sample = instruments.guitarFaustPluckProcess(&voices[idx].synth) * instrumentVoiceEnvelope(voices[idx].flavor, voices[idx].synth.age);
+        const sample = instrumentPostProcess(voices[idx].flavor, raw_sample);
         const stereo = dsp.panStereo(sample, voices[idx].pan);
         left += stereo[0];
         right += stereo[1];
@@ -941,10 +964,18 @@ fn processVoices() [2]f32 {
     return .{ left * 0.72, right * 0.72 };
 }
 
+fn instrumentPostProcess(flavor: InstrumentFlavor, sample: f32) f32 {
+    return switch (flavor) {
+        .guitar, .banjo => sample,
+        .electric => softClip(sample * 2.15) * 0.42,
+    };
+}
+
 fn noteTailSamples(flavor: InstrumentFlavor) u32 {
     return switch (flavor) {
         .guitar => NOTE_TAIL_SAMPLES,
         .banjo => BANJO_NOTE_TAIL_SAMPLES,
+        .electric => ELECTRIC_NOTE_TAIL_SAMPLES,
     };
 }
 
@@ -955,6 +986,11 @@ fn instrumentVoiceEnvelope(flavor: InstrumentFlavor, age: u32) f32 {
             const age_f: f32 = @floatFromInt(age);
             const decay_samples = dsp.SAMPLE_RATE * 0.16;
             return std.math.exp(-age_f / decay_samples);
+        },
+        .electric => {
+            const age_f: f32 = @floatFromInt(age);
+            const decay_samples = dsp.SAMPLE_RATE * 0.95;
+            return 0.72 + 0.28 * std.math.exp(-age_f / decay_samples);
         },
     }
 }
