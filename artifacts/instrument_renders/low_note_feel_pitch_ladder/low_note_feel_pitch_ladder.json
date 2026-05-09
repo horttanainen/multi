@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "purpose": "Single-note pitch ladder using the D2 low-note feel recipe from the Milestone 5 gauntlet.",
+    "instrument": "guitar-faust-pluck",
+    "velocity": 0.6209,
+    "duration_seconds": 0.745308,
+    "cue_note": "Cue count equals cue number; all clips use the same single-note recipe, no overlap."
+  },
+  "order": [
+    {
+      "cue": 1,
+      "name": "D2_anchor",
+      "frequency_hz": 73.7183,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/01_D2_anchor.wav"
+    },
+    {
+      "cue": 2,
+      "name": "Fsharp2",
+      "frequency_hz": 92.4986,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/02_Fsharp2.wav"
+    },
+    {
+      "cue": 3,
+      "name": "A2",
+      "frequency_hz": 110.0,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/03_A2.wav"
+    },
+    {
+      "cue": 4,
+      "name": "D3",
+      "frequency_hz": 146.8324,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/04_D3.wav"
+    },
+    {
+      "cue": 5,
+      "name": "Fsharp3",
+      "frequency_hz": 184.9972,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/05_Fsharp3.wav"
+    },
+    {
+      "cue": 6,
+      "name": "A3",
+      "frequency_hz": 220.0,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/06_A3.wav"
+    },
+    {
+      "cue": 7,
+      "name": "D4",
+      "frequency_hz": 293.6648,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/07_D4.wav"
+    },
+    {
+      "cue": 8,
+      "name": "Fsharp4",
+      "frequency_hz": 369.9944,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/08_Fsharp4.wav"
+    },
+    {
+      "cue": 9,
+      "name": "G4",
+      "frequency_hz": 391.9954,
+      "path": "artifacts/instrument_renders/low_note_feel_pitch_ladder/09_G4.wav"
+    }
+  ],
+  "output_wav": "artifacts/instrument_renders/low_note_feel_pitch_ladder/low_note_feel_pitch_ladder.wav"
+}

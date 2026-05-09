@@ -6,6 +6,11 @@ const SMS_PARTIAL_COUNT = 24;
 const KS_BUFFER_SIZE = 8192;
 const WAVEGUIDE_BUFFER_SIZE = 8192;
 const FAUST_STRING_BUFFER_SIZE = 8192;
+const FAUST_PROMOTED_PLUCK_BRIGHTNESS: f32 = 0.68;
+const FAUST_PROMOTED_STRING_DECAY: f32 = 0.7765;
+const FAUST_PROMOTED_HIGH_DECAY: f32 = 0.54;
+const FAUST_PROMOTED_BRIDGE_COUPLING: f32 = 0.85;
+const FAUST_PROMOTED_MUTE: f32 = 0.114;
 
 const BODY_MODE_FREQS = [_]f32{
     101.6,
@@ -74,6 +79,11 @@ const FaustBridgeFilter = struct {
     h0: f32 = 0.7,
     h1: f32 = 0.15,
     rho: f32 = 0.99784,
+};
+
+const FaustPluckStep = struct {
+    string_sample: f32 = 0.0,
+    bridge_signal: f32 = 0.0,
 };
 
 pub const GuitarProbeParams = struct {
@@ -162,6 +172,21 @@ pub const GuitarFaustPluck = struct {
     velocity: f32 = 0.8,
     feedback: f32 = 0.9968,
     age: u32 = 999999,
+};
+
+pub const GuitarFaustBridgePluck = struct {
+    core: GuitarFaustPluck = .{},
+    bridge_prev: f32 = 0.0,
+    bridge_hpf: dsp.HPF = dsp.hpfInit(92.0),
+    bridge_lpf: dsp.LPF = dsp.lpfInit(8600.0),
+};
+
+pub const GuitarFaustBodyPluck = struct {
+    core: GuitarFaustPluck = .{},
+    body: BodyFilterBank = .{},
+    bridge_prev: f32 = 0.0,
+    body_drive_hpf: dsp.HPF = dsp.hpfInit(48.0),
+    body_drive_lpf: dsp.LPF = dsp.lpfInit(2400.0),
 };
 
 pub const GuitarContactPickModal = struct {
@@ -389,19 +414,73 @@ pub fn guitarFaustPluckTriggerWithParams(ctx: *GuitarFaustPluck, frequency_hz: f
         ctx.delay_samples = 8;
     }
 
-    ctx.bridge_filter = faustBridgeFilterInit(0.4, 0.5);
-    ctx.nut_filter = faustBridgeFilterInit(0.4, 0.5);
-    ctx.excitation_lpf1 = dsp.lpfInit(std.math.clamp(ctx.frequency_hz * 5.0, 80.0, 18000.0));
-    ctx.excitation_lpf2 = dsp.lpfInit(std.math.clamp(ctx.frequency_hz * 5.0, 80.0, 18000.0));
-    ctx.feedback = std.math.clamp(0.9975 + (ctx.params.string_decay_scale - 1.0) * 0.0005 - ctx.params.mute_amount * 0.001, 0.99, 0.9992);
+    ctx.bridge_filter = faustBridgeFilterInit(faustBridgeBrightness(ctx.params), faustBridgeAbsorption(ctx.params));
+    ctx.nut_filter = faustBridgeFilterInit(faustBridgeBrightness(ctx.params), faustBridgeAbsorption(ctx.params));
+    ctx.excitation_lpf1 = dsp.lpfInit(faustExcitationCutoff(ctx.frequency_hz, ctx.params));
+    ctx.excitation_lpf2 = dsp.lpfInit(faustExcitationCutoff(ctx.frequency_hz, ctx.params));
+    ctx.out_lpf = dsp.lpfInit(faustOutputCutoff(ctx.params));
+    ctx.feedback = faustStringFeedback(ctx.params);
     guitarFaustPluckPrimeString(ctx);
     ctx.age = 0;
 }
 
 pub fn guitarFaustPluckProcess(ctx: *GuitarFaustPluck) f32 {
+    const step = guitarFaustPluckStep(ctx) orelse return 0.0;
+    const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, step.string_sample * stringMix(ctx.params, 0.48)));
+    ctx.age = nextAge(ctx.age);
+    return dsp.softClip(filtered * outputGain(ctx.params, 4.8));
+}
+
+pub fn guitarFaustBridgePluckTrigger(ctx: *GuitarFaustBridgePluck, frequency_hz: f32, velocity: f32) void {
+    guitarFaustBridgePluckTriggerWithParams(ctx, frequency_hz, velocity, .{});
+}
+
+pub fn guitarFaustBridgePluckTriggerWithParams(ctx: *GuitarFaustBridgePluck, frequency_hz: f32, velocity: f32, params: GuitarProbeParams) void {
+    ctx.* = .{};
+    guitarFaustPluckTriggerWithParams(&ctx.core, frequency_hz, velocity, params);
+}
+
+pub fn guitarFaustBridgePluckProcess(ctx: *GuitarFaustBridgePluck) f32 {
+    const step = guitarFaustPluckStep(&ctx.core) orelse return 0.0;
+    const params = ctx.core.params;
+    const bridge_velocity = bridgeForceSample(&ctx.bridge_prev, step.bridge_signal, bridgeCoupling(params, 0.74));
+    const bridge = dsp.lpfProcess(&ctx.bridge_lpf, dsp.hpfProcess(&ctx.bridge_hpf, bridge_velocity));
+    const dry = step.string_sample * stringMix(params, 0.20);
+    const coupled = bridge * stringMix(params, 0.40);
+    const filtered = dsp.lpfProcess(&ctx.core.out_lpf, dsp.hpfProcess(&ctx.core.out_hpf, dry + coupled));
+    ctx.core.age = nextAge(ctx.core.age);
+    return dsp.softClip(filtered * outputGain(params, 4.8));
+}
+
+pub fn guitarFaustBodyPluckTrigger(ctx: *GuitarFaustBodyPluck, frequency_hz: f32, velocity: f32) void {
+    guitarFaustBodyPluckTriggerWithParams(ctx, frequency_hz, velocity, .{});
+}
+
+pub fn guitarFaustBodyPluckTriggerWithParams(ctx: *GuitarFaustBodyPluck, frequency_hz: f32, velocity: f32, params: GuitarProbeParams) void {
+    ctx.* = .{};
+    guitarFaustPluckTriggerWithParams(&ctx.core, frequency_hz, velocity, params);
+    const safe_params = ctx.core.params;
+    bodyFilterBankConfigureScaled(&ctx.body, bodyFreq(safe_params, 1.0), bodyGain(safe_params, 2.15), bodyDecay(safe_params, 1.25));
+}
+
+pub fn guitarFaustBodyPluckProcess(ctx: *GuitarFaustBodyPluck) f32 {
+    const step = guitarFaustPluckStep(&ctx.core) orelse return 0.0;
+    const params = ctx.core.params;
+    const bridge_velocity = bridgeForceSample(&ctx.bridge_prev, step.bridge_signal, bridgeCoupling(params, 5.2));
+    const body_drive = dsp.lpfProcess(&ctx.body_drive_lpf, dsp.hpfProcess(&ctx.body_drive_hpf, bridge_velocity + step.string_sample * 0.10));
+    const body = bodyFilterBankProcess(&ctx.body, body_drive * 2.4);
+    const dry = step.string_sample * stringMix(params, 0.22);
+    const bridge_presence = body_drive * stringMix(params, 0.055);
+    const body_signal = body * bodyMix(params, 13.5);
+    const filtered = dsp.lpfProcess(&ctx.core.out_lpf, dsp.hpfProcess(&ctx.core.out_hpf, dry + bridge_presence + body_signal));
+    ctx.core.age = nextAge(ctx.core.age);
+    return dsp.softClip(filtered * outputGain(params, 4.35));
+}
+
+fn guitarFaustPluckStep(ctx: *GuitarFaustPluck) ?FaustPluckStep {
     if (ctx.delay_samples < 2) {
-        std.log.warn("guitarFaustPluckProcess: delay_samples={d} is invalid, returning silence", .{ctx.delay_samples});
-        return 0.0;
+        std.log.warn("guitarFaustPluckStep: delay_samples={d} is invalid, returning silence", .{ctx.delay_samples});
+        return null;
     }
 
     const read_idx = ctx.write_pos;
@@ -417,9 +496,10 @@ pub fn guitarFaustPluckProcess(ctx: *GuitarFaustPluck) f32 {
     ctx.buffer[read_idx] = std.math.clamp(steel_string * ctx.feedback + excitation, -1.0, 1.0);
     ctx.write_pos = next_idx;
 
-    const filtered = dsp.lpfProcess(&ctx.out_lpf, dsp.hpfProcess(&ctx.out_hpf, string_sample * stringMix(ctx.params, 0.48)));
-    ctx.age = nextAge(ctx.age);
-    return dsp.softClip(filtered * outputGain(ctx.params, 4.8));
+    return .{
+        .string_sample = string_sample,
+        .bridge_signal = bridge,
+    };
 }
 
 pub fn guitarContactPickModalTrigger(ctx: *GuitarContactPickModal, frequency_hz: f32, velocity: f32) void {
@@ -1032,10 +1112,48 @@ fn guitarFaustPluckAttackSamples(frequency_hz: f32, decay_scale: f32) u32 {
 }
 
 fn guitarFaustSteelSmooth(ctx: *GuitarFaustPluck, input: f32) f32 {
-    const stiffness = 0.05;
+    const stiffness = faustSteelSmooth(ctx.params);
     ctx.stiffness_smooth1 = input * (1.0 - stiffness) + ctx.stiffness_smooth1 * stiffness;
     ctx.stiffness_smooth2 = ctx.stiffness_smooth1 * (1.0 - stiffness) + ctx.stiffness_smooth2 * stiffness;
     return ctx.stiffness_smooth2;
+}
+
+fn faustBridgeBrightness(params: GuitarProbeParams) f32 {
+    const brightness = pluckBrightness(params, FAUST_PROMOTED_PLUCK_BRIGHTNESS);
+    const high_decay_offset = params.high_decay_scale - FAUST_PROMOTED_HIGH_DECAY;
+    const bridge_offset = params.bridge_coupling_scale - FAUST_PROMOTED_BRIDGE_COUPLING;
+    return std.math.clamp(0.4 + (brightness - FAUST_PROMOTED_PLUCK_BRIGHTNESS) * 0.42 + high_decay_offset * 0.10 + bridge_offset * 0.04, 0.06, 0.92);
+}
+
+fn faustBridgeAbsorption(params: GuitarProbeParams) f32 {
+    const high_decay_offset = params.high_decay_scale - FAUST_PROMOTED_HIGH_DECAY;
+    const bridge_offset = params.bridge_coupling_scale - FAUST_PROMOTED_BRIDGE_COUPLING;
+    const mute_offset = params.mute_amount - FAUST_PROMOTED_MUTE;
+    return std.math.clamp(0.5 - high_decay_offset * 0.18 - bridge_offset * 0.10 + mute_offset * 0.24, 0.08, 0.88);
+}
+
+fn faustExcitationCutoff(frequency_hz: f32, params: GuitarProbeParams) f32 {
+    const brightness = pluckBrightness(params, FAUST_PROMOTED_PLUCK_BRIGHTNESS);
+    const ratio = 5.0 + (brightness - FAUST_PROMOTED_PLUCK_BRIGHTNESS) * 4.0;
+    return std.math.clamp(frequency_hz * ratio, 80.0, 18000.0);
+}
+
+fn faustOutputCutoff(params: GuitarProbeParams) f32 {
+    const brightness = pluckBrightness(params, FAUST_PROMOTED_PLUCK_BRIGHTNESS);
+    const high_decay_offset = params.high_decay_scale - FAUST_PROMOTED_HIGH_DECAY;
+    return std.math.clamp(9800.0 + (brightness - FAUST_PROMOTED_PLUCK_BRIGHTNESS) * 3800.0 + high_decay_offset * 2200.0, 5200.0, 14500.0);
+}
+
+fn faustStringFeedback(params: GuitarProbeParams) f32 {
+    const string_decay_offset = params.string_decay_scale - FAUST_PROMOTED_STRING_DECAY;
+    const high_decay_offset = params.high_decay_scale - FAUST_PROMOTED_HIGH_DECAY;
+    const previous_feedback = 0.9975 + (params.string_decay_scale - 1.0) * 0.0005 - params.mute_amount * 0.001;
+    return std.math.clamp(previous_feedback + string_decay_offset * 0.00085 + high_decay_offset * 0.00022, 0.99, 0.99935);
+}
+
+fn faustSteelSmooth(params: GuitarProbeParams) f32 {
+    const high_decay_offset = params.high_decay_scale - FAUST_PROMOTED_HIGH_DECAY;
+    return std.math.clamp(0.05 - high_decay_offset * 0.014, 0.025, 0.08);
 }
 
 fn faustBridgeFilterInit(brightness: f32, absorption: f32) FaustBridgeFilter {

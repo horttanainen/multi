@@ -17,11 +17,11 @@ import estimate_target_pitch as pitch
 DEFAULT_SOURCE = "artifacts/stems/americana_raga/guitar.wav"
 DEFAULT_PRESET = (
     "artifacts/music_presets/"
-    "target_set_fit_pass1_scorer2_best_guitar_pluck_params.json"
+    "faust_direct_moredepth_listener_promoted_guitar_pluck_params.json"
 )
 DEFAULT_RENDER_ROOT = "artifacts/event_phrase_renders"
 DEFAULT_REPORT_ROOT = "artifacts/music_reports"
-DEFAULT_INSTRUMENT = "guitar-modal-pluck"
+DEFAULT_INSTRUMENT = "guitar-faust-pluck"
 EPSILON = 1.0e-12
 
 
@@ -55,7 +55,7 @@ def parse_args():
             "phrase against the real reference segment."
         )
     )
-    parser.add_argument("--round-id", default="guitar_event_phrase_pass1")
+    parser.add_argument("--round-id", default="guitar_event_phrase_faust_pass1")
     parser.add_argument("--source", default=DEFAULT_SOURCE)
     parser.add_argument("--preset", default=DEFAULT_PRESET)
     parser.add_argument("--instrument", default=DEFAULT_INSTRUMENT)
@@ -75,6 +75,11 @@ def parse_args():
     parser.add_argument("--velocity-base", type=float, default=0.34)
     parser.add_argument("--velocity-scale", type=float, default=0.62)
     parser.add_argument("--velocity-max", type=float, default=1.0)
+    parser.add_argument("--duration-scale", type=float, default=1.0)
+    parser.add_argument("--duration-velocity-scale", type=float, default=0.0)
+    parser.add_argument("--timing-spread-ms", type=float, default=0.0)
+    parser.add_argument("--pitch-spread-cents", type=float, default=0.0)
+    parser.add_argument("--velocity-alternation", type=float, default=0.0)
     parser.add_argument(
         "--param",
         action="append",
@@ -384,7 +389,7 @@ def render_event(root, event, output_path, instrument, params):
         "--",
         instrument,
         "--freq",
-        f"{event['pitch']['frequency_hz']:.4f}",
+        f"{event['render_frequency_hz']:.4f}",
         "--velocity",
         f"{event['velocity']:.4f}",
         "--duration",
@@ -423,7 +428,7 @@ def mix_rendered_events(phrase_frame_count, sample_rate, events):
                 f"{render_audio['sample_rate']} vs {sample_rate}"
             )
 
-        start_sample = int(round(event["onset_seconds"] * sample_rate))
+        start_sample = int(round(event["render_onset_seconds"] * sample_rate))
         for index, sample in enumerate(render_audio["samples"]):
             target_index = start_sample + index
             if target_index >= phrase_frame_count:
@@ -531,21 +536,66 @@ def enrich_events(phrase_samples, sample_rate, raw_events, output_dir, args):
             "analysis": report.get("analysis", {}),
             "combined_candidates": report.get("combined_candidates", [])[:8],
         }
-        event["velocity"] = round(
-            max(
+        mapped_velocity = max(
+            args.velocity_min,
+            min(
+                args.velocity_max,
+                args.velocity_base
+                + args.velocity_scale * event["peak_rms"] / (max_peak + EPSILON),
+            ),
+        )
+        if args.velocity_alternation != 0.0:
+            direction = 1.0 if index % 2 == 0 else -1.0
+            mapped_velocity = max(
                 args.velocity_min,
+                min(args.velocity_max, mapped_velocity + direction * args.velocity_alternation),
+            )
+        event["velocity"] = round(mapped_velocity, 4)
+        velocity_norm = max(
+            0.0,
+            min(
+                1.0,
+                (mapped_velocity - args.velocity_min)
+                / (args.velocity_max - args.velocity_min + EPSILON),
+            ),
+        )
+        timing_offset = performance_offset(index, args.timing_spread_ms) / 1000.0
+        event["render_onset_seconds"] = round(
+            max(
+                0.0,
                 min(
-                    args.velocity_max,
-                    args.velocity_base
-                    + args.velocity_scale * event["peak_rms"] / (max_peak + EPSILON),
+                    max(0.0, len(phrase_samples) / sample_rate - 0.01),
+                    event["onset_seconds"] + timing_offset,
                 ),
             ),
+            6,
+        )
+        duration_scale = args.duration_scale * (
+            1.0 + args.duration_velocity_scale * velocity_norm
+        )
+        event["render_duration_seconds"] = round(
+            max(0.08, min(1.20, args.event_duration * duration_scale)),
+            6,
+        )
+        event["render_pitch_cents"] = round(
+            performance_offset(index, args.pitch_spread_cents),
             4,
         )
-        event["render_duration_seconds"] = args.event_duration
+        event["render_frequency_hz"] = round(
+            event["pitch"]["frequency_hz"]
+            * math.pow(2.0, event["render_pitch_cents"] / 1200.0),
+            4,
+        )
         if event["pitch"]["accepted"] or args.keep_weak_pitch:
             enriched.append(event)
     return enriched
+
+
+def performance_offset(index, spread):
+    if spread == 0.0:
+        return 0.0
+    pattern = [0.0, -0.72, 0.48, -0.32, 0.64, -0.20, 0.36, -0.56]
+    return pattern[index % len(pattern)] * spread
 
 
 def write_manifest(path, data):
@@ -564,6 +614,9 @@ def main():
         return 2
     if args.velocity_min < 0.0 or args.velocity_max > 1.0 or args.velocity_min > args.velocity_max:
         print("error: invalid velocity range", file=sys.stderr)
+        return 2
+    if args.duration_scale <= 0.0:
+        print("error: --duration-scale must be positive", file=sys.stderr)
         return 2
 
     root = repo_root()
@@ -646,6 +699,13 @@ def main():
                 "scale": args.velocity_scale,
                 "max": args.velocity_max,
             },
+            "performance_mapping": {
+                "duration_scale": args.duration_scale,
+                "duration_velocity_scale": args.duration_velocity_scale,
+                "timing_spread_ms": args.timing_spread_ms,
+                "pitch_spread_cents": args.pitch_spread_cents,
+                "velocity_alternation": args.velocity_alternation,
+            },
             "reference_phrase": relative_path(reference_path),
             "generated_phrase": relative_path(generated_path),
             "audition_phrase": relative_path(audition_path),
@@ -689,7 +749,9 @@ def main():
         status = "accepted" if pitch_info["accepted"] else "weak"
         print(
             f"- {event['index']:02d} t={event['onset_seconds']:.3f}s "
+            f"rt={event['render_onset_seconds']:.3f}s "
             f"freq={pitch_info['frequency_hz']:.2f} note={pitch_info['nearest_note']} "
+            f"rfreq={event['render_frequency_hz']:.2f} "
             f"velocity={event['velocity']:.3f} pitch={status} "
             f"render={event.get('render_path', '')}"
         )

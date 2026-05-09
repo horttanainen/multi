@@ -10,19 +10,33 @@ candidate WAVs, and a scoring report before any candidate is promoted.
 
 ## Current Accepted Baseline
 
-- WAV: `artifacts/instrument_renders/target_set_fit_pass1_scorer2_fit_001_first_pluck.wav`
-- Report: `artifacts/music_reports/target_set_fit_pass1_scorer2_compare.json`
-- Target-set score: `56.3654`
+- Instrument: `guitar-faust-pluck`
+- WAV:
+  `artifacts/instrument_renders/target_set_faust_direct_pluck_pass1_audition/by_candidate_03_faust_direct_moredepth.wav`
+- Preset:
+  `artifacts/music_presets/faust_direct_moredepth_listener_promoted_guitar_pluck_params.json`
+- Report: `artifacts/music_reports/target_set_faust_direct_pluck_pass1_compare.json`
+- Target-set score: `45.7017`
+- Phrase score: `47.5494`
+- Accepted feel recipe:
+  - velocity around `0.62`
+  - render duration around `0.745s`
+  - no overlap requirement
+  - use dry `guitar-faust-pluck`; the good low-note character came from the
+    single-note render, not from body/bridge variants.
 - Parameters:
-  `pluck_position=0.1678`, `pluck_brightness=0.8165`,
-  `string_mix=1.7309`, `body_mix=1.3536`, `attack_mix=0.8253`,
-  `mute=0.114`, `string_decay=0.7765`, `body_gain=1.0442`,
-  `body_decay=0.7817`, `body_freq=0.8752`, `pick_noise=0.6683`,
+  `pluck_position=0.1678`, `pluck_brightness=0.68`,
+  `string_mix=1.35`, `body_mix=1.55`, `attack_mix=0.55`,
+  `mute=0.114`, `string_decay=0.7765`, `body_gain=1.55`,
+  `body_decay=1.22`, `body_freq=0.8752`, `pick_noise=0.6683`,
   `attack_gain=0.6903`, `attack_decay=0.5456`,
-  `inharmonicity=0.4292`, `high_decay=0.6963`,
+  `bridge_coupling=0.85`, `inharmonicity=0.4292`, `high_decay=0.54`,
   `output_gain=0.9934`.
-- Promotion: listener picked `fit_001` by ear, then scorer version 5 ranked it
-  first across the accepted target set.
+- Promotion: listener promoted `faust_direct_moredepth` by ear on 2026-05-09
+  because it has the convincing ringing note missing from earlier branches,
+  despite the isolated target-set scorer ranking old admittance variants higher.
+  The later low-note feel pitch ladder confirmed this is the accepted guitar
+  instrument direction.
 - Runner default candidate parameters now inherit this baseline unless a
   candidate overrides them.
 
@@ -39,6 +53,15 @@ Stop point for the next session:
   `artifacts/instrument_renders/target_set_faust_direct_pluck_pass1_audition/by_candidate_03_faust_direct_moredepth.wav`
 - Working Faust phrase audition:
   `artifacts/event_phrase_renders/guitar_event_phrase_faust_direct_moredepth_pass1/audition_reference_then_generated.wav`
+- Promoted Faust preset:
+  `artifacts/music_presets/faust_direct_moredepth_listener_promoted_guitar_pluck_params.json`
+- Accepted guitar feel audition:
+  `artifacts/instrument_renders/low_note_feel_pitch_ladder/low_note_feel_pitch_ladder.wav`
+- Current Milestone 5 gauntlet checkpoint:
+  `artifacts/event_phrase_renders/guitar_event_phrase_m5_gauntlet_compare/m5_gauntlet_phrase_compare.wav`
+- Multi-phrase validation checkpoints:
+  - `artifacts/event_phrase_renders/guitar_event_phrase_m5_validation_133_compare/m5_validation_133_compare.wav`
+  - `artifacts/event_phrase_renders/guitar_event_phrase_m5_validation_245_compare/m5_validation_245_compare.wav`
 - Main Faust reports:
   - target-set:
     `artifacts/music_reports/target_set_faust_direct_pluck_pass1_compare.json`
@@ -47,22 +70,16 @@ Stop point for the next session:
 - Current score position:
   - `faust_direct_moredepth` target-set score `45.7017`
   - `faust_direct_moredepth` phrase score `47.5494`
-  - phrase score is close to `admittance_moredepth` (`47.7471`)
-- Important direction rule: keep the Faust string dry and ringing first. Do not
-  reintroduce the previous body bank or bridge-body resonator path until the
-  Faust string itself is promoted as the working phrase timbre.
+  - phrase score is close to `admittance_moredepth` (`47.7471`), but listener
+    review promoted Faust by ear because it has the missing ringing note.
+- Important direction rule: dry Faust plus the low-note feel recipe is now the
+  accepted guitar instrument. Bridge/body candidates are parked unless needed
+  later.
 - Next concrete step:
-  1. Commit the cleaned `guitar-faust-pluck` implementation and workflow update.
-  2. Run a focused Faust-only parameter pass for decay, brightness, simple
-     bridge-filter absorption/brightness, and excitation balance.
-  3. Listener-review the best Faust single-pluck and phrase auditions against
-     `admittance_moredepth` and `blend_more_body`.
-  4. Promote Faust as the working phrase timbre if it still wins by ear, even if
-     isolated target-set score remains lower.
-  5. After Faust is promoted, add a real bridge/coupling milestone before any
-     body layer. The current Faust branch has a useful bridge filter, but it
-     does not yet have the bridge/admittance/body coupling work from the earlier
-     research branch.
+  1. Package the accepted low-note feel recipe as the guitar event-rendering
+     default.
+  2. Add provenance/license notice before distribution.
+  3. Move the accepted Faust guitar into procedural Americana rendering.
 
 ## Milestones
 
@@ -112,9 +129,9 @@ section aligned with the round history below.
   - Goal: make `guitar-faust-pluck` the working instrument for a convincing
     guitar phrase: ringing note, onset, decay, event timing, velocity, and phrase
     continuity.
-  - Status: in progress. The active direction is `guitar-faust-pluck`.
-    `guitar-admittance-pluck` and `blend_more_body` are comparison references,
-    not the main branch.
+  - Status: mostly complete. `guitar-faust-pluck` plus the low-note feel recipe
+    is accepted as the guitar instrument. Remaining work is packaging,
+    provenance/license, and procedural integration.
 
 - [x] Milestone 5F: Faust Direct Working Branch
   - Goal: replace the failed split-waveguide experiment with a closer Faust
@@ -128,20 +145,57 @@ section aligned with the round history below.
     the target set and `47.5494` on the phrase. Listener feedback: it sounds
     really good. The failed `guitar-waveguide-split` code path was removed.
 
-- [ ] Milestone 5A: Promote Faust Phrase Timbre
+- [x] Milestone 5A: Promote Faust Phrase Timbre
   - Goal: decide whether `guitar-faust-pluck` becomes the working phrase timbre.
   - Done when the listener compares Faust against `admittance_moredepth` and
     `blend_more_body`, confirms the Faust branch by ear, and the selected Faust
     preset/render is documented as the working phrase timbre.
-  - Current front-runner:
+  - Selected phrase render:
     `artifacts/event_phrase_renders/guitar_event_phrase_faust_direct_moredepth_pass1/audition_reference_then_generated.wav`
+  - Selected preset:
+    `artifacts/music_presets/faust_direct_moredepth_listener_promoted_guitar_pluck_params.json`
+  - Promotion comparison pack:
+    `artifacts/event_phrase_renders/guitar_event_phrase_faust_promotion_compare/faust_vs_admittance_phrase_compare.wav`
+  - Cue map:
+    - cue 1 reference
+    - cue 2 `admittance_moredepth`, score `47.7471`
+    - cue 3 `blend_more_body`, score `48.0871`
+    - cue 4 `faust_direct_moredepth`, score `47.5494`
+  - Status: completed on 2026-05-09. Listener promoted cue 4,
+    `faust_direct_moredepth`, by ear even though isolated target-set score
+    remains below `admittance_moredepth`.
 
-- [ ] Milestone 5B: Faust Parameter Pass
+- [x] Milestone 5B: Faust Parameter Pass
   - Goal: tune only the working Faust string path before adding body modeling.
   - Scope: string decay, bridge-filter absorption/brightness, pluck brightness,
     excitation level, output level, and velocity response.
   - Done when a small Faust-only sweep produces reproducible presets and a
     listener-selected winner that preserves the ringing note.
+  - Code change: the Faust bridge filter, excitation cutoff, output low-pass,
+    feedback, and steel-string smoothing now respond to existing probe
+    parameters while the promoted Faust preset remains the exact center point.
+  - Target-set pass:
+    `artifacts/music_reports/target_set_faust_param_pass1_compare.json`
+  - Target-set ranking:
+    - `soft_pick`: `45.8901`, min `37.6848`
+    - promoted Faust baseline: `45.7017`, min `36.2552`
+    - `decay_plus`: `45.6649`, min `36.3167`
+    - `open_bright`: `45.6162`, min `36.4557`
+    - `round_darker`: `45.5690`, min `36.5571`
+    - `lean_ring`: `45.3071`, min `36.1747`
+  - Target-set audition pack:
+    `artifacts/instrument_renders/target_set_faust_param_pass1_audition/audition_manifest.json`
+  - Phrase comparison pack:
+    `artifacts/event_phrase_renders/guitar_event_phrase_faust_param_pass1_compare/faust_param_pass1_phrase_compare.wav`
+  - Phrase cues:
+    - cue 1 reference
+    - cue 2 promoted Faust baseline, score `47.5494`
+    - cue 3 `soft_pick`, score `47.5997`
+  - Candidate preset:
+    `artifacts/music_presets/faust_param_pass1_soft_pick_candidate_guitar_pluck_params.json`
+  - Listener result: cue 2, the promoted Faust baseline, wins by ear.
+  - Status: completed with no parameter promotion. Keep
+    `faust_direct_moredepth` as the working baseline and move to Milestone 5C.
 
 - [ ] Milestone 5C: Faust Bridge Coupling
   - Goal: give the working Faust string an explicit bridge/coupling stage before
@@ -152,6 +206,39 @@ section aligned with the round history below.
   - Done when a bridge-coupled Faust variant keeps the ringing note, avoids the
     plastic-barrel/drum transient, and is documented against the dry Faust
     baseline by score and ear.
+  - Code change: added `guitar-faust-bridge-pluck` as a separate probe
+    candidate. It reuses the Faust string loop but outputs a filtered
+    bridge-motion/bridge-force readout mixed with a reduced dry string signal.
+    No body resonators are added.
+  - Target-set pass:
+    `artifacts/music_reports/target_set_faust_bridge_pass1_compare.json`
+  - Target-set ranking:
+    - `bridge_light`: `46.0862`, min `37.0965`
+    - `bridge_soft_pick`: `46.0695`, min `38.1000`
+    - `bridge_readout`: `45.9902`, min `37.0801`
+    - dry promoted Faust baseline: `45.7017`, min `36.2552`
+  - Target-set audition pack:
+    `artifacts/instrument_renders/target_set_faust_bridge_pass1_audition/audition_manifest.json`
+  - Phrase comparison pack:
+    `artifacts/event_phrase_renders/guitar_event_phrase_faust_bridge_pass1_compare/faust_bridge_pass1_phrase_compare.wav`
+  - Phrase cues:
+    - cue 1 reference
+    - cue 2 dry promoted Faust baseline, score `47.5494`
+    - cue 3 `bridge_light`, score `47.7589`
+    - cue 4 `bridge_soft_pick`, score `48.0753`
+  - Candidate preset:
+    `artifacts/music_presets/faust_bridge_pass1_bridge_soft_pick_candidate_guitar_pluck_params.json`
+  - Listener result: cues 2, 3, and 4 sound exactly alike.
+  - Status: no promotion from pass 1. Scorer improved, but the bridge readout is
+    not audibly meaningful yet. Keep dry Faust as the baseline and revise 5C
+    before moving to body handoff.
+  - Gauntlet follow-up:
+    - `bridge_stress` in
+      `artifacts/event_phrase_renders/guitar_event_phrase_m5_gauntlet_compare/m5_gauntlet_phrase_compare.wav`
+      is cue 3 and scores `47.9415` on the phrase.
+    - Target-set score is `46.1244`, above dry Faust `45.7017`.
+    - Status: listener review pending. Treat this as the only 5C candidate that
+      may be audibly different enough to keep.
 
 - [ ] Milestone 5D: Faust Body Handoff
   - Goal: add acoustic depth after the bridge coupling is stable.
@@ -159,28 +246,80 @@ section aligned with the round history below.
     from the Faust bridge signal. Do not use the old direct body transient path.
   - Done when a body-enabled Faust variant beats or matches dry/bridge-only
     Faust by ear and does not obscure the string note.
+  - Code change: added `guitar-faust-body-pluck`, a separate probe candidate
+    that feeds the body filter bank from Faust bridge/string motion only.
+  - Gauntlet result: `body_warm` is cue 4 in
+    `artifacts/event_phrase_renders/guitar_event_phrase_m5_gauntlet_compare/m5_gauntlet_phrase_compare.wav`.
+    It scores `43.2379` on the phrase and `42.7718` on the target set, well
+    below dry Faust.
+  - Status: likely reject unless the listener hears useful acoustic depth in cue
+    4. The scorer says this body handoff is too intrusive or wrong.
 
-- [ ] Milestone 5E: Better Faust Event Rendering
+- [x] Milestone 5E: Better Faust Event Rendering
   - Goal: improve phrase rendering beyond one detected pluck per event using the
     Faust instrument.
   - Scope: note duration, decay overlap, chord interaction, mute/release
     behavior, pitch contours, and dynamic-dependent brightness.
+  - Code change: `scripts/render_guitar_event_phrase.py` can now vary rendered
+    event duration, duration-by-velocity, timing, pitch, and velocity accents.
+  - Gauntlet result: `event_overlap` is cue 5 in
+    `artifacts/event_phrase_renders/guitar_event_phrase_m5_gauntlet_compare/m5_gauntlet_phrase_compare.wav`.
+    It uses longer overlap and two extra detected events. Phrase score improved
+    to `48.3762` from dry Faust `47.5494`.
+  - Listener clarification: the useful thing in the first and last cues of the
+    last-three comparison is the low note's tone, not the fact that it overlaps.
+    Treat this as a low-register timbre clue, not an arrangement rule.
+  - Low-note feel pitch ladder:
+    `artifacts/instrument_renders/low_note_feel_pitch_ladder/low_note_feel_pitch_ladder.wav`
+    renders the same single-note recipe from the liked D2 event across D2,
+    F#2, A2, D3, F#3, A3, D4, F#4, and G4 with no overlap.
+  - Listener result: the low-note pitch ladder sounds excellent across the
+    tested notes. Promote the single-note feel recipe, not the overlap.
+  - Status: completed for instrument selection. Use the low-note feel recipe as
+    the event-rendering default candidate for integration.
 
-- [ ] Milestone 5G: Multi-Phrase Faust Validation
+- [x] Milestone 5G: Multi-Phrase Faust Validation
   - Goal: prevent overfitting the current phrase window.
   - Done when the Faust branch is scored and auditioned across multiple accepted
     phrase snippets, analogous to the completed multi-pluck target set.
+  - Validation packs:
+    - `artifacts/event_phrase_renders/guitar_event_phrase_m5_validation_133_compare/m5_validation_133_compare.wav`
+    - `artifacts/event_phrase_renders/guitar_event_phrase_m5_validation_245_compare/m5_validation_245_compare.wav`
+  - Validation scores:
+    - 133s window: performance variant `45.5422`, baseline `44.2758`
+    - 245s window: performance variant `46.9067`, baseline `46.9922`
+  - Status: completed enough for instrument selection. Validation says not to
+    promote the broad performance variant yet, but the single-note low-register
+    feel is accepted by listener review.
 
 - [ ] Milestone 5H: Faust Provenance And License
   - Goal: make the code provenance explicit before broader integration.
   - Done when copied/ported Faust-derived code is documented with source links
   and the appropriate license notice is added if we keep it.
+  - Current provenance note: the maintained code is a Zig reimplementation of
+    Faust/STK-inspired plucked-string ideas, especially `pluckString`-style
+    low-passed excitation, steel-string smoothing, and a two-zero bridge filter.
+    No Faust source files are vendored in this repo.
+  - Source family to document before shipping:
+    `https://github.com/grame-cncm/faust` and the Faust physical modeling/STK
+    guitar examples reviewed for this work.
+  - Status: checkpoint recorded, but final license notice is still required
+    before broader distribution.
 
 - [ ] Milestone 5I: Performance Details
   - Goal: add guitar-specific performance behavior after the Faust timbre is
   chosen.
   - Scope: slight timing spread, body/sympathetic continuity between notes,
     strum/chord behavior, and more realistic damping between events.
+  - Gauntlet result: `performance` is cue 6 in
+    `artifacts/event_phrase_renders/guitar_event_phrase_m5_gauntlet_compare/m5_gauntlet_phrase_compare.wav`.
+    It adds small deterministic timing spread, pitch spread, velocity
+    alternation, and duration-by-velocity. Phrase score improved to `48.6234`,
+    the best score in the gauntlet.
+  - Combined result: cue 7 combines event overlap and performance settings but
+    scores lower at `48.1192`.
+  - Status: defer. Do not promote broad timing/pitch variation yet; first
+    integrate the accepted single-note guitar feel.
 
 - [ ] Milestone 6: Procedural Faust Integration
   - Goal: move the winning Faust model/preset from probe and audition scripts
@@ -224,8 +363,12 @@ Research-backed improvement backlog:
   below `admittance_moredepth` (`62.0208`). Phrase round
   `guitar_event_phrase_faust_direct_moredepth_pass1` scored `47.5494`, close to
   `admittance_moredepth` (`47.7471`). This is the first Faust-derived branch
-  with a convincing ringing note by scorer and listener review. The failed
-  `guitar-waveguide-split` code path was removed before commit.
+  with a convincing ringing note by scorer and listener review. It was promoted
+  by ear on 2026-05-09 after the comparison pack
+  `artifacts/event_phrase_renders/guitar_event_phrase_faust_promotion_compare/faust_vs_admittance_phrase_compare.wav`;
+  the selected preset is
+  `artifacts/music_presets/faust_direct_moredepth_listener_promoted_guitar_pluck_params.json`.
+  The failed `guitar-waveguide-split` code path was removed before commit.
 - Body coupling correction: route the body mainly from string/bridge-like motion
   instead of adding a separate contact/body hit on every note.
 - PDF-backed body rule: Woodhouse starts from string properties plus bridge
@@ -569,10 +712,10 @@ Research-backed improvement backlog:
     - Saved front-runner preset:
       `artifacts/music_presets/admittance_blend_more_body_listener_front_runner_guitar_pluck_params.json`
     - Important scorer disagreement: the phrase scorer and listener preference
-      favor cue 7, but the isolated target-set scorer still strongly favors
-      `admittance_moredepth`. Treat cue 7 as the current ear front-runner, not a
-      fully promoted baseline, until the scoring rule is reconciled or listener
-      confirms final promotion.
+      favored cue 7 at this point, but the isolated target-set scorer still
+      strongly favored `admittance_moredepth`. This admittance front-runner was
+      superseded on 2026-05-09 by the promoted `guitar-faust-pluck` phrase
+      timbre.
 
 ## Round Loop
 
@@ -581,7 +724,7 @@ Research-backed improvement backlog:
 3. Render every candidate through the music generation entrypoint:
 
 ```bash
-zig build music-probe -- guitar-modal-pluck --freq 390.2439 --velocity 0.8 --duration 0.22 --out <candidate.wav>
+zig build music-probe -- guitar-faust-pluck --freq 390.2439 --velocity 0.8 --duration 0.22 --out <candidate.wav>
 ```
 
 4. Score the generated WAVs against the selected reference target:
@@ -619,9 +762,9 @@ A round task is not done until:
 ## Automation
 
 Use `scripts/run_guitar_pluck_round.py` to render and score a round while keeping
-the output concise. With no `--candidate` arguments, it renders only the
-maintained `guitar-modal-pluck` candidate and includes the previous winner in the
-scoring set. Parked legacy instruments can still be tested with explicit
+the output concise. With no `--candidate` arguments, it renders the promoted
+`guitar-faust-pluck` candidate and includes the promoted Faust single-pluck WAV
+in the scoring set. Older instruments can still be tested with explicit
 `--candidate` arguments, but they are no longer part of the default comparison
 set. Pass one or more explicit `--candidate` arguments for a narrow A/B round.
 
@@ -649,10 +792,10 @@ Example focused sweep:
 
 ```bash
 pyenv exec python3 scripts/run_guitar_pluck_round.py \
-  --round-id first_pluck_param_sweep \
-  --candidate name=baseline,instrument=guitar-modal-pluck \
-  --candidate name=body_plus,instrument=guitar-modal-pluck,body_gain=1.15 \
-  --candidate name=pluck_back,instrument=guitar-modal-pluck,pluck_position=0.170
+  --round-id faust_pluck_param_sweep \
+  --candidate name=baseline,instrument=guitar-faust-pluck \
+  --candidate name=longer_ring,instrument=guitar-faust-pluck,string_decay=0.86 \
+  --candidate name=softer_attack,instrument=guitar-faust-pluck,attack_gain=0.56
 ```
 
 The script should not decide promotion by itself; it only prints the evidence

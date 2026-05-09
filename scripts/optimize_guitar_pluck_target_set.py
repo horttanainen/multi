@@ -12,27 +12,27 @@ from pathlib import Path
 DEFAULT_TARGET_SET = (
     "artifacts/music_targets/americana_raga/guitar/selected/pluck_target_set.json"
 )
-DEFAULT_INSTRUMENT = "guitar-modal-pluck"
+DEFAULT_INSTRUMENT = "guitar-faust-pluck"
 DEFAULT_RENDER_DIR = "artifacts/instrument_renders"
 DEFAULT_REPORT_DIR = "artifacts/music_reports"
 DEFAULT_PRESET_DIR = "artifacts/music_presets"
 BASELINE_PARAMS = {
     "pluck_position": 0.1678,
-    "pluck_brightness": 0.8165,
-    "string_mix": 1.7309,
-    "body_mix": 1.3536,
-    "attack_mix": 0.8253,
+    "pluck_brightness": 0.68,
+    "string_mix": 1.35,
+    "body_mix": 1.55,
+    "attack_mix": 0.55,
     "mute": 0.114,
     "string_decay": 0.7765,
-    "body_gain": 1.0442,
-    "body_decay": 0.7817,
+    "body_gain": 1.55,
+    "body_decay": 1.22,
     "body_freq": 0.8752,
     "pick_noise": 0.6683,
     "attack_gain": 0.6903,
     "attack_decay": 0.5456,
-    "bridge_coupling": 1.0,
+    "bridge_coupling": 0.85,
     "inharmonicity": 0.4292,
-    "high_decay": 0.6963,
+    "high_decay": 0.54,
     "output_gain": 0.9934,
 }
 SEARCH_SPACE = {

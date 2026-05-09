@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "version": 1,
+    "purpose": "Listener-promoted Faust direct guitar pluck preset.",
+    "round_id": "target_set_faust_direct_pluck_pass1",
+    "phrase_round_id": "guitar_event_phrase_faust_direct_moredepth_pass1",
+    "target_set": "artifacts/music_targets/americana_raga/guitar/selected/pluck_target_set.json",
+    "target_set_report": "artifacts/music_reports/target_set_faust_direct_pluck_pass1_compare.json",
+    "phrase_report": "artifacts/music_reports/guitar_event_phrase_faust_direct_moredepth_pass1_phrase_compare.json",
+    "promotion_compare": "artifacts/event_phrase_renders/guitar_event_phrase_faust_promotion_compare/faust_vs_admittance_phrase_compare.wav",
+    "promotion_rule": "listener may promote by ear when scorer disagrees but the candidate fixes the audible failure mode",
+    "status": "promoted phrase timbre on 2026-05-09"
+  },
+  "candidate": {
+    "name": "faust_direct_moredepth",
+    "instrument": "guitar-faust-pluck",
+    "source": "direct Faust/STK-informed pluckString, steel-string smoothing, and two-zero bridge filter branch",
+    "target_set_score": 45.7017,
+    "phrase_score": 47.5494,
+    "listener_note": "Promoted by ear because it has the convincing ringing note missing from earlier branches."
+  },
+  "params": {
+    "pluck_position": 0.1678,
+    "pluck_brightness": 0.68,
+    "string_mix": 1.35,
+    "body_mix": 1.55,
+    "attack_mix": 0.55,
+    "mute": 0.114,
+    "string_decay": 0.7765,
+    "body_gain": 1.55,
+    "body_decay": 1.22,
+    "body_freq": 0.8752,
+    "pick_noise": 0.6683,
+    "attack_gain": 0.6903,
+    "attack_decay": 0.5456,
+    "bridge_coupling": 0.85,
+    "inharmonicity": 0.4292,
+    "high_decay": 0.54,
+    "output_gain": 0.9934
+  },
+  "audition": {
+    "target_set_manifest": "artifacts/instrument_renders/target_set_faust_direct_pluck_pass1_audition/audition_manifest.json",
+    "target_set_by_candidate": "artifacts/instrument_renders/target_set_faust_direct_pluck_pass1_audition/by_candidate_03_faust_direct_moredepth.wav",
+    "phrase_manifest": "artifacts/event_phrase_renders/guitar_event_phrase_faust_direct_moredepth_pass1/event_phrase_manifest.json",
+    "phrase_audition": "artifacts/event_phrase_renders/guitar_event_phrase_faust_direct_moredepth_pass1/audition_reference_then_generated.wav",
+    "phrase_compare": "artifacts/event_phrase_renders/guitar_event_phrase_faust_promotion_compare/faust_vs_admittance_phrase_compare.wav"
+  }
+}

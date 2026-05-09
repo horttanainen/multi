@@ -1,0 +1,50 @@
+{
+  "meta": {
+    "version": 1,
+    "purpose": "Milestone 5B Faust parameter-pass candidate.",
+    "round_id": "target_set_faust_param_pass1",
+    "phrase_round_id": "guitar_event_phrase_faust_param_pass1_soft_pick",
+    "target_set": "artifacts/music_targets/americana_raga/guitar/selected/pluck_target_set.json",
+    "target_set_report": "artifacts/music_reports/target_set_faust_param_pass1_compare.json",
+    "phrase_report": "artifacts/music_reports/guitar_event_phrase_faust_param_pass1_soft_pick_phrase_compare.json",
+    "phrase_compare": "artifacts/event_phrase_renders/guitar_event_phrase_faust_param_pass1_compare/faust_param_pass1_phrase_compare.wav",
+    "promotion_rule": "listener confirms the parameter candidate improves on the promoted Faust baseline",
+    "status": "listener review pending"
+  },
+  "candidate": {
+    "name": "soft_pick",
+    "instrument": "guitar-faust-pluck",
+    "source": "focused Milestone 5B parameter pass around promoted Faust direct preset",
+    "target_set_score": 45.8901,
+    "target_set_min_score": 37.6848,
+    "phrase_score": 47.5997,
+    "baseline_target_set_score": 45.7017,
+    "baseline_phrase_score": 47.5494
+  },
+  "params": {
+    "pluck_position": 0.1678,
+    "pluck_brightness": 0.62,
+    "string_mix": 1.35,
+    "body_mix": 1.55,
+    "attack_mix": 0.55,
+    "mute": 0.114,
+    "string_decay": 0.7765,
+    "body_gain": 1.55,
+    "body_decay": 1.22,
+    "body_freq": 0.8752,
+    "pick_noise": 0.6683,
+    "attack_gain": 0.52,
+    "attack_decay": 0.86,
+    "bridge_coupling": 0.85,
+    "inharmonicity": 0.4292,
+    "high_decay": 0.54,
+    "output_gain": 1.03
+  },
+  "audition": {
+    "target_set_manifest": "artifacts/instrument_renders/target_set_faust_param_pass1_audition/audition_manifest.json",
+    "target_set_by_candidate": "artifacts/instrument_renders/target_set_faust_param_pass1_audition/by_candidate_01_soft_pick.wav",
+    "phrase_manifest": "artifacts/event_phrase_renders/guitar_event_phrase_faust_param_pass1_soft_pick/event_phrase_manifest.json",
+    "phrase_audition": "artifacts/event_phrase_renders/guitar_event_phrase_faust_param_pass1_soft_pick/audition_reference_then_generated.wav",
+    "phrase_compare": "artifacts/event_phrase_renders/guitar_event_phrase_faust_param_pass1_compare/faust_param_pass1_phrase_compare.wav"
+  }
+}

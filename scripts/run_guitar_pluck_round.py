@@ -15,32 +15,34 @@ DEFAULT_TARGET_SET = (
 )
 DEFAULT_PREVIOUS_WINNER = (
     "artifacts/instrument_renders/"
-    "target_set_fit_pass1_scorer2_fit_001_first_pluck.wav"
+    "target_set_faust_direct_pluck_pass1_audition/"
+    "by_candidate_03_faust_direct_moredepth.wav"
 )
-DEFAULT_INSTRUMENT = "guitar-modal-pluck"
+DEFAULT_INSTRUMENT = "guitar-faust-pluck"
 DEFAULT_FREQ_HZ = "390.2439"
 DEFAULT_VELOCITY = "0.8"
 DEFAULT_DURATION = "0.22"
 DEFAULT_GUITAR_PARAMS = {
     "pluck_position": "0.1678",
-    "pluck_brightness": "0.8165",
-    "string_mix": "1.7309",
-    "body_mix": "1.3536",
-    "attack_mix": "0.8253",
+    "pluck_brightness": "0.68",
+    "string_mix": "1.35",
+    "body_mix": "1.55",
+    "attack_mix": "0.55",
     "mute": "0.114",
     "string_decay": "0.7765",
-    "body_gain": "1.0442",
-    "body_decay": "0.7817",
+    "body_gain": "1.55",
+    "body_decay": "1.22",
     "body_freq": "0.8752",
     "pick_noise": "0.6683",
     "attack_gain": "0.6903",
     "attack_decay": "0.5456",
+    "bridge_coupling": "0.85",
     "inharmonicity": "0.4292",
-    "high_decay": "0.6963",
+    "high_decay": "0.54",
     "output_gain": "0.9934",
 }
 DEFAULT_PROBE_CANDIDATES = [
-    "name=guitar_modal_pluck,instrument=guitar-modal-pluck",
+    "name=guitar_faust_pluck,instrument=guitar-faust-pluck",
 ]
 GUITAR_PARAM_OPTIONS = {
     "pluck_position": "--pluck-position",
@@ -96,8 +98,8 @@ def parse_args():
         help=(
             "candidate spec; either a name or comma-separated key=value pairs. "
             "Supported keys: " + ",".join(SUPPORTED_CANDIDATE_KEYS) + ". "
-            "If omitted, renders the maintained guitar-modal-pluck baseline. "
-            "Legacy instruments can still be tested with explicit candidates."
+            "If omitted, renders the promoted guitar-faust-pluck baseline. "
+            "Other instruments can still be tested with explicit candidates."
         ),
     )
     parser.add_argument("--instrument", default=DEFAULT_INSTRUMENT)
