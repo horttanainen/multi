@@ -22,6 +22,7 @@ const InstrumentName = enum {
     guitar_sms_fit,
     guitar_ks,
     guitar_waveguide_raw,
+    guitar_faust_pluck,
 };
 
 const RenderConfig = struct {
@@ -312,6 +313,9 @@ fn parseInstrumentName(name: []const u8) ?InstrumentName {
     if (std.mem.eql(u8, name, "guitar-waveguide-raw") or std.mem.eql(u8, name, "guitar_waveguide_raw")) {
         return .guitar_waveguide_raw;
     }
+    if (std.mem.eql(u8, name, "guitar-faust-pluck") or std.mem.eql(u8, name, "guitar_faust_pluck")) {
+        return .guitar_faust_pluck;
+    }
     return null;
 }
 
@@ -441,6 +445,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
     var guitar_sms_fit: guitar_probe.GuitarSmsFit = .{};
     var guitar_ks: guitar_probe.GuitarKs = .{};
     var guitar_waveguide_raw: guitar_probe.GuitarWaveguideRaw = .{};
+    var guitar_faust_pluck: guitar_probe.GuitarFaustPluck = .{};
 
     switch (cfg.instrument) {
         .choir => instruments.choirPartTrigger(&choir, frequency_hz, dsp.envelopeInit(0.012, 0.28, 0.72, 0.32)),
@@ -454,6 +459,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
         .guitar_sms_fit => guitar_probe.guitarSmsFitTriggerWithParams(&guitar_sms_fit, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_ks => guitar_probe.guitarKsTriggerWithParams(&guitar_ks, frequency_hz, cfg.velocity, cfg.guitar_params),
         .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawTriggerWithParams(&guitar_waveguide_raw, frequency_hz, cfg.velocity, cfg.guitar_params),
+        .guitar_faust_pluck => guitar_probe.guitarFaustPluckTriggerWithParams(&guitar_faust_pluck, frequency_hz, cfg.velocity, cfg.guitar_params),
         .sine_drone => {},
     }
 
@@ -481,6 +487,7 @@ fn writeInstrumentFrames(file: std.fs.File, cfg: RenderConfig, frequency_hz: f32
                 .guitar_sms_fit => guitar_probe.guitarSmsFitProcess(&guitar_sms_fit),
                 .guitar_ks => guitar_probe.guitarKsProcess(&guitar_ks),
                 .guitar_waveguide_raw => guitar_probe.guitarWaveguideRawProcess(&guitar_waveguide_raw),
+                .guitar_faust_pluck => guitar_probe.guitarFaustPluckProcess(&guitar_faust_pluck),
             };
             if (!instrumentHandlesVelocity(cfg.instrument)) {
                 mono *= cfg.velocity;
@@ -583,12 +590,13 @@ fn instrumentLabel(instrument: InstrumentName) []const u8 {
         .guitar_sms_fit => "guitar-sms-fit",
         .guitar_ks => "guitar-ks",
         .guitar_waveguide_raw => "guitar-waveguide-raw",
+        .guitar_faust_pluck => "guitar-faust-pluck",
     };
 }
 
 fn instrumentHandlesVelocity(instrument: InstrumentName) bool {
     return switch (instrument) {
-        .guitar_modal, .guitar_contact_pick_modal, .guitar_modal_pluck, .guitar_bridge_body_pluck, .guitar_admittance_pluck, .guitar_two_pol_modal, .guitar_commuted, .guitar_sms_fit, .guitar_ks, .guitar_waveguide_raw => true,
+        .guitar_modal, .guitar_contact_pick_modal, .guitar_modal_pluck, .guitar_bridge_body_pluck, .guitar_admittance_pluck, .guitar_two_pol_modal, .guitar_commuted, .guitar_sms_fit, .guitar_ks, .guitar_waveguide_raw, .guitar_faust_pluck => true,
         .sine_drone, .choir => false,
     };
 }
@@ -611,6 +619,7 @@ fn printUsage() void {
         \\  guitar-sms-fit
         \\  guitar-ks
         \\  guitar-waveguide-raw
+        \\  guitar-faust-pluck
         \\
         \\options:
         \\  --instrument <name>      instrument to render
