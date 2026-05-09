@@ -54,4 +54,21 @@ pub fn build(b: *std.Build) !void {
         probe_run_cmd.addArgs(args);
     }
     probe_run.dependOn(&probe_run_cmd.step);
+
+    const procedural_probe = b.addExecutable(.{
+        .name = "procedural_music_probe",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/procedural_music_probe.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(procedural_probe);
+
+    const procedural_probe_run = b.step("procedural-music-probe", "Render a procedural music style to WAV");
+    const procedural_probe_run_cmd = b.addRunArtifact(procedural_probe);
+    if (b.args) |args| {
+        procedural_probe_run_cmd.addArgs(args);
+    }
+    procedural_probe_run.dependOn(&procedural_probe_run_cmd.step);
 }

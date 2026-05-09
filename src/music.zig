@@ -6,6 +6,7 @@ const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
+const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 const allocator = @import("allocator.zig").allocator;
 const AtomicU32 = std.atomic.Value(u32);
 
@@ -14,6 +15,7 @@ pub const Style = enum {
     choir,
     african_drums,
     taiko,
+    americana_guitar,
 };
 
 pub const Source = enum {
@@ -196,6 +198,7 @@ fn resetCurrentStyle() void {
         .choir => procedural_choir.reset(),
         .african_drums => procedural_african_drums.reset(),
         .taiko => procedural_taiko.reset(),
+        .americana_guitar => procedural_americana_guitar.reset(),
     }
 }
 
@@ -242,6 +245,7 @@ fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_in
                     .choir => procedural_choir.fillBuffer(&buf, chunk_frames),
                     .african_drums => procedural_african_drums.fillBuffer(&buf, chunk_frames),
                     .taiko => procedural_taiko.fillBuffer(&buf, chunk_frames),
+                    .americana_guitar => procedural_americana_guitar.fillBuffer(&buf, chunk_frames),
                 }
                 analyzeStereoBuffer(buf[0 .. chunk_frames * 2]);
 

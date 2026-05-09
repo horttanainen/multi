@@ -10,6 +10,7 @@ const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
+const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
@@ -39,6 +40,7 @@ const DEFAULT_TAIKO_SHIME_MIX: f32 = 0.55;
 const DEFAULT_TAIKO_NAGADO_MIX: f32 = 0.65;
 const DEFAULT_TAIKO_KANE_MIX: f32 = 0.5;
 const DEFAULT_TAIKO_CUE: u8 = @intFromEnum(procedural_taiko.CuePreset.matsuri);
+const DEFAULT_AMERICANA_GUITAR_CUE: u8 = @intFromEnum(procedural_americana_guitar.CuePreset.open_road);
 
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
@@ -116,6 +118,7 @@ const StoredSettings = struct {
     music_taiko_nagado_mix: ?f32 = null,
     music_taiko_kane_mix: ?f32 = null,
     music_taiko_cue: ?u8 = null,
+    music_americana_guitar_cue: ?u8 = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -148,6 +151,7 @@ pub var music_taiko_shime_mix: f32 = DEFAULT_TAIKO_SHIME_MIX;
 pub var music_taiko_nagado_mix: f32 = DEFAULT_TAIKO_NAGADO_MIX;
 pub var music_taiko_kane_mix: f32 = DEFAULT_TAIKO_KANE_MIX;
 pub var music_taiko_cue: u8 = DEFAULT_TAIKO_CUE;
+pub var music_americana_guitar_cue: u8 = DEFAULT_AMERICANA_GUITAR_CUE;
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
@@ -304,6 +308,10 @@ pub fn applyMusic() void {
     procedural_taiko.slap_mix = music_taiko_kane_mix;
     procedural_taiko.selected_cue = @enumFromInt(music_taiko_cue);
 
+    procedural_americana_guitar.bpm = music_bpm;
+    procedural_americana_guitar.reverb_mix = music_reverb_mix;
+    procedural_americana_guitar.selected_cue = @enumFromInt(music_americana_guitar_cue);
+
     if (!style_changed and !seed_changed) return;
     music.playStyle(music_style);
 }
@@ -384,6 +392,7 @@ pub fn save() !void {
         .music_taiko_nagado_mix = music_taiko_nagado_mix,
         .music_taiko_kane_mix = music_taiko_kane_mix,
         .music_taiko_cue = music_taiko_cue,
+        .music_americana_guitar_cue = music_americana_guitar_cue,
     };
 
     if (has_bg_preset) {
@@ -480,6 +489,7 @@ fn resetMusicSettings() void {
     music_taiko_nagado_mix = DEFAULT_TAIKO_NAGADO_MIX;
     music_taiko_kane_mix = DEFAULT_TAIKO_KANE_MIX;
     music_taiko_cue = DEFAULT_TAIKO_CUE;
+    music_americana_guitar_cue = DEFAULT_AMERICANA_GUITAR_CUE;
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
@@ -512,4 +522,5 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_taiko_nagado_mix = std.math.clamp(s.music_taiko_nagado_mix orelse DEFAULT_TAIKO_NAGADO_MIX, 0.0, 1.0);
     music_taiko_kane_mix = std.math.clamp(s.music_taiko_kane_mix orelse DEFAULT_TAIKO_KANE_MIX, 0.0, 1.0);
     music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 3);
+    music_americana_guitar_cue = std.math.clamp(s.music_americana_guitar_cue orelse DEFAULT_AMERICANA_GUITAR_CUE, 0, 3);
 }

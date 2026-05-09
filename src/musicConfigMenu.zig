@@ -7,6 +7,7 @@ const procedural_choir = @import("procedural_choir.zig");
 const procedural_ambient = @import("procedural_ambient.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
+const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 
 // ============================================================
 // Style selection
@@ -17,6 +18,7 @@ const style_targets = [_]music.Style{
     .choir,
     .african_drums,
     .taiko,
+    .americana_guitar,
 };
 const STYLE_COUNT = style_targets.len;
 var style_value: u8 = 0;
@@ -26,6 +28,7 @@ const style_names = [STYLE_COUNT][:0]const u8{
     "Style: Choir",
     "Style: African Drums",
     "Style: Taiko",
+    "Style: Americana Guitar",
 };
 
 const AMBIENT_CUE_COUNT = 4;
@@ -61,6 +64,14 @@ const taiko_cue_names = [TAIKO_CUE_COUNT][:0]const u8{
     "Cue: Yatai-bayashi",
     "Cue: Miyake",
     "Cue: Oroshi",
+};
+const AMERICANA_GUITAR_CUE_COUNT = 4;
+var americana_guitar_cue_value: u8 = 0;
+const americana_guitar_cue_names = [AMERICANA_GUITAR_CUE_COUNT][:0]const u8{
+    "Cue: Open Road",
+    "Cue: Low Drone",
+    "Cue: Rolling Travis",
+    "Cue: High Lonesome",
 };
 
 // ============================================================
@@ -151,6 +162,12 @@ var taiko_items = [_]menu.Item{
     .{ .label = "Atarigane Volume", .kind = .{ .config = &taiko_kane_mix_config }, .font = .medium },
 };
 
+var americana_guitar_items = [_]menu.Item{
+    .{ .label = "Back", .kind = .{ .button = actionBackToMain }, .font = .medium },
+    .{ .label = "Trigger Cue", .kind = .{ .button = actionTriggerAmericanaGuitarCue }, .font = .medium },
+    .{ .label = "Cue: Open Road", .kind = .{ .button = actionCycleAmericanaGuitarCue }, .font = .medium, .cycle_names = &americana_guitar_cue_names, .cycle_index = &americana_guitar_cue_value, .on_cycle = onCycleAmericanaGuitarCue },
+};
+
 // ============================================================
 // Public API
 // ============================================================
@@ -230,6 +247,9 @@ fn loadFromParams() void {
             taiko_nagado_mix_config.value = settings.music_taiko_nagado_mix;
             taiko_kane_mix_config.value = settings.music_taiko_kane_mix;
         },
+        .americana_guitar => {
+            americana_guitar_cue_value = settings.music_americana_guitar_cue;
+        },
     }
 }
 
@@ -280,6 +300,9 @@ fn applyMenuToSettings(save_changes: bool) !void {
             settings.music_taiko_shime_mix = taiko_shime_mix_config.value;
             settings.music_taiko_nagado_mix = taiko_nagado_mix_config.value;
             settings.music_taiko_kane_mix = taiko_kane_mix_config.value;
+        },
+        .americana_guitar => {
+            settings.music_americana_guitar_cue = americana_guitar_cue_value;
         },
     }
 
@@ -334,6 +357,7 @@ fn actionOpenTweak() anyerror!void {
         .choir => menu.push(&choir_items, .{ .minimal_edit = true }),
         .african_drums => menu.push(&african_items, .{ .minimal_edit = true }),
         .taiko => menu.push(&taiko_items, .{ .minimal_edit = true }),
+        .americana_guitar => menu.push(&americana_guitar_items, .{ .minimal_edit = true }),
     }
 }
 
@@ -406,4 +430,23 @@ fn onCycleTaikoCue() void {
         return;
     };
     procedural_taiko.triggerCue();
+}
+
+fn actionTriggerAmericanaGuitarCue() anyerror!void {
+    try applyMenuToSettings(false);
+    procedural_americana_guitar.triggerCue();
+}
+
+fn actionCycleAmericanaGuitarCue() anyerror!void {
+    americana_guitar_cue_value = (americana_guitar_cue_value + 1) % AMERICANA_GUITAR_CUE_COUNT;
+    try applyMenuToSettings(false);
+    procedural_americana_guitar.triggerCue();
+}
+
+fn onCycleAmericanaGuitarCue() void {
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCycleAmericanaGuitarCue: failed to apply settings: {}", .{err});
+        return;
+    };
+    procedural_americana_guitar.triggerCue();
 }
