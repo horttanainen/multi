@@ -309,8 +309,8 @@ fn applyInstrumentTuning(cue_idx: f32) void {
     odaiko.base_freq = 44.0 + cue_idx * 4.0;
     nagado1.base_freq = 130.0 + cue_idx * 12.0;
     nagado2.base_freq = 155.0 + cue_idx * 12.0;
-    shime1.base_freq = 400.0 + cue_idx * 20.0;
-    shime2.base_freq = 440.0 + cue_idx * 20.0;
+    shime1.base_freq = 390.0 + cue_idx * 14.0;
+    shime2.base_freq = 426.0 + cue_idx * 14.0;
     kane.base_freq = 880.0 + cue_idx * 40.0;
 }
 
@@ -359,8 +359,8 @@ fn maybeAdvanceStructuralCue(step: u8) void {
 var odaiko: instruments.Odaiko = .{};
 var nagado1: instruments.Nagado = .{ .base_freq = 140.0, .volume = 0.85 };
 var nagado2: instruments.Nagado = .{ .base_freq = 165.0, .volume = 0.78 };
-var shime1: instruments.Shime = .{ .base_freq = 420.0, .volume = 0.6 };
-var shime2: instruments.Shime = .{ .base_freq = 460.0, .volume = 0.55 };
+var shime1: instruments.Shime = .{ .base_freq = 400.0, .volume = 0.6 };
+var shime2: instruments.Shime = .{ .base_freq = 436.0, .volume = 0.55 };
 var kane: instruments.Atarigane = .{};
 
 // ============================================================
@@ -672,8 +672,8 @@ fn resetInstruments() void {
     odaiko = .{};
     nagado1 = .{ .base_freq = 140.0, .volume = 0.85 };
     nagado2 = .{ .base_freq = 165.0, .volume = 0.78 };
-    shime1 = .{ .base_freq = 420.0, .volume = 0.6 };
-    shime2 = .{ .base_freq = 460.0, .volume = 0.55 };
+    shime1 = .{ .base_freq = 400.0, .volume = 0.6 };
+    shime2 = .{ .base_freq = 436.0, .volume = 0.55 };
     kane = .{};
 }
 
