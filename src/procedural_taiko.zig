@@ -520,7 +520,7 @@ fn scheduleDoro(voice: usize, vel: f32) void {
 
 fn scheduleKara(voice: usize, vel: f32) void {
     scheduleTrigger(voice, .ka, vel);
-    scheduleTriggerAfter(voice, .ka, vel * 0.68, KUCHI_SOFT_PAIR_DELAY_SAMPLES);
+    scheduleTriggerAfter(voice, .ka, vel * 0.82, KUCHI_SOFT_PAIR_DELAY_SAMPLES);
 }
 
 fn scheduleTsuku(voice: usize, vel: f32) void {
