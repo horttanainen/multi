@@ -761,9 +761,12 @@ pub fn dununProcess(ctx: *Dunun, rng_inst: *dsp.Rng) [2]f32 {
 // Japanese taiko instruments
 
 pub const TaikoStroke = enum { don, ka, ghost };
+const ODAIKO_MODE_COUNT = 8;
 const NAGADO_MODE_COUNT = 6;
 const SHIME_MODE_COUNT = 11;
 const ATARIGANE_MODE_COUNT = 10;
+
+const OdaikoStroke = enum { don, ka, ghost };
 
 fn ModalDrumBody(comptime n_modes: usize) type {
     return struct {
@@ -884,32 +887,53 @@ pub const Odaiko = struct {
     phase: f32 = 0,
     sub_phase: f32 = 0,
     pitch_env: f32 = 0,
-    env: dsp.Envelope = dsp.envelopeInit(0.002, 1.2, 0.0, 0.8),
-    body_lpf: dsp.LPF = dsp.lpfInit(120.0),
+    body: ModalDrumBody(ODAIKO_MODE_COUNT) = .{
+        .body_lpf = dsp.lpfInit(420.0),
+        .body_hpf = dsp.hpfInit(18.0),
+        .noise_lpf = dsp.lpfInit(900.0),
+        .noise_lpf2 = dsp.lpfInit(1500.0),
+        .noise_hpf = dsp.hpfInit(80.0),
+        .body_mix = 0.78,
+        .noise_mix = 0.10,
+        .velocity_floor = 0.42,
+        .velocity_sensitivity = 0.58,
+        .volume = 0.60,
+    },
+    carrier_env: dsp.Envelope = dsp.envelopeInit(0.002, 1.2, 0.0, 0.8),
+    rng: dsp.Rng = dsp.rngInit(0x0DA1_4001),
     base_freq: f32 = 48.0,
     sweep: f32 = 55.0,
-    decay_rate: f32 = 0.9997,
+    decay_rate: f32 = 0.99962,
+    carrier_mix: f32 = 0.0,
     volume: f32 = 1.4,
-    velocity: f32 = 0.0,
 };
 
 pub fn odaikoTriggerDon(ctx: *Odaiko, vel: f32) void {
-    ctx.velocity = vel;
-    ctx.pitch_env = vel;
-    ctx.body_lpf = dsp.lpfInit(100.0 + vel * 60.0);
-    dsp.envelopeRetrigger(&ctx.env, 0.002, 1.2, 0.0, 0.8);
+    ctx.pitch_env = vel * 1.42;
+    ctx.decay_rate = 0.99932;
+    ctx.carrier_mix = 0.86;
+    modalDrumBodyTrigger(ODAIKO_MODE_COUNT, &ctx.body, odaikoBodyConfig(ctx.base_freq, .don, ctx.volume), vel);
+    dsp.envelopeRetrigger(&ctx.carrier_env, 0.001, 0.82, 0.0, 0.30);
+}
+
+pub fn odaikoTriggerKa(ctx: *Odaiko, vel: f32) void {
+    ctx.pitch_env = vel * 0.035;
+    ctx.decay_rate = 0.9989;
+    ctx.carrier_mix = 0.035;
+    modalDrumBodyTrigger(ODAIKO_MODE_COUNT, &ctx.body, odaikoBodyConfig(ctx.base_freq, .ka, ctx.volume), vel * 0.82);
+    dsp.envelopeRetrigger(&ctx.carrier_env, 0.001, 0.055, 0.0, 0.018);
 }
 
 pub fn odaikoTriggerGhost(ctx: *Odaiko, vel: f32) void {
-    ctx.velocity = vel * 0.3;
-    ctx.pitch_env = vel * 0.2;
-    ctx.body_lpf = dsp.lpfInit(80.0);
-    dsp.envelopeRetrigger(&ctx.env, 0.003, 0.4, 0.0, 0.2);
+    ctx.pitch_env = vel * 0.12;
+    ctx.decay_rate = 0.9988;
+    ctx.carrier_mix = 0.16;
+    modalDrumBodyTrigger(ODAIKO_MODE_COUNT, &ctx.body, odaikoBodyConfig(ctx.base_freq, .ghost, ctx.volume), vel * 0.55);
+    dsp.envelopeRetrigger(&ctx.carrier_env, 0.003, 0.22, 0.0, 0.070);
 }
 
 pub fn odaikoProcess(ctx: *Odaiko) f32 {
-    const env_val = dsp.envelopeProcess(&ctx.env);
-    if (env_val <= 0.0001) return 0.0;
+    const carrier_env = dsp.envelopeProcess(&ctx.carrier_env);
 
     ctx.pitch_env *= ctx.decay_rate;
     const freq = ctx.base_freq + ctx.pitch_env * ctx.sweep;
@@ -918,8 +942,109 @@ pub fn odaikoProcess(ctx: *Odaiko) f32 {
     ctx.sub_phase += freq * 0.5 * dsp.INV_SR * dsp.TAU;
     if (ctx.sub_phase > dsp.TAU) ctx.sub_phase -= dsp.TAU;
 
-    const body = @sin(ctx.phase) * 0.75 + @sin(ctx.sub_phase) * 0.35;
-    return dsp.lpfProcess(&ctx.body_lpf, body) * env_val * ctx.velocity * ctx.volume;
+    const carrier_body = (@sin(ctx.phase) * 0.72 + @sin(ctx.sub_phase) * 0.42) * ctx.carrier_mix * carrier_env;
+    return modalDrumBodyProcess(ODAIKO_MODE_COUNT, &ctx.body, &ctx.rng, carrier_body);
+}
+
+fn odaikoBodyConfig(base_freq: f32, stroke: OdaikoStroke, volume: f32) ModalDrumBodyConfig(ODAIKO_MODE_COUNT) {
+    return switch (stroke) {
+        .don => .{
+            .mode_freqs = .{
+                base_freq * 0.72,
+                base_freq,
+                base_freq * 1.42,
+                base_freq * 1.93,
+                base_freq * 2.58,
+                base_freq * 3.45,
+                base_freq * 4.32,
+                base_freq * 5.10,
+            },
+            .mode_t60s = .{ 1.60, 2.20, 1.15, 0.62, 0.34, 0.20, 0.14, 0.10 },
+            .mode_gains = .{ 0.42, 1.08, 0.72, 0.46, 0.29, 0.18, 0.105, 0.055 },
+            .body_lpf_hz = 840.0,
+            .body_hpf_hz = 16.0,
+            .noise_lpf_hz = 2400.0,
+            .noise_lpf2_hz = 3200.0,
+            .noise_hpf_hz = 105.0,
+            .body_mix = 0.86,
+            .noise_mix = 0.58,
+            .strike_attack_s = 0.001,
+            .strike_decay_s = 0.014,
+            .strike_release_s = 0.005,
+            .strike_noise_samples = 620,
+            .strike_noise_decay = 0.038,
+            .strike_cluster_count = 3,
+            .strike_cluster_spacing = 12,
+            .strike_cluster_rolloff = 0.30,
+            .velocity_floor = 0.42,
+            .velocity_sensitivity = 0.58,
+            .volume = volume * 0.52,
+        },
+        .ka => .{
+            .mode_freqs = .{
+                base_freq * 5.8,
+                base_freq * 7.2,
+                base_freq * 9.1,
+                base_freq * 11.4,
+                base_freq * 14.2,
+                base_freq * 17.6,
+                base_freq * 21.5,
+                base_freq * 26.0,
+            },
+            .mode_t60s = .{ 0.085, 0.080, 0.070, 0.058, 0.046, 0.036, 0.028, 0.022 },
+            .mode_gains = .{ 0.34, 0.48, 0.54, 0.44, 0.32, 0.22, 0.14, 0.080 },
+            .body_lpf_hz = 3400.0,
+            .body_hpf_hz = 190.0,
+            .noise_lpf_hz = 3200.0,
+            .noise_lpf2_hz = 4200.0,
+            .noise_hpf_hz = 360.0,
+            .body_mix = 0.52,
+            .noise_mix = 0.82,
+            .strike_attack_s = 0.001,
+            .strike_decay_s = 0.018,
+            .strike_release_s = 0.004,
+            .strike_noise_samples = 720,
+            .strike_noise_decay = 0.040,
+            .strike_cluster_count = 2,
+            .strike_cluster_spacing = 18,
+            .strike_cluster_rolloff = 0.42,
+            .velocity_floor = 0.48,
+            .velocity_sensitivity = 0.42,
+            .volume = volume * 0.95,
+        },
+        .ghost => .{
+            .mode_freqs = .{
+                base_freq * 0.76,
+                base_freq,
+                base_freq * 1.45,
+                base_freq * 1.98,
+                base_freq * 2.64,
+                base_freq * 3.50,
+                base_freq * 4.40,
+                base_freq * 5.25,
+            },
+            .mode_t60s = .{ 0.18, 0.26, 0.18, 0.12, 0.082, 0.056, 0.040, 0.030 },
+            .mode_gains = .{ 0.075, 0.35, 0.25, 0.15, 0.085, 0.046, 0.026, 0.014 },
+            .body_lpf_hz = 260.0,
+            .body_hpf_hz = 24.0,
+            .noise_lpf_hz = 620.0,
+            .noise_lpf2_hz = 820.0,
+            .noise_hpf_hz = 105.0,
+            .body_mix = 0.48,
+            .noise_mix = 0.045,
+            .strike_attack_s = 0.001,
+            .strike_decay_s = 0.018,
+            .strike_release_s = 0.006,
+            .strike_noise_samples = 620,
+            .strike_noise_decay = 0.018,
+            .strike_cluster_count = 1,
+            .strike_cluster_spacing = 0,
+            .strike_cluster_rolloff = 0.55,
+            .velocity_floor = 0.28,
+            .velocity_sensitivity = 0.42,
+            .volume = volume * 0.85,
+        },
+    };
 }
 
 pub const Nagado = struct {

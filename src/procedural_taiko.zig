@@ -437,6 +437,7 @@ fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
     switch (voice) {
         V_ODAIKO => switch (ttype) {
             .don => instruments.odaikoTriggerDon(&odaiko, vel),
+            .ka => instruments.odaikoTriggerKa(&odaiko, vel),
             .ghost => instruments.odaikoTriggerGhost(&odaiko, vel),
             else => {},
         },
@@ -833,7 +834,11 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
     } else if (composition.stepActive(spec.odaiko_mask, step)) {
         scheduleTrigger(V_ODAIKO, .don, vel_base * accent);
     } else if (composition.stepActive(spec.odaiko_fill_mask, step) and dsp.rngFloat(&rng) < spec.fill_density * macro_t) {
-        scheduleTrigger(V_ODAIKO, .don, vel_base * 0.6);
+        const fill_type: TriggerType = if (dsp.rngFloat(&rng) < 0.62) .ka else .don;
+        const fill_vel: f32 = if (fill_type == .ka) vel_base * 0.58 else vel_base * 0.58;
+        scheduleTrigger(V_ODAIKO, fill_type, fill_vel);
+    } else if (step % 4 == 2 and dsp.rngFloat(&rng) < spec.fill_density * macro_t * 0.22) {
+        scheduleTrigger(V_ODAIKO, .ka, vel_base * 0.40);
     } else if (dsp.rngFloat(&rng) < spec.ghost_density * macro_t * 0.3) {
         scheduleTrigger(V_ODAIKO, .ghost, vel_base * 0.3);
     }
