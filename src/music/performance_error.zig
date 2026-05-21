@@ -69,37 +69,6 @@ pub const ACOUSTIC_GUITAR_ERROR_PROFILE: ErrorProfile = .{
     },
 };
 
-pub const BANJO_ERROR_PROFILE: ErrorProfile = .{
-    .timing = .{
-        .base_latency_ms = 9.0,
-        .step_random_ms = 1.35,
-        .strong_step_scale = 0.35,
-        .offbeat_drag_min_ms = -1.8,
-        .offbeat_drag_max_ms = 3.8,
-        .pickup_rush_min_ms = 0.8,
-        .pickup_rush_max_ms = 3.2,
-        .backbeat_bias_min_ms = -1.0,
-        .backbeat_bias_max_ms = 2.5,
-        .voice_bias_ms = 1.55,
-        .voice_slope_ms = 0.2,
-        .clock_initial_ms = 1.8,
-        .clock_drift_step_ms = 0.85,
-        .clock_drift_base_ms = 3.2,
-        .clock_drift_meso_ms = 2.8,
-        .clock_smoothing = 0.24,
-        .residual_anchor_ms = 0.55,
-        .residual_note_ms = 1.15,
-        .max_delay_ms = 22.0,
-    },
-    .pitch = .{
-        .voice_bias_cents = 1.8,
-        .residual_anchor_cents = 0.8,
-        .residual_note_cents = 1.5,
-        .slip_chance = 0.045,
-        .slip_cents = 5.0,
-    },
-};
-
 pub const ELECTRIC_GUITAR_ERROR_PROFILE: ErrorProfile = .{
     .timing = .{
         .base_latency_ms = 8.0,

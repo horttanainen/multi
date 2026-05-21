@@ -22,6 +22,7 @@ const RenderConfig = struct {
     reverb_mix: f32 = 0.35,
     guitar_volume: f32 = 0.86,
     guitar_cue: procedural_americana_guitar.CuePreset = .open_road,
+    instrument_flavor: procedural_americana_guitar.InstrumentFlavor = .guitar,
     seed: u64 = DEFAULT_SEED,
     fixed_seed: bool = true,
 };
@@ -68,10 +69,11 @@ pub fn main() !void {
     }
 
     std.log.info(
-        "procedural_music_probe: wrote {s} style={s} cue={s} duration_seconds={d:.3} frames={d} rms={d:.5} peak={d:.5}",
+        "procedural_music_probe: wrote {s} style={s} instrument={s} cue={s} duration_seconds={d:.3} frames={d} rms={d:.5} peak={d:.5}",
         .{
             cfg.out_path,
             styleLabel(cfg.style),
+            instrumentFlavorLabel(cfg.instrument_flavor),
             guitarCueLabel(cfg.guitar_cue),
             cfg.duration_seconds,
             total_frames,
@@ -146,6 +148,12 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
             idx += 2;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--instrument")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.instrument_flavor = try parseInstrumentFlavorArg(value);
+            idx += 2;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--seed")) {
             const value = try optionValue(args, idx, arg);
             cfg.seed = try parseSeedArg(value);
@@ -205,6 +213,20 @@ fn parseGuitarCueName(name: []const u8) ?procedural_americana_guitar.CuePreset {
     return null;
 }
 
+fn parseInstrumentFlavorArg(arg: []const u8) !procedural_americana_guitar.InstrumentFlavor {
+    const flavor = parseInstrumentFlavorName(arg) orelse {
+        std.log.err("procedural_music_probe: unknown instrument '{s}'", .{arg});
+        return error.InvalidArgument;
+    };
+    return flavor;
+}
+
+fn parseInstrumentFlavorName(name: []const u8) ?procedural_americana_guitar.InstrumentFlavor {
+    if (std.mem.eql(u8, name, "guitar")) return .guitar;
+    if (std.mem.eql(u8, name, "electric") or std.mem.eql(u8, name, "electric-guitar") or std.mem.eql(u8, name, "electric_guitar")) return .electric;
+    return null;
+}
+
 fn parsePositiveFloatArg(label: []const u8, arg: []const u8) !f32 {
     const parsed = std.fmt.parseFloat(f32, arg) catch |err| {
         std.log.err("procedural_music_probe: invalid {s}='{s}': {}", .{ label, arg, err });
@@ -243,6 +265,7 @@ fn applyStyleSettings(cfg: RenderConfig) void {
             procedural_americana_guitar.reverb_mix = cfg.reverb_mix;
             procedural_americana_guitar.guitar_vol = cfg.guitar_volume;
             procedural_americana_guitar.selected_cue = cfg.guitar_cue;
+            procedural_americana_guitar.selected_instrument = cfg.instrument_flavor;
         },
     }
 }
@@ -388,6 +411,13 @@ fn guitarCueLabel(cue: procedural_americana_guitar.CuePreset) []const u8 {
     };
 }
 
+fn instrumentFlavorLabel(flavor: procedural_americana_guitar.InstrumentFlavor) []const u8 {
+    return switch (flavor) {
+        .guitar => "guitar",
+        .electric => "electric",
+    };
+}
+
 fn printUsage() void {
     std.debug.print(
         \\Usage: zig build procedural-music-probe -- [style] [options]
@@ -402,6 +432,7 @@ fn printUsage() void {
         \\  --reverb VALUE      0..1, scaled inside the guitar style
         \\  --volume VALUE      0..1
         \\  --cue NAME          open-road, low-drone, rolling-travis, high-lonesome
+        \\  --instrument NAME   guitar, electric
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
         \\

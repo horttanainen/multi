@@ -18,8 +18,6 @@ pub var selected_instrument: InstrumentFlavor = .guitar;
 const BASE_VELOCITY: f32 = 0.62;
 const NOTE_TAIL_SECONDS: f32 = 0.745;
 const NOTE_TAIL_SAMPLES: u32 = @intFromFloat(NOTE_TAIL_SECONDS * dsp.SAMPLE_RATE);
-const BANJO_NOTE_TAIL_SECONDS: f32 = 0.38;
-const BANJO_NOTE_TAIL_SAMPLES: u32 = @intFromFloat(BANJO_NOTE_TAIL_SECONDS * dsp.SAMPLE_RATE);
 const ELECTRIC_NOTE_TAIL_SECONDS: f32 = 1.1;
 const ELECTRIC_NOTE_TAIL_SAMPLES: u32 = @intFromFloat(ELECTRIC_NOTE_TAIL_SECONDS * dsp.SAMPLE_RATE);
 const VOICE_COUNT = 12;
@@ -35,9 +33,15 @@ const GUITAR_REVERB_SEND_SCALE: f32 = 0.44;
 const GUITAR_REVERB_MAX_WET: f32 = 0.62;
 const GUITAR_REVERB_RETURN_GAIN: f32 = 2.4;
 const GUITAR_REVERB_DRY_DUCK: f32 = 0.35;
+const ELECTRIC_DISTORTION_DRIVE: f32 = 10.5;
+const ELECTRIC_DISTORTION_SECONDARY_DRIVE: f32 = 3.15;
+const ELECTRIC_DISTORTION_BIAS: f32 = 0.055;
+const ELECTRIC_DISTORTION_EDGE: f32 = 0.28;
+const ELECTRIC_DISTORTION_HARD_CLIP_DRIVE: f32 = 1.28;
+const ELECTRIC_DISTORTION_WET: f32 = 0.93;
+const ELECTRIC_DISTORTION_OUTPUT_GAIN: f32 = 0.24;
 
 const OPEN_STRING_MIDI: [STRING_COUNT]u8 = .{ 38, 45, 50, 55, 59, 64 };
-const BANJO_STRING_MIDI: [STRING_COUNT]u8 = .{ 50, 55, 59, 62, 67, 74 };
 const ELECTRIC_STRING_MIDI: [STRING_COUNT]u8 = .{ 40, 45, 50, 55, 59, 64 };
 const STRING_PAN: [STRING_COUNT]f32 = .{ -0.12, -0.08, -0.03, 0.04, 0.09, 0.14 };
 
@@ -45,7 +49,6 @@ const GuitarReverb = dsp.StereoReverb(.{ 1301, 1511, 1741, 1999 }, .{ 353, 941 }
 
 pub const InstrumentFlavor = enum(u8) {
     guitar,
-    banjo,
     electric,
 };
 
@@ -112,6 +115,7 @@ const TrebleMotif = struct {
 
 const GuitarVoice = struct {
     synth: instruments.GuitarFaustPluck = .{},
+    electric_synth: instruments.GuitarFaustElectric = .{},
     pan: f32 = 0.0,
     active: bool = false,
     flavor: InstrumentFlavor = .guitar,
@@ -154,44 +158,24 @@ const CHORD_SHAPES: [5]ChordShape = .{
     .{ .id = .cadd9_over_d, .frets = .{ 0, 3, 2, 0, 3, 3 } },
 };
 
-const BANJO_PARAMS: instruments.GuitarParams = .{
-    .pluck_position = 0.105,
-    .pluck_brightness = 0.8,
-    .string_mix_scale = 1.85,
-    .body_mix_scale = 0.62,
-    .attack_mix_scale = 1.15,
-    .mute_amount = 0.78,
-    .string_decay_scale = 0.34,
-    .body_gain_scale = 0.5,
-    .body_decay_scale = 0.48,
-    .body_freq_scale = 1.18,
-    .pick_noise_scale = 1.24,
-    .attack_gain_scale = 1.34,
-    .attack_decay_scale = 0.42,
-    .bridge_coupling_scale = 1.5,
-    .inharmonicity_scale = 0.88,
-    .high_decay_scale = 1.02,
-    .output_gain_scale = 0.92,
-};
-
 const ELECTRIC_PARAMS: instruments.GuitarParams = .{
-    .pluck_position = 0.18,
-    .pluck_brightness = 0.62,
-    .string_mix_scale = 1.55,
-    .body_mix_scale = 0.34,
-    .attack_mix_scale = 0.42,
-    .mute_amount = 0.045,
-    .string_decay_scale = 1.58,
-    .body_gain_scale = 0.36,
-    .body_decay_scale = 0.86,
+    .pluck_position = 0.8,
+    .pluck_brightness = 0.82,
+    .string_mix_scale = 1.45,
+    .body_mix_scale = 0.16,
+    .attack_mix_scale = 0.55,
+    .mute_amount = 0.025,
+    .string_decay_scale = 1.82,
+    .body_gain_scale = 0.22,
+    .body_decay_scale = 0.78,
     .body_freq_scale = 1.08,
-    .pick_noise_scale = 0.46,
-    .attack_gain_scale = 0.56,
-    .attack_decay_scale = 0.72,
-    .bridge_coupling_scale = 0.95,
-    .inharmonicity_scale = 0.38,
-    .high_decay_scale = 0.72,
-    .output_gain_scale = 0.9,
+    .pick_noise_scale = 0.34,
+    .attack_gain_scale = 0.62,
+    .attack_decay_scale = 0.86,
+    .bridge_coupling_scale = 1.05,
+    .inharmonicity_scale = 0.32,
+    .high_decay_scale = 1.04,
+    .output_gain_scale = 0.78,
 };
 
 const PROGRESSIONS: [4][8]ChordId = .{
@@ -517,7 +501,6 @@ fn advancePerformanceErrorClock(meso: f32) void {
 fn errorProfile() performance_error.ErrorProfile {
     return switch (selected_instrument) {
         .guitar => performance_error.ACOUSTIC_GUITAR_ERROR_PROFILE,
-        .banjo => performance_error.BANJO_ERROR_PROFILE,
         .electric => performance_error.ELECTRIC_GUITAR_ERROR_PROFILE,
     };
 }
@@ -785,7 +768,6 @@ fn stringEventVelocity(event: StringEvent, meso: f32, spec: *const GuitarCueSpec
     const energy_bias = (spec.energy - 0.5) * 0.07 + meso * 0.025;
     const instrument_bias: f32 = switch (selected_instrument) {
         .guitar => 0.0,
-        .banjo => -0.035,
         .electric => -0.015,
     };
     return std.math.clamp(BASE_VELOCITY * event.velocity_scale + anchor_bias + energy_bias + instrument_bias + randomRange(-0.02, 0.02), 0.34, 0.78);
@@ -795,7 +777,6 @@ fn scheduledGuitarParams(is_anchor: bool) instruments.GuitarParams {
     var params = baseInstrumentParams();
     switch (selected_instrument) {
         .guitar => randomizeGuitarParams(&params, is_anchor),
-        .banjo => randomizeBanjoParams(&params, is_anchor),
         .electric => randomizeElectricParams(&params, is_anchor),
     }
     params.rng_seed = dsp.rngNext(&rng);
@@ -806,7 +787,6 @@ fn scheduledGuitarParams(is_anchor: bool) instruments.GuitarParams {
 fn baseInstrumentParams() instruments.GuitarParams {
     return switch (selected_instrument) {
         .guitar => instruments.GUITAR_FAUST_PROMOTED_PARAMS,
-        .banjo => BANJO_PARAMS,
         .electric => ELECTRIC_PARAMS,
     };
 }
@@ -826,42 +806,25 @@ fn randomizeGuitarParams(params: *instruments.GuitarParams, is_anchor: bool) voi
     params.output_gain_scale *= randomRange(0.9, 1.025);
 }
 
-fn randomizeBanjoParams(params: *instruments.GuitarParams, is_anchor: bool) void {
-    const pluck_position = params.pluck_position orelse 0.105;
-    const pluck_brightness = params.pluck_brightness orelse 0.8;
-    const anchor_brightness: f32 = if (is_anchor) -0.015 else 0.0;
-    params.pluck_position = std.math.clamp(pluck_position + randomRange(-0.012, 0.012), 0.075, 0.145);
-    params.pluck_brightness = std.math.clamp(pluck_brightness + anchor_brightness + randomRange(-0.07, 0.035), 0.66, 0.9);
-    params.attack_mix_scale *= randomRange(0.9, 1.18);
-    params.attack_gain_scale *= randomRange(0.88, 1.14);
-    params.attack_decay_scale *= randomRange(0.88, 1.06);
-    params.string_decay_scale *= randomRange(0.84, 1.04);
-    params.high_decay_scale *= randomRange(0.82, 1.08);
-    params.bridge_coupling_scale *= randomRange(0.84, 1.18);
-    params.mute_amount = std.math.clamp(params.mute_amount + randomRange(-0.035, 0.09), 0.0, 1.0);
-    params.output_gain_scale *= randomRange(0.82, 1.0);
-}
-
 fn randomizeElectricParams(params: *instruments.GuitarParams, is_anchor: bool) void {
-    const pluck_position = params.pluck_position orelse 0.18;
-    const pluck_brightness = params.pluck_brightness orelse 0.62;
+    const pluck_position = params.pluck_position orelse 0.8;
+    const pluck_brightness = params.pluck_brightness orelse 0.82;
     const anchor_brightness: f32 = if (is_anchor) -0.018 else 0.0;
-    params.pluck_position = std.math.clamp(pluck_position + randomRange(-0.015, 0.018), 0.13, 0.24);
-    params.pluck_brightness = std.math.clamp(pluck_brightness + anchor_brightness + randomRange(-0.035, 0.035), 0.5, 0.75);
-    params.attack_mix_scale *= randomRange(0.86, 1.08);
+    params.pluck_position = std.math.clamp(pluck_position + randomRange(-0.045, 0.035), 0.72, 0.88);
+    params.pluck_brightness = std.math.clamp(pluck_brightness + anchor_brightness + randomRange(-0.035, 0.035), 0.68, 0.9);
+    params.attack_mix_scale *= randomRange(0.86, 1.1);
     params.attack_gain_scale *= randomRange(0.88, 1.08);
     params.attack_decay_scale *= randomRange(0.92, 1.08);
-    params.string_decay_scale *= randomRange(0.96, 1.06);
-    params.high_decay_scale *= randomRange(0.92, 1.08);
-    params.bridge_coupling_scale *= randomRange(0.9, 1.08);
-    params.mute_amount = std.math.clamp(params.mute_amount + randomRange(-0.02, 0.035), 0.0, 1.0);
-    params.output_gain_scale *= randomRange(0.9, 1.04);
+    params.string_decay_scale *= randomRange(1.0, 1.08);
+    params.high_decay_scale *= randomRange(0.94, 1.08);
+    params.bridge_coupling_scale *= randomRange(0.96, 1.12);
+    params.mute_amount = std.math.clamp(params.mute_amount + randomRange(-0.015, 0.025), 0.0, 1.0);
+    params.output_gain_scale *= randomRange(0.88, 1.02);
 }
 
 fn maybeApplyRoughPick(params: *instruments.GuitarParams, is_anchor: bool) void {
     const base_chance: f32 = switch (selected_instrument) {
         .guitar => 0.08,
-        .banjo => 0.16,
         .electric => 0.06,
     };
     const chance = if (is_anchor) base_chance * 0.55 else base_chance;
@@ -885,7 +848,6 @@ fn performanceTimingDelaySamples(is_anchor: bool, step: u8, string_idx: usize) f
 fn openStringMidi(string_idx: usize) u8 {
     return switch (selected_instrument) {
         .guitar => OPEN_STRING_MIDI[string_idx],
-        .banjo => BANJO_STRING_MIDI[string_idx],
         .electric => ELECTRIC_STRING_MIDI[string_idx],
     };
 }
@@ -931,7 +893,10 @@ fn triggerVoice(freq: f32, velocity: f32, pan: f32, params: instruments.GuitarPa
     voices[voice_idx].pan = pan;
     voices[voice_idx].active = true;
     voices[voice_idx].flavor = flavor;
-    instruments.guitarFaustPluckTriggerWithParams(&voices[voice_idx].synth, freq, velocity, params);
+    switch (flavor) {
+        .guitar => instruments.guitarFaustPluckTriggerWithParams(&voices[voice_idx].synth, freq, velocity, params),
+        .electric => instruments.guitarFaustElectricTriggerWithParams(&voices[voice_idx].electric_synth, freq, velocity, params),
+    }
 }
 
 fn voiceForTrigger() usize {
@@ -939,8 +904,9 @@ fn voiceForTrigger() usize {
     var best_age: u32 = 0;
     for (0..VOICE_COUNT) |idx| {
         if (!voices[idx].active) return idx;
-        if (voices[idx].synth.age <= best_age) continue;
-        best_age = voices[idx].synth.age;
+        const age = guitarVoiceAge(&voices[idx]);
+        if (age <= best_age) continue;
+        best_age = age;
         best_idx = idx;
     }
     return best_idx;
@@ -952,29 +918,53 @@ fn processVoices() [2]f32 {
 
     for (0..VOICE_COUNT) |idx| {
         if (!voices[idx].active) continue;
-        const raw_sample = instruments.guitarFaustPluckProcess(&voices[idx].synth) * instrumentVoiceEnvelope(voices[idx].flavor, voices[idx].synth.age);
+        const age = guitarVoiceAge(&voices[idx]);
+        const raw_sample = guitarVoiceProcess(&voices[idx]) * instrumentVoiceEnvelope(voices[idx].flavor, age);
         const sample = instrumentPostProcess(voices[idx].flavor, raw_sample);
         const stereo = dsp.panStereo(sample, voices[idx].pan);
         left += stereo[0];
         right += stereo[1];
-        if (voices[idx].synth.age < noteTailSamples(voices[idx].flavor)) continue;
+        if (age < noteTailSamples(voices[idx].flavor)) continue;
         voices[idx].active = false;
     }
 
     return .{ left * 0.72, right * 0.72 };
 }
 
+fn guitarVoiceAge(voice: *const GuitarVoice) u32 {
+    return switch (voice.flavor) {
+        .guitar => voice.synth.age,
+        .electric => voice.electric_synth.age,
+    };
+}
+
+fn guitarVoiceProcess(voice: *GuitarVoice) f32 {
+    return switch (voice.flavor) {
+        .guitar => instruments.guitarFaustPluckProcess(&voice.synth),
+        .electric => instruments.guitarFaustElectricProcess(&voice.electric_synth),
+    };
+}
+
 fn instrumentPostProcess(flavor: InstrumentFlavor, sample: f32) f32 {
     return switch (flavor) {
-        .guitar, .banjo => sample,
-        .electric => softClip(sample * 2.15) * 0.42,
+        .guitar => sample,
+        .electric => electricDistortion(sample),
     };
+}
+
+fn electricDistortion(sample: f32) f32 {
+    const bias_reference = softClip(ELECTRIC_DISTORTION_BIAS);
+    const first_stage = softClip(sample * ELECTRIC_DISTORTION_DRIVE + ELECTRIC_DISTORTION_BIAS) - bias_reference;
+    const edge = first_stage + first_stage * @abs(first_stage) * ELECTRIC_DISTORTION_EDGE;
+    const second_stage = softClip(edge * ELECTRIC_DISTORTION_SECONDARY_DRIVE);
+    const hard_stage = std.math.clamp(second_stage * ELECTRIC_DISTORTION_HARD_CLIP_DRIVE, -0.96, 0.96);
+    const blended = first_stage * (1.0 - ELECTRIC_DISTORTION_WET) + hard_stage * ELECTRIC_DISTORTION_WET;
+    return blended * ELECTRIC_DISTORTION_OUTPUT_GAIN;
 }
 
 fn noteTailSamples(flavor: InstrumentFlavor) u32 {
     return switch (flavor) {
         .guitar => NOTE_TAIL_SAMPLES,
-        .banjo => BANJO_NOTE_TAIL_SAMPLES,
         .electric => ELECTRIC_NOTE_TAIL_SAMPLES,
     };
 }
@@ -982,11 +972,6 @@ fn noteTailSamples(flavor: InstrumentFlavor) u32 {
 fn instrumentVoiceEnvelope(flavor: InstrumentFlavor, age: u32) f32 {
     switch (flavor) {
         .guitar => return 1.0,
-        .banjo => {
-            const age_f: f32 = @floatFromInt(age);
-            const decay_samples = dsp.SAMPLE_RATE * 0.16;
-            return std.math.exp(-age_f / decay_samples);
-        },
         .electric => {
             const age_f: f32 = @floatFromInt(age);
             const decay_samples = dsp.SAMPLE_RATE * 0.95;
