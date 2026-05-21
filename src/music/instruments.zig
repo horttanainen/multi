@@ -761,6 +761,7 @@ pub fn dununProcess(ctx: *Dunun, rng_inst: *dsp.Rng) [2]f32 {
 // Japanese taiko instruments
 
 pub const TaikoStroke = enum { don, ka, ghost };
+const ATARIGANE_MODE_COUNT = 10;
 
 pub const Odaiko = struct {
     phase: f32 = 0,
@@ -907,7 +908,7 @@ pub fn shimeProcess(ctx: *Shime, rng_inst: *dsp.Rng) f32 {
 }
 
 pub const Atarigane = struct {
-    resonators: dsp.ResonatorBank(4) = .{},
+    resonators: dsp.ResonatorBank(ATARIGANE_MODE_COUNT) = .{},
     env: dsp.Envelope = dsp.envelopeInit(0.001, 0.08, 0.0, 0.04),
     hpf: dsp.HPF = dsp.hpfInit(1200.0),
     noise_lpf: dsp.LPF = dsp.lpfInit(7200.0),
@@ -922,8 +923,8 @@ pub fn atariganeTriggerOpen(ctx: *Atarigane, vel: f32) void {
     ctx.velocity = vel;
     ctx.muted = false;
     atariganeConfigureModes(ctx);
-    dsp.resonatorBankExcite(4, &ctx.resonators, .{ 0.7, 0.42, 0.28, 0.16 }, vel);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.12, 0.0, 0.06);
+    dsp.resonatorBankExcite(ATARIGANE_MODE_COUNT, &ctx.resonators, .{ 0.34, 0.24, 0.18, 0.13, 0.095, 0.068, 0.048, 0.034, 0.024, 0.016 }, vel);
+    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.055, 0.0, 0.02);
     ctx.strike_age = 0;
 }
 
@@ -931,43 +932,59 @@ pub fn atariganeTriggerMuted(ctx: *Atarigane, vel: f32) void {
     ctx.velocity = vel;
     ctx.muted = true;
     atariganeConfigureModes(ctx);
-    dsp.resonatorBankExcite(4, &ctx.resonators, .{ 0.45, 0.24, 0.12, 0.06 }, vel * 0.8);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.025, 0.0, 0.012);
+    dsp.resonatorBankExcite(ATARIGANE_MODE_COUNT, &ctx.resonators, .{ 0.24, 0.16, 0.11, 0.074, 0.05, 0.034, 0.022, 0.014, 0.009, 0.006 }, vel * 0.8);
+    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.018, 0.0, 0.008);
     ctx.strike_age = 0;
 }
 
 pub fn atariganeProcess(ctx: *Atarigane, rng_inst: *dsp.Rng) f32 {
-    const env_val = dsp.envelopeProcess(&ctx.env);
-    if (env_val <= 0.0001) return 0.0;
+    const strike_env = dsp.envelopeProcess(&ctx.env);
 
-    var tone = dsp.resonatorBankProcess(4, &ctx.resonators);
-    if (ctx.strike_age < 2800) {
-        tone += dsp.exciterNoiseBurst(rng_inst, &ctx.hpf, &ctx.noise_lpf, ctx.strike_age, if (ctx.muted) 0.015 else 0.007, 0.18);
+    var tone = dsp.resonatorBankProcess(ATARIGANE_MODE_COUNT, &ctx.resonators);
+    if (ctx.strike_age < atariganeStrikeNoiseSamples(ctx.muted)) {
+        const noise_gain: f32 = if (ctx.muted) 0.12 else 0.08;
+        tone += dsp.exciterNoiseBurst(rng_inst, &ctx.hpf, &ctx.noise_lpf, ctx.strike_age, if (ctx.muted) 0.024 else 0.011, noise_gain) * strike_env;
         ctx.strike_age += 1;
     }
     tone = dsp.hpfProcess(&ctx.hpf, tone);
 
-    if (ctx.muted) tone *= 0.4;
-    return tone * env_val * ctx.velocity * ctx.volume;
+    if (ctx.muted) tone *= 0.55;
+    return tone * ctx.volume;
 }
 
 fn atariganeConfigureModes(ctx: *Atarigane) void {
     dsp.resonatorBankConfigure(
-        4,
+        ATARIGANE_MODE_COUNT,
         &ctx.resonators,
         .{
             ctx.base_freq,
-            ctx.base_freq * 2.31,
-            ctx.base_freq * 3.89,
-            ctx.base_freq * 5.12,
+            ctx.base_freq * 1.58,
+            ctx.base_freq * 2.19,
+            ctx.base_freq * 2.74,
+            ctx.base_freq * 3.68,
+            ctx.base_freq * 4.63,
+            ctx.base_freq * 5.89,
+            ctx.base_freq * 7.21,
+            ctx.base_freq * 8.96,
+            ctx.base_freq * 10.83,
         },
         .{
-            if (ctx.muted) 0.9974 else 0.9992,
-            if (ctx.muted) 0.9971 else 0.9988,
-            if (ctx.muted) 0.9968 else 0.9984,
-            if (ctx.muted) 0.9964 else 0.998,
+            if (ctx.muted) 0.9986 else 0.99986,
+            if (ctx.muted) 0.9984 else 0.9998,
+            if (ctx.muted) 0.9981 else 0.99972,
+            if (ctx.muted) 0.9978 else 0.99962,
+            if (ctx.muted) 0.9975 else 0.99952,
+            if (ctx.muted) 0.9972 else 0.9994,
+            if (ctx.muted) 0.9969 else 0.99925,
+            if (ctx.muted) 0.9966 else 0.99905,
+            if (ctx.muted) 0.9963 else 0.99885,
+            if (ctx.muted) 0.996 else 0.99865,
         },
     );
+}
+
+fn atariganeStrikeNoiseSamples(muted: bool) u32 {
+    return if (muted) 1200 else 2600;
 }
 
 pub const SineDrone = struct {

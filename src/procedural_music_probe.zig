@@ -2,6 +2,7 @@ const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const entropy = @import("music/entropy.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
+const procedural_taiko = @import("procedural_taiko.zig");
 
 const SAMPLE_RATE_U32: u32 = 48000;
 const CHANNEL_COUNT: u16 = 2;
@@ -12,6 +13,7 @@ const DEFAULT_SEED: u64 = 0xA6A1_6A01_0000_0001;
 
 const StyleName = enum {
     americana_guitar,
+    taiko,
 };
 
 const RenderConfig = struct {
@@ -20,8 +22,10 @@ const RenderConfig = struct {
     out_path: []const u8 = DEFAULT_OUT_PATH,
     tempo_scale: f32 = 1.0,
     reverb_mix: f32 = 0.35,
-    guitar_volume: f32 = 0.86,
+    volume: f32 = 0.86,
     guitar_cue: procedural_americana_guitar.CuePreset = .open_road,
+    taiko_cue: procedural_taiko.CuePreset = .matsuri,
+    cue_style: ?StyleName = null,
     instrument_flavor: procedural_americana_guitar.InstrumentFlavor = .guitar,
     seed: u64 = DEFAULT_SEED,
     fixed_seed: bool = true,
@@ -73,8 +77,8 @@ pub fn main() !void {
         .{
             cfg.out_path,
             styleLabel(cfg.style),
-            instrumentFlavorLabel(cfg.instrument_flavor),
-            guitarCueLabel(cfg.guitar_cue),
+            instrumentLabel(cfg),
+            cueLabel(cfg),
             cfg.duration_seconds,
             total_frames,
             renderRms(stats),
@@ -138,13 +142,13 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--volume")) {
             const value = try optionValue(args, idx, arg);
-            cfg.guitar_volume = try parseBoundedFloatArg("volume", value, 0.0, 1.0);
+            cfg.volume = try parseBoundedFloatArg("volume", value, 0.0, 1.0);
             idx += 2;
             continue;
         }
         if (std.mem.eql(u8, arg, "--cue")) {
             const value = try optionValue(args, idx, arg);
-            cfg.guitar_cue = try parseGuitarCueArg(value);
+            try parseCueArg(&cfg, value);
             idx += 2;
             continue;
         }
@@ -171,6 +175,7 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         return error.InvalidArgument;
     }
 
+    try validateRenderConfig(cfg);
     return cfg;
 }
 
@@ -194,7 +199,29 @@ fn parseStyleName(name: []const u8) ?StyleName {
     if (std.mem.eql(u8, name, "americana-guitar") or std.mem.eql(u8, name, "americana_guitar")) {
         return .americana_guitar;
     }
+    if (std.mem.eql(u8, name, "taiko")) {
+        return .taiko;
+    }
     return null;
+}
+
+fn parseCueArg(cfg: *RenderConfig, arg: []const u8) !void {
+    const guitar_cue = parseGuitarCueName(arg);
+    if (guitar_cue != null) {
+        cfg.guitar_cue = guitar_cue.?;
+        cfg.cue_style = .americana_guitar;
+        return;
+    }
+
+    const taiko_cue = parseTaikoCueName(arg);
+    if (taiko_cue != null) {
+        cfg.taiko_cue = taiko_cue.?;
+        cfg.cue_style = .taiko;
+        return;
+    }
+
+    std.log.err("procedural_music_probe: unknown cue '{s}'", .{arg});
+    return error.InvalidArgument;
 }
 
 fn parseGuitarCueArg(arg: []const u8) !procedural_americana_guitar.CuePreset {
@@ -213,6 +240,22 @@ fn parseGuitarCueName(name: []const u8) ?procedural_americana_guitar.CuePreset {
     return null;
 }
 
+fn parseTaikoCueArg(arg: []const u8) !procedural_taiko.CuePreset {
+    const cue = parseTaikoCueName(arg) orelse {
+        std.log.err("procedural_music_probe: unknown taiko cue '{s}'", .{arg});
+        return error.InvalidArgument;
+    };
+    return cue;
+}
+
+fn parseTaikoCueName(name: []const u8) ?procedural_taiko.CuePreset {
+    if (std.mem.eql(u8, name, "matsuri")) return .matsuri;
+    if (std.mem.eql(u8, name, "yatai-bayashi") or std.mem.eql(u8, name, "yatai_bayashi")) return .yatai_bayashi;
+    if (std.mem.eql(u8, name, "miyake")) return .miyake;
+    if (std.mem.eql(u8, name, "oroshi")) return .oroshi;
+    return null;
+}
+
 fn parseInstrumentFlavorArg(arg: []const u8) !procedural_americana_guitar.InstrumentFlavor {
     const flavor = parseInstrumentFlavorName(arg) orelse {
         std.log.err("procedural_music_probe: unknown instrument '{s}'", .{arg});
@@ -225,6 +268,14 @@ fn parseInstrumentFlavorName(name: []const u8) ?procedural_americana_guitar.Inst
     if (std.mem.eql(u8, name, "guitar")) return .guitar;
     if (std.mem.eql(u8, name, "electric") or std.mem.eql(u8, name, "electric-guitar") or std.mem.eql(u8, name, "electric_guitar")) return .electric;
     return null;
+}
+
+fn validateRenderConfig(cfg: RenderConfig) !void {
+    const cue_style = cfg.cue_style orelse return;
+    if (cue_style == cfg.style) return;
+
+    std.log.err("procedural_music_probe: cue={s} does not belong to style={s}", .{ cueLabelForStyle(cue_style, cfg), styleLabel(cfg.style) });
+    return error.InvalidArgument;
 }
 
 fn parsePositiveFloatArg(label: []const u8, arg: []const u8) !f32 {
@@ -263,9 +314,15 @@ fn applyStyleSettings(cfg: RenderConfig) void {
         .americana_guitar => {
             procedural_americana_guitar.bpm = cfg.tempo_scale;
             procedural_americana_guitar.reverb_mix = cfg.reverb_mix;
-            procedural_americana_guitar.guitar_vol = cfg.guitar_volume;
+            procedural_americana_guitar.guitar_vol = cfg.volume;
             procedural_americana_guitar.selected_cue = cfg.guitar_cue;
             procedural_americana_guitar.selected_instrument = cfg.instrument_flavor;
+        },
+        .taiko => {
+            procedural_taiko.bpm = cfg.tempo_scale;
+            procedural_taiko.reverb_mix = cfg.reverb_mix;
+            procedural_taiko.drum_mix = cfg.volume;
+            procedural_taiko.selected_cue = cfg.taiko_cue;
         },
     }
 }
@@ -273,12 +330,14 @@ fn applyStyleSettings(cfg: RenderConfig) void {
 fn resetStyle(style: StyleName) void {
     switch (style) {
         .americana_guitar => procedural_americana_guitar.reset(),
+        .taiko => procedural_taiko.reset(),
     }
 }
 
 fn fillStyleBuffer(style: StyleName, buf: [*]f32, frames: usize) void {
     switch (style) {
         .americana_guitar => procedural_americana_guitar.fillBuffer(buf, frames),
+        .taiko => procedural_taiko.fillBuffer(buf, frames),
     }
 }
 
@@ -399,6 +458,18 @@ fn writeI16Le(out: []u8, value: i16) void {
 fn styleLabel(style: StyleName) []const u8 {
     return switch (style) {
         .americana_guitar => "americana-guitar",
+        .taiko => "taiko",
+    };
+}
+
+fn cueLabel(cfg: RenderConfig) []const u8 {
+    return cueLabelForStyle(cfg.style, cfg);
+}
+
+fn cueLabelForStyle(style: StyleName, cfg: RenderConfig) []const u8 {
+    return switch (style) {
+        .americana_guitar => guitarCueLabel(cfg.guitar_cue),
+        .taiko => taikoCueLabel(cfg.taiko_cue),
     };
 }
 
@@ -408,6 +479,22 @@ fn guitarCueLabel(cue: procedural_americana_guitar.CuePreset) []const u8 {
         .low_drone => "low-drone",
         .rolling_travis => "rolling-travis",
         .high_lonesome => "high-lonesome",
+    };
+}
+
+fn taikoCueLabel(cue: procedural_taiko.CuePreset) []const u8 {
+    return switch (cue) {
+        .matsuri => "matsuri",
+        .yatai_bayashi => "yatai-bayashi",
+        .miyake => "miyake",
+        .oroshi => "oroshi",
+    };
+}
+
+fn instrumentLabel(cfg: RenderConfig) []const u8 {
+    return switch (cfg.style) {
+        .americana_guitar => instrumentFlavorLabel(cfg.instrument_flavor),
+        .taiko => "taiko-ensemble",
     };
 }
 
@@ -424,15 +511,17 @@ fn printUsage() void {
         \\
         \\Styles:
         \\  americana-guitar
+        \\  taiko
         \\
         \\Options:
         \\  --duration SECONDS
         \\  --out PATH
         \\  --tempo SCALE       0.35..1.65, default 1.0
-        \\  --reverb VALUE      0..1, scaled inside the guitar style
-        \\  --volume VALUE      0..1
-        \\  --cue NAME          open-road, low-drone, rolling-travis, high-lonesome
-        \\  --instrument NAME   guitar, electric
+        \\  --reverb VALUE      0..1, scaled inside the selected style
+        \\  --volume VALUE      0..1, style master volume
+        \\  --cue NAME          guitar: open-road, low-drone, rolling-travis, high-lonesome
+        \\                      taiko: matsuri, yatai-bayashi, miyake, oroshi
+        \\  --instrument NAME   guitar, electric (americana-guitar only)
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
         \\
