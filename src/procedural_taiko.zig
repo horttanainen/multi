@@ -31,13 +31,22 @@ pub var shaker_mix: f32 = 0.55; // maps to shime volume
 pub var tone_mix: f32 = 0.65; // maps to nagado volume
 pub var slap_mix: f32 = 0.5; // maps to atarigane volume
 pub var selected_cue: CuePreset = .matsuri;
+const TAIKO_ODAIKO_BUS_GAIN: f32 = 0.62;
+const TAIKO_NAGADO_BUS_GAIN: f32 = 0.82;
+const TAIKO_SHIME_BUS_GAIN: f32 = 0.72;
+const TAIKO_KANE_BUS_GAIN: f32 = 0.9;
+const TAIKO_REVERB_SEND_GAIN: f32 = 0.55;
+const TAIKO_REVERB_RETURN_GAIN: f32 = 0.45;
+const TAIKO_REVERB_DRY_DUCK: f32 = 0.18;
+const TAIKO_REVERB_MAX_WET: f32 = 0.48;
+const TAIKO_MASTER_OUTPUT_GAIN: f32 = 0.88;
 
 // ============================================================
 // Reverb — large hall / outdoor space character
 // ============================================================
 
 const TaikoReverb = StereoReverb(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 });
-var reverb: TaikoReverb = dsp.stereoReverbInit(.{1801, 1907, 2053, 2111}, .{241, 557}, .{ 0.87, 0.88, 0.86, 0.89 });
+var reverb: TaikoReverb = dsp.stereoReverbInit(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 }, .{ 0.87, 0.88, 0.86, 0.89 });
 var rng: dsp.Rng = dsp.rngInit(0xDA1C_0000);
 
 fn initHarmony() composition.ChordMarkov {
@@ -483,7 +492,6 @@ fn hashLeadPattern() u32 {
     return pattern_history.hashEnumPattern(LeadHit, lead_pattern[0..]);
 }
 
-
 fn randomTaikoLeadHit(is_strong: bool) LeadHit {
     const r = dsp.rngFloat(&rng);
     if (is_strong and r < 0.22) return .don_don;
@@ -629,7 +637,7 @@ pub fn reset() void {
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
     structural_cue = selected_cue;
     pending_scale_type = null;
-    reverb = dsp.stereoReverbInit(.{1801, 1907, 2053, 2111}, .{241, 557}, .{ 0.87, 0.88, 0.86, 0.89 });
+    reverb = dsp.stereoReverbInit(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 }, .{ 0.87, 0.88, 0.86, 0.89 });
     lfo_space = .{ .period_beats = 96, .depth = 0.03 };
 
     composition.stepStyleRunnerReset(TaikoCueSpec, 4, &runner, &STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
@@ -753,50 +761,53 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         processPendingTriggers();
 
         // ---- Mix ----
-        var left: f32 = 0.0;
-        var right: f32 = 0.0;
+        var dry_left: f32 = 0.0;
+        var dry_right: f32 = 0.0;
 
         // Odaiko — massive center presence
-        const odaiko_s = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2;
-        left += odaiko_s;
-        right += odaiko_s;
+        const odaiko_s = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2 * TAIKO_ODAIKO_BUS_GAIN;
+        dry_left += odaiko_s;
+        dry_right += odaiko_s;
 
         // Nagados
-        const n1_s = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
+        const n1_s = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
         const n1_pan = dsp.panStereo(n1_s, VOICE_PAN[V_NAGADO1]);
-        left += n1_pan[0];
-        right += n1_pan[1];
+        dry_left += n1_pan[0];
+        dry_right += n1_pan[1];
 
-        const n2_s = instruments.nagadoProcess(&nagado2, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER];
+        const n2_s = instruments.nagadoProcess(&nagado2, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
         const n2_pan = dsp.panStereo(n2_s, VOICE_PAN[V_NAGADO2]);
-        left += n2_pan[0];
-        right += n2_pan[1];
+        dry_left += n2_pan[0];
+        dry_right += n2_pan[1];
 
         // Shimes
-        const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
+        const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
         const s1_pan = dsp.panStereo(s1_s, VOICE_PAN[V_SHIME1]);
-        left += s1_pan[0];
-        right += s1_pan[1];
+        dry_left += s1_pan[0];
+        dry_right += s1_pan[1];
 
-        const s2_s = instruments.shimeProcess(&shime2, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER];
+        const s2_s = instruments.shimeProcess(&shime2, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
         const s2_pan = dsp.panStereo(s2_s, VOICE_PAN[V_SHIME2]);
-        left += s2_pan[0];
-        right += s2_pan[1];
+        dry_left += s2_pan[0];
+        dry_right += s2_pan[1];
 
         // Atarigane
-        const kane_s = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER];
-        left += kane_s; // center
-        right += kane_s;
+        const kane_s = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER] * TAIKO_KANE_BUS_GAIN;
+        dry_left += kane_s; // center
+        dry_right += kane_s;
 
         // Reverb — large space
-        const wet = (reverb_mix + spec.reverb_boost) * composition.slowLfoModulate(&lfo_space);
-        const dry = 1.0 - wet;
-        const rev = dsp.stereoReverbProcess(.{1801, 1907, 2053, 2111}, .{241, 557}, &reverb, .{ left, right });
-        left = left * dry + rev[0] * wet;
-        right = right * dry + rev[1] * wet;
+        const wet = std.math.clamp((reverb_mix + spec.reverb_boost) * composition.slowLfoModulate(&lfo_space), 0.0, TAIKO_REVERB_MAX_WET);
+        const dry_gain = 1.0 - wet * TAIKO_REVERB_DRY_DUCK;
+        const rev = dsp.stereoReverbProcess(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 }, &reverb, .{
+            dry_left * TAIKO_REVERB_SEND_GAIN,
+            dry_right * TAIKO_REVERB_SEND_GAIN,
+        });
+        const left = dry_left * dry_gain + rev[0] * wet * TAIKO_REVERB_RETURN_GAIN;
+        const right = dry_right * dry_gain + rev[1] * wet * TAIKO_REVERB_RETURN_GAIN;
 
-        buf[i * 2] = softClip(left * 0.85);
-        buf[i * 2 + 1] = softClip(right * 0.85);
+        buf[i * 2] = softClip(left * TAIKO_MASTER_OUTPUT_GAIN);
+        buf[i * 2 + 1] = softClip(right * TAIKO_MASTER_OUTPUT_GAIN);
     }
 }
 

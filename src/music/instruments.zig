@@ -761,6 +761,7 @@ pub fn dununProcess(ctx: *Dunun, rng_inst: *dsp.Rng) [2]f32 {
 // Japanese taiko instruments
 
 pub const TaikoStroke = enum { don, ka, ghost };
+const NAGADO_MODE_COUNT = 6;
 const ATARIGANE_MODE_COUNT = 10;
 
 pub const Odaiko = struct {
@@ -806,65 +807,149 @@ pub fn odaikoProcess(ctx: *Odaiko) f32 {
 }
 
 pub const Nagado = struct {
-    phase: f32 = 0,
-    overtone_phase: f32 = 0,
-    pitch_env: f32 = 0,
+    phase: f32 = 0.0,
+    sub_phase: f32 = 0.0,
+    resonators: dsp.ResonatorBank(NAGADO_MODE_COUNT) = .{},
     env: dsp.Envelope = dsp.envelopeInit(0.001, 0.28, 0.0, 0.14),
+    body_env: dsp.Envelope = dsp.envelopeInit(0.001, 0.42, 0.0, 0.18),
     body_lpf: dsp.LPF = dsp.lpfInit(600.0),
     noise_lpf: dsp.LPF = dsp.lpfInit(2400.0),
     noise_hpf: dsp.HPF = dsp.hpfInit(800.0),
     base_freq: f32 = 140.0,
     noise_mix: f32 = 0.12,
     body_mix: f32 = 0.88,
+    carrier_mix: f32 = 0.0,
     velocity: f32 = 0.0,
-    pitch_decay: f32 = 0.999,
     volume: f32 = 0.85,
+    strike_age: u32 = 999999,
+    strike_noise_samples: u32 = 1800,
+    strike_noise_decay: f32 = 0.008,
+    pitch_env: f32 = 0.0,
+    pitch_decay: f32 = 0.99935,
 };
 
 pub fn nagadoTriggerDon(ctx: *Nagado, vel: f32) void {
     ctx.velocity = vel;
-    ctx.pitch_env = 0.6;
-    ctx.pitch_decay = 0.9992;
-    ctx.noise_mix = 0.12;
-    ctx.body_mix = 0.88;
-    ctx.body_lpf = dsp.lpfInit(ctx.base_freq * 3.5);
-    ctx.noise_lpf = dsp.lpfInit(1800.0);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.28, 0.0, 0.14);
+    ctx.noise_mix = 0.09;
+    ctx.body_mix = 0.95;
+    ctx.carrier_mix = 0.42;
+    ctx.pitch_env = vel * 0.32;
+    ctx.pitch_decay = 0.99945;
+    ctx.body_lpf = dsp.lpfInit(ctx.base_freq * 4.4);
+    ctx.noise_lpf = dsp.lpfInit(2200.0);
+    ctx.noise_hpf = dsp.hpfInit(650.0);
+    ctx.strike_noise_samples = 2200;
+    ctx.strike_noise_decay = 0.0065;
+    nagadoConfigureModes(ctx, .don);
+    dsp.resonatorBankExcite(NAGADO_MODE_COUNT, &ctx.resonators, .{ 1.05, 0.64, 0.38, 0.24, 0.14, 0.08 }, vel);
+    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.055, 0.0, 0.02);
+    dsp.envelopeRetrigger(&ctx.body_env, 0.001, 0.48, 0.0, 0.18);
+    ctx.strike_age = 0;
 }
 
 pub fn nagadoTriggerKa(ctx: *Nagado, vel: f32) void {
     ctx.velocity = vel;
-    ctx.pitch_env = 0.3;
-    ctx.pitch_decay = 0.998;
-    ctx.noise_mix = 0.72;
-    ctx.body_mix = 0.18;
+    ctx.noise_mix = 0.66;
+    ctx.body_mix = 0.42;
+    ctx.carrier_mix = 0.08;
+    ctx.pitch_env = vel * 0.12;
+    ctx.pitch_decay = 0.9988;
     ctx.body_lpf = dsp.lpfInit(4200.0);
     ctx.noise_lpf = dsp.lpfInit(6500.0);
     ctx.noise_hpf = dsp.hpfInit(1800.0);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.035, 0.0, 0.018);
+    ctx.strike_noise_samples = 1200;
+    ctx.strike_noise_decay = 0.012;
+    nagadoConfigureModes(ctx, .ka);
+    dsp.resonatorBankExcite(NAGADO_MODE_COUNT, &ctx.resonators, .{ 0.48, 0.43, 0.31, 0.22, 0.14, 0.09 }, vel * 0.9);
+    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.028, 0.0, 0.012);
+    dsp.envelopeRetrigger(&ctx.body_env, 0.001, 0.08, 0.0, 0.025);
+    ctx.strike_age = 0;
 }
 
 pub fn nagadoTriggerGhost(ctx: *Nagado, vel: f32) void {
-    nagadoTriggerDon(ctx, vel * 0.25);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.06, 0.0, 0.03);
+    ctx.velocity = vel * 0.25;
+    ctx.noise_mix = 0.07;
+    ctx.body_mix = 0.68;
+    ctx.carrier_mix = 0.26;
+    ctx.pitch_env = vel * 0.08;
+    ctx.pitch_decay = 0.9992;
+    ctx.body_lpf = dsp.lpfInit(ctx.base_freq * 4.2);
+    ctx.noise_lpf = dsp.lpfInit(1700.0);
+    ctx.noise_hpf = dsp.hpfInit(700.0);
+    ctx.strike_noise_samples = 900;
+    ctx.strike_noise_decay = 0.011;
+    nagadoConfigureModes(ctx, .ghost);
+    dsp.resonatorBankExcite(NAGADO_MODE_COUNT, &ctx.resonators, .{ 0.48, 0.26, 0.14, 0.072, 0.036, 0.02 }, vel);
+    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.035, 0.0, 0.014);
+    dsp.envelopeRetrigger(&ctx.body_env, 0.001, 0.18, 0.0, 0.06);
+    ctx.strike_age = 0;
 }
 
 pub fn nagadoProcess(ctx: *Nagado, rng_inst: *dsp.Rng) f32 {
-    const env_val = dsp.envelopeProcess(&ctx.env);
-    if (env_val <= 0.0001) return 0.0;
+    const strike_env = dsp.envelopeProcess(&ctx.env);
+    const body_env = dsp.envelopeProcess(&ctx.body_env);
 
     ctx.pitch_env *= ctx.pitch_decay;
-    const freq = ctx.base_freq * (1.0 + ctx.pitch_env * 0.25);
-    ctx.phase += freq * dsp.INV_SR * dsp.TAU;
+    const carrier_freq = ctx.base_freq * (1.0 + ctx.pitch_env * 0.18);
+    ctx.phase += carrier_freq * dsp.INV_SR * dsp.TAU;
     if (ctx.phase > dsp.TAU) ctx.phase -= dsp.TAU;
-    ctx.overtone_phase += freq * 1.58 * dsp.INV_SR * dsp.TAU;
-    if (ctx.overtone_phase > dsp.TAU) ctx.overtone_phase -= dsp.TAU;
+    ctx.sub_phase += carrier_freq * 0.74 * dsp.INV_SR * dsp.TAU;
+    if (ctx.sub_phase > dsp.TAU) ctx.sub_phase -= dsp.TAU;
 
-    const body = dsp.lpfProcess(&ctx.body_lpf, @sin(ctx.phase) + @sin(ctx.overtone_phase) * 0.18);
-    const raw_noise = dsp.rngFloat(rng_inst) * 2.0 - 1.0;
-    const noise = dsp.hpfProcess(&ctx.noise_hpf, dsp.lpfProcess(&ctx.noise_lpf, raw_noise));
+    const modal_body = dsp.resonatorBankProcess(NAGADO_MODE_COUNT, &ctx.resonators) * ctx.body_mix;
+    const carrier_body = (@sin(ctx.phase) * 0.76 + @sin(ctx.sub_phase) * 0.24) * ctx.carrier_mix * body_env;
+    const body = dsp.lpfProcess(&ctx.body_lpf, modal_body + carrier_body);
+    var noise: f32 = 0.0;
+    if (ctx.strike_age < ctx.strike_noise_samples) {
+        noise = dsp.exciterNoiseBurst(rng_inst, &ctx.noise_hpf, &ctx.noise_lpf, ctx.strike_age, ctx.strike_noise_decay, ctx.noise_mix) * strike_env;
+        ctx.strike_age += 1;
+    }
 
-    return (body * ctx.body_mix + noise * ctx.noise_mix) * env_val * ctx.velocity * ctx.volume;
+    return (body + noise) * (0.55 + ctx.velocity * 0.45) * ctx.volume;
+}
+
+fn nagadoConfigureModes(ctx: *Nagado, stroke: TaikoStroke) void {
+    switch (stroke) {
+        .don => dsp.resonatorBankConfigure(
+            NAGADO_MODE_COUNT,
+            &ctx.resonators,
+            .{
+                ctx.base_freq,
+                ctx.base_freq * 1.47,
+                ctx.base_freq * 2.09,
+                ctx.base_freq * 2.58,
+                ctx.base_freq * 3.24,
+                ctx.base_freq * 4.02,
+            },
+            .{ 0.9999, 0.99972, 0.99942, 0.99908, 0.99866, 0.9982 },
+        ),
+        .ka => dsp.resonatorBankConfigure(
+            NAGADO_MODE_COUNT,
+            &ctx.resonators,
+            .{
+                ctx.base_freq * 1.72,
+                ctx.base_freq * 2.38,
+                ctx.base_freq * 3.07,
+                ctx.base_freq * 4.19,
+                ctx.base_freq * 5.58,
+                ctx.base_freq * 7.06,
+            },
+            .{ 0.9989, 0.99855, 0.99805, 0.99742, 0.99675, 0.99605 },
+        ),
+        .ghost => dsp.resonatorBankConfigure(
+            NAGADO_MODE_COUNT,
+            &ctx.resonators,
+            .{
+                ctx.base_freq,
+                ctx.base_freq * 1.47,
+                ctx.base_freq * 2.09,
+                ctx.base_freq * 2.58,
+                ctx.base_freq * 3.24,
+                ctx.base_freq * 4.02,
+            },
+            .{ 0.99935, 0.999, 0.99852, 0.99794, 0.99732, 0.9967 },
+        ),
+    }
 }
 
 pub const Shime = struct {
