@@ -1,6 +1,6 @@
 // Procedural Japanese taiko ensemble — v2 composition engine.
 //
-// Kumi-daiko ensemble: odaiko, 2x nagado-daiko, 2x shime-daiko, atarigane.
+// Kumi-daiko ensemble: odaiko, 4x nagado/chū-daiko, 2x shime-daiko, atarigane.
 // 16-step sequencer with swing, per-voice microtiming, lead improvisation
 // with phrase memory, Jo-Ha-Kyu macro arc (sparse→layered→driving unison),
 // call-and-response passages, and dramatic breaks with "ma" (silence).
@@ -34,13 +34,13 @@ pub var selected_cue: CuePreset = .matsuri;
 pub var collect_bus_stats: bool = false;
 const TAIKO_ODAIKO_BUS_GAIN: f32 = 0.54;
 const TAIKO_NAGADO_BUS_GAIN: f32 = 0.90;
-const TAIKO_SHIME_BUS_GAIN: f32 = 0.80;
+const TAIKO_SHIME_BUS_GAIN: f32 = 1.20;
 const TAIKO_KANE_BUS_GAIN: f32 = 1.0;
 const TAIKO_REVERB_SEND_GAIN: f32 = 0.55;
 const TAIKO_REVERB_RETURN_GAIN: f32 = 0.45;
 const TAIKO_REVERB_DRY_DUCK: f32 = 0.18;
 const TAIKO_REVERB_MAX_WET: f32 = 0.48;
-const TAIKO_MASTER_OUTPUT_GAIN: f32 = 0.84;
+const TAIKO_MASTER_OUTPUT_GAIN: f32 = 0.90;
 
 pub const TaikoMeterStats = struct {
     samples: u64 = 0,
@@ -135,6 +135,7 @@ const TaikoCueSpec = struct {
     scale_type: composition.ScaleType,
     base_bpm: f32,
     chord_change_beats: f32,
+    pattern_style: TaikoPatternStyle,
     progressive_roll: bool = false,
     swing_amount: f32, // 0 = straight, 0.15 = moderate swing
     // 16-bit step masks
@@ -176,6 +177,13 @@ var runner: TaikoRunner = .{};
 // Cue specs — different taiko traditions
 // ============================================================
 
+const TaikoPatternStyle = enum {
+    matsuri,
+    yatai_bayashi,
+    miyake,
+    oroshi,
+};
+
 const CUE_SPECS: [4]TaikoCueSpec = .{
     // matsuri — festival rhythm, moderate tempo, steady groove
     .{
@@ -183,6 +191,7 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .scale_type = .dorian,
         .base_bpm = 116.0,
         .chord_change_beats = 16.0,
+        .pattern_style = .matsuri,
         .progressive_roll = false,
         .swing_amount = 0.08,
         // Odaiko: beats 1 and 9 (half notes)
@@ -217,6 +226,7 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .scale_type = .mixolydian,
         .base_bpm = 128.0,
         .chord_change_beats = 12.0,
+        .pattern_style = .yatai_bayashi,
         .progressive_roll = false,
         .swing_amount = 0.12,
         .odaiko_mask = (1 << 0) | (1 << 8),
@@ -246,6 +256,7 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .scale_type = .natural_minor,
         .base_bpm = 108.0,
         .chord_change_beats = 20.0,
+        .pattern_style = .miyake,
         .progressive_roll = false,
         .swing_amount = 0.05,
         .odaiko_mask = (1 << 0) | (1 << 6) | (1 << 8) | (1 << 14),
@@ -275,6 +286,7 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .scale_type = .harmonic_minor,
         .base_bpm = 82.0,
         .chord_change_beats = 16.0,
+        .pattern_style = .oroshi,
         .progressive_roll = true,
         .swing_amount = 0.0,
         .odaiko_mask = (1 << 0) | (1 << 8),
@@ -341,6 +353,8 @@ fn applyInstrumentTuning(cue_idx: f32) void {
     odaiko.base_freq = 44.0 + cue_idx * 4.0;
     nagado1.base_freq = 130.0 + cue_idx * 12.0;
     nagado2.base_freq = 155.0 + cue_idx * 12.0;
+    nagado3.base_freq = 142.0 + cue_idx * 10.0;
+    nagado4.base_freq = 174.0 + cue_idx * 9.0;
     shime1.base_freq = 390.0 + cue_idx * 14.0;
     shime2.base_freq = 426.0 + cue_idx * 14.0;
     kane.base_freq = 880.0 + cue_idx * 40.0;
@@ -391,6 +405,8 @@ fn maybeAdvanceStructuralCue(step: u8) void {
 var odaiko: instruments.Odaiko = .{};
 var nagado1: instruments.Nagado = .{ .base_freq = 140.0, .volume = 0.85 };
 var nagado2: instruments.Nagado = .{ .base_freq = 165.0, .volume = 0.78 };
+var nagado3: instruments.Nagado = .{ .base_freq = 148.0, .volume = 0.62 };
+var nagado4: instruments.Nagado = .{ .base_freq = 178.0, .volume = 0.58 };
 var shime1: instruments.Shime = .{ .base_freq = 400.0, .volume = 0.6 };
 var shime2: instruments.Shime = .{ .base_freq = 436.0, .volume = 0.55 };
 var kane: instruments.Atarigane = .{};
@@ -399,18 +415,22 @@ var kane: instruments.Atarigane = .{};
 // Microtiming
 // ============================================================
 
-const NUM_VOICES: usize = 6;
+const NUM_VOICES: usize = 8;
 const V_ODAIKO: usize = 0;
 const V_NAGADO1: usize = 1;
 const V_NAGADO2: usize = 2;
-const V_SHIME1: usize = 3;
-const V_SHIME2: usize = 4;
-const V_KANE: usize = 5;
+const V_NAGADO3: usize = 3;
+const V_NAGADO4: usize = 4;
+const V_SHIME1: usize = 5;
+const V_SHIME2: usize = 6;
+const V_KANE: usize = 7;
 
 const VOICE_OFFSETS: [NUM_VOICES]f32 = .{
     4.5, // odaiko: behind (massive drum, deliberate)
     1.8, // nagado1: slightly behind
     -1.5, // nagado2: slightly ahead
+    0.8, // nagado3: ensemble support, near center
+    -0.8, // nagado4: ensemble support, answering side
     0.0, // shime1: reference (timekeeper)
     0.5, // shime2: nearly on reference
     -2.0, // kane: slightly ahead (bright, cutting)
@@ -419,8 +439,10 @@ const JITTER_SAMPLES: f32 = 2.0;
 
 const VOICE_PAN: [NUM_VOICES]f32 = .{
     0.0, // odaiko: center
-    -0.35, // nagado1: left
-    0.35, // nagado2: right
+    -0.42, // nagado1: left
+    0.42, // nagado2: right
+    -0.16, // nagado3: inner left
+    0.16, // nagado4: inner right
     -0.55, // shime1: further left
     0.55, // shime2: further right
     0.0, // kane: center (cuts through)
@@ -442,27 +464,78 @@ const PendingTrigger = struct {
     velocity: f32 = 0.0,
 };
 
-var pending: [NUM_VOICES]PendingTrigger = .{PendingTrigger{}} ** NUM_VOICES;
+const PENDING_SLOTS_PER_VOICE: usize = 4;
+const EMPTY_PENDING_ROW: [PENDING_SLOTS_PER_VOICE]PendingTrigger = .{PendingTrigger{}} ** PENDING_SLOTS_PER_VOICE;
+var pending: [NUM_VOICES][PENDING_SLOTS_PER_VOICE]PendingTrigger = .{EMPTY_PENDING_ROW} ** NUM_VOICES;
 
 fn scheduleTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
-    const offset = VOICE_OFFSETS[voice] + (dsp.rngFloat(&rng) * 2.0 - 1.0) * JITTER_SAMPLES;
-    pending[voice] = .{
-        .trigger_type = ttype,
-        .delay = @max(offset, 0.0),
-        .velocity = vel,
-    };
+    scheduleTriggerAfter(voice, ttype, vel, 0.0);
+}
+
+fn scheduleTriggerAfter(voice: usize, ttype: TriggerType, vel: f32, extra_delay_samples: f32) void {
+    if (voice >= NUM_VOICES) {
+        std.log.warn("procedural_taiko.scheduleTriggerAfter: voice {d} out of range", .{voice});
+        return;
+    }
+    if (ttype == .none or vel <= 0.0) return;
+
+    const offset = VOICE_OFFSETS[voice] + extra_delay_samples + (dsp.rngFloat(&rng) * 2.0 - 1.0) * JITTER_SAMPLES;
+    for (0..PENDING_SLOTS_PER_VOICE) |slot| {
+        if (pending[voice][slot].trigger_type != .none) continue;
+        pending[voice][slot] = .{
+            .trigger_type = ttype,
+            .delay = @max(offset, 0.0),
+            .velocity = vel,
+        };
+        return;
+    }
 }
 
 fn processPendingTriggers() void {
     for (0..NUM_VOICES) |i| {
-        if (pending[i].trigger_type == .none) continue;
-        if (pending[i].delay <= 0) {
-            fireTrigger(i, pending[i].trigger_type, pending[i].velocity);
-            pending[i].trigger_type = .none;
-        } else {
-            pending[i].delay -= 1.0;
+        for (0..PENDING_SLOTS_PER_VOICE) |slot| {
+            if (pending[i][slot].trigger_type == .none) continue;
+            if (pending[i][slot].delay <= 0) {
+                fireTrigger(i, pending[i][slot].trigger_type, pending[i][slot].velocity);
+                pending[i][slot].trigger_type = .none;
+            } else {
+                pending[i][slot].delay -= 1.0;
+            }
         }
     }
+}
+
+const KUCHI_PAIR_DELAY_SAMPLES: f32 = dsp.SAMPLE_RATE * 0.034;
+const KUCHI_SOFT_PAIR_DELAY_SAMPLES: f32 = dsp.SAMPLE_RATE * 0.026;
+
+fn scheduleDoko(voice: usize, vel: f32) void {
+    scheduleTrigger(voice, .don, vel);
+    scheduleTriggerAfter(voice, .ghost, vel * 0.62, KUCHI_PAIR_DELAY_SAMPLES);
+}
+
+fn scheduleDoro(voice: usize, vel: f32) void {
+    scheduleTrigger(voice, .don, vel);
+    scheduleTriggerAfter(voice, .don, vel * 0.56, KUCHI_PAIR_DELAY_SAMPLES);
+}
+
+fn scheduleKara(voice: usize, vel: f32) void {
+    scheduleTrigger(voice, .ka, vel);
+    scheduleTriggerAfter(voice, .ka, vel * 0.68, KUCHI_SOFT_PAIR_DELAY_SAMPLES);
+}
+
+fn scheduleTsuku(voice: usize, vel: f32) void {
+    scheduleTrigger(voice, .ghost, vel);
+    scheduleTriggerAfter(voice, .ghost, vel * 0.70, KUCHI_SOFT_PAIR_DELAY_SAMPLES);
+}
+
+fn scheduleDonKa(voice: usize, vel: f32) void {
+    scheduleTrigger(voice, .don, vel);
+    scheduleTriggerAfter(voice, .ka, vel * 0.72, KUCHI_PAIR_DELAY_SAMPLES);
+}
+
+fn stepActiveShifted(mask: u16, step: u8, shift: u8) bool {
+    const shifted_step: u8 = @intCast((@as(u16, step) + @as(u16, shift)) % 16);
+    return composition.stepActive(mask, shifted_step);
 }
 
 fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
@@ -485,15 +558,29 @@ fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
             .ghost => instruments.nagadoTriggerGhost(&nagado2, vel),
             else => {},
         },
+        V_NAGADO3 => switch (ttype) {
+            .don => instruments.nagadoTriggerDon(&nagado3, vel),
+            .ka => instruments.nagadoTriggerKa(&nagado3, vel),
+            .ghost => instruments.nagadoTriggerGhost(&nagado3, vel),
+            else => {},
+        },
+        V_NAGADO4 => switch (ttype) {
+            .don => instruments.nagadoTriggerDon(&nagado4, vel),
+            .ka => instruments.nagadoTriggerKa(&nagado4, vel),
+            .ghost => instruments.nagadoTriggerGhost(&nagado4, vel),
+            else => {},
+        },
         V_SHIME1 => switch (ttype) {
             .don => instruments.shimeTriggerDon(&shime1, vel),
             .ka => instruments.shimeTriggerKa(&shime1, vel),
+            .ghost => instruments.shimeTriggerRoll(&shime1, vel),
             .roll => instruments.shimeTriggerRoll(&shime1, vel),
             else => {},
         },
         V_SHIME2 => switch (ttype) {
             .don => instruments.shimeTriggerDon(&shime2, vel),
             .ka => instruments.shimeTriggerKa(&shime2, vel),
+            .ghost => instruments.shimeTriggerRoll(&shime2, vel),
             .roll => instruments.shimeTriggerRoll(&shime2, vel),
             else => {},
         },
@@ -677,7 +764,7 @@ pub fn reset() void {
     composition.stepStyleRunnerReset(TaikoCueSpec, 4, &runner, &STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
 
     resetInstruments();
-    pending = .{PendingTrigger{}} ** NUM_VOICES;
+    pending = .{EMPTY_PENDING_ROW} ** NUM_VOICES;
     lead_cycle_count = 0;
     in_break = false;
     break_remaining = 0;
@@ -706,6 +793,8 @@ fn resetInstruments() void {
     odaiko = .{};
     nagado1 = .{ .base_freq = 140.0, .volume = 0.85 };
     nagado2 = .{ .base_freq = 165.0, .volume = 0.78 };
+    nagado3 = .{ .base_freq = 148.0, .volume = 0.62 };
+    nagado4 = .{ .base_freq = 178.0, .volume = 0.58 };
     shime1 = .{ .base_freq = 400.0, .volume = 0.6 };
     shime2 = .{ .base_freq = 436.0, .volume = 0.55 };
     kane = .{};
@@ -846,7 +935,21 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         const n2_pan = dsp.panStereo(n2_s, VOICE_PAN[V_NAGADO2]);
         dry_left += n2_pan[0];
         dry_right += n2_pan[1];
-        const nagado_bus = .{ n1_pan[0] + n2_pan[0], n1_pan[1] + n2_pan[1] };
+
+        const n3_s = instruments.nagadoProcess(&nagado3, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n3_pan = dsp.panStereo(n3_s, VOICE_PAN[V_NAGADO3]);
+        dry_left += n3_pan[0];
+        dry_right += n3_pan[1];
+
+        const n4_s = instruments.nagadoProcess(&nagado4, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n4_pan = dsp.panStereo(n4_s, VOICE_PAN[V_NAGADO4]);
+        dry_left += n4_pan[0];
+        dry_right += n4_pan[1];
+
+        const nagado_bus = .{
+            n1_pan[0] + n2_pan[0] + n3_pan[0] + n4_pan[0],
+            n1_pan[1] + n2_pan[1] + n3_pan[1] + n4_pan[1],
+        };
 
         // Shimes
         const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
@@ -971,25 +1074,9 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
             scheduleTrigger(V_NAGADO2, .ghost, vel_base * 0.3);
         }
     }
+    advanceNagadoBackline(step, meso, macro_t, vel_base, accent, spec);
 
-    // ---- Shime-daiko (ji-uchi — always present) ----
-    if (composition.stepActive(spec.shime_ji_mask, step)) {
-        const is_accent = composition.stepActive(spec.shime_accent_mask, step);
-        const shime_vel = if (is_accent) vel_base * (0.78 + spec.energy * 0.16) else vel_base * (0.42 + spec.energy * 0.18);
-
-        // Shime 1: main ji-uchi
-        scheduleTrigger(V_SHIME1, .don, shime_vel);
-
-        // Shime 2: interlocking — plays the off-positions or rolls
-        if (!composition.stepActive(spec.shime_ji_mask, (step + 1) % 16) or dsp.rngFloat(&rng) < 0.12 + spec.energy * 0.22) {
-            scheduleTrigger(V_SHIME2, .don, shime_vel * 0.85);
-        }
-    }
-    // Shime rolls during high tension
-    if (dsp.rngFloat(&rng) < spec.roll_chance * macro_t and step % 4 == 3) {
-        scheduleTrigger(V_SHIME1, .roll, vel_base * 0.6);
-        scheduleTrigger(V_SHIME2, .roll, vel_base * 0.5);
-    }
+    advanceShimeJi(step, meso, macro_t, vel_base, spec);
 
     // ---- Atarigane ----
     if (composition.stepActive(spec.kane_open_mask, step)) {
@@ -1000,6 +1087,153 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
         if (dsp.rngFloat(&rng) < kaneMutedChance(spec, meso, macro_t)) {
             scheduleTrigger(V_KANE, .muted, vel_base * 0.42);
         }
+    }
+}
+
+fn advanceNagadoBackline(step: u8, meso: f32, macro_t: f32, vel_base: f32, accent: f32, spec: *const TaikoCueSpec) void {
+    const back_vel = vel_base * (0.36 + macro_t * 0.18 + meso * 0.08);
+
+    if (in_break) {
+        if (step >= 8 and step % 2 == 0) {
+            scheduleTrigger(V_NAGADO3, .don, back_vel * accent * 0.92);
+            scheduleTrigger(V_NAGADO4, .don, back_vel * accent * 0.86);
+        } else if (step >= 12 and step % 2 == 1) {
+            scheduleKara(V_NAGADO4, back_vel * 0.48);
+        }
+        return;
+    }
+
+    switch (spec.pattern_style) {
+        .matsuri => {
+            if (composition.stepActive(spec.nagado1_don_mask, step)) {
+                scheduleTrigger(V_NAGADO3, .don, back_vel * accent * 0.78);
+            }
+            if (composition.stepActive(spec.nagado1_ka_mask, step)) {
+                scheduleKara(V_NAGADO4, back_vel * 0.52);
+            }
+            if (composition.stepActive(spec.odaiko_fill_mask, step) and dsp.rngFloat(&rng) < spec.fill_density * macro_t * 0.75) {
+                scheduleDoko(V_NAGADO3, back_vel * 0.58);
+            }
+        },
+        .yatai_bayashi => {
+            if (stepActiveShifted(spec.nagado1_don_mask, step, 4)) {
+                scheduleTrigger(V_NAGADO3, .don, back_vel * 0.74);
+            }
+            if (stepActiveShifted(spec.nagado1_don_mask, step, 8) and dsp.rngFloat(&rng) < 0.55 + macro_t * 0.22) {
+                scheduleDoro(V_NAGADO4, back_vel * 0.62);
+            }
+            if (stepActiveShifted(spec.nagado1_ka_mask, step, 4)) {
+                scheduleTrigger(V_NAGADO3, .ka, back_vel * 0.46);
+            }
+            if (step % 8 == 7 and dsp.rngFloat(&rng) < 0.38 + meso * 0.18) {
+                scheduleKara(V_NAGADO4, back_vel * 0.42);
+            }
+        },
+        .miyake => {
+            if (step % 4 == 0) {
+                scheduleTrigger(V_NAGADO3, .don, back_vel * accent * 0.90);
+                scheduleTrigger(V_NAGADO4, .don, back_vel * accent * 0.78);
+            } else if (step % 4 == 2) {
+                scheduleDoko(V_NAGADO3, back_vel * 0.58);
+                if (dsp.rngFloat(&rng) < 0.48 + macro_t * 0.20) {
+                    scheduleTrigger(V_NAGADO4, .ka, back_vel * 0.50);
+                }
+            } else if (dsp.rngFloat(&rng) < spec.ghost_density * (0.5 + meso * 0.4)) {
+                scheduleTrigger(if (step % 4 == 1) V_NAGADO3 else V_NAGADO4, .ghost, back_vel * 0.38);
+            }
+        },
+        .oroshi => {},
+    }
+}
+
+fn shimeBaseVelocity(step: u8, vel_base: f32, spec: *const TaikoCueSpec) f32 {
+    const is_accent = composition.stepActive(spec.shime_accent_mask, step);
+    if (is_accent) return vel_base * (0.76 + spec.energy * 0.16);
+    return vel_base * (0.38 + spec.energy * 0.18);
+}
+
+fn advanceShimeJi(step: u8, meso: f32, macro_t: f32, vel_base: f32, spec: *const TaikoCueSpec) void {
+    const shime_vel = shimeBaseVelocity(step, vel_base, spec);
+
+    switch (spec.pattern_style) {
+        .matsuri => advanceMatsuriShimeJi(step, meso, shime_vel),
+        .yatai_bayashi => advanceYataiShimeJi(step, meso, macro_t, shime_vel),
+        .miyake => advanceMiyakeShimeJi(step, meso, macro_t, shime_vel),
+        .oroshi => {},
+    }
+
+    if (dsp.rngFloat(&rng) < spec.roll_chance * macro_t and step % 4 == 3) {
+        scheduleTrigger(V_SHIME1, .roll, vel_base * 0.54);
+        scheduleTsuku(V_SHIME2, vel_base * 0.34);
+    }
+}
+
+fn advanceMatsuriShimeJi(step: u8, meso: f32, shime_vel: f32) void {
+    switch (step % 8) {
+        0 => {
+            scheduleTrigger(V_SHIME1, .don, shime_vel * 1.04);
+            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.62);
+        },
+        2 => {
+            scheduleDoko(V_SHIME1, shime_vel * 0.78);
+            if (dsp.rngFloat(&rng) < 0.34 + meso * 0.18) {
+                scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.48);
+            }
+        },
+        4 => {
+            scheduleTrigger(V_SHIME1, .don, shime_vel * 0.86);
+            scheduleTsuku(V_SHIME2, shime_vel * 0.44);
+        },
+        6 => {
+            scheduleDonKa(V_SHIME1, shime_vel * 0.82);
+            scheduleKara(V_SHIME2, shime_vel * 0.54);
+        },
+        7 => if (dsp.rngFloat(&rng) < 0.22 + meso * 0.18) {
+            scheduleTrigger(V_SHIME2, .ghost, shime_vel * 0.38);
+        },
+        else => if (dsp.rngFloat(&rng) < 0.08 + meso * 0.08) {
+            scheduleTrigger(V_SHIME1, .ka, shime_vel * 0.36);
+        },
+    }
+}
+
+fn advanceYataiShimeJi(step: u8, meso: f32, macro_t: f32, shime_vel: f32) void {
+    if (step % 2 == 0) {
+        scheduleTrigger(V_SHIME1, .don, shime_vel * 0.88);
+        scheduleTrigger(V_SHIME2, .ghost, shime_vel * (0.54 + macro_t * 0.10));
+    } else {
+        scheduleTrigger(V_SHIME1, .ghost, shime_vel * 0.62);
+        if (step % 4 == 1) {
+            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.52);
+        } else {
+            scheduleTrigger(V_SHIME2, .ghost, shime_vel * 0.44);
+        }
+    }
+
+    if (step % 8 == 3 and dsp.rngFloat(&rng) < 0.35 + meso * 0.24) {
+        scheduleKara(V_SHIME2, shime_vel * 0.52);
+    } else if (step % 8 == 7 and dsp.rngFloat(&rng) < 0.30 + macro_t * 0.24) {
+        scheduleTsuku(V_SHIME1, shime_vel * 0.42);
+    }
+}
+
+fn advanceMiyakeShimeJi(step: u8, meso: f32, macro_t: f32, shime_vel: f32) void {
+    if (step % 4 == 0) {
+        scheduleTrigger(V_SHIME1, .don, shime_vel * 0.94);
+        scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.56);
+        return;
+    }
+
+    if (step % 4 == 2) {
+        scheduleKara(V_SHIME1, shime_vel * 0.58);
+        if (dsp.rngFloat(&rng) < 0.28 + macro_t * 0.20) {
+            scheduleTrigger(V_SHIME2, .ghost, shime_vel * 0.42);
+        }
+        return;
+    }
+
+    if (dsp.rngFloat(&rng) < 0.10 + meso * 0.18) {
+        scheduleTrigger(if (step % 4 == 1) V_SHIME2 else V_SHIME1, .ghost, shime_vel * 0.36);
     }
 }
 
@@ -1022,7 +1256,7 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
     if (!composition.stepActive(density_mask, step)) {
         if (macro_t > 0.9 and step == 15 and dsp.rngFloat(&rng) < 0.65) {
             scheduleTrigger(V_SHIME1, .roll, vel_base * 0.52);
-            scheduleTrigger(V_SHIME2, .roll, vel_base * 0.46);
+            scheduleTsuku(V_SHIME2, vel_base * 0.42);
         }
         return;
     }
@@ -1037,8 +1271,11 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
                 const support_hit: TriggerType = if (dsp.rngFloat(&rng) < 0.58) .ghost else .ka;
                 scheduleTrigger(support_voice, support_hit, nagado_vel * 0.5);
             }
+            if (dsp.rngFloat(&rng) < 0.16 + meso * 0.12) {
+                scheduleTrigger(V_NAGADO3, .ghost, nagado_vel * 0.38);
+            }
         } else if (composition.stepActive(quarter_mask, step) and dsp.rngFloat(&rng) < 0.18 + meso * 0.2) {
-            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.64);
+            scheduleKara(V_SHIME2, shime_vel * 0.48);
         }
         if (step == 0 or (step == 8 and dsp.rngFloat(&rng) < 0.52 + meso * 0.2)) {
             scheduleTrigger(V_SHIME1, .don, shime_vel * (0.74 + dsp.rngFloat(&rng) * 0.18));
@@ -1050,30 +1287,37 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
         }
     } else if (macro_t < 0.52) {
         scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.88);
+        if (step % 8 == 4) {
+            scheduleDoko(V_NAGADO3, nagado_vel * 0.46);
+        }
         if (composition.stepActive(quarter_mask, step)) {
             scheduleTrigger(V_SHIME1, .don, shime_vel);
         } else if (dsp.rngFloat(&rng) < 0.35 + meso * 0.2) {
-            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.72);
+            scheduleKara(V_SHIME2, shime_vel * 0.54);
         }
     } else if (macro_t < 0.82) {
         if (step % 2 == 0) {
             scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.9);
+            scheduleTrigger(V_NAGADO3, .don, nagado_vel * 0.58);
             scheduleTrigger(V_SHIME1, .don, shime_vel);
         } else {
             scheduleTrigger(V_NAGADO2, .don, nagado_vel * 0.82);
-            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.76);
+            scheduleTrigger(V_NAGADO4, .ka, nagado_vel * 0.48);
+            scheduleKara(V_SHIME2, shime_vel * 0.58);
         }
     } else {
         if (step % 2 == 0) {
             scheduleTrigger(V_NAGADO1, .don, nagado_vel * 0.96);
+            scheduleDoko(V_NAGADO3, nagado_vel * 0.54);
             scheduleTrigger(V_SHIME1, .don, shime_vel * 1.05);
         } else {
             scheduleTrigger(V_NAGADO2, .don, nagado_vel * 0.9);
-            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.9);
+            scheduleTrigger(V_NAGADO4, .ka, nagado_vel * 0.54);
+            scheduleKara(V_SHIME2, shime_vel * 0.66);
         }
 
         if (dsp.rngFloat(&rng) < 0.18 + macro_t * 0.2) {
-            scheduleTrigger(V_SHIME1, .roll, vel_base * 0.34);
+            scheduleTsuku(V_SHIME1, vel_base * 0.30);
         }
     }
 
