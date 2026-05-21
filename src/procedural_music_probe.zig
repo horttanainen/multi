@@ -29,6 +29,7 @@ const RenderConfig = struct {
     instrument_flavor: procedural_americana_guitar.InstrumentFlavor = .guitar,
     seed: u64 = DEFAULT_SEED,
     fixed_seed: bool = true,
+    taiko_bus_stats: bool = false,
 };
 
 const RenderStats = struct {
@@ -85,6 +86,9 @@ pub fn main() !void {
             stats.peak_abs,
         },
     );
+    if (cfg.taiko_bus_stats) {
+        logTaikoBusStats(cfg);
+    }
 }
 
 fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
@@ -167,6 +171,11 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--random-seed")) {
             cfg.fixed_seed = false;
+            idx += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--taiko-bus-stats")) {
+            cfg.taiko_bus_stats = true;
             idx += 1;
             continue;
         }
@@ -271,6 +280,11 @@ fn parseInstrumentFlavorName(name: []const u8) ?procedural_americana_guitar.Inst
 }
 
 fn validateRenderConfig(cfg: RenderConfig) !void {
+    if (cfg.taiko_bus_stats and cfg.style != .taiko) {
+        std.log.err("procedural_music_probe: --taiko-bus-stats requires style=taiko", .{});
+        return error.InvalidArgument;
+    }
+
     const cue_style = cfg.cue_style orelse return;
     if (cue_style == cfg.style) return;
 
@@ -312,6 +326,7 @@ fn parseSeedArg(arg: []const u8) !u64 {
 fn applyStyleSettings(cfg: RenderConfig) void {
     switch (cfg.style) {
         .americana_guitar => {
+            procedural_taiko.collect_bus_stats = false;
             procedural_americana_guitar.bpm = cfg.tempo_scale;
             procedural_americana_guitar.reverb_mix = cfg.reverb_mix;
             procedural_americana_guitar.guitar_vol = cfg.volume;
@@ -323,6 +338,7 @@ fn applyStyleSettings(cfg: RenderConfig) void {
             procedural_taiko.reverb_mix = cfg.reverb_mix;
             procedural_taiko.drum_mix = cfg.volume;
             procedural_taiko.selected_cue = cfg.taiko_cue;
+            procedural_taiko.collect_bus_stats = cfg.taiko_bus_stats;
         },
     }
 }
@@ -438,6 +454,31 @@ fn renderRms(stats: RenderStats) f64 {
     return @sqrt(stats.sum_sq / @as(f64, @floatFromInt(stats.finite_samples)));
 }
 
+fn logTaikoBusStats(cfg: RenderConfig) void {
+    const stats = procedural_taiko.getBusStats();
+    std.log.info(
+        "taiko_bus_stats: cue={s} samples={d} odaiko_rms={d:.5} peak={d:.5} nagado_rms={d:.5} peak={d:.5} shime_rms={d:.5} peak={d:.5} kane_rms={d:.5} peak={d:.5} dry_rms={d:.5} peak={d:.5} reverb_rms={d:.5} peak={d:.5} final_rms={d:.5} peak={d:.5}",
+        .{
+            taikoCueLabel(cfg.taiko_cue),
+            stats.final.samples,
+            procedural_taiko.meterRms(stats.odaiko),
+            stats.odaiko.peak_abs,
+            procedural_taiko.meterRms(stats.nagado),
+            stats.nagado.peak_abs,
+            procedural_taiko.meterRms(stats.shime),
+            stats.shime.peak_abs,
+            procedural_taiko.meterRms(stats.kane),
+            stats.kane.peak_abs,
+            procedural_taiko.meterRms(stats.dry),
+            stats.dry.peak_abs,
+            procedural_taiko.meterRms(stats.reverb),
+            stats.reverb.peak_abs,
+            procedural_taiko.meterRms(stats.final),
+            stats.final.peak_abs,
+        },
+    );
+}
+
 fn writeU16Le(out: []u8, value: u16) void {
     out[0] = @intCast(value & 0x00FF);
     out[1] = @intCast((value >> 8) & 0x00FF);
@@ -524,6 +565,7 @@ fn printUsage() void {
         \\  --instrument NAME   guitar, electric (americana-guitar only)
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
+        \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
         \\
     , .{});
 }

@@ -31,15 +31,47 @@ pub var shaker_mix: f32 = 0.55; // maps to shime volume
 pub var tone_mix: f32 = 0.65; // maps to nagado volume
 pub var slap_mix: f32 = 0.5; // maps to atarigane volume
 pub var selected_cue: CuePreset = .matsuri;
-const TAIKO_ODAIKO_BUS_GAIN: f32 = 0.62;
-const TAIKO_NAGADO_BUS_GAIN: f32 = 0.82;
-const TAIKO_SHIME_BUS_GAIN: f32 = 0.72;
-const TAIKO_KANE_BUS_GAIN: f32 = 0.9;
+pub var collect_bus_stats: bool = false;
+const TAIKO_ODAIKO_BUS_GAIN: f32 = 0.54;
+const TAIKO_NAGADO_BUS_GAIN: f32 = 0.90;
+const TAIKO_SHIME_BUS_GAIN: f32 = 0.80;
+const TAIKO_KANE_BUS_GAIN: f32 = 1.0;
 const TAIKO_REVERB_SEND_GAIN: f32 = 0.55;
 const TAIKO_REVERB_RETURN_GAIN: f32 = 0.45;
 const TAIKO_REVERB_DRY_DUCK: f32 = 0.18;
 const TAIKO_REVERB_MAX_WET: f32 = 0.48;
-const TAIKO_MASTER_OUTPUT_GAIN: f32 = 0.88;
+const TAIKO_MASTER_OUTPUT_GAIN: f32 = 0.84;
+
+pub const TaikoMeterStats = struct {
+    samples: u64 = 0,
+    sum_sq: f64 = 0.0,
+    peak_abs: f32 = 0.0,
+};
+
+pub const TaikoBusStats = struct {
+    odaiko: TaikoMeterStats = .{},
+    nagado: TaikoMeterStats = .{},
+    shime: TaikoMeterStats = .{},
+    kane: TaikoMeterStats = .{},
+    dry: TaikoMeterStats = .{},
+    reverb: TaikoMeterStats = .{},
+    final: TaikoMeterStats = .{},
+};
+
+var bus_stats: TaikoBusStats = .{};
+
+pub fn resetBusStats() void {
+    bus_stats = .{};
+}
+
+pub fn getBusStats() TaikoBusStats {
+    return bus_stats;
+}
+
+pub fn meterRms(meter: TaikoMeterStats) f64 {
+    if (meter.samples == 0) return 0.0;
+    return @sqrt(meter.sum_sq / @as(f64, @floatFromInt(meter.samples)));
+}
 
 // ============================================================
 // Reverb — large hall / outdoor space character
@@ -634,6 +666,7 @@ fn buildCallPattern() void {
 // ============================================================
 
 pub fn reset() void {
+    resetBusStats();
     rng = dsp.rngInit(entropy.nextSeed(0xDA1C_0000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
     structural_cue = selected_cue;
@@ -676,6 +709,38 @@ fn resetInstruments() void {
     shime1 = .{ .base_freq = 400.0, .volume = 0.6 };
     shime2 = .{ .base_freq = 436.0, .volume = 0.55 };
     kane = .{};
+}
+
+fn meterSample(meter: *TaikoMeterStats, sample: f32) void {
+    meter.samples += 1;
+    meter.peak_abs = @max(meter.peak_abs, @abs(sample));
+    const sample_f64: f64 = sample;
+    meter.sum_sq += sample_f64 * sample_f64;
+}
+
+fn meterStereo(meter: *TaikoMeterStats, left: f32, right: f32) void {
+    meterSample(meter, left);
+    meterSample(meter, right);
+}
+
+fn meterTaikoBuses(
+    odaiko_bus: [2]f32,
+    nagado_bus: [2]f32,
+    shime_bus: [2]f32,
+    kane_bus: [2]f32,
+    dry_bus: [2]f32,
+    reverb_bus: [2]f32,
+    final_bus: [2]f32,
+) void {
+    if (!collect_bus_stats) return;
+
+    meterStereo(&bus_stats.odaiko, odaiko_bus[0], odaiko_bus[1]);
+    meterStereo(&bus_stats.nagado, nagado_bus[0], nagado_bus[1]);
+    meterStereo(&bus_stats.shime, shime_bus[0], shime_bus[1]);
+    meterStereo(&bus_stats.kane, kane_bus[0], kane_bus[1]);
+    meterStereo(&bus_stats.dry, dry_bus[0], dry_bus[1]);
+    meterStereo(&bus_stats.reverb, reverb_bus[0], reverb_bus[1]);
+    meterStereo(&bus_stats.final, final_bus[0], final_bus[1]);
 }
 
 pub fn triggerCue() void {
@@ -767,8 +832,9 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
         // Odaiko — massive center presence
         const odaiko_s = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2 * TAIKO_ODAIKO_BUS_GAIN;
-        dry_left += odaiko_s;
-        dry_right += odaiko_s;
+        const odaiko_bus = .{ odaiko_s, odaiko_s };
+        dry_left += odaiko_bus[0];
+        dry_right += odaiko_bus[1];
 
         // Nagados
         const n1_s = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
@@ -780,6 +846,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         const n2_pan = dsp.panStereo(n2_s, VOICE_PAN[V_NAGADO2]);
         dry_left += n2_pan[0];
         dry_right += n2_pan[1];
+        const nagado_bus = .{ n1_pan[0] + n2_pan[0], n1_pan[1] + n2_pan[1] };
 
         // Shimes
         const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
@@ -791,11 +858,13 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         const s2_pan = dsp.panStereo(s2_s, VOICE_PAN[V_SHIME2]);
         dry_left += s2_pan[0];
         dry_right += s2_pan[1];
+        const shime_bus = .{ s1_pan[0] + s2_pan[0], s1_pan[1] + s2_pan[1] };
 
         // Atarigane
         const kane_s = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER] * TAIKO_KANE_BUS_GAIN;
-        dry_left += kane_s; // center
-        dry_right += kane_s;
+        const kane_bus = .{ kane_s, kane_s };
+        dry_left += kane_bus[0]; // center
+        dry_right += kane_bus[1];
 
         // Reverb — large space
         const wet = std.math.clamp((reverb_mix + spec.reverb_boost) * composition.slowLfoModulate(&lfo_space), 0.0, TAIKO_REVERB_MAX_WET);
@@ -804,11 +873,29 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
             dry_left * TAIKO_REVERB_SEND_GAIN,
             dry_right * TAIKO_REVERB_SEND_GAIN,
         });
-        const left = dry_left * dry_gain + rev[0] * wet * TAIKO_REVERB_RETURN_GAIN;
-        const right = dry_right * dry_gain + rev[1] * wet * TAIKO_REVERB_RETURN_GAIN;
+        const output_scale = dry_gain * TAIKO_MASTER_OUTPUT_GAIN;
+        const dry_bus = .{ dry_left * output_scale, dry_right * output_scale };
+        const reverb_bus = .{
+            rev[0] * wet * TAIKO_REVERB_RETURN_GAIN * TAIKO_MASTER_OUTPUT_GAIN,
+            rev[1] * wet * TAIKO_REVERB_RETURN_GAIN * TAIKO_MASTER_OUTPUT_GAIN,
+        };
+        const final_bus = .{
+            softClip(dry_bus[0] + reverb_bus[0]),
+            softClip(dry_bus[1] + reverb_bus[1]),
+        };
 
-        buf[i * 2] = softClip(left * TAIKO_MASTER_OUTPUT_GAIN);
-        buf[i * 2 + 1] = softClip(right * TAIKO_MASTER_OUTPUT_GAIN);
+        meterTaikoBuses(
+            .{ odaiko_bus[0] * output_scale, odaiko_bus[1] * output_scale },
+            .{ nagado_bus[0] * output_scale, nagado_bus[1] * output_scale },
+            .{ shime_bus[0] * output_scale, shime_bus[1] * output_scale },
+            .{ kane_bus[0] * output_scale, kane_bus[1] * output_scale },
+            dry_bus,
+            reverb_bus,
+            final_bus,
+        );
+
+        buf[i * 2] = final_bus[0];
+        buf[i * 2 + 1] = final_bus[1];
     }
 }
 
