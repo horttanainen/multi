@@ -31,6 +31,7 @@ const RenderConfig = struct {
     fixed_seed: bool = true,
     taiko_bus_stats: bool = false,
     taiko_isolate_kane: bool = false,
+    taiko_isolate_nagado_back: bool = false,
 };
 
 const RenderStats = struct {
@@ -182,6 +183,11 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--taiko-isolate-kane")) {
             cfg.taiko_isolate_kane = true;
+            idx += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--taiko-isolate-nagado-back")) {
+            cfg.taiko_isolate_nagado_back = true;
             idx += 1;
             continue;
         }
@@ -352,6 +358,15 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 procedural_taiko.shaker_mix = 0.0;
                 procedural_taiko.tone_mix = 0.0;
                 procedural_taiko.slap_mix = 1.0;
+            }
+            if (cfg.taiko_isolate_nagado_back) {
+                // Keep only V_NAGADO3 + V_NAGADO4; mute lead nagados, odaiko, shime, kane.
+                procedural_taiko.voice_mute[0] = true; // V_ODAIKO
+                procedural_taiko.voice_mute[1] = true; // V_NAGADO1
+                procedural_taiko.voice_mute[2] = true; // V_NAGADO2
+                procedural_taiko.voice_mute[5] = true; // V_SHIME1
+                procedural_taiko.voice_mute[6] = true; // V_SHIME2
+                procedural_taiko.voice_mute[7] = true; // V_KANE
             }
         },
     }

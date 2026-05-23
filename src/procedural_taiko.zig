@@ -32,6 +32,8 @@ pub var tone_mix: f32 = 0.65; // maps to nagado volume
 pub var slap_mix: f32 = 0.5; // maps to atarigane volume
 pub var selected_cue: CuePreset = .matsuri;
 pub var collect_bus_stats: bool = false;
+// Per-voice mute used by probe/test code to render individual voices.
+pub var voice_mute: [NUM_VOICES]bool = .{false} ** NUM_VOICES;
 const TAIKO_ODAIKO_BUS_GAIN: f32 = 0.54;
 const TAIKO_NAGADO_BUS_GAIN: f32 = 0.90;
 const TAIKO_SHIME_BUS_GAIN: f32 = 1.20;
@@ -106,6 +108,14 @@ const TAIKO_ARCS: composition.ArcSystem = .{
 };
 
 var lfo_space: composition.SlowLfo = .{ .period_beats = 96, .depth = 0.03 };
+// Slow tempo LFO for cross-cycle drift (procession acceleration). Depth=1.0
+// so slowLfoValue returns pure sin(phase); per-cue magnitude is applied via
+// spec.tempo_cycle_drift in the per-sample bpm calc.
+var tempo_lfo: composition.SlowLfo = .{ .period_beats = 1024.0, .depth = 1.0 };
+// A/B sub-flavor state for kuse-style alternation across macro cycles.
+var macro_cycle_count: u32 = 0;
+var last_macro_beat_global: f32 = -1.0;
+var active_variant_offset: f32 = 0.0;
 
 // ============================================================
 // Layer system — Jo-Ha-Kyu vertical activation
@@ -159,6 +169,27 @@ const TaikoCueSpec = struct {
     reverb_boost: f32,
     // Tempo drift: macro arc can push tempo up slightly at Kyu
     tempo_drift: f32,
+    // Pattern hold cadence — how many macro-arc beats between repicks for
+    // supporting voices. Repicks happen at multiples of these counts within
+    // each macro cycle, plus at every cycle wrap. Larger = steadier groove.
+    // Macro section is 256 beats (~2 min) — so e.g. 128 = 2 phases per cycle.
+    kane_hold_beats: u16,
+    nagado_back_hold_beats: u16,
+    // Cycle-indexed pattern bias — emulates the "kuse" rotation of festival
+    // bayashi where the lead-implied accompaniment shifts across verses.
+    // 0 = picker uses only intensity; 1 = cycle dominates fully. Tune per cue.
+    cycle_bias_amount: f32,
+    // Cross-cycle tempo drift — models processional acceleration of yatai
+    // bayashi where the tempo rises and falls slowly over many minutes.
+    // 0 = no drift. 0.03 = ±3% slow modulation. Use only for procession music.
+    tempo_cycle_drift: f32,
+    // A/B sub-flavors — models the kuse/honbun alternation of festival music.
+    // Variant B is selected for variant_period_cycles macro arcs at a time
+    // (intervened with the same length of variant A). 0 = no variants.
+    // variant_intensity_offset shifts the picker target toward sparse (<0) or
+    // dense (>0) for the duration that B is active.
+    variant_period_cycles: u8,
+    variant_intensity_offset: f32,
 };
 
 const TaikoStyleSpec = composition.StyleSpec(TaikoCueSpec, 4, 0);
@@ -214,6 +245,17 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .energy = 0.68,
         .reverb_boost = 0.04,
         .tempo_drift = 0.02,
+        // 4 kane phases (~33s each) + 2 backline phases (~66s each) per macro cycle (~2.2 min).
+        .kane_hold_beats = 64,
+        .nagado_back_hold_beats = 128,
+        // Matsuri kuse rotation — pattern preference shifts across festival verses.
+        .cycle_bias_amount = 0.3,
+        // Matsuri tempo is steady party music — no cross-cycle drift.
+        .tempo_cycle_drift = 0.0,
+        // Matsuri alternates between two kuse flavors every 3 macro cycles (~6.6 min).
+        // B-flavor leans denser (more chi/ki fills in kane, more doko in backline).
+        .variant_period_cycles = 3,
+        .variant_intensity_offset = 0.25,
     },
     // yatai_bayashi — float procession, building energy, faster
     .{
@@ -242,6 +284,17 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .energy = 0.78,
         .reverb_boost = 0.02,
         .tempo_drift = 0.04,
+        // 2 kane phases (~60s each) + 2 backline phases (~60s each) per macro cycle (~2 min).
+        // Yatai is a steady driving procession — supporting voices hold their figures.
+        .kane_hold_beats = 128,
+        .nagado_back_hold_beats = 128,
+        // Yatai is hypnotically repetitive — no kuse rotation.
+        .cycle_bias_amount = 0.0,
+        // Yatai processional acceleration — gradual tempo rise/fall across ~9-min period.
+        .tempo_cycle_drift = 0.03,
+        // Yatai stays in one mode for the entire procession — no A/B.
+        .variant_period_cycles = 0,
+        .variant_intensity_offset = 0.0,
     },
     // miyake — powerful, athletic, driving rhythm
     .{
@@ -270,6 +323,17 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .energy = 0.75,
         .reverb_boost = 0.06,
         .tempo_drift = 0.015,
+        // 2 kane phases (~71s each) + 1 backline phase (~142s) per macro cycle (~2.4 min).
+        // Miyake is bold and rock-steady — backline holds for the entire macro cycle.
+        .kane_hold_beats = 128,
+        .nagado_back_hold_beats = 256,
+        // Miyake has mild section-transition variation, less than matsuri.
+        .cycle_bias_amount = 0.2,
+        // Miyake is rock-steady — no cross-cycle tempo drift.
+        .tempo_cycle_drift = 0.0,
+        // Miyake alternates every 4 cycles (~9.4 min). B-flavor is more spacious.
+        .variant_period_cycles = 4,
+        .variant_intensity_offset = -0.20,
     },
     // oroshi — thunder roll, dramatic building, fastest
     .{
@@ -298,6 +362,16 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .energy = 0.82,
         .reverb_boost = 0.0,
         .tempo_drift = 0.18,
+        // 4 kane phases (~47s each) per macro cycle (~3.1 min). Backline is silent in oroshi.
+        .kane_hold_beats = 64,
+        .nagado_back_hold_beats = 128,
+        // Oroshi is a single building figure that loops — no kuse rotation.
+        .cycle_bias_amount = 0.0,
+        // Oroshi keeps its own dramatic build; no cross-cycle tempo drift.
+        .tempo_cycle_drift = 0.0,
+        // Oroshi is a single building figure — no A/B variants.
+        .variant_period_cycles = 0,
+        .variant_intensity_offset = 0.0,
     },
 };
 
@@ -527,11 +601,6 @@ fn scheduleDonKa(voice: usize, vel: f32) void {
     scheduleTriggerAfter(voice, .ka, vel * 0.72, KUCHI_PAIR_DELAY_SAMPLES);
 }
 
-fn stepActiveShifted(mask: u16, step: u8, shift: u8) bool {
-    const shifted_step: u8 = @intCast((@as(u16, step) + @as(u16, shift)) % 16);
-    return composition.stepActive(mask, shifted_step);
-}
-
 fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
     switch (voice) {
         V_ODAIKO => switch (ttype) {
@@ -757,11 +826,17 @@ pub fn reset() void {
     pending_scale_type = null;
     reverb = dsp.stereoReverbInit(.{ 1801, 1907, 2053, 2111 }, .{ 241, 557 }, .{ 0.87, 0.88, 0.86, 0.89 });
     lfo_space = .{ .period_beats = 96, .depth = 0.03 };
+    tempo_lfo = .{ .period_beats = 1024.0, .depth = 1.0 };
+    macro_cycle_count = 0;
+    last_macro_beat_global = -1.0;
+    active_variant_offset = 0.0;
 
     composition.stepStyleRunnerReset(TaikoCueSpec, 4, &runner, &STYLE, .{ .root = 36, .scale_type = .dorian }, initHarmony(), CHORD_CHANGE_BEATS, .none, .{ 0.4, 0.5, 0.85, 0.7 }, .{ 0.3, 0.4, 0.8, 0.6 });
 
     resetInstruments();
     pending = .{EMPTY_PENDING_ROW} ** NUM_VOICES;
+    kane_state = .{};
+    nagado_back_state = .{};
     lead_cycle_count = 0;
     in_break = false;
     break_remaining = 0;
@@ -854,9 +929,27 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         spec.roll_chance = std.math.clamp(spec.roll_chance * (0.8 + section_harmonic * 0.45), 0.0, 0.95);
 
         applyInstrumentTuning(cue_idx);
-        // Jo-Ha-Kyu tempo drift: macro arc pushes tempo up at climax
+        // Track macro-cycle wraps for A/B sub-flavor alternation.
+        const cur_macro_beat = runner.engine.arcs.macro.beat_count;
+        if (last_macro_beat_global > cur_macro_beat) {
+            macro_cycle_count +%= 1;
+        }
+        last_macro_beat_global = cur_macro_beat;
+        if (spec.variant_period_cycles > 0) {
+            const variant_b_active = (macro_cycle_count / spec.variant_period_cycles) & 1 == 1;
+            active_variant_offset = if (variant_b_active) spec.variant_intensity_offset else 0.0;
+        } else {
+            active_variant_offset = 0.0;
+        }
+
+        // Within-arc tempo drift: macro arc pushes tempo up at Kyu climax.
         const macro_t = composition.arcControllerTension(&runner.engine.arcs.macro);
-        const effective_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
+        const inner_bpm = spec.base_bpm * bpm * (1.0 + macro_t * spec.tempo_drift);
+        // Cross-cycle tempo drift via slow LFO (procession acceleration).
+        // Period 1024 beats ≈ 8 min at yatai 128 bpm — much longer than macro arc.
+        composition.slowLfoAdvanceSample(&tempo_lfo, inner_bpm);
+        const tempo_cycle_mod = 1.0 + composition.slowLfoValue(&tempo_lfo) * spec.tempo_cycle_drift;
+        const effective_bpm = inner_bpm * tempo_cycle_mod;
         composition.slowLfoAdvanceSample(&lfo_space, effective_bpm);
         const frame = composition.stepStyleRunnerAdvanceFrame(TaikoCueSpec, 4, &runner, &rng, &STYLE, effective_bpm, LAYER_FADE_RATE);
 
@@ -916,29 +1009,42 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         var dry_left: f32 = 0.0;
         var dry_right: f32 = 0.0;
 
+        // Long-form director-driven mix scaling. Background voices (kane,
+        // backline, shime) breathe with director.intensity; the lead nagado
+        // and odaiko stay full-presence so the groove anchor never sags.
+        const director_norm = std.math.clamp((composition.compositionEngineLongFormIntensity(&runner.engine) - 0.12) / 0.84, 0.0, 1.0);
+        const back_dir_scale = 0.70 + director_norm * 0.30;
+        const kane_dir_scale = 0.55 + director_norm * 0.45;
+        const shime_dir_scale = 0.85 + director_norm * 0.15;
+
         // Odaiko — massive center presence
-        const odaiko_s = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2 * TAIKO_ODAIKO_BUS_GAIN;
+        const odaiko_raw = instruments.odaikoProcess(&odaiko) * drum_mix * runner.layer_levels[ODAIKO_LAYER] * 1.2 * TAIKO_ODAIKO_BUS_GAIN;
+        const odaiko_s = if (voice_mute[V_ODAIKO]) 0.0 else odaiko_raw;
         const odaiko_bus = .{ odaiko_s, odaiko_s };
         dry_left += odaiko_bus[0];
         dry_right += odaiko_bus[1];
 
         // Nagados
-        const n1_s = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n1_raw = instruments.nagadoProcess(&nagado1, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n1_s = if (voice_mute[V_NAGADO1]) 0.0 else n1_raw;
         const n1_pan = dsp.panStereo(n1_s, VOICE_PAN[V_NAGADO1]);
         dry_left += n1_pan[0];
         dry_right += n1_pan[1];
 
-        const n2_s = instruments.nagadoProcess(&nagado2, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n2_raw = instruments.nagadoProcess(&nagado2, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n2_s = if (voice_mute[V_NAGADO2]) 0.0 else n2_raw;
         const n2_pan = dsp.panStereo(n2_s, VOICE_PAN[V_NAGADO2]);
         dry_left += n2_pan[0];
         dry_right += n2_pan[1];
 
-        const n3_s = instruments.nagadoProcess(&nagado3, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n3_raw = instruments.nagadoProcess(&nagado3, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN * back_dir_scale;
+        const n3_s = if (voice_mute[V_NAGADO3]) 0.0 else n3_raw;
         const n3_pan = dsp.panStereo(n3_s, VOICE_PAN[V_NAGADO3]);
         dry_left += n3_pan[0];
         dry_right += n3_pan[1];
 
-        const n4_s = instruments.nagadoProcess(&nagado4, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN;
+        const n4_raw = instruments.nagadoProcess(&nagado4, &rng) * drum_mix * tone_mix * runner.layer_levels[NAGADO_LAYER] * TAIKO_NAGADO_BUS_GAIN * back_dir_scale;
+        const n4_s = if (voice_mute[V_NAGADO4]) 0.0 else n4_raw;
         const n4_pan = dsp.panStereo(n4_s, VOICE_PAN[V_NAGADO4]);
         dry_left += n4_pan[0];
         dry_right += n4_pan[1];
@@ -949,19 +1055,22 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         };
 
         // Shimes
-        const s1_s = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
+        const s1_raw = instruments.shimeProcess(&shime1, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN * shime_dir_scale;
+        const s1_s = if (voice_mute[V_SHIME1]) 0.0 else s1_raw;
         const s1_pan = dsp.panStereo(s1_s, VOICE_PAN[V_SHIME1]);
         dry_left += s1_pan[0];
         dry_right += s1_pan[1];
 
-        const s2_s = instruments.shimeProcess(&shime2, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN;
+        const s2_raw = instruments.shimeProcess(&shime2, &rng) * shaker_mix * runner.layer_levels[SHIME_LAYER] * TAIKO_SHIME_BUS_GAIN * shime_dir_scale;
+        const s2_s = if (voice_mute[V_SHIME2]) 0.0 else s2_raw;
         const s2_pan = dsp.panStereo(s2_s, VOICE_PAN[V_SHIME2]);
         dry_left += s2_pan[0];
         dry_right += s2_pan[1];
         const shime_bus = .{ s1_pan[0] + s2_pan[0], s1_pan[1] + s2_pan[1] };
 
         // Atarigane
-        const kane_s = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER] * TAIKO_KANE_BUS_GAIN;
+        const kane_raw = instruments.atariganeProcess(&kane, &rng) * slap_mix * runner.layer_levels[KANE_LAYER] * TAIKO_KANE_BUS_GAIN * kane_dir_scale;
+        const kane_s = if (voice_mute[V_KANE]) 0.0 else kane_raw;
         const kane_bus = .{ kane_s, kane_s };
         dry_left += kane_bus[0]; // center
         dry_right += kane_bus[1];
@@ -1091,47 +1200,27 @@ fn advanceNagadoBackline(step: u8, meso: f32, macro_t: f32, vel_base: f32, accen
         return;
     }
 
-    switch (spec.pattern_style) {
-        .matsuri => {
-            if (composition.stepActive(spec.nagado1_don_mask, step)) {
-                scheduleTrigger(V_NAGADO3, .don, back_vel * accent * 0.78);
-            }
-            if (composition.stepActive(spec.nagado1_ka_mask, step)) {
-                scheduleKara(V_NAGADO4, back_vel * 0.52);
-            }
-            if (composition.stepActive(spec.odaiko_fill_mask, step) and dsp.rngFloat(&rng) < spec.fill_density * macro_t * 0.75) {
-                scheduleDoko(V_NAGADO3, back_vel * 0.58);
-            }
-        },
-        .yatai_bayashi => {
-            if (stepActiveShifted(spec.nagado1_don_mask, step, 4)) {
-                scheduleTrigger(V_NAGADO3, .don, back_vel * 0.74);
-            }
-            if (stepActiveShifted(spec.nagado1_don_mask, step, 8) and dsp.rngFloat(&rng) < 0.55 + macro_t * 0.22) {
-                scheduleDoro(V_NAGADO4, back_vel * 0.62);
-            }
-            if (stepActiveShifted(spec.nagado1_ka_mask, step, 4)) {
-                scheduleTrigger(V_NAGADO3, .ka, back_vel * 0.46);
-            }
-            if (step % 8 == 7 and dsp.rngFloat(&rng) < 0.38 + meso * 0.18) {
-                scheduleKara(V_NAGADO4, back_vel * 0.42);
-            }
-        },
-        .miyake => {
-            if (step % 4 == 0) {
-                scheduleTrigger(V_NAGADO3, .don, back_vel * accent * 0.90);
-                scheduleTrigger(V_NAGADO4, .don, back_vel * accent * 0.78);
-            } else if (step % 4 == 2) {
-                scheduleDoko(V_NAGADO3, back_vel * 0.58);
-                if (dsp.rngFloat(&rng) < 0.48 + macro_t * 0.20) {
-                    scheduleTrigger(V_NAGADO4, .ka, back_vel * 0.50);
-                }
-            } else if (dsp.rngFloat(&rng) < spec.ghost_density * (0.5 + meso * 0.4)) {
-                scheduleTrigger(if (step % 4 == 1) V_NAGADO3 else V_NAGADO4, .ghost, back_vel * 0.38);
-            }
-        },
-        .oroshi => {},
+    if (spec.pattern_style == .oroshi) return;
+
+    const intensity = nagadoBackPatternIntensity(meso, macro_t, spec.energy);
+    const total_phase = updatePatternPhase(&nagado_back_state, spec.nagado_back_hold_beats);
+    const style_changed = nagado_back_state.last_style != spec.pattern_style;
+    const phase_changed = nagado_back_state.last_total_phase != total_phase;
+
+    if (style_changed or phase_changed) {
+        nagado_back_state.last_style = spec.pattern_style;
+        nagado_back_state.last_total_phase = total_phase;
+        nagado_back_state.current_idx = pickNagadoBackPattern(spec.pattern_style, intensity, nagado_back_state.cycle_count, spec.cycle_bias_amount);
     }
+
+    const bank = nagadoBackPatternBank(spec.pattern_style);
+    if (bank.len == 0) {
+        std.log.warn("procedural_taiko.advanceNagadoBackline: empty backline bank for style {s}", .{@tagName(spec.pattern_style)});
+        return;
+    }
+    const pattern = bank[nagado_back_state.current_idx % @as(u8, @intCast(bank.len))];
+
+    fireNagadoBackStep(step, pattern, back_vel, accent);
 }
 
 fn shimeBaseVelocity(step: u8, vel_base: f32, spec: *const TaikoCueSpec) f32 {
@@ -1344,13 +1433,19 @@ const OROSHI_KANE_PATTERNS = [_]AtariganePattern{
 
 const KANE_BANK_MAX: usize = 8;
 
-const KanePatternState = struct {
+// Tracks macro-arc-tied pattern selection. A "phase" is hold_beats long;
+// patterns hold for one phase. Cycle count + intra-cycle phase gives a
+// monotonic id that detects both phase boundaries AND macro cycle wraps,
+// so a hold_beats >= section_beats still triggers exactly one repick per
+// macro cycle.
+const PatternPhaseState = struct {
     current_idx: u8 = 0,
     last_style: TaikoPatternStyle = .matsuri,
-    steps_held: u16 = 0,
-    bars_to_hold: u8 = 2,
+    last_total_phase: i64 = -1,
+    cycle_count: u32 = 0,
+    last_beat: f32 = -1.0,
 };
-var kane_state: KanePatternState = .{};
+var kane_state: PatternPhaseState = .{};
 
 fn kanePatternBank(style: TaikoPatternStyle) []const AtariganePattern {
     return switch (style) {
@@ -1362,11 +1457,45 @@ fn kanePatternBank(style: TaikoPatternStyle) []const AtariganePattern {
 }
 
 fn kanePatternIntensity(meso: f32, macro_t: f32, energy: f32) f32 {
-    return std.math.clamp(0.25 * energy + 0.45 * macro_t + 0.30 * meso, 0.0, 1.0);
+    // Long-form director drifts on a ~3-min period that's coprime with the macro
+    // arc, so the combined intensity never exactly repeats across cycles.
+    // active_variant_offset adds a kuse-style A/B shift for the cues that use it.
+    const director_t = composition.compositionEngineLongFormIntensity(&runner.engine);
+    return std.math.clamp(0.20 * energy + 0.40 * macro_t + 0.25 * meso + 0.15 * director_t + active_variant_offset, 0.0, 1.0);
 }
 
-// Bias selection toward sparser indices at low intensity, denser at high.
-fn pickKanePattern(style: TaikoPatternStyle, intensity: f32) u8 {
+// Advance the shared phase-tracking state for a supporting voice. Returns the
+// (possibly new) total phase id. The id increments at every hold-boundary
+// crossing within a macro cycle and at every macro cycle wrap.
+fn updatePatternPhase(state: *PatternPhaseState, hold_beats: u16) i64 {
+    const macro_arc = &runner.engine.arcs.macro;
+    const beat = macro_arc.beat_count;
+    const section = macro_arc.section_beats;
+    if (state.last_beat > beat) {
+        state.cycle_count +%= 1;
+    }
+    state.last_beat = beat;
+
+    const hold: f32 = @floatFromInt(@max(hold_beats, 1));
+    const phases_per_cycle: u32 = @max(@as(u32, @intFromFloat(@ceil(section / hold))), 1);
+    const intra_phase: u32 = @intFromFloat(beat / hold);
+    return @as(i64, @intCast(@as(u64, state.cycle_count) * phases_per_cycle + intra_phase));
+}
+
+// Compute the picker's "target" position in the bank, blending intensity
+// (driven by macro/meso/energy/director) with a cycle-indexed rotation
+// (kuse-like alternation across macro arcs). bias_amount=0 → pure intensity;
+// bias_amount=1 → cycle dominates.
+fn pickerTarget(bank_len: usize, intensity: f32, cycle_count: u32, bias_amount: f32) f32 {
+    if (bank_len <= 1) return 0.0;
+    const max_idx_f: f32 = @floatFromInt(bank_len - 1);
+    const cycle_idx_f: f32 = @floatFromInt(cycle_count % @as(u32, @intCast(bank_len)));
+    const cycle_target = cycle_idx_f / max_idx_f;
+    return std.math.clamp(intensity * (1.0 - bias_amount) + cycle_target * bias_amount, 0.0, 1.0);
+}
+
+// Bias selection toward sparser indices at low target, denser at high.
+fn pickKanePattern(style: TaikoPatternStyle, intensity: f32, cycle_count: u32, bias_amount: f32) u8 {
     const bank = kanePatternBank(style);
     if (bank.len == 0) {
         std.log.warn("procedural_taiko.pickKanePattern: empty kane bank for style {s}", .{@tagName(style)});
@@ -1374,12 +1503,13 @@ fn pickKanePattern(style: TaikoPatternStyle, intensity: f32) u8 {
     }
     if (bank.len == 1) return 0;
 
+    const target = pickerTarget(bank.len, intensity, cycle_count, bias_amount);
     var weights: [KANE_BANK_MAX]f32 = undefined;
     var total: f32 = 0.0;
     const max_idx_f: f32 = @floatFromInt(bank.len - 1);
     for (0..bank.len) |i| {
         const idx_f: f32 = @floatFromInt(i);
-        const dist = @abs(idx_f / max_idx_f - intensity);
+        const dist = @abs(idx_f / max_idx_f - target);
         const w = @max(0.1, 1.0 - dist * 0.85);
         weights[i] = w;
         total += w;
@@ -1392,7 +1522,7 @@ fn pickKanePattern(style: TaikoPatternStyle, intensity: f32) u8 {
     return @intCast(bank.len - 1);
 }
 
-fn jitterKaneVel(vel: f32) f32 {
+fn jitterVoiceVel(vel: f32) f32 {
     return vel * (1.0 + (dsp.rngFloat(&rng) - 0.5) * 0.16); // +/- 8%
 }
 
@@ -1402,16 +1532,15 @@ fn kanePhraseVelocity(vel_base: f32, spec: *const TaikoCueSpec, macro_t: f32) f3
 
 fn advanceAtarigane(step: u8, meso: f32, macro_t: f32, vel_base: f32, spec: *const TaikoCueSpec) void {
     const intensity = kanePatternIntensity(meso, macro_t, spec.energy);
+    const total_phase = updatePatternPhase(&kane_state, spec.kane_hold_beats);
     const style_changed = kane_state.last_style != spec.pattern_style;
-    const bar_boundary = step == 0 and kane_state.steps_held >= @as(u16, kane_state.bars_to_hold) * 16;
+    const phase_changed = kane_state.last_total_phase != total_phase;
 
-    if (style_changed or bar_boundary) {
+    if (style_changed or phase_changed) {
         kane_state.last_style = spec.pattern_style;
-        kane_state.steps_held = 0;
-        kane_state.bars_to_hold = if (intensity > 0.7) 2 else 3;
-        kane_state.current_idx = pickKanePattern(spec.pattern_style, intensity);
+        kane_state.last_total_phase = total_phase;
+        kane_state.current_idx = pickKanePattern(spec.pattern_style, intensity, kane_state.cycle_count, spec.cycle_bias_amount);
     }
-    kane_state.steps_held +%= 1;
 
     const bank = kanePatternBank(spec.pattern_style);
     if (bank.len == 0) {
@@ -1428,20 +1557,218 @@ fn fireKanePatternStep(step: u8, pattern: AtariganePattern, kane_vel: f32, macro
     // Priority: chan > chi > ki on overlapping bits.
     if (composition.stepActive(pattern.chan_mask, step)) {
         const accent: f32 = if (step == 0) 1.0 else 0.86;
-        scheduleTrigger(V_KANE, .open, jitterKaneVel(kane_vel * accent));
+        scheduleTrigger(V_KANE, .open, jitterVoiceVel(kane_vel * accent));
         // Occasional chiki-flam ornament riding the chan, only at high intensity.
         if (macro_t > 0.7 and dsp.rngFloat(&rng) < 0.18) {
-            scheduleTriggerAfter(V_KANE, .chi, jitterKaneVel(kane_vel * 0.44), KANE_STROKE_DELAY_SAMPLES * 0.55);
+            scheduleTriggerAfter(V_KANE, .chi, jitterVoiceVel(kane_vel * 0.44), KANE_STROKE_DELAY_SAMPLES * 0.55);
         }
     } else if (composition.stepActive(pattern.chi_mask, step)) {
-        scheduleTrigger(V_KANE, .chi, jitterKaneVel(kane_vel * 0.62));
+        scheduleTrigger(V_KANE, .chi, jitterVoiceVel(kane_vel * 0.62));
     } else if (composition.stepActive(pattern.ki_mask, step)) {
-        scheduleTrigger(V_KANE, .ki, jitterKaneVel(kane_vel * 0.48));
+        scheduleTrigger(V_KANE, .ki, jitterVoiceVel(kane_vel * 0.48));
     }
 
     if (composition.stepActive(pattern.damp_mask, step)) {
         const damp_amount = 0.40 + macro_t * 0.18;
         scheduleTrigger(V_KANE, .damp, damp_amount);
+    }
+}
+
+// ============================================================
+// Nagado backline pattern bank — kuchi-shoga figures for n3/n4
+// The backline (chū-daiko) plays its own supporting figures behind the
+// lead nagado. Each pattern is a complete bar-level specification for
+// both backline voices. Priority within a voice: doro > doko > don > ka
+// (for n3) and kara > don > ka > ghost (for n4).
+// ============================================================
+
+const NagadoBacklinePattern = struct {
+    n3_don_mask: u16,
+    n3_ka_mask: u16,
+    n3_doko_mask: u16, // don+ghost combo (scheduleDoko)
+    n3_doro_mask: u16, // don+don combo (scheduleDoro)
+    n4_don_mask: u16,
+    n4_ka_mask: u16,
+    n4_kara_mask: u16, // ka+ka combo (scheduleKara)
+    n4_ghost_mask: u16,
+};
+
+// Matsuri — festival groove. Backline answers the lead with quarter dons
+// and off-eighth ka-doubles, with denser figures during higher intensity.
+const MATSURI_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Mirror (canonical ji-uchi): n3 follows lead don, n4 kara fills off-beats
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n4_ghost_mask = 0,
+    },
+    // Hocket: n3 anchors 1+3, n4 fills 2+4 — alternating quarters
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 4) | (1 << 12),
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 2) | (1 << 10),
+        .n4_ka_mask = (1 << 6) | (1 << 14),
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Doro answer: long rolls on beat 3, ghost texture
+    .{
+        .n3_don_mask = (1 << 0),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = (1 << 8),
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = (1 << 4) | (1 << 12),
+        .n4_ghost_mask = (1 << 6) | (1 << 14),
+    },
+};
+
+// Yatai-bayashi — forward-driving float procession.
+const YATAI_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Push hocket: n3 on quarters, n4 on the off-eighths
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = (1 << 4) | (1 << 12),
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 2) | (1 << 10),
+        .n4_ka_mask = (1 << 6) | (1 << 14),
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Doko spray: quarter-doko on n3, kara fill on n4 off-eighths
+    .{
+        .n3_don_mask = 0,
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n4_ghost_mask = 0,
+    },
+    // Syncopated push: n3 syncopated dons, n4 counter, ghost ground
+    .{
+        .n3_don_mask = (1 << 1) | (1 << 9),
+        .n3_ka_mask = (1 << 3) | (1 << 7) | (1 << 11) | (1 << 15),
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 5) | (1 << 13),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+    },
+};
+
+// Miyake — bold and athletic. Backline plays heavy unison hits with rolls.
+const MIYAKE_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Unison power: both voices on quarters, n3 fills with doko
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Doro hammers: rolling answer on off-quarters, ghost texture beneath
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = (1 << 4) | (1 << 12),
+        .n4_don_mask = (1 << 0) | (1 << 8),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+    },
+    // Spacious breathing: very wide with single anchors and a kara fill
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = (1 << 4) | (1 << 12),
+        .n4_ghost_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+    },
+};
+
+var nagado_back_state: PatternPhaseState = .{};
+
+fn nagadoBackPatternBank(style: TaikoPatternStyle) []const NagadoBacklinePattern {
+    return switch (style) {
+        .matsuri => &MATSURI_NAGADO_BACK_PATTERNS,
+        .yatai_bayashi => &YATAI_NAGADO_BACK_PATTERNS,
+        .miyake => &MIYAKE_NAGADO_BACK_PATTERNS,
+        .oroshi => &.{},
+    };
+}
+
+fn nagadoBackPatternIntensity(meso: f32, macro_t: f32, energy: f32) f32 {
+    const director_t = composition.compositionEngineLongFormIntensity(&runner.engine);
+    return std.math.clamp(0.18 * energy + 0.42 * macro_t + 0.25 * meso + 0.15 * director_t + active_variant_offset, 0.0, 1.0);
+}
+
+fn pickNagadoBackPattern(style: TaikoPatternStyle, intensity: f32, cycle_count: u32, bias_amount: f32) u8 {
+    const bank = nagadoBackPatternBank(style);
+    if (bank.len == 0) {
+        std.log.warn("procedural_taiko.pickNagadoBackPattern: empty backline bank for style {s}", .{@tagName(style)});
+        return 0;
+    }
+    if (bank.len == 1) return 0;
+
+    const target = pickerTarget(bank.len, intensity, cycle_count, bias_amount);
+    var weights: [KANE_BANK_MAX]f32 = undefined;
+    var total: f32 = 0.0;
+    const max_idx_f: f32 = @floatFromInt(bank.len - 1);
+    for (0..bank.len) |i| {
+        const idx_f: f32 = @floatFromInt(i);
+        const dist = @abs(idx_f / max_idx_f - target);
+        const w = @max(0.1, 1.0 - dist * 0.85);
+        weights[i] = w;
+        total += w;
+    }
+    var r = dsp.rngFloat(&rng) * total;
+    for (0..bank.len) |i| {
+        r -= weights[i];
+        if (r <= 0.0) return @intCast(i);
+    }
+    return @intCast(bank.len - 1);
+}
+
+fn fireNagadoBackStep(step: u8, pattern: NagadoBacklinePattern, back_vel: f32, accent: f32) void {
+    // Nagado 3 — priority: doro > doko > don > ka (only one fires per step).
+    if (composition.stepActive(pattern.n3_doro_mask, step)) {
+        scheduleDoro(V_NAGADO3, jitterVoiceVel(back_vel * 0.62));
+    } else if (composition.stepActive(pattern.n3_doko_mask, step)) {
+        scheduleDoko(V_NAGADO3, jitterVoiceVel(back_vel * 0.58));
+    } else if (composition.stepActive(pattern.n3_don_mask, step)) {
+        scheduleTrigger(V_NAGADO3, .don, jitterVoiceVel(back_vel * accent * 0.78));
+    } else if (composition.stepActive(pattern.n3_ka_mask, step)) {
+        scheduleTrigger(V_NAGADO3, .ka, jitterVoiceVel(back_vel * 0.46));
+    }
+
+    // Nagado 4 — priority: kara > don > ka > ghost.
+    if (composition.stepActive(pattern.n4_kara_mask, step)) {
+        scheduleKara(V_NAGADO4, jitterVoiceVel(back_vel * 0.52));
+    } else if (composition.stepActive(pattern.n4_don_mask, step)) {
+        scheduleTrigger(V_NAGADO4, .don, jitterVoiceVel(back_vel * accent * 0.72));
+    } else if (composition.stepActive(pattern.n4_ka_mask, step)) {
+        scheduleTrigger(V_NAGADO4, .ka, jitterVoiceVel(back_vel * 0.46));
+    } else if (composition.stepActive(pattern.n4_ghost_mask, step)) {
+        scheduleTrigger(V_NAGADO4, .ghost, jitterVoiceVel(back_vel * 0.38));
     }
 }
 
