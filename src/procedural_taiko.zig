@@ -147,8 +147,6 @@ const TaikoCueSpec = struct {
     nagado2_ka_mask: u16,
     shime_ji_mask: u16, // ji-uchi ground pattern
     shime_accent_mask: u16,
-    kane_open_mask: u16,
-    kane_muted_mask: u16,
     // Dynamics
     lead_density: f32,
     lead_rebuild_cycles: u16,
@@ -206,9 +204,6 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         // Shime: steady eighth notes
         .shime_ji_mask = 0x5555, // every other step
         .shime_accent_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
-        // Kane: on beats, with muted off-beats
-        .kane_open_mask = (1 << 0) | (1 << 8),
-        .kane_muted_mask = (1 << 4) | (1 << 12),
         .lead_density = 0.6,
         .lead_rebuild_cycles = 4,
         .ghost_density = 0.18,
@@ -237,8 +232,6 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .nagado2_ka_mask = (1 << 3) | (1 << 8) | (1 << 11),
         .shime_ji_mask = 0xFFFF, // every step (sixteenths)
         .shime_accent_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
-        .kane_open_mask = (1 << 0) | (1 << 8),
-        .kane_muted_mask = (1 << 6) | (1 << 14),
         .lead_density = 0.72,
         .lead_rebuild_cycles = 3,
         .ghost_density = 0.24,
@@ -267,8 +260,6 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .nagado2_ka_mask = (1 << 1) | (1 << 5) | (1 << 9) | (1 << 13),
         .shime_ji_mask = (1 << 0) | (1 << 2) | (1 << 4) | (1 << 6) | (1 << 8) | (1 << 10) | (1 << 12) | (1 << 14),
         .shime_accent_mask = (1 << 0) | (1 << 8),
-        .kane_open_mask = (1 << 0),
-        .kane_muted_mask = (1 << 8),
         .lead_density = 0.55,
         .lead_rebuild_cycles = 5,
         .ghost_density = 0.12,
@@ -297,8 +288,6 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         .nagado2_ka_mask = 0,
         .shime_ji_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
         .shime_accent_mask = (1 << 0) | (1 << 8),
-        .kane_open_mask = (1 << 0) | (1 << 8),
-        .kane_muted_mask = (1 << 12),
         .lead_density = 0.18,
         .lead_rebuild_cycles = 8,
         .ghost_density = 0.06,
@@ -455,6 +444,10 @@ const TriggerType = enum {
     ghost,
     roll,
     open,
+    chi,
+    ki,
+    choke,
+    damp,
     muted,
 };
 
@@ -464,7 +457,7 @@ const PendingTrigger = struct {
     velocity: f32 = 0.0,
 };
 
-const PENDING_SLOTS_PER_VOICE: usize = 4;
+const PENDING_SLOTS_PER_VOICE: usize = 8;
 const EMPTY_PENDING_ROW: [PENDING_SLOTS_PER_VOICE]PendingTrigger = .{PendingTrigger{}} ** PENDING_SLOTS_PER_VOICE;
 var pending: [NUM_VOICES][PENDING_SLOTS_PER_VOICE]PendingTrigger = .{EMPTY_PENDING_ROW} ** NUM_VOICES;
 
@@ -507,6 +500,7 @@ fn processPendingTriggers() void {
 
 const KUCHI_PAIR_DELAY_SAMPLES: f32 = dsp.SAMPLE_RATE * 0.034;
 const KUCHI_SOFT_PAIR_DELAY_SAMPLES: f32 = dsp.SAMPLE_RATE * 0.026;
+const KANE_STROKE_DELAY_SAMPLES: f32 = dsp.SAMPLE_RATE * 0.108;
 
 fn scheduleDoko(voice: usize, vel: f32) void {
     scheduleTrigger(voice, .don, vel);
@@ -585,8 +579,11 @@ fn fireTrigger(voice: usize, ttype: TriggerType, vel: f32) void {
             else => {},
         },
         V_KANE => switch (ttype) {
-            .open => instruments.atariganeTriggerOpen(&kane, vel),
-            .muted => instruments.atariganeTriggerMuted(&kane, vel),
+            .open => instruments.atariganeTriggerChan(&kane, vel),
+            .chi => instruments.atariganeTriggerChi(&kane, vel),
+            .ki => instruments.atariganeTriggerKi(&kane, vel),
+            .choke, .muted => instruments.atariganeTriggerChoke(&kane, vel),
+            .damp => instruments.atariganeDamp(&kane, vel),
             else => {},
         },
         else => {},
@@ -1013,7 +1010,7 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
     const accent: f32 = if (step % 4 == 0) 1.0 else if (step % 2 == 0) 0.76 + spec.swing_amount * 0.35 else 0.56 + spec.swing_amount * 0.4;
 
     if (spec.progressive_roll) {
-        advanceOroshiStep(step, meso, macro_t, vel_base);
+        advanceOroshiStep(step, meso, macro_t, vel_base, spec);
         return;
     }
 
@@ -1078,16 +1075,7 @@ fn advanceStep(step: u8, meso: f32, micro: f32, spec: *const TaikoCueSpec) void 
 
     advanceShimeJi(step, meso, macro_t, vel_base, spec);
 
-    // ---- Atarigane ----
-    if (composition.stepActive(spec.kane_open_mask, step)) {
-        if (dsp.rngFloat(&rng) < kaneOpenChance(spec, meso, macro_t)) {
-            scheduleTrigger(V_KANE, .open, vel_base * 0.62);
-        }
-    } else if (composition.stepActive(spec.kane_muted_mask, step)) {
-        if (dsp.rngFloat(&rng) < kaneMutedChance(spec, meso, macro_t)) {
-            scheduleTrigger(V_KANE, .muted, vel_base * 0.42);
-        }
-    }
+    advanceAtarigane(step, meso, macro_t, vel_base, spec);
 }
 
 fn advanceNagadoBackline(step: u8, meso: f32, macro_t: f32, vel_base: f32, accent: f32, spec: *const TaikoCueSpec) void {
@@ -1237,15 +1225,227 @@ fn advanceMiyakeShimeJi(step: u8, meso: f32, macro_t: f32, shime_vel: f32) void 
     }
 }
 
-fn kaneOpenChance(spec: *const TaikoCueSpec, meso: f32, macro_t: f32) f32 {
-    return std.math.clamp(0.08 + spec.energy * 0.14 + meso * 0.08 + macro_t * 0.12, 0.0, 0.42);
+// ============================================================
+// Atarigane pattern bank — kuchi-shoga 16-step bayashi figures
+// chan = open ring (long-decay center stroke, the "downbeat" sound)
+// chi  = bright rim stroke
+// ki   = sharper edge click
+// damp = explicit hand-damp, used at phrase endings only
+// Banks are ordered sparse -> dense; pickKanePattern weights by intensity.
+// ============================================================
+
+const AtariganePattern = struct {
+    chan_mask: u16,
+    chi_mask: u16,
+    ki_mask: u16,
+    damp_mask: u16,
+};
+
+// Matsuri — festival groove. Chan on the downbeats, chi/ki sprinkled.
+const MATSURI_KANE_PATTERNS = [_]AtariganePattern{
+    // Sparse: "CHAN — — — — — chi — | CHAN — — — — — chi —"
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 6) | (1 << 14),
+        .ki_mask = 0,
+        .damp_mask = (1 << 15),
+    },
+    // Moderate: "CHAN — chi ki — chi — ki | CHAN — chi ki — chi — ki"
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 2) | (1 << 5) | (1 << 10) | (1 << 13),
+        .ki_mask = (1 << 3) | (1 << 7) | (1 << 11) | (1 << 15),
+        .damp_mask = 0,
+    },
+    // Dense: "CHAN — chi ki chi ki ki ki | CHAN — chi ki chi ki ki —"
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 2) | (1 << 4) | (1 << 10) | (1 << 12),
+        .ki_mask = (1 << 3) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 11) | (1 << 13) | (1 << 14),
+        .damp_mask = (1 << 15),
+    },
+};
+
+// Yatai-bayashi — driving float-procession. Continuous 16ths under chan accents.
+const YATAI_KANE_PATTERNS = [_]AtariganePattern{
+    // Quarter chans with chi-ki off-beat fills
+    .{
+        .chan_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .chi_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .ki_mask = (1 << 3) | (1 << 7) | (1 << 11) | (1 << 15),
+        .damp_mask = 0,
+    },
+    // Driving 16ths — chan on 1 & 3, every other 16th filled
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 2) | (1 << 4) | (1 << 6) | (1 << 10) | (1 << 12) | (1 << 14),
+        .ki_mask = (1 << 1) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 9) | (1 << 11) | (1 << 13) | (1 << 15),
+        .damp_mask = 0,
+    },
+    // Call-and-answer: front half busy, back half holds
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 2) | (1 << 4) | (1 << 6) | (1 << 12),
+        .ki_mask = (1 << 1) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 14),
+        .damp_mask = (1 << 15),
+    },
+};
+
+// Miyake — bold and spacious. Chans dominate, ornaments are sparse.
+const MIYAKE_KANE_PATTERNS = [_]AtariganePattern{
+    // Very spacious: chan on 1, single chi at the back
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = (1 << 10),
+        .ki_mask = 0,
+        .damp_mask = (1 << 14),
+    },
+    // Half-time chans with chi-ki pickup
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 6) | (1 << 14),
+        .ki_mask = (1 << 4) | (1 << 12),
+        .damp_mask = (1 << 15),
+    },
+    // Building energy: ki pickups before each chan
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 6) | (1 << 14),
+        .ki_mask = (1 << 5) | (1 << 7) | (1 << 13) | (1 << 15),
+        .damp_mask = 0,
+    },
+};
+
+// Oroshi — thunder roll, dramatic build. Kane is sparse; even at peak
+// it stays uncluttered so it reads as a tolling gong over the roll.
+const OROSHI_KANE_PATTERNS = [_]AtariganePattern{
+    // Pre-roll: a single chan and a damp
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = (1 << 14),
+    },
+    // Building: half-note chans
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = (1 << 15),
+    },
+    // Peak: half-note chans with chi pickup before the second chan
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 6) | (1 << 14),
+        .ki_mask = 0,
+        .damp_mask = (1 << 15),
+    },
+};
+
+const KANE_BANK_MAX: usize = 8;
+
+const KanePatternState = struct {
+    current_idx: u8 = 0,
+    last_style: TaikoPatternStyle = .matsuri,
+    steps_held: u16 = 0,
+    bars_to_hold: u8 = 2,
+};
+var kane_state: KanePatternState = .{};
+
+fn kanePatternBank(style: TaikoPatternStyle) []const AtariganePattern {
+    return switch (style) {
+        .matsuri => &MATSURI_KANE_PATTERNS,
+        .yatai_bayashi => &YATAI_KANE_PATTERNS,
+        .miyake => &MIYAKE_KANE_PATTERNS,
+        .oroshi => &OROSHI_KANE_PATTERNS,
+    };
 }
 
-fn kaneMutedChance(spec: *const TaikoCueSpec, meso: f32, macro_t: f32) f32 {
-    return std.math.clamp(0.04 + spec.energy * 0.1 + meso * 0.06 + macro_t * 0.08, 0.0, 0.32);
+fn kanePatternIntensity(meso: f32, macro_t: f32, energy: f32) f32 {
+    return std.math.clamp(0.25 * energy + 0.45 * macro_t + 0.30 * meso, 0.0, 1.0);
 }
 
-fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
+// Bias selection toward sparser indices at low intensity, denser at high.
+fn pickKanePattern(style: TaikoPatternStyle, intensity: f32) u8 {
+    const bank = kanePatternBank(style);
+    if (bank.len == 0) {
+        std.log.warn("procedural_taiko.pickKanePattern: empty kane bank for style {s}", .{@tagName(style)});
+        return 0;
+    }
+    if (bank.len == 1) return 0;
+
+    var weights: [KANE_BANK_MAX]f32 = undefined;
+    var total: f32 = 0.0;
+    const max_idx_f: f32 = @floatFromInt(bank.len - 1);
+    for (0..bank.len) |i| {
+        const idx_f: f32 = @floatFromInt(i);
+        const dist = @abs(idx_f / max_idx_f - intensity);
+        const w = @max(0.1, 1.0 - dist * 0.85);
+        weights[i] = w;
+        total += w;
+    }
+    var r = dsp.rngFloat(&rng) * total;
+    for (0..bank.len) |i| {
+        r -= weights[i];
+        if (r <= 0.0) return @intCast(i);
+    }
+    return @intCast(bank.len - 1);
+}
+
+fn jitterKaneVel(vel: f32) f32 {
+    return vel * (1.0 + (dsp.rngFloat(&rng) - 0.5) * 0.16); // +/- 8%
+}
+
+fn kanePhraseVelocity(vel_base: f32, spec: *const TaikoCueSpec, macro_t: f32) f32 {
+    return vel_base * (0.46 + spec.energy * 0.16 + macro_t * 0.10);
+}
+
+fn advanceAtarigane(step: u8, meso: f32, macro_t: f32, vel_base: f32, spec: *const TaikoCueSpec) void {
+    const intensity = kanePatternIntensity(meso, macro_t, spec.energy);
+    const style_changed = kane_state.last_style != spec.pattern_style;
+    const bar_boundary = step == 0 and kane_state.steps_held >= @as(u16, kane_state.bars_to_hold) * 16;
+
+    if (style_changed or bar_boundary) {
+        kane_state.last_style = spec.pattern_style;
+        kane_state.steps_held = 0;
+        kane_state.bars_to_hold = if (intensity > 0.7) 2 else 3;
+        kane_state.current_idx = pickKanePattern(spec.pattern_style, intensity);
+    }
+    kane_state.steps_held +%= 1;
+
+    const bank = kanePatternBank(spec.pattern_style);
+    if (bank.len == 0) {
+        std.log.warn("procedural_taiko.advanceAtarigane: empty kane bank for style {s}", .{@tagName(spec.pattern_style)});
+        return;
+    }
+    const pattern = bank[kane_state.current_idx % @as(u8, @intCast(bank.len))];
+
+    const kane_vel = kanePhraseVelocity(vel_base, spec, macro_t);
+    fireKanePatternStep(step, pattern, kane_vel, macro_t);
+}
+
+fn fireKanePatternStep(step: u8, pattern: AtariganePattern, kane_vel: f32, macro_t: f32) void {
+    // Priority: chan > chi > ki on overlapping bits.
+    if (composition.stepActive(pattern.chan_mask, step)) {
+        const accent: f32 = if (step == 0) 1.0 else 0.86;
+        scheduleTrigger(V_KANE, .open, jitterKaneVel(kane_vel * accent));
+        // Occasional chiki-flam ornament riding the chan, only at high intensity.
+        if (macro_t > 0.7 and dsp.rngFloat(&rng) < 0.18) {
+            scheduleTriggerAfter(V_KANE, .chi, jitterKaneVel(kane_vel * 0.44), KANE_STROKE_DELAY_SAMPLES * 0.55);
+        }
+    } else if (composition.stepActive(pattern.chi_mask, step)) {
+        scheduleTrigger(V_KANE, .chi, jitterKaneVel(kane_vel * 0.62));
+    } else if (composition.stepActive(pattern.ki_mask, step)) {
+        scheduleTrigger(V_KANE, .ki, jitterKaneVel(kane_vel * 0.48));
+    }
+
+    if (composition.stepActive(pattern.damp_mask, step)) {
+        const damp_amount = 0.40 + macro_t * 0.18;
+        scheduleTrigger(V_KANE, .damp, damp_amount);
+    }
+}
+
+fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32, spec: *const TaikoCueSpec) void {
     const density_mask = oroshiDensityMask(macro_t);
     const quarter_mask: u16 = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12);
     const half_mask: u16 = (1 << 0) | (1 << 8);
@@ -1325,13 +1525,7 @@ fn advanceOroshiStep(step: u8, meso: f32, macro_t: f32, vel_base: f32) void {
         scheduleTrigger(V_ODAIKO, .don, vel_base * (0.68 + macro_t * 0.22));
     }
 
-    if (step == 0) {
-        scheduleTrigger(V_KANE, .open, vel_base * (0.34 + macro_t * 0.16));
-    } else if (macro_t > 0.72 and step == 8 and dsp.rngFloat(&rng) < 0.5) {
-        scheduleTrigger(V_KANE, .muted, vel_base * 0.28);
-    } else if (macro_t > 0.9 and step == 12 and dsp.rngFloat(&rng) < 0.38) {
-        scheduleTrigger(V_KANE, .open, vel_base * 0.32);
-    }
+    advanceAtarigane(step, meso, macro_t, vel_base, spec);
 }
 
 fn oroshiDensityMask(macro_t: f32) u16 {

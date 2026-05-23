@@ -30,6 +30,7 @@ const RenderConfig = struct {
     seed: u64 = DEFAULT_SEED,
     fixed_seed: bool = true,
     taiko_bus_stats: bool = false,
+    taiko_isolate_kane: bool = false,
 };
 
 const RenderStats = struct {
@@ -176,6 +177,11 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--taiko-bus-stats")) {
             cfg.taiko_bus_stats = true;
+            idx += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--taiko-isolate-kane")) {
+            cfg.taiko_isolate_kane = true;
             idx += 1;
             continue;
         }
@@ -339,6 +345,14 @@ fn applyStyleSettings(cfg: RenderConfig) void {
             procedural_taiko.drum_mix = cfg.volume;
             procedural_taiko.selected_cue = cfg.taiko_cue;
             procedural_taiko.collect_bus_stats = cfg.taiko_bus_stats;
+            if (cfg.taiko_isolate_kane) {
+                // Mute all non-kane busses so the atarigane patterns are auditable.
+                // drum_mix gates odaiko+nagado; shaker_mix gates shime; slap_mix gates kane.
+                procedural_taiko.drum_mix = 0.0;
+                procedural_taiko.shaker_mix = 0.0;
+                procedural_taiko.tone_mix = 0.0;
+                procedural_taiko.slap_mix = 1.0;
+            }
         },
     }
 }

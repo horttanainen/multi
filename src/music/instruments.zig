@@ -767,6 +767,7 @@ const SHIME_MODE_COUNT = 11;
 const ATARIGANE_MODE_COUNT = 10;
 
 const OdaikoStroke = enum { don, ka, ghost };
+pub const AtariganeStroke = enum { chan, chi, ki, choke };
 
 fn ModalDrumBody(comptime n_modes: usize) type {
     return struct {
@@ -1325,29 +1326,70 @@ pub const Atarigane = struct {
     resonators: dsp.ResonatorBank(ATARIGANE_MODE_COUNT) = .{},
     env: dsp.Envelope = dsp.envelopeInit(0.001, 0.08, 0.0, 0.04),
     hpf: dsp.HPF = dsp.hpfInit(1200.0),
+    tone_lpf: dsp.LPF = dsp.lpfInit(12000.0),
+    noise_hpf: dsp.HPF = dsp.hpfInit(1500.0),
     noise_lpf: dsp.LPF = dsp.lpfInit(7200.0),
     base_freq: f32 = 920.0,
     volume: f32 = 0.35,
     velocity: f32 = 0.0,
     muted: bool = false,
+    stroke: AtariganeStroke = .chan,
+    noise_samples: u32 = 2600,
+    noise_decay: f32 = 0.011,
+    noise_gain: f32 = 0.08,
+    post_gain: f32 = 1.0,
     strike_age: u32 = 999999,
 };
 
 pub fn atariganeTriggerOpen(ctx: *Atarigane, vel: f32) void {
-    ctx.velocity = vel;
-    ctx.muted = false;
-    atariganeConfigureModes(ctx);
-    dsp.resonatorBankExcite(ATARIGANE_MODE_COUNT, &ctx.resonators, .{ 0.34, 0.24, 0.18, 0.13, 0.095, 0.068, 0.048, 0.034, 0.024, 0.016 }, vel);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.055, 0.0, 0.02);
-    ctx.strike_age = 0;
+    atariganeTriggerChan(ctx, vel);
 }
 
 pub fn atariganeTriggerMuted(ctx: *Atarigane, vel: f32) void {
+    atariganeTriggerChoke(ctx, vel);
+}
+
+pub fn atariganeTriggerChan(ctx: *Atarigane, vel: f32) void {
+    atariganeTriggerStroke(ctx, .chan, vel);
+}
+
+pub fn atariganeTriggerChi(ctx: *Atarigane, vel: f32) void {
+    atariganeTriggerStroke(ctx, .chi, vel);
+}
+
+pub fn atariganeTriggerKi(ctx: *Atarigane, vel: f32) void {
+    atariganeTriggerStroke(ctx, .ki, vel);
+}
+
+pub fn atariganeTriggerChoke(ctx: *Atarigane, vel: f32) void {
+    atariganeTriggerStroke(ctx, .choke, vel);
+}
+
+pub fn atariganeDamp(ctx: *Atarigane, amount: f32) void {
+    const keep = 1.0 - std.math.clamp(amount, 0.0, 0.96);
+    for (0..ATARIGANE_MODE_COUNT) |idx| {
+        ctx.resonators.amps[idx] *= keep;
+    }
+    ctx.noise_samples = @min(ctx.noise_samples, ctx.strike_age);
+}
+
+fn atariganeTriggerStroke(ctx: *Atarigane, stroke: AtariganeStroke, vel: f32) void {
+    const config = atariganeConfig(ctx.base_freq, stroke);
     ctx.velocity = vel;
-    ctx.muted = true;
-    atariganeConfigureModes(ctx);
-    dsp.resonatorBankExcite(ATARIGANE_MODE_COUNT, &ctx.resonators, .{ 0.24, 0.16, 0.11, 0.074, 0.05, 0.034, 0.022, 0.014, 0.009, 0.006 }, vel * 0.8);
-    dsp.envelopeRetrigger(&ctx.env, 0.001, 0.018, 0.0, 0.008);
+    ctx.muted = stroke == .choke;
+    ctx.stroke = stroke;
+    ctx.hpf = dsp.hpfInit(config.tone_hpf_hz);
+    ctx.tone_lpf = dsp.lpfInit(config.tone_lpf_hz);
+    ctx.noise_hpf = dsp.hpfInit(config.noise_hpf_hz);
+    ctx.noise_lpf = dsp.lpfInit(config.noise_lpf_hz);
+    ctx.noise_samples = config.noise_samples;
+    ctx.noise_decay = config.noise_decay;
+    ctx.noise_gain = config.noise_gain;
+    ctx.post_gain = config.post_gain;
+
+    atariganeConfigureModes(ctx, config);
+    dsp.resonatorBankExcite(ATARIGANE_MODE_COUNT, &ctx.resonators, config.mode_gains, vel * config.excitation_gain);
+    dsp.envelopeRetrigger(&ctx.env, config.attack_s, config.decay_s, 0.0, config.release_s);
     ctx.strike_age = 0;
 }
 
@@ -1355,50 +1397,133 @@ pub fn atariganeProcess(ctx: *Atarigane, rng_inst: *dsp.Rng) f32 {
     const strike_env = dsp.envelopeProcess(&ctx.env);
 
     var tone = dsp.resonatorBankProcess(ATARIGANE_MODE_COUNT, &ctx.resonators);
-    if (ctx.strike_age < atariganeStrikeNoiseSamples(ctx.muted)) {
-        const noise_gain: f32 = if (ctx.muted) 0.12 else 0.08;
-        tone += dsp.exciterNoiseBurst(rng_inst, &ctx.hpf, &ctx.noise_lpf, ctx.strike_age, if (ctx.muted) 0.024 else 0.011, noise_gain) * strike_env;
+    if (ctx.strike_age < ctx.noise_samples) {
+        tone += dsp.exciterNoiseBurst(rng_inst, &ctx.noise_hpf, &ctx.noise_lpf, ctx.strike_age, ctx.noise_decay, ctx.noise_gain) * strike_env;
         ctx.strike_age += 1;
     }
-    tone = dsp.hpfProcess(&ctx.hpf, tone);
+    tone = dsp.lpfProcess(&ctx.tone_lpf, dsp.hpfProcess(&ctx.hpf, tone));
 
-    if (ctx.muted) tone *= 0.55;
-    return tone * ctx.volume;
+    return tone * ctx.volume * ctx.post_gain;
 }
 
-fn atariganeConfigureModes(ctx: *Atarigane) void {
+const AtariganeConfig = struct {
+    mode_freqs: [ATARIGANE_MODE_COUNT]f32,
+    mode_t60s: [ATARIGANE_MODE_COUNT]f32,
+    mode_gains: [ATARIGANE_MODE_COUNT]f32,
+    excitation_gain: f32,
+    attack_s: f32,
+    decay_s: f32,
+    release_s: f32,
+    tone_hpf_hz: f32,
+    tone_lpf_hz: f32,
+    noise_hpf_hz: f32,
+    noise_lpf_hz: f32,
+    noise_samples: u32,
+    noise_decay: f32,
+    noise_gain: f32,
+    post_gain: f32,
+};
+
+fn atariganeConfigureModes(ctx: *Atarigane, config: AtariganeConfig) void {
+    var mode_decays: [ATARIGANE_MODE_COUNT]f32 = undefined;
+    for (0..ATARIGANE_MODE_COUNT) |idx| {
+        mode_decays[idx] = modalDecayFromT60(config.mode_t60s[idx]);
+    }
+
     dsp.resonatorBankConfigure(
         ATARIGANE_MODE_COUNT,
         &ctx.resonators,
-        .{
-            ctx.base_freq,
-            ctx.base_freq * 1.58,
-            ctx.base_freq * 2.19,
-            ctx.base_freq * 2.74,
-            ctx.base_freq * 3.68,
-            ctx.base_freq * 4.63,
-            ctx.base_freq * 5.89,
-            ctx.base_freq * 7.21,
-            ctx.base_freq * 8.96,
-            ctx.base_freq * 10.83,
-        },
-        .{
-            if (ctx.muted) 0.9986 else 0.99986,
-            if (ctx.muted) 0.9984 else 0.9998,
-            if (ctx.muted) 0.9981 else 0.99972,
-            if (ctx.muted) 0.9978 else 0.99962,
-            if (ctx.muted) 0.9975 else 0.99952,
-            if (ctx.muted) 0.9972 else 0.9994,
-            if (ctx.muted) 0.9969 else 0.99925,
-            if (ctx.muted) 0.9966 else 0.99905,
-            if (ctx.muted) 0.9963 else 0.99885,
-            if (ctx.muted) 0.996 else 0.99865,
-        },
+        config.mode_freqs,
+        mode_decays,
     );
 }
 
-fn atariganeStrikeNoiseSamples(muted: bool) u32 {
-    return if (muted) 1200 else 2600;
+fn atariganeConfig(base_freq: f32, stroke: AtariganeStroke) AtariganeConfig {
+    return switch (stroke) {
+        .chan => .{
+            .mode_freqs = atariganeShellModeFreqs(base_freq),
+            .mode_t60s = .{ 1.18, 0.96, 0.72, 0.52, 0.38, 0.29, 0.22, 0.16, 0.12, 0.09 },
+            .mode_gains = .{ 0.40, 0.30, 0.23, 0.17, 0.12, 0.086, 0.060, 0.041, 0.027, 0.016 },
+            .excitation_gain = 1.08,
+            .attack_s = 0.001,
+            .decay_s = 0.050,
+            .release_s = 0.022,
+            .tone_hpf_hz = base_freq * 0.52,
+            .tone_lpf_hz = 11200.0,
+            .noise_hpf_hz = base_freq * 1.05,
+            .noise_lpf_hz = 7600.0,
+            .noise_samples = 2100,
+            .noise_decay = 0.014,
+            .noise_gain = 0.070,
+            .post_gain = 1.05,
+        },
+        .chi => .{
+            .mode_freqs = atariganeShellModeFreqs(base_freq),
+            .mode_t60s = .{ 0.30, 0.26, 0.21, 0.16, 0.12, 0.088, 0.064, 0.046, 0.034, 0.025 },
+            .mode_gains = .{ 0.16, 0.20, 0.19, 0.15, 0.10, 0.070, 0.046, 0.029, 0.017, 0.009 },
+            .excitation_gain = 0.78,
+            .attack_s = 0.001,
+            .decay_s = 0.016,
+            .release_s = 0.006,
+            .tone_hpf_hz = base_freq * 0.74,
+            .tone_lpf_hz = 7200.0,
+            .noise_hpf_hz = base_freq * 1.02,
+            .noise_lpf_hz = 5600.0,
+            .noise_samples = 620,
+            .noise_decay = 0.044,
+            .noise_gain = 0.150,
+            .post_gain = 0.72,
+        },
+        .ki => .{
+            .mode_freqs = atariganeShellModeFreqs(base_freq),
+            .mode_t60s = .{ 0.23, 0.20, 0.16, 0.12, 0.090, 0.066, 0.048, 0.034, 0.025, 0.018 },
+            .mode_gains = .{ 0.12, 0.16, 0.16, 0.13, 0.088, 0.058, 0.036, 0.021, 0.012, 0.006 },
+            .excitation_gain = 0.68,
+            .attack_s = 0.001,
+            .decay_s = 0.012,
+            .release_s = 0.005,
+            .tone_hpf_hz = base_freq * 0.82,
+            .tone_lpf_hz = 6600.0,
+            .noise_hpf_hz = base_freq * 1.10,
+            .noise_lpf_hz = 5000.0,
+            .noise_samples = 520,
+            .noise_decay = 0.052,
+            .noise_gain = 0.130,
+            .post_gain = 0.60,
+        },
+        .choke => .{
+            .mode_freqs = atariganeShellModeFreqs(base_freq),
+            .mode_t60s = .{ 0.070, 0.060, 0.048, 0.038, 0.030, 0.023, 0.017, 0.012, 0.009, 0.007 },
+            .mode_gains = .{ 0.15, 0.19, 0.18, 0.14, 0.096, 0.060, 0.034, 0.018, 0.009, 0.004 },
+            .excitation_gain = 0.74,
+            .attack_s = 0.001,
+            .decay_s = 0.010,
+            .release_s = 0.004,
+            .tone_hpf_hz = base_freq * 0.78,
+            .tone_lpf_hz = 5400.0,
+            .noise_hpf_hz = base_freq * 0.98,
+            .noise_lpf_hz = 4600.0,
+            .noise_samples = 460,
+            .noise_decay = 0.058,
+            .noise_gain = 0.145,
+            .post_gain = 0.52,
+        },
+    };
+}
+
+fn atariganeShellModeFreqs(base_freq: f32) [ATARIGANE_MODE_COUNT]f32 {
+    return .{
+        base_freq,
+        base_freq * 1.51,
+        base_freq * 2.12,
+        base_freq * 2.74,
+        base_freq * 3.57,
+        base_freq * 4.48,
+        base_freq * 5.71,
+        base_freq * 7.05,
+        base_freq * 8.72,
+        base_freq * 10.48,
+    };
 }
 
 pub const SineDrone = struct {
