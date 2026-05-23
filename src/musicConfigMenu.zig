@@ -57,13 +57,16 @@ const african_cue_names = [AFRICAN_CUE_COUNT][:0]const u8{
     "Cue: Fanga",
     "Cue: Soli",
 };
-const TAIKO_CUE_COUNT = 4;
+const TAIKO_CUE_COUNT = 7;
 var taiko_cue_value: u8 = 0;
 const taiko_cue_names = [TAIKO_CUE_COUNT][:0]const u8{
     "Cue: Matsuri",
     "Cue: Yatai-bayashi",
     "Cue: Miyake",
     "Cue: Oroshi",
+    "Cue: Hachijo",
+    "Cue: Bon-odori",
+    "Cue: Furi-uchi",
 };
 const AMERICANA_GUITAR_CUE_COUNT = 4;
 var americana_guitar_cue_value: u8 = 0;

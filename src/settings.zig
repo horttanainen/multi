@@ -521,6 +521,6 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_taiko_shime_mix = std.math.clamp(s.music_taiko_shime_mix orelse DEFAULT_TAIKO_SHIME_MIX, 0.0, 1.0);
     music_taiko_nagado_mix = std.math.clamp(s.music_taiko_nagado_mix orelse DEFAULT_TAIKO_NAGADO_MIX, 0.0, 1.0);
     music_taiko_kane_mix = std.math.clamp(s.music_taiko_kane_mix orelse DEFAULT_TAIKO_KANE_MIX, 0.0, 1.0);
-    music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 3);
+    music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 6);
     music_americana_guitar_cue = std.math.clamp(s.music_americana_guitar_cue orelse DEFAULT_AMERICANA_GUITAR_CUE, 0, 3);
 }
