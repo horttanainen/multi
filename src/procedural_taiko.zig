@@ -21,6 +21,9 @@ pub const CuePreset = enum(u8) {
     yatai_bayashi,
     miyake,
     oroshi,
+    hachijo,
+    bon_odori,
+    furi_uchi,
 };
 
 pub var bpm: f32 = 1.0;
@@ -211,9 +214,12 @@ const TaikoPatternStyle = enum {
     yatai_bayashi,
     miyake,
     oroshi,
+    hachijo,
+    bon_odori,
+    furi_uchi,
 };
 
-const CUE_SPECS: [4]TaikoCueSpec = .{
+const CUE_SPECS: [7]TaikoCueSpec = .{
     // matsuri — festival rhythm, moderate tempo, steady groove
     .{
         .root = 36,
@@ -372,6 +378,124 @@ const CUE_SPECS: [4]TaikoCueSpec = .{
         // Oroshi is a single building figure — no A/B variants.
         .variant_period_cycles = 0,
         .variant_intensity_offset = 0.0,
+    },
+    // hachijo — island style, two players on one drum: steady ground (shitabyōshi)
+    // under a free improvising lead (uwabyōshi). Conversational, intimate.
+    .{
+        .root = 38,
+        .scale_type = .dorian,
+        .base_bpm = 96.0,
+        .chord_change_beats = 16.0,
+        .pattern_style = .hachijo,
+        .progressive_roll = false,
+        .swing_amount = 0.06,
+        // Odaiko: very sparse, gentle pulse on beat 1
+        .odaiko_mask = (1 << 0),
+        .odaiko_fill_mask = (1 << 8),
+        // Lead nagado (uwabyōshi) follows lead_pattern; masks describe its baseline.
+        .nagado1_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .nagado1_ka_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        // Nagado 2 is sparse support
+        .nagado2_don_mask = (1 << 8),
+        .nagado2_ka_mask = 0,
+        // Shime light, quarters only
+        .shime_ji_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .shime_accent_mask = (1 << 0) | (1 << 8),
+        .lead_density = 0.78, // high — improv is the point
+        .lead_rebuild_cycles = 2, // frequent — lead is the variation engine
+        .ghost_density = 0.20,
+        .fill_density = 0.18,
+        .break_chance = 0.08,
+        .call_response_chance = 0.22,
+        .roll_chance = 0.05,
+        .energy = 0.55,
+        .reverb_boost = 0.08,
+        .tempo_drift = 0.02,
+        // Kane shifts frequently (conversational accents); backline holds rock-steady.
+        .kane_hold_beats = 64,
+        .nagado_back_hold_beats = 256,
+        // Hachijo has many "verses" — conversational rotation is strong.
+        .cycle_bias_amount = 0.35,
+        .tempo_cycle_drift = 0.0,
+        .variant_period_cycles = 4,
+        .variant_intensity_offset = 0.15,
+    },
+    // bon_odori — Obon summer dance accompaniment. Slow-to-moderate,
+    // repetitive, communal. Easy quarter feel, minimal syncopation.
+    .{
+        .root = 36,
+        .scale_type = .major_pentatonic,
+        .base_bpm = 94.0,
+        .chord_change_beats = 16.0,
+        .pattern_style = .bon_odori,
+        .progressive_roll = false,
+        .swing_amount = 0.02,
+        // Odaiko prominent on all quarters (the dance pulse)
+        .odaiko_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .odaiko_fill_mask = 0,
+        // Lead nagado on the same quarter grid, less syncopated than matsuri
+        .nagado1_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .nagado1_ka_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .nagado2_don_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .nagado2_ka_mask = 0,
+        // Shime steady 8ths
+        .shime_ji_mask = 0x5555,
+        .shime_accent_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .lead_density = 0.50,
+        .lead_rebuild_cycles = 6, // slow to evolve — repetitive by design
+        .ghost_density = 0.10,
+        .fill_density = 0.12,
+        .break_chance = 0.02,
+        .call_response_chance = 0.05,
+        .roll_chance = 0.03,
+        .energy = 0.52,
+        .reverb_boost = 0.02,
+        .tempo_drift = 0.0, // steady for dancing
+        .kane_hold_beats = 128,
+        .nagado_back_hold_beats = 128,
+        .cycle_bias_amount = 0.10, // very repetitive
+        .tempo_cycle_drift = 0.0,
+        .variant_period_cycles = 0, // bon-odori stays in one mode
+        .variant_intensity_offset = 0.0,
+    },
+    // furi_uchi — ceremonial slow style. Sparse, dignified, dramatic.
+    // Lots of "ma" (silence) between strikes; rolls are structural.
+    .{
+        .root = 33,
+        .scale_type = .harmonic_minor,
+        .base_bpm = 72.0,
+        .chord_change_beats = 24.0,
+        .pattern_style = .furi_uchi,
+        .progressive_roll = false,
+        .swing_amount = 0.0,
+        // Odaiko on half notes — big, deliberate
+        .odaiko_mask = (1 << 0) | (1 << 8),
+        .odaiko_fill_mask = (1 << 4) | (1 << 12),
+        // Lead nagado on the strong beats
+        .nagado1_don_mask = (1 << 0) | (1 << 8),
+        .nagado1_ka_mask = (1 << 4) | (1 << 12),
+        .nagado2_don_mask = (1 << 4) | (1 << 12),
+        .nagado2_ka_mask = 0,
+        // Shime extremely sparse, half notes only
+        .shime_ji_mask = (1 << 0) | (1 << 8),
+        .shime_accent_mask = (1 << 0),
+        .lead_density = 0.30, // sparse
+        .lead_rebuild_cycles = 8, // rarely changes
+        .ghost_density = 0.05,
+        .fill_density = 0.20,
+        .break_chance = 0.0,
+        .call_response_chance = 0.0,
+        .roll_chance = 0.18, // rolls are the structural element
+        .energy = 0.40,
+        .reverb_boost = 0.12, // big ceremonial space
+        .tempo_drift = 0.04,
+        // One phase per macro cycle for both — utterly steady.
+        .kane_hold_beats = 256,
+        .nagado_back_hold_beats = 256,
+        .cycle_bias_amount = 0.15,
+        .tempo_cycle_drift = 0.0,
+        .variant_period_cycles = 4,
+        .variant_intensity_offset = -0.15, // B-flavor is even sparser
     },
 };
 
@@ -1237,6 +1361,9 @@ fn advanceShimeJi(step: u8, meso: f32, macro_t: f32, vel_base: f32, spec: *const
         .yatai_bayashi => advanceYataiShimeJi(step, meso, macro_t, shime_vel),
         .miyake => advanceMiyakeShimeJi(step, meso, macro_t, shime_vel),
         .oroshi => {},
+        .hachijo => advanceHachijoShimeJi(step, meso, shime_vel),
+        .bon_odori => advanceBonOdoriShimeJi(step, shime_vel),
+        .furi_uchi => advanceFuriUchiShimeJi(step, macro_t, shime_vel),
     }
 
     if (dsp.rngFloat(&rng) < spec.roll_chance * macro_t and step % 4 == 3) {
@@ -1311,6 +1438,45 @@ fn advanceMiyakeShimeJi(step: u8, meso: f32, macro_t: f32, shime_vel: f32) void 
 
     if (dsp.rngFloat(&rng) < 0.10 + meso * 0.18) {
         scheduleTrigger(if (step % 4 == 1) V_SHIME2 else V_SHIME1, .ghost, shime_vel * 0.36);
+    }
+}
+
+// Hachijo — light steady ground. Quarter-note feel, sparse.
+fn advanceHachijoShimeJi(step: u8, meso: f32, shime_vel: f32) void {
+    switch (step % 4) {
+        0 => {
+            scheduleTrigger(V_SHIME1, .don, shime_vel * 0.92);
+        },
+        2 => {
+            if (dsp.rngFloat(&rng) < 0.55 + meso * 0.20) {
+                scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.58);
+            }
+        },
+        else => {},
+    }
+}
+
+// Bon-odori — even quarter ground with kara on off-eighths.
+fn advanceBonOdoriShimeJi(step: u8, shime_vel: f32) void {
+    switch (step % 4) {
+        0 => {
+            scheduleTrigger(V_SHIME1, .don, shime_vel);
+            scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.52);
+        },
+        2 => {
+            scheduleTrigger(V_SHIME1, .ka, shime_vel * 0.62);
+        },
+        else => {},
+    }
+}
+
+// Furi-uchi — very sparse, ceremonial. Mostly silent.
+fn advanceFuriUchiShimeJi(step: u8, macro_t: f32, shime_vel: f32) void {
+    if (step == 0) {
+        scheduleTrigger(V_SHIME1, .don, shime_vel);
+        scheduleTrigger(V_SHIME2, .ka, shime_vel * 0.50);
+    } else if (step == 8 and macro_t > 0.35) {
+        scheduleTrigger(V_SHIME1, .ka, shime_vel * 0.60);
     }
 }
 
@@ -1405,6 +1571,82 @@ const MIYAKE_KANE_PATTERNS = [_]AtariganePattern{
     },
 };
 
+// Hachijo — intimate conversational style. Kane is sparse, conversational.
+const HACHIJO_KANE_PATTERNS = [_]AtariganePattern{
+    // Sparse: chan @ 1 only
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = (1 << 14),
+    },
+    // Moderate: chan @ 1 + 3, chi pickup before chan 3
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 6),
+        .ki_mask = 0,
+        .damp_mask = (1 << 14),
+    },
+    // Lively: chan @ 1 + 3, chi on off-eighths
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 4) | (1 << 12),
+        .ki_mask = (1 << 6) | (1 << 14),
+        .damp_mask = (1 << 15),
+    },
+};
+
+// Bon-odori — communal dance. Kane is very sparse, only the strong beats.
+const BON_ODORI_KANE_PATTERNS = [_]AtariganePattern{
+    // Single chan per bar (very repetitive)
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = 0,
+    },
+    // Half notes
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = 0,
+    },
+    // Half notes + simple chi on beat 2 & 4
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = (1 << 4) | (1 << 12),
+        .ki_mask = 0,
+        .damp_mask = 0,
+    },
+};
+
+// Furi-uchi — ceremonial. Kane is almost silent, marking only the most
+// dignified moments. The space between strokes is the point.
+const FURI_UCHI_KANE_PATTERNS = [_]AtariganePattern{
+    // Single chan, long ring through the whole bar
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = 0,
+    },
+    // Chan with a damp at phrase end
+    .{
+        .chan_mask = (1 << 0),
+        .chi_mask = (1 << 8),
+        .ki_mask = 0,
+        .damp_mask = (1 << 15),
+    },
+    // Half notes
+    .{
+        .chan_mask = (1 << 0) | (1 << 8),
+        .chi_mask = 0,
+        .ki_mask = 0,
+        .damp_mask = (1 << 15),
+    },
+};
+
 // Oroshi — thunder roll, dramatic build. Kane is sparse; even at peak
 // it stays uncluttered so it reads as a tolling gong over the roll.
 const OROSHI_KANE_PATTERNS = [_]AtariganePattern{
@@ -1453,6 +1695,9 @@ fn kanePatternBank(style: TaikoPatternStyle) []const AtariganePattern {
         .yatai_bayashi => &YATAI_KANE_PATTERNS,
         .miyake => &MIYAKE_KANE_PATTERNS,
         .oroshi => &OROSHI_KANE_PATTERNS,
+        .hachijo => &HACHIJO_KANE_PATTERNS,
+        .bon_odori => &BON_ODORI_KANE_PATTERNS,
+        .furi_uchi => &FURI_UCHI_KANE_PATTERNS,
     };
 }
 
@@ -1705,6 +1950,118 @@ const MIYAKE_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
     },
 };
 
+// Hachijo — the shimoshirabe (under-pattern). This is the FOUNDATION over
+// which the lead uwabyoshi improvises freely. It must stay rock-steady.
+const HACHIJO_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Steady ground: n3 quarters, n4 off-eighths
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Subtle variation: n3 don 1 & 3 with doko on 2 & 4, n4 ka off-eighths
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 4) | (1 << 12),
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Slightly more active: n3 doko quarters, n4 ghost off-eighths
+    .{
+        .n3_don_mask = 0,
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+    },
+};
+
+// Bon-odori — communal dance backline. Very steady, even quarter feel.
+const BON_ODORI_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Simple quarters with off-eighth ka
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14),
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Same but with kara doubles on 2 & 4 of n4
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = (1 << 2) | (1 << 10),
+        .n4_ghost_mask = (1 << 6) | (1 << 14),
+    },
+    // Doko fills on n3
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = (1 << 4) | (1 << 12),
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+};
+
+// Furi-uchi — ceremonial backline. Sparse, dignified, with rolls for drama.
+const FURI_UCHI_NAGADO_BACK_PATTERNS = [_]NagadoBacklinePattern{
+    // Single anchor: n3 on 1, n4 on 3
+    .{
+        .n3_don_mask = (1 << 0),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 8),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Long roll on beat 3 (the dramatic "now" of furi-uchi)
+    .{
+        .n3_don_mask = (1 << 0),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = (1 << 8),
+        .n4_don_mask = 0,
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = 0,
+    },
+    // Unison anchors with ghost texture (building section)
+    .{
+        .n3_don_mask = (1 << 0) | (1 << 8),
+        .n3_ka_mask = 0,
+        .n3_doko_mask = 0,
+        .n3_doro_mask = 0,
+        .n4_don_mask = (1 << 0) | (1 << 8),
+        .n4_ka_mask = 0,
+        .n4_kara_mask = 0,
+        .n4_ghost_mask = (1 << 4) | (1 << 12),
+    },
+};
+
 var nagado_back_state: PatternPhaseState = .{};
 
 fn nagadoBackPatternBank(style: TaikoPatternStyle) []const NagadoBacklinePattern {
@@ -1713,6 +2070,9 @@ fn nagadoBackPatternBank(style: TaikoPatternStyle) []const NagadoBacklinePattern
         .yatai_bayashi => &YATAI_NAGADO_BACK_PATTERNS,
         .miyake => &MIYAKE_NAGADO_BACK_PATTERNS,
         .oroshi => &.{},
+        .hachijo => &HACHIJO_NAGADO_BACK_PATTERNS,
+        .bon_odori => &BON_ODORI_NAGADO_BACK_PATTERNS,
+        .furi_uchi => &FURI_UCHI_NAGADO_BACK_PATTERNS,
     };
 }
 

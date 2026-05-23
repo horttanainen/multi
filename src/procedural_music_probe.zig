@@ -274,6 +274,9 @@ fn parseTaikoCueName(name: []const u8) ?procedural_taiko.CuePreset {
     if (std.mem.eql(u8, name, "yatai-bayashi") or std.mem.eql(u8, name, "yatai_bayashi")) return .yatai_bayashi;
     if (std.mem.eql(u8, name, "miyake")) return .miyake;
     if (std.mem.eql(u8, name, "oroshi")) return .oroshi;
+    if (std.mem.eql(u8, name, "hachijo")) return .hachijo;
+    if (std.mem.eql(u8, name, "bon-odori") or std.mem.eql(u8, name, "bon_odori")) return .bon_odori;
+    if (std.mem.eql(u8, name, "furi-uchi") or std.mem.eql(u8, name, "furi_uchi")) return .furi_uchi;
     return null;
 }
 
@@ -558,6 +561,9 @@ fn taikoCueLabel(cue: procedural_taiko.CuePreset) []const u8 {
         .yatai_bayashi => "yatai-bayashi",
         .miyake => "miyake",
         .oroshi => "oroshi",
+        .hachijo => "hachijo",
+        .bon_odori => "bon-odori",
+        .furi_uchi => "furi-uchi",
     };
 }
 
@@ -590,7 +596,8 @@ fn printUsage() void {
         \\  --reverb VALUE      0..1, scaled inside the selected style
         \\  --volume VALUE      0..1, style master volume
         \\  --cue NAME          guitar: open-road, low-drone, rolling-travis, high-lonesome
-        \\                      taiko: matsuri, yatai-bayashi, miyake, oroshi
+        \\                      taiko: matsuri, yatai-bayashi, miyake, oroshi,
+        \\                             hachijo, bon-odori, furi-uchi
         \\  --instrument NAME   guitar, electric (americana-guitar only)
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
