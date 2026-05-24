@@ -51,9 +51,12 @@ const Sprite = entity.Sprite;
 
 //Level editor
 //TODO: make level editor not generate the level everytime we make changes
-//TODO: allow for slecting if entity is breakable or not
+//TODO: add visible grid that can be turned on and off
+//TODO: add option to snap to the grid
+//TODO: add option to turn the colliders on so that objects can not be placed on top of each other
+//TODO: allow for selecting if entity is breakable or not
 //TODO: allow for setting the scale of entity
-//TODO: allow for copying existing entities j
+//TODO: allow for copying existing entities
 
 //Small improvements
 //TODO: make settings.zig use data.zig to read the json
