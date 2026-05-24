@@ -35,6 +35,7 @@ pub const Item = struct {
     label: [:0]const u8,
     kind: ItemKind,
     font: text.Font = .large,
+    disabled: bool = false,
     image: ?u64 = null,
     preview_color: ?*const fn () sdl.Color = null,
     cycle_names: ?[]const [:0]const u8 = null,
@@ -549,6 +550,8 @@ fn cycleItem(item: *Item, direction: i2) void {
 }
 
 fn activate(idx: usize) !void {
+    if (active_items[idx].disabled) return;
+
     switch (active_items[idx].kind) {
         .button => |action| {
             if (current_minimal_edit and active_items[idx].cycle_names != null) {
@@ -588,6 +591,8 @@ const COLOR_FOCUSED = config.menu.colorFocused;
 const COLOR_EDITING = config.menu.colorEditing;
 const COLOR_OVERLAY = config.menu.colorOverlay;
 const COLOR_SIDE = config.menu.colorSide;
+const COLOR_DISABLED = sdl.Color{ .r = 55, .g = 55, .b = 55, .a = 190 };
+const TEXT_ALPHA_DISABLED: u8 = 120;
 const SWATCH_MIN_SIZE: i32 = 18;
 const SWATCH_PAD: i32 = 8;
 const SWATCH_BORDER: i32 = 2;
@@ -638,7 +643,9 @@ fn drawVertical() !void {
 
         const in_window = i >= scroll_offset and i < scroll_offset + VISIBLE;
         const is_editing = if (editing_index) |ei| ei == i else false;
-        const color = if (is_editing)
+        const color = if (item.disabled)
+            COLOR_DISABLED
+        else if (is_editing)
             COLOR_EDITING
         else if (i == focused_index)
             COLOR_FOCUSED
@@ -678,10 +685,17 @@ fn drawVertical() !void {
                 .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
             };
             preview_label = label;
-            try text.writeCenter(item.font, label, .{
-                .x = btn_x + @divFloor(btn_w, 2),
-                .y = y + @divFloor(BTN_H, 2),
-            });
+            if (item.disabled) {
+                try text.writeCenterWithAlpha(item.font, label, .{
+                    .x = btn_x + @divFloor(btn_w, 2),
+                    .y = y + @divFloor(BTN_H, 2),
+                }, TEXT_ALPHA_DISABLED);
+            } else {
+                try text.writeCenter(item.font, label, .{
+                    .x = btn_x + @divFloor(btn_w, 2),
+                    .y = y + @divFloor(BTN_H, 2),
+                });
+            }
         }
 
         try drawInlineColorPreview(item, preview_label, btn_x, y, btn_w, BTN_H);
@@ -778,7 +792,9 @@ fn drawHorizontal() !void {
         if (x + btn_w < 0 or x > window.width) continue;
 
         const in_window = i >= scroll_offset and i < scroll_offset + VISIBLE;
-        const color = if (i == focused_index)
+        const color = if (item.disabled)
+            COLOR_DISABLED
+        else if (i == focused_index)
             COLOR_FOCUSED
         else if (in_window)
             COLOR_NORMAL

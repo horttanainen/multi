@@ -151,7 +151,23 @@ pub fn createNewLevel() !void {
     currentVersion = 0;
 
     const emptyLevel =
-        \\{"size":{"x":1920,"y":960},"levelHeightMeters":12,"parallaxEntities":[],"entities":[]}
+        \\{
+        \\  "size": {
+        \\    "x": 1707,
+        \\    "y": 960
+        \\  },
+        \\  "levelHeightMeters": 12,
+        \\  "aspectRatio": {
+        \\    "width": 16,
+        \\    "height": 9
+        \\  },
+        \\  "gravity": 10,
+        \\  "pixelsPerMeter": 80,
+        \\  "splitscreen": false,
+        \\  "fixedCamera": true,
+        \\  "parallaxEntities": [],
+        \\  "entities": []
+        \\}
     ;
 
     var editingD = try std.fs.cwd().openDir(editDirPath, .{});
@@ -361,9 +377,21 @@ fn findTemporaryFolders() ![][]const u8 {
     return folderList.toOwnedSlice();
 }
 
-pub const Config = struct { gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixedCamera: bool };
+pub const Config = struct {
+    gravity: f32,
+    levelHeightMeters: f32,
+    aspectRatio: level.AspectRatio,
+    splitscreen: bool,
+    fixedCamera: bool,
+};
 
-const default_config = Config{ .gravity = 10.0, .levelHeightMeters = 12.0, .splitscreen = true, .fixedCamera = false };
+const default_config = Config{
+    .gravity = 10.0,
+    .levelHeightMeters = level.defaultLevelHeightMeters,
+    .aspectRatio = level.defaultAspectRatio,
+    .splitscreen = false,
+    .fixedCamera = true,
+};
 
 pub fn getConfig() Config {
     const f = &(maybeCurrentlyOpenLevelFile orelse return default_config);
@@ -384,12 +412,13 @@ pub fn getConfig() Config {
     return Config{
         .gravity = parsed.value.gravity,
         .levelHeightMeters = parsed.value.levelHeightMeters,
+        .aspectRatio = parsed.value.aspectRatio,
         .splitscreen = parsed.value.splitscreen,
         .fixedCamera = parsed.value.fixedCamera,
     };
 }
 
-pub fn saveConfig(gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixedCamera: bool) !void {
+pub fn saveConfig(gravity: f32, levelHeightMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -400,9 +429,11 @@ pub fn saveConfig(gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixed
 
         serializableLevel.gravity = gravity;
         serializableLevel.levelHeightMeters = levelHeightMeters;
-        serializableLevel.size.y = @intFromFloat(@round(levelHeightMeters * @as(f32, @floatFromInt(serializableLevel.pixelsPerMeter))));
-        serializableLevel.splitscreen = splitscreen;
+        serializableLevel.aspectRatio = aspectRatio;
+        serializableLevel.pixelsPerMeter = level.defaultPixelsPerMeter;
+        serializableLevel.size = level.sizeFromHeightAndAspect(levelHeightMeters, aspectRatio, level.defaultPixelsPerMeter);
         serializableLevel.fixedCamera = fixedCamera;
+        serializableLevel.splitscreen = splitscreen and !fixedCamera;
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);

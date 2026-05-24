@@ -219,6 +219,7 @@ pub fn main() !void {
 
 fn levelEditorLoop() void {
     cursor.updateState();
+    renderer.updateZoom();
     cursor.cameraFollow();
 }
 

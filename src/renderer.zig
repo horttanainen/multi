@@ -48,6 +48,9 @@ pub fn render() !void {
     if (!menu.isOpen() and !state.editingBackground) {
         if (state.editingLevel) {
             try renderCamera(0);
+            // renderCamera draws UI last, and UI rendering resets zoom to 1.0.
+            // Editor overlays are world-space, so restore camera zoom before drawing them.
+            gpu.setZoom(zoom);
             try drawLevelBorder();
             try cursor.draw();
         } else {

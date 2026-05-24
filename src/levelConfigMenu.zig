@@ -27,8 +27,8 @@ pub fn open(gravity: f32, levelHeightMeters: f32, aspectRatio: level.AspectRatio
     gravity_config.value = gravity;
     level_height_meters_config.value = levelHeightMeters;
     aspect_ratio_value = aspectRatio;
-    splitscreen_value = splitscreen;
     fixed_camera_value = fixedCamera;
+    splitscreen_value = splitscreen and !fixed_camera_value;
     updateAspectRatioLabel();
     updateSplitscreenLabel();
     updateFixedCameraLabel();
@@ -40,7 +40,11 @@ fn updateAspectRatioLabel() void {
 }
 
 fn updateSplitscreenLabel() void {
+    if (fixed_camera_value) {
+        splitscreen_value = false;
+    }
     items[3].label = if (splitscreen_value) "Splitscreen: ON" else "Splitscreen: OFF";
+    items[3].disabled = fixed_camera_value;
 }
 
 fn updateFixedCameraLabel() void {
@@ -65,12 +69,18 @@ fn actionOpenAspectRatio() anyerror!void {
 }
 
 fn actionToggleSplitscreen() anyerror!void {
+    if (fixed_camera_value) return;
+
     splitscreen_value = !splitscreen_value;
     updateSplitscreenLabel();
 }
 
 fn actionToggleFixedCamera() anyerror!void {
     fixed_camera_value = !fixed_camera_value;
+    if (fixed_camera_value) {
+        splitscreen_value = false;
+    }
+    updateSplitscreenLabel();
     updateFixedCameraLabel();
 }
 

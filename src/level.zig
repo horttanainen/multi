@@ -53,16 +53,54 @@ const LevelError = error{
 pub const Level = struct {
     size: vec.IVec2,
     levelHeightMeters: f32,
+    aspectRatio: AspectRatio,
     gravity: f32 = 10.0,
-    pixelsPerMeter: i32 = 80,
-    splitscreen: bool = true,
-    fixedCamera: bool = false,
+    pixelsPerMeter: i32 = defaultPixelsPerMeter,
+    splitscreen: bool = false,
+    fixedCamera: bool = true,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
 
-pub var splitscreen: bool = true;
-pub var fixedCamera: bool = false;
+pub const AspectRatio = struct {
+    width: i32,
+    height: i32,
+};
+
+pub const defaultPixelsPerMeter: i32 = 80;
+pub const defaultLevelHeightMeters: f32 = 12.0;
+pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
+
+pub var splitscreen: bool = false;
+pub var fixedCamera: bool = true;
+
+pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio, pixelsPerMeter: i32) vec.IVec2 {
+    var safeHeightMeters = levelHeightMeters;
+    if (safeHeightMeters <= 0) {
+        std.log.warn("sizeFromHeightAndAspect: invalid level height {d}, using default", .{safeHeightMeters});
+        safeHeightMeters = defaultLevelHeightMeters;
+    }
+
+    var safeAspectRatio = aspectRatio;
+    if (safeAspectRatio.width <= 0 or safeAspectRatio.height <= 0) {
+        std.log.warn("sizeFromHeightAndAspect: invalid aspect ratio {d}:{d}, using default", .{ safeAspectRatio.width, safeAspectRatio.height });
+        safeAspectRatio = defaultAspectRatio;
+    }
+
+    var safePixelsPerMeter = pixelsPerMeter;
+    if (safePixelsPerMeter <= 0) {
+        std.log.warn("sizeFromHeightAndAspect: invalid pixels per meter {d}, using default", .{safePixelsPerMeter});
+        safePixelsPerMeter = defaultPixelsPerMeter;
+    }
+
+    const heightPixelsF = safeHeightMeters * @as(f32, @floatFromInt(safePixelsPerMeter));
+    const ratio = @as(f32, @floatFromInt(safeAspectRatio.width)) / @as(f32, @floatFromInt(safeAspectRatio.height));
+
+    return .{
+        .x = @intFromFloat(@round(heightPixelsF * ratio)),
+        .y = @intFromFloat(@round(heightPixelsF)),
+    };
+}
 
 pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
     const parsed = try std.json.parseFromSlice(Level, allocator, data, .{ .allocate = .alloc_always });
@@ -158,9 +196,12 @@ fn loadLevelContents(lev: Level) !bool {
         }
     }
 
-    size = lev.size;
-    splitscreen = lev.splitscreen;
     fixedCamera = lev.fixedCamera;
+    if (fixedCamera and lev.splitscreen) {
+        std.log.warn("loadLevelContents: fixed camera level has splitscreen enabled, disabling splitscreen", .{});
+    }
+    size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
+    splitscreen = lev.splitscreen and !fixedCamera;
     return hasSpawn;
 }
 
@@ -197,7 +238,7 @@ pub fn loadLevel(path: []const u8) !bool {
     const lev = parsed.value;
 
     box2d.setGravity(lev.gravity);
-    conv.met2pix = @floatFromInt(lev.pixelsPerMeter);
+    conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
     spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
     const hasSpawn = try loadLevelContents(lev);
     return hasSpawn;
