@@ -91,8 +91,6 @@ fn actionSaveChanges() anyerror!void {
 
 fn actionTryLevel() anyerror!void {
     try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
-    var pathBuf: [200]u8 = undefined;
-    const path = try levelEditor.getEditorLevelPath(&pathBuf);
-    try level.tryEditorLevel(path);
+    try levelEditor.tryCurrentLevel();
     menu.close();
 }

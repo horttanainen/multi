@@ -19,6 +19,7 @@ var editDirPathBuf: [100]u8 = undefined;
 var editDirPath: []const u8 = undefined;
 var maybeCurrentlyOpenLevelFile: ?std.fs.File = null;
 var currentVersion: u32 = 0;
+var tryingLevel: bool = false;
 
 pub fn copySelection() void {
     maybeCopiedBodyId = maybeSelectedBodyId;
@@ -126,6 +127,30 @@ pub fn getEditorLevelPath(buf: []u8) ![]const u8 {
     return std.fmt.bufPrint(buf, "{s}/{d}.json", .{ editDirPath, currentVersion });
 }
 
+pub fn hasOpenLevel() bool {
+    return maybeCurrentlyOpenLevelFile != null;
+}
+
+pub fn isTryingLevel() bool {
+    return tryingLevel;
+}
+
+pub fn stopTryingLevel() void {
+    tryingLevel = false;
+}
+
+pub fn tryCurrentLevel() !void {
+    if (maybeCurrentlyOpenLevelFile == null) {
+        std.log.warn("tryCurrentLevel: no level file open, skipping", .{});
+        return;
+    }
+
+    var pathBuf: [200]u8 = undefined;
+    const path = try getEditorLevelPath(&pathBuf);
+    try level.tryEditorLevel(path);
+    tryingLevel = true;
+}
+
 pub fn reloadForEditor() !void {
     var pathBuf: [200]u8 = undefined;
     const path = try getEditorLevelPath(&pathBuf);
@@ -134,6 +159,8 @@ pub fn reloadForEditor() !void {
 }
 
 pub fn createNewLevel() !void {
+    tryingLevel = false;
+
     // Create the drafts directory if it doesn't exist
     std.fs.cwd().makeDir("drafts") catch |err| switch (err) {
         error.PathAlreadyExists => {},
@@ -186,6 +213,7 @@ pub fn createNewLevel() !void {
 }
 
 pub fn enter() !void {
+    tryingLevel = false;
     state.editingLevel = true;
 
     if (maybeCurrentlyOpenLevelFile == null) {
