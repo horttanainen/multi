@@ -52,6 +52,7 @@ const LevelError = error{
 
 pub const Level = struct {
     size: vec.IVec2,
+    levelHeightMeters: f32,
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = 80,
     splitscreen: bool = true,

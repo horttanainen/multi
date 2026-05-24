@@ -3,6 +3,7 @@
         "x": 4096,
         "y": 4096
     },
+    "levelHeightMeters": 51.2,
     "splitscreen": true,
     "fixedCamera": false,
     "parallaxEntities": [

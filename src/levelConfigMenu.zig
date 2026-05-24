@@ -6,20 +6,20 @@ var splitscreen_value: bool = true;
 var fixed_camera_value: bool = false;
 
 var gravity_config = menu.ConfigData{ .value = 10.0, .step = 0.5, .min = 0.0, .max = 200.0 };
-var pixels_per_meter_config = menu.ConfigData{ .value = 80.0, .step = 1.0, .min = 10.0, .max = 500.0 };
+var level_height_meters_config = menu.ConfigData{ .value = 12.0, .step = 0.5, .min = 1.0, .max = 200.0 };
 
 var items = [_]menu.Item{
     .{ .label = "Gravity", .kind = .{ .config = &gravity_config }, .font = .medium },
-    .{ .label = "Pixels Per Meter", .kind = .{ .config = &pixels_per_meter_config }, .font = .medium },
+    .{ .label = "Level Height (m)", .kind = .{ .config = &level_height_meters_config }, .font = .medium },
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
     .{ .label = "Fixed Camera: OFF", .kind = .{ .button = actionToggleFixedCamera } },
     .{ .label = "Save Changes", .kind = .{ .button = actionSaveChanges } },
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
 };
 
-pub fn open(gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCamera: bool) void {
+pub fn open(gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixedCamera: bool) void {
     gravity_config.value = gravity;
-    pixels_per_meter_config.value = @floatFromInt(pixelsPerMeter);
+    level_height_meters_config.value = levelHeightMeters;
     splitscreen_value = splitscreen;
     fixed_camera_value = fixedCamera;
     updateSplitscreenLabel();
@@ -39,8 +39,8 @@ fn getGravity() f32 {
     return gravity_config.value;
 }
 
-fn getPixelsPerMeter() i32 {
-    return @intFromFloat(pixels_per_meter_config.value);
+fn getLevelHeightMeters() f32 {
+    return level_height_meters_config.value;
 }
 
 fn actionToggleSplitscreen() anyerror!void {
@@ -54,12 +54,12 @@ fn actionToggleFixedCamera() anyerror!void {
 }
 
 fn actionSaveChanges() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getPixelsPerMeter(), splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), splitscreen_value, fixed_camera_value);
     try levelEditor.reloadForEditor();
 }
 
 fn actionTryLevel() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getPixelsPerMeter(), splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), splitscreen_value, fixed_camera_value);
     var pathBuf: [200]u8 = undefined;
     const path = try levelEditor.getEditorLevelPath(&pathBuf);
     try level.tryEditorLevel(path);

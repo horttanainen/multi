@@ -151,7 +151,7 @@ pub fn createNewLevel() !void {
     currentVersion = 0;
 
     const emptyLevel =
-        \\{"size":{"x":1920,"y":1080},"parallaxEntities":[],"entities":[]}
+        \\{"size":{"x":1920,"y":960},"levelHeightMeters":12,"parallaxEntities":[],"entities":[]}
     ;
 
     var editingD = try std.fs.cwd().openDir(editDirPath, .{});
@@ -361,9 +361,9 @@ fn findTemporaryFolders() ![][]const u8 {
     return folderList.toOwnedSlice();
 }
 
-pub const Config = struct { gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCamera: bool };
+pub const Config = struct { gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixedCamera: bool };
 
-const default_config = Config{ .gravity = 10.0, .pixelsPerMeter = 80, .splitscreen = true, .fixedCamera = false };
+const default_config = Config{ .gravity = 10.0, .levelHeightMeters = 12.0, .splitscreen = true, .fixedCamera = false };
 
 pub fn getConfig() Config {
     const f = &(maybeCurrentlyOpenLevelFile orelse return default_config);
@@ -383,13 +383,13 @@ pub fn getConfig() Config {
     defer parsed.deinit();
     return Config{
         .gravity = parsed.value.gravity,
-        .pixelsPerMeter = parsed.value.pixelsPerMeter,
+        .levelHeightMeters = parsed.value.levelHeightMeters,
         .splitscreen = parsed.value.splitscreen,
         .fixedCamera = parsed.value.fixedCamera,
     };
 }
 
-pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCamera: bool) !void {
+pub fn saveConfig(gravity: f32, levelHeightMeters: f32, splitscreen: bool, fixedCamera: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -399,7 +399,8 @@ pub fn saveConfig(gravity: f32, pixelsPerMeter: i32, splitscreen: bool, fixedCam
         var serializableLevel = parsed.value;
 
         serializableLevel.gravity = gravity;
-        serializableLevel.pixelsPerMeter = pixelsPerMeter;
+        serializableLevel.levelHeightMeters = levelHeightMeters;
+        serializableLevel.size.y = @intFromFloat(@round(levelHeightMeters * @as(f32, @floatFromInt(serializableLevel.pixelsPerMeter))));
         serializableLevel.splitscreen = splitscreen;
         serializableLevel.fixedCamera = fixedCamera;
 
