@@ -49,31 +49,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//Coupling music into the background:
-// Yes, absolutely. The basic approach:
-// 1. Audio analysis on CPU each frame — tap into miniaudio's playback output (e.g., via a custom ma_node in the node graph, or a loopback capture device) to get PCM samples. Compute a few features:
-//   - RMS volume (overall energy)
-//   - Band-split energy (bass / mid / treble) via simple bandpass filters or a small FFT
-//   - Beat detection (track energy spikes in the bass band)
-// 2. Pass as uniforms — add a few floats to PaintUniforms like audio_bass/audio_mid/audio_treble and push them each frame alongside the existing uniforms.
-// 3. Use in shader — modulate existing params: pulse spin_speed or contrast with bass energy, shift colors with treble, spike spin_amount on beats, etc.
-
-// Considerations:
-// - miniaudio doesn't include FFT, so you'd either implement a small radix-2 FFT (~50 lines), use a tiny lib, or just do simple RMS with biquad bandpass filters (miniaudio has ma_biquad) which is simpler and
-// sufficient for bass/mid/treble splits
-// - Latency: the data callback runs on a separate thread, so you'd write the analysis results to a shared atomic/volatile variable that the main thread reads each frame
-// - Smoothing: you'd want to lerp/decay the values so they don't flicker — something like value = max(new_sample, value * 0.92)
-
-// It's very doable with what you already have in the project.
-
-//Background ideas
-//TODO: remove flaky index approac
-//TODO: make it possible to tweak crt effect (own menu)
-//TODO: make it possible to turn crt effect off in the settings.
-//TODO: make it possible to randomize only the algorithms
-//TODO: make it possible to randomize everything except the selected algorithm
-//TODO: ask if values in each category are so that they have an effect on each of the algorithms in that section
-
 //Level editor
 //TODO: make level editor not generate the level everytime we make changes
 //TODO: allow for slecting if entity is breakable or not
@@ -82,7 +57,6 @@ const Sprite = entity.Sprite;
 
 //Small improvements
 //TODO: make settings.zig use data.zig to read the json
-//TODO: investigate if it would be simpler to migrate to sdl_audio
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
@@ -151,8 +125,8 @@ const Sprite = entity.Sprite;
 //TODO: shrapnel rocket launcher ammo
 
 //Music
-//TODO: There should be basic music fitting the deathmatch theme of the game
 //TODO: music can be turned off
+//TODO: should be able to play music from a specified location on fs.
 
 //Multiplayer:
 //TODO: add localhost multiplayer
@@ -162,8 +136,9 @@ const Sprite = entity.Sprite;
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
 
-//Bugs:
-//TODO: Level json creation broke during 0.15 update
+//Background ideas
+//TODO: make it possible to tweak crt effect (own menu)
+//TODO: make it possible to turn crt effect off in the settings.
 
 fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     std.log.info("Ran successfully for 5 seconds", .{});
