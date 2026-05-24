@@ -184,6 +184,7 @@ pub fn createNewLevel() !void {
         \\    "y": 960
         \\  },
         \\  "levelHeightMeters": 12,
+        \\  "cameraZoomMeters": 12,
         \\  "aspectRatio": {
         \\    "width": 16,
         \\    "height": 9
@@ -408,6 +409,7 @@ fn findTemporaryFolders() ![][]const u8 {
 pub const Config = struct {
     gravity: f32,
     levelHeightMeters: f32,
+    cameraZoomMeters: f32,
     aspectRatio: level.AspectRatio,
     splitscreen: bool,
     fixedCamera: bool,
@@ -416,6 +418,7 @@ pub const Config = struct {
 const default_config = Config{
     .gravity = 10.0,
     .levelHeightMeters = level.defaultLevelHeightMeters,
+    .cameraZoomMeters = level.defaultCameraZoomMeters,
     .aspectRatio = level.defaultAspectRatio,
     .splitscreen = false,
     .fixedCamera = true,
@@ -440,13 +443,14 @@ pub fn getConfig() Config {
     return Config{
         .gravity = parsed.value.gravity,
         .levelHeightMeters = parsed.value.levelHeightMeters,
+        .cameraZoomMeters = level.sanitizeCameraZoomMeters(parsed.value.cameraZoomMeters),
         .aspectRatio = parsed.value.aspectRatio,
         .splitscreen = parsed.value.splitscreen,
         .fixedCamera = parsed.value.fixedCamera,
     };
 }
 
-pub fn saveConfig(gravity: f32, levelHeightMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) !void {
+pub fn saveConfig(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -457,6 +461,7 @@ pub fn saveConfig(gravity: f32, levelHeightMeters: f32, aspectRatio: level.Aspec
 
         serializableLevel.gravity = gravity;
         serializableLevel.levelHeightMeters = levelHeightMeters;
+        serializableLevel.cameraZoomMeters = level.sanitizeCameraZoomMeters(cameraZoomMeters);
         serializableLevel.aspectRatio = aspectRatio;
         serializableLevel.pixelsPerMeter = level.defaultPixelsPerMeter;
         serializableLevel.size = level.sizeFromHeightAndAspect(levelHeightMeters, aspectRatio, level.defaultPixelsPerMeter);

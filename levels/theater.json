@@ -4,6 +4,7 @@
         "y": 4096
     },
     "levelHeightMeters": 51.2,
+    "cameraZoomMeters": 15,
     "aspectRatio": {
         "width": 1,
         "height": 1

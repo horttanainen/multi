@@ -12,10 +12,16 @@ var aspect_ratio_label_buf: [64]u8 = undefined;
 
 var gravity_config = menu.ConfigData{ .value = 10.0, .step = 0.5, .min = 0.0, .max = 200.0 };
 var level_height_meters_config = menu.ConfigData{ .value = 12.0, .step = 0.5, .min = 1.0, .max = 200.0 };
+var camera_zoom_meters_config = menu.ConfigData{ .value = level.defaultCameraZoomMeters, .step = 0.5, .min = 1.0, .max = 200.0 };
+
+const aspect_ratio_item_index = 3;
+const splitscreen_item_index = 4;
+const fixed_camera_item_index = 5;
 
 var items = [_]menu.Item{
     .{ .label = "Gravity", .kind = .{ .config = &gravity_config }, .font = .medium },
     .{ .label = "Level Height (m)", .kind = .{ .config = &level_height_meters_config }, .font = .medium },
+    .{ .label = "Camera Zoom (m)", .kind = .{ .config = &camera_zoom_meters_config }, .font = .medium },
     .{ .label = "Aspect Ratio", .kind = .{ .button = actionOpenAspectRatio }, .font = .medium },
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
     .{ .label = "Fixed Camera: OFF", .kind = .{ .button = actionToggleFixedCamera } },
@@ -23,9 +29,10 @@ var items = [_]menu.Item{
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
 };
 
-pub fn open(gravity: f32, levelHeightMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) void {
+pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) void {
     gravity_config.value = gravity;
     level_height_meters_config.value = levelHeightMeters;
+    camera_zoom_meters_config.value = cameraZoomMeters;
     aspect_ratio_value = aspectRatio;
     fixed_camera_value = fixedCamera;
     splitscreen_value = splitscreen and !fixed_camera_value;
@@ -36,19 +43,19 @@ pub fn open(gravity: f32, levelHeightMeters: f32, aspectRatio: level.AspectRatio
 }
 
 fn updateAspectRatioLabel() void {
-    items[2].label = std.fmt.bufPrintZ(&aspect_ratio_label_buf, "Aspect Ratio: {d}:{d}", .{ aspect_ratio_value.width, aspect_ratio_value.height }) catch "Aspect Ratio";
+    items[aspect_ratio_item_index].label = std.fmt.bufPrintZ(&aspect_ratio_label_buf, "Aspect Ratio: {d}:{d}", .{ aspect_ratio_value.width, aspect_ratio_value.height }) catch "Aspect Ratio";
 }
 
 fn updateSplitscreenLabel() void {
     if (fixed_camera_value) {
         splitscreen_value = false;
     }
-    items[3].label = if (splitscreen_value) "Splitscreen: ON" else "Splitscreen: OFF";
-    items[3].disabled = fixed_camera_value;
+    items[splitscreen_item_index].label = if (splitscreen_value) "Splitscreen: ON" else "Splitscreen: OFF";
+    items[splitscreen_item_index].disabled = fixed_camera_value;
 }
 
 fn updateFixedCameraLabel() void {
-    items[4].label = if (fixed_camera_value) "Fixed Camera: ON" else "Fixed Camera: OFF";
+    items[fixed_camera_item_index].label = if (fixed_camera_value) "Fixed Camera: ON" else "Fixed Camera: OFF";
 }
 
 fn getGravity() f32 {
@@ -57,6 +64,10 @@ fn getGravity() f32 {
 
 fn getLevelHeightMeters() f32 {
     return level_height_meters_config.value;
+}
+
+fn getCameraZoomMeters() f32 {
+    return camera_zoom_meters_config.value;
 }
 
 fn setAspectRatio(aspectRatio: level.AspectRatio) void {
@@ -85,12 +96,12 @@ fn actionToggleFixedCamera() anyerror!void {
 }
 
 fn actionSaveChanges() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
     try levelEditor.reloadForEditor();
 }
 
 fn actionTryLevel() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
     try levelEditor.tryCurrentLevel();
     menu.close();
 }

@@ -53,6 +53,7 @@ const LevelError = error{
 pub const Level = struct {
     size: vec.IVec2,
     levelHeightMeters: f32,
+    cameraZoomMeters: f32 = defaultCameraZoomMeters,
     aspectRatio: AspectRatio,
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = defaultPixelsPerMeter,
@@ -69,10 +70,20 @@ pub const AspectRatio = struct {
 
 pub const defaultPixelsPerMeter: i32 = 80;
 pub const defaultLevelHeightMeters: f32 = 12.0;
+pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
 
 pub var splitscreen: bool = false;
 pub var fixedCamera: bool = true;
+pub var cameraZoomMeters: f32 = defaultCameraZoomMeters;
+
+pub fn sanitizeCameraZoomMeters(value: f32) f32 {
+    if (value <= 0) {
+        std.log.warn("sanitizeCameraZoomMeters: invalid camera zoom {d}, using default", .{value});
+        return defaultCameraZoomMeters;
+    }
+    return value;
+}
 
 pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio, pixelsPerMeter: i32) vec.IVec2 {
     var safeHeightMeters = levelHeightMeters;
@@ -197,6 +208,7 @@ fn loadLevelContents(lev: Level) !bool {
     }
 
     fixedCamera = lev.fixedCamera;
+    cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
     if (fixedCamera and lev.splitscreen) {
         std.log.warn("loadLevelContents: fixed camera level has splitscreen enabled, disabling splitscreen", .{});
     }
