@@ -54,6 +54,7 @@ const Sprite = entity.Sprite;
 //TODO: add visible grid that can be turned on and off
 //TODO: add option to snap to the grid
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
+//TODO: make it possible to stretch entities
 //TODO: allow for selecting if entity is breakable or not
 //TODO: allow for setting the scale of entity
 //TODO: allow for copying existing entities
@@ -221,7 +222,6 @@ pub fn main() !void {
 }
 
 fn levelEditorLoop() void {
-    cursor.updateState();
     renderer.updateZoom();
     cursor.cameraFollow();
 }

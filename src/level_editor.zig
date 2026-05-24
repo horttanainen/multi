@@ -295,7 +295,7 @@ pub fn selectEntityAtCursor() ?box2d.c.b2BodyId {
 fn cursorOverlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     const result: *?box2d.c.b2BodyId = @ptrCast(@alignCast(context.?));
     const bodyId = box2d.c.b2Shape_GetBody(shapeId);
-    if (entity.getEntity(bodyId) == null) return true; // skip cursor body
+    if (entity.getEntity(bodyId) == null) return true;
     result.* = bodyId;
     return false;
 }

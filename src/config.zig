@@ -12,7 +12,6 @@ pub const debugLog = false;
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
-
 pub const physics = .{
     .dt = 1.0 / 60.0,
     .subStepCount = 4,
@@ -106,7 +105,7 @@ pub const lut = .{
     .regenerate_builtin_luts_on_startup = false,
 };
 
-pub const levelEditorCameraMovementForce = 10;
+pub const levelEditorCursorMovePixels = 10;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;

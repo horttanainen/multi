@@ -1,16 +1,15 @@
-const box2d = @import("box2d.zig");
+const std = @import("std");
+
 const data = @import("data.zig");
 const sprite = @import("sprite.zig");
-const conv = @import("conversion.zig");
 const camera = @import("camera.zig");
 const vec = @import("vector.zig");
 const level = @import("level.zig");
 const config = @import("config.zig");
 const renderer = @import("renderer.zig");
 
-var bodyId: box2d.c.b2BodyId = undefined;
-var bodyCreated: bool = false;
-var prevState: ?box2d.State = null;
+var created: bool = false;
+var posPx: vec.IVec2 = vec.izero;
 var crosshairUuid: ?u64 = null;
 
 var pendingKey: ?[]const u8 = null;
@@ -19,40 +18,25 @@ var pendingImgPath: ?[]const u8 = null;
 var pendingScale: vec.Vec2 = .{ .x = 1, .y = 1 };
 
 pub fn create() !void {
-    if (bodyCreated) return;
-    const bodyDef = box2d.createDynamicBodyDef(.{ .x = 0, .y = 0 });
-    bodyId = try box2d.createBody(bodyDef);
-    box2d.c.b2Body_SetGravityScale(bodyId, 0);
-    box2d.c.b2Body_SetLinearDamping(bodyId, 2);
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.isSensor = true;
-    const polygon = box2d.c.b2MakeSquare(0.5);
-    _ = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &polygon);
-    bodyCreated = true;
+    if (created) return;
+    posPx = level.position;
+    created = true;
 }
 
-pub fn destroy() void {
-    if (bodyCreated) {
-        box2d.c.b2DestroyBody(bodyId);
-        bodyCreated = false;
-    }
+pub fn deinit() void {
+    created = false;
     if (crosshairUuid) |uuid| {
         sprite.cleanupLater(uuid);
         crosshairUuid = null;
     }
+    detachSprite();
 }
 
 // Called on initial level editor entry: refresh sprite and reset cursor to level center.
 pub fn initSprite() void {
     if (crosshairUuid) |old| sprite.cleanupLater(old);
     crosshairUuid = data.createSpriteFrom("crosshair");
-
-    if (bodyCreated) {
-        const centerM = conv.p2m(level.position);
-        const rot = box2d.c.b2MakeRot(0.0);
-        box2d.c.b2Body_SetTransform(bodyId, centerM, rot);
-        box2d.c.b2Body_SetLinearVelocity(bodyId, .{ .x = 0, .y = 0 });
-    }
+    posPx = level.position;
 }
 
 // Called after editor reloads: refreshes sprites without moving the cursor.
@@ -71,15 +55,13 @@ pub fn refreshSprite() void {
     }
 }
 
-pub fn updateState() void {
-    if (bodyCreated) prevState = box2d.getState(bodyId);
-}
-
 pub fn cameraFollow() void {
-    if (!bodyCreated) return;
-    const currentState = box2d.getState(bodyId);
-    const state = box2d.getInterpolatedState(prevState, currentState);
-    camera.centerOn(conv.m2Pixel(state.pos), renderer.zoom);
+    if (!created) return;
+    if (level.fixedCamera) {
+        camera.centerOn(level.position, renderer.zoom);
+        return;
+    }
+    camera.centerOn(posPx, renderer.zoom);
 }
 
 pub fn attachSprite(key: []const u8) void {
@@ -111,34 +93,49 @@ pub fn getPendingScale() vec.Vec2 {
 }
 
 pub fn getWorldPos() vec.IVec2 {
-    if (!bodyCreated) return .{ .x = 0, .y = 0 };
-    const currentState = box2d.getState(bodyId);
-    const state = box2d.getInterpolatedState(prevState, currentState);
-    return conv.m2Pixel(state.pos);
+    if (!created) {
+        std.log.warn("getWorldPos: cursor not created, returning origin", .{});
+        return vec.izero;
+    }
+    return posPx;
 }
 
 pub fn moveLeft() void {
-    applyForce(.{ .x = -config.levelEditorCameraMovementForce, .y = 0 });
+    moveByScreenPixels(.{ .x = -config.levelEditorCursorMovePixels, .y = 0 });
 }
 pub fn moveRight() void {
-    applyForce(.{ .x = config.levelEditorCameraMovementForce, .y = 0 });
+    moveByScreenPixels(.{ .x = config.levelEditorCursorMovePixels, .y = 0 });
 }
 pub fn moveUp() void {
-    applyForce(.{ .x = 0, .y = -config.levelEditorCameraMovementForce });
+    moveByScreenPixels(.{ .x = 0, .y = -config.levelEditorCursorMovePixels });
 }
 pub fn moveDown() void {
-    applyForce(.{ .x = 0, .y = config.levelEditorCameraMovementForce });
+    moveByScreenPixels(.{ .x = 0, .y = config.levelEditorCursorMovePixels });
 }
 
-fn applyForce(f: box2d.c.b2Vec2) void {
-    if (bodyCreated) box2d.c.b2Body_ApplyForceToCenter(bodyId, f, true);
+fn moveByScreenPixels(delta: vec.IVec2) void {
+    if (!created) return;
+    if (renderer.zoom <= 0) {
+        std.log.warn("moveByScreenPixels: invalid renderer zoom {d}, skipping cursor movement", .{renderer.zoom});
+        return;
+    }
+
+    var worldDelta = vec.IVec2{
+        .x = @intFromFloat(@round(@as(f32, @floatFromInt(delta.x)) / renderer.zoom)),
+        .y = @intFromFloat(@round(@as(f32, @floatFromInt(delta.y)) / renderer.zoom)),
+    };
+    if (delta.x != 0 and worldDelta.x == 0) {
+        worldDelta.x = if (delta.x > 0) 1 else -1;
+    }
+    if (delta.y != 0 and worldDelta.y == 0) {
+        worldDelta.y = if (delta.y > 0) 1 else -1;
+    }
+    posPx = vec.iadd(posPx, worldDelta);
 }
 
 pub fn draw() !void {
-    if (!bodyCreated) return;
-    const currentState = box2d.getState(bodyId);
-    const state = box2d.getInterpolatedState(prevState, currentState);
-    const screenPos = camera.relativePosition(conv.m2Pixel(state.pos));
+    if (!created) return;
+    const screenPos = camera.relativePosition(posPx);
 
     if (pendingUuid) |uuid| {
         const s = sprite.getSprite(uuid) orelse return;
