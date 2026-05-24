@@ -6,7 +6,6 @@ const menu = @import("menu.zig");
 const aspectRatioMenu = @import("aspectRatioMenu.zig");
 
 var splitscreen_value: bool = true;
-var fixed_camera_value: bool = false;
 var aspect_ratio_value: level.AspectRatio = level.defaultAspectRatio;
 var aspect_ratio_label_buf: [64]u8 = undefined;
 
@@ -16,7 +15,6 @@ var camera_zoom_meters_config = menu.ConfigData{ .value = level.defaultCameraZoo
 
 const aspect_ratio_item_index = 3;
 const splitscreen_item_index = 4;
-const fixed_camera_item_index = 5;
 
 var items = [_]menu.Item{
     .{ .label = "Gravity", .kind = .{ .config = &gravity_config }, .font = .medium },
@@ -24,21 +22,18 @@ var items = [_]menu.Item{
     .{ .label = "Camera Zoom (m)", .kind = .{ .config = &camera_zoom_meters_config }, .font = .medium },
     .{ .label = "Aspect Ratio", .kind = .{ .button = actionOpenAspectRatio }, .font = .medium },
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
-    .{ .label = "Fixed Camera: OFF", .kind = .{ .button = actionToggleFixedCamera } },
     .{ .label = "Save Changes", .kind = .{ .button = actionSaveChanges } },
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
 };
 
-pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) void {
+pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool) void {
     gravity_config.value = gravity;
     level_height_meters_config.value = levelHeightMeters;
     camera_zoom_meters_config.value = cameraZoomMeters;
     aspect_ratio_value = aspectRatio;
-    fixed_camera_value = fixedCamera;
-    splitscreen_value = splitscreen and !fixed_camera_value;
+    splitscreen_value = splitscreen;
     updateAspectRatioLabel();
     updateSplitscreenLabel();
-    updateFixedCameraLabel();
     menu.open(&items, .{});
 }
 
@@ -47,15 +42,8 @@ fn updateAspectRatioLabel() void {
 }
 
 fn updateSplitscreenLabel() void {
-    if (fixed_camera_value) {
-        splitscreen_value = false;
-    }
     items[splitscreen_item_index].label = if (splitscreen_value) "Splitscreen: ON" else "Splitscreen: OFF";
-    items[splitscreen_item_index].disabled = fixed_camera_value;
-}
-
-fn updateFixedCameraLabel() void {
-    items[fixed_camera_item_index].label = if (fixed_camera_value) "Fixed Camera: ON" else "Fixed Camera: OFF";
+    items[splitscreen_item_index].disabled = false;
 }
 
 fn getGravity() f32 {
@@ -80,28 +68,17 @@ fn actionOpenAspectRatio() anyerror!void {
 }
 
 fn actionToggleSplitscreen() anyerror!void {
-    if (fixed_camera_value) return;
-
     splitscreen_value = !splitscreen_value;
     updateSplitscreenLabel();
 }
 
-fn actionToggleFixedCamera() anyerror!void {
-    fixed_camera_value = !fixed_camera_value;
-    if (fixed_camera_value) {
-        splitscreen_value = false;
-    }
-    updateSplitscreenLabel();
-    updateFixedCameraLabel();
-}
-
 fn actionSaveChanges() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value);
     try levelEditor.reloadForEditor();
 }
 
 fn actionTryLevel() anyerror!void {
-    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value, fixed_camera_value);
+    try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value);
     try levelEditor.tryCurrentLevel();
     menu.close();
 }

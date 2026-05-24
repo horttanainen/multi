@@ -178,7 +178,7 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         .open_config_menu => {
             if (!delay.check("menuToggle")) {
                 const cfg = levelEditor.getConfig();
-                levelConfigMenu.open(cfg.gravity, cfg.levelHeightMeters, cfg.cameraZoomMeters, cfg.aspectRatio, cfg.splitscreen, cfg.fixedCamera);
+                levelConfigMenu.open(cfg.gravity, cfg.levelHeightMeters, cfg.cameraZoomMeters, cfg.aspectRatio, cfg.splitscreen);
                 delay.action("menuToggle", 300);
             }
         },

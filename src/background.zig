@@ -5,7 +5,6 @@ const allocator = @import("allocator.zig").allocator;
 const camera = @import("camera.zig");
 const level = @import("level.zig");
 
-
 pub const SerializableParallaxEntity = struct {
     parallaxDistance: f32,
     fog: f32,
@@ -28,7 +27,7 @@ pub fn draw() !void {
     for (parallaxEntities.items) |parallaxEntity| {
         const parallaxSprite = sprite.getSprite(parallaxEntity.spriteUuid) orelse continue;
 
-        const relativePos = if (level.fixedCamera)
+        const relativePos = if (!level.splitscreen)
             camera.relativePosition(parallaxEntity.pos)
         else
             camera.parallaxAdjustedRelativePosition(
@@ -74,4 +73,3 @@ pub fn cleanup() void {
     parallaxEntities.deinit();
     parallaxEntities = std.array_list.Managed(ParallaxEntity).init(allocator);
 }
-

@@ -12,7 +12,6 @@
     "gravity": 10,
     "pixelsPerMeter": 80,
     "splitscreen": true,
-    "fixedCamera": false,
     "parallaxEntities": [
         {
             "parallaxDistance": 2,

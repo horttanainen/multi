@@ -27,7 +27,7 @@ const RendererError = error{RendererUninitialized};
 pub var zoom: f32 = 1.0;
 
 pub fn updateZoom() void {
-    if (!level.fixedCamera) {
+    if (level.splitscreen) {
         const cameraHeightPixels = level.cameraZoomMeters * @as(f32, @floatFromInt(level.defaultPixelsPerMeter));
         zoom = @as(f32, @floatFromInt(window.height)) / cameraHeightPixels;
         return;

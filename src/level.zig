@@ -58,7 +58,6 @@ pub const Level = struct {
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = defaultPixelsPerMeter,
     splitscreen: bool = false,
-    fixedCamera: bool = true,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
@@ -74,7 +73,6 @@ pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
 
 pub var splitscreen: bool = false;
-pub var fixedCamera: bool = true;
 pub var cameraZoomMeters: f32 = defaultCameraZoomMeters;
 
 pub fn sanitizeCameraZoomMeters(value: f32) f32 {
@@ -207,13 +205,9 @@ fn loadLevelContents(lev: Level) !bool {
         }
     }
 
-    fixedCamera = lev.fixedCamera;
     cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
-    if (fixedCamera and lev.splitscreen) {
-        std.log.warn("loadLevelContents: fixed camera level has splitscreen enabled, disabling splitscreen", .{});
-    }
+    splitscreen = lev.splitscreen;
     size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
-    splitscreen = lev.splitscreen and !fixedCamera;
     return hasSpawn;
 }
 

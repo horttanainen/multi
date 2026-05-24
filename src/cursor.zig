@@ -57,7 +57,7 @@ pub fn refreshSprite() void {
 
 pub fn cameraFollow() void {
     if (!created) return;
-    if (level.fixedCamera) {
+    if (!level.splitscreen) {
         camera.centerOn(level.position, renderer.zoom);
         return;
     }

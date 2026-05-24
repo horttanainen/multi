@@ -86,7 +86,7 @@ pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
 }
 
 pub fn followAllPlayers(zoom: f32) void {
-    if (level.fixedCamera) {
+    if (!level.splitscreen) {
         followSharedCamera(zoom);
         return;
     }

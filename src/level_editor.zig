@@ -192,7 +192,6 @@ pub fn createNewLevel() !void {
         \\  "gravity": 10,
         \\  "pixelsPerMeter": 80,
         \\  "splitscreen": false,
-        \\  "fixedCamera": true,
         \\  "parallaxEntities": [],
         \\  "entities": []
         \\}
@@ -412,7 +411,6 @@ pub const Config = struct {
     cameraZoomMeters: f32,
     aspectRatio: level.AspectRatio,
     splitscreen: bool,
-    fixedCamera: bool,
 };
 
 const default_config = Config{
@@ -421,7 +419,6 @@ const default_config = Config{
     .cameraZoomMeters = level.defaultCameraZoomMeters,
     .aspectRatio = level.defaultAspectRatio,
     .splitscreen = false,
-    .fixedCamera = true,
 };
 
 pub fn getConfig() Config {
@@ -446,11 +443,10 @@ pub fn getConfig() Config {
         .cameraZoomMeters = level.sanitizeCameraZoomMeters(parsed.value.cameraZoomMeters),
         .aspectRatio = parsed.value.aspectRatio,
         .splitscreen = parsed.value.splitscreen,
-        .fixedCamera = parsed.value.fixedCamera,
     };
 }
 
-pub fn saveConfig(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool, fixedCamera: bool) !void {
+pub fn saveConfig(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool) !void {
     if (maybeCurrentlyOpenLevelFile) |*currentlyOpenLevelFile| {
         try currentlyOpenLevelFile.seekTo(0);
         const data = try currentlyOpenLevelFile.readToEndAlloc(allocator, config.maxLevelSizeInBytes);
@@ -465,8 +461,7 @@ pub fn saveConfig(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, a
         serializableLevel.aspectRatio = aspectRatio;
         serializableLevel.pixelsPerMeter = level.defaultPixelsPerMeter;
         serializableLevel.size = level.sizeFromHeightAndAspect(levelHeightMeters, aspectRatio, level.defaultPixelsPerMeter);
-        serializableLevel.fixedCamera = fixedCamera;
-        serializableLevel.splitscreen = splitscreen and !fixedCamera;
+        serializableLevel.splitscreen = splitscreen;
 
         try currentlyOpenLevelFile.setEndPos(0);
         try currentlyOpenLevelFile.seekTo(0);
