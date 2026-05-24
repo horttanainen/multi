@@ -37,13 +37,23 @@ pub fn drawFps() !void {
     try text.writeCenter(.small, fpsText, .{ .x = vp.width - 60, .y = 12 });
 }
 
-pub fn drawPlayerHealth() !void {
+fn worldToScreenPosition(worldPos: vec.IVec2, cameraZoom: f32) vec.IVec2 {
+    const relativePos = camera.relativePosition(worldPos);
+    return .{
+        .x = @intFromFloat(@round(@as(f32, @floatFromInt(relativePos.x)) * cameraZoom)),
+        .y = @intFromFloat(@round(@as(f32, @floatFromInt(relativePos.y)) * cameraZoom)),
+    };
+}
+
+pub fn drawPlayerHealth(cameraZoom: f32) !void {
+    gpu.setZoom(1.0);
+
     for (player.players.values()) |*p| {
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             const currentState = box2d.getState(p.bodyId);
             const interpState = box2d.getInterpolatedState(ent.state, currentState);
-            const playerPos = camera.relativePosition(conv.m2Pixel(interpState.pos));
+            const playerPos = worldToScreenPosition(conv.m2Pixel(interpState.pos), cameraZoom);
 
             var buf: [32]u8 = undefined;
             const healthText = std.fmt.bufPrintZ(&buf, "{d}", .{@as(i32, @intFromFloat(p.health))}) catch return;
@@ -53,7 +63,9 @@ pub fn drawPlayerHealth() !void {
     }
 }
 
-pub fn drawPlayerLocationsOnViewportBorder() !void {
+pub fn drawPlayerLocationsOnViewportBorder(cameraZoom: f32) !void {
+    gpu.setZoom(1.0);
+
     const activeCamera = camera.getActiveCamera() orelse return;
     const vpPlayerId = activeCamera.playerId;
 
@@ -62,7 +74,7 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
     const vpEnt = entity.getEntity(vpPlayer.bodyId) orelse return;
     const vpCurrentState = box2d.getState(vpPlayer.bodyId);
     const vpState = box2d.getInterpolatedState(vpEnt.state, vpCurrentState);
-    const vpScreenPos = camera.relativePosition(conv.m2Pixel(vpState.pos));
+    const vpScreenPos = worldToScreenPosition(conv.m2Pixel(vpState.pos), cameraZoom);
     const ox: f32 = @floatFromInt(vpScreenPos.x);
     const oy: f32 = @floatFromInt(vpScreenPos.y);
 
@@ -79,7 +91,7 @@ pub fn drawPlayerLocationsOnViewportBorder() !void {
 
         const currentState = box2d.getState(p.bodyId);
         const interpState = box2d.getInterpolatedState(ent.state, currentState);
-        const enemyPos = camera.relativePosition(conv.m2Pixel(interpState.pos));
+        const enemyPos = worldToScreenPosition(conv.m2Pixel(interpState.pos), cameraZoom);
 
         const enemyController = controller.controllers.get(p.id) orelse continue;
         const enemyColor = enemyController.color;

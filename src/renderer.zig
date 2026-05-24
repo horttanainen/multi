@@ -90,8 +90,8 @@ fn renderCamera(cameraId: usize) !void {
 
     try ui.drawMode();
     try ui.drawFps();
-    try ui.drawPlayerHealth();
-    try ui.drawPlayerLocationsOnViewportBorder();
+    try ui.drawPlayerHealth(zoom);
+    try ui.drawPlayerLocationsOnViewportBorder(zoom);
     try ui.drawScoreboard();
 }
 
