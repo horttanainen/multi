@@ -4,6 +4,12 @@
         "y": 4096
     },
     "levelHeightMeters": 51.2,
+    "aspectRatio": {
+        "width": 1,
+        "height": 1
+    },
+    "gravity": 10,
+    "pixelsPerMeter": 80,
     "splitscreen": true,
     "fixedCamera": false,
     "parallaxEntities": [
