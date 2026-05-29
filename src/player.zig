@@ -242,6 +242,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .bodyId = bodyId,
         .spriteUuids = playerSpriteUuids,
         .shapeIds = try shapeIds.toOwnedSlice(),
+        .colliderChunks = try allocator.alloc(entity.ColliderChunk, 0),
         .state = null,
         .highlighted = false,
         .animated = false,

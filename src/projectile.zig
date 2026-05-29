@@ -142,11 +142,12 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
             if (ent.spriteUuids.len == 0) continue;
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse continue;
 
-            try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
+            const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
+            if (dirtyRect == null) continue;
 
             try sprite.updateTextureFromSurface(ent.spriteUuids[0]);
 
-            const stillExists = try entity.regenerateColliders(ent);
+            const stillExists = try entity.regenerateCollidersInPixelRect(ent, dirtyRect.?);
 
             if (!stillExists) {
                 entity.cleanupLater(ent.*);
@@ -174,7 +175,6 @@ fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
         }
     }
 }
-
 
 fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     if (explosion.sound) |snd| {
@@ -291,7 +291,6 @@ pub fn cleanupShrapnel() !void {
         }
     }
 }
-
 
 pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
     const explosionBodies = try createExplosion(pos, explosion);

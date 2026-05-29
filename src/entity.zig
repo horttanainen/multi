@@ -24,6 +24,13 @@ const animation = @import("animation.zig");
 const config = @import("config.zig");
 const collision = @import("collision.zig");
 
+pub const terrainColliderChunkSizeP: i32 = 256;
+
+pub const ColliderChunk = struct {
+    rect: vec.IRect,
+    shapeIds: []box2d.c.b2ShapeId,
+};
+
 pub const Entity = struct {
     type: []const u8,
     friction: f32,
@@ -32,6 +39,7 @@ pub const Entity = struct {
     spriteUuids: []u64,
     highlighted: bool,
     shapeIds: []box2d.c.b2ShapeId,
+    colliderChunks: []ColliderChunk,
     animated: bool,
     flipEntityHorizontally: bool,
     categoryBits: u64,
@@ -108,6 +116,8 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
     const shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 1);
     shapeIds[0] = shapeId;
 
+    const colliderChunks = try allocator.alloc(ColliderChunk, 0);
+
     var spriteUuids = try allocator.alloc(u64, 1);
     spriteUuids[0] = spriteUuid;
 
@@ -118,6 +128,7 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
         .shapeIds = shapeIds,
+        .colliderChunks = colliderChunks,
         .highlighted = false,
         .animated = false,
         .flipEntityHorizontally = false,
@@ -141,15 +152,110 @@ pub fn createFromImg(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box
     return entity;
 }
 
+fn isStaticTerrainType(eType: []const u8) bool {
+    return std.mem.eql(u8, eType, "static");
+}
+
+fn createShapeDefForEntity(entity: Entity) box2d.c.b2ShapeDef {
+    var shapeDef = box2d.c.b2DefaultShapeDef();
+    shapeDef.material.friction = entity.friction;
+    shapeDef.enableSensorEvents = true;
+    shapeDef.filter.categoryBits = entity.categoryBits;
+    shapeDef.filter.maskBits = entity.maskBits;
+    return shapeDef;
+}
+
+fn destroyShapeIds(shapeIds: []const box2d.c.b2ShapeId) void {
+    for (shapeIds) |shapeId| {
+        box2d.c.b2DestroyShape(shapeId, true);
+    }
+}
+
+fn freeColliderChunks(colliderChunks: []ColliderChunk) void {
+    for (colliderChunks) |colliderChunk| {
+        allocator.free(colliderChunk.shapeIds);
+    }
+    allocator.free(colliderChunks);
+}
+
+fn destroyAndFreeColliderChunks(colliderChunks: []ColliderChunk) void {
+    for (colliderChunks) |colliderChunk| {
+        destroyShapeIds(colliderChunk.shapeIds);
+        allocator.free(colliderChunk.shapeIds);
+    }
+    allocator.free(colliderChunks);
+}
+
+fn flattenColliderChunkShapeIds(colliderChunks: []const ColliderChunk) ![]box2d.c.b2ShapeId {
+    var shapeIds = std.array_list.Managed(box2d.c.b2ShapeId).init(allocator);
+    defer shapeIds.deinit();
+
+    for (colliderChunks) |colliderChunk| {
+        try shapeIds.appendSlice(colliderChunk.shapeIds);
+    }
+
+    return shapeIds.toOwnedSlice();
+}
+
+fn createColliderChunksForSprite(
+    bodyId: box2d.c.b2BodyId,
+    s: sprite.Sprite,
+    shapeDef: box2d.c.b2ShapeDef,
+) ![]ColliderChunk {
+    const triangleChunks = try polygon.triangulateChunksCached(s, terrainColliderChunkSizeP);
+    var colliderChunks = std.array_list.Managed(ColliderChunk).init(allocator);
+    errdefer {
+        for (colliderChunks.items) |colliderChunk| {
+            destroyShapeIds(colliderChunk.shapeIds);
+            allocator.free(colliderChunk.shapeIds);
+        }
+        colliderChunks.deinit();
+    }
+
+    for (triangleChunks) |triangleChunk| {
+        const shapeIds = try box2d.createPolygonShape(bodyId, triangleChunk.triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
+
+        if (shapeIds.len == 0) {
+            allocator.free(shapeIds);
+            continue;
+        }
+
+        colliderChunks.append(.{
+            .rect = triangleChunk.rect,
+            .shapeIds = shapeIds,
+        }) catch |err| {
+            destroyShapeIds(shapeIds);
+            allocator.free(shapeIds);
+            return err;
+        };
+    }
+
+    if (colliderChunks.items.len == 0) {
+        return polygon.PolygonError.CouldNotCreateTriangle;
+    }
+
+    return colliderChunks.toOwnedSlice();
+}
+
 pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try allocator.dupe(u8, eType);
     errdefer allocator.free(entityType);
 
     const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
 
-    const triangles = try polygon.triangulateCached(s);
+    const colliderChunks = if (isStaticTerrainType(eType))
+        try createColliderChunksForSprite(bodyId, s, shapeDef)
+    else
+        try allocator.alloc(ColliderChunk, 0);
+    errdefer freeColliderChunks(colliderChunks);
 
-    const shapeIds = try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
+    const shapeIds = if (colliderChunks.len > 0) blk: {
+        break :blk try flattenColliderChunkShapeIds(colliderChunks);
+    } else blk: {
+        const triangles = try polygon.triangulateCached(s);
+        break :blk try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
+    };
+    errdefer allocator.free(shapeIds);
 
     var spriteUuids = try allocator.alloc(u64, 1);
     spriteUuids[0] = spriteUuid;
@@ -161,6 +267,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
         .shapeIds = shapeIds,
+        .colliderChunks = colliderChunks,
         .highlighted = false,
         .animated = false,
         .flipEntityHorizontally = false,
@@ -219,6 +326,7 @@ pub fn cleanupEntities() void {
 pub fn cleanupOne(entity: Entity) void {
     box2d.c.b2DestroyBody(entity.bodyId);
     allocator.free(entity.shapeIds);
+    freeColliderChunks(entity.colliderChunks);
     allocator.free(entity.type);
 
     if (entity.animated) {
@@ -267,38 +375,127 @@ pub fn serialize(entity: Entity, pos: vec.IVec2, id: u64) ?SerializableEntity {
 }
 
 pub fn regenerateColliders(entity: *Entity) !bool {
-    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return false;
+    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse {
+        std.log.warn("regenerateColliders: sprite {d} not found", .{entity.spriteUuids[0]});
+        return false;
+    };
 
-    const triangles = polygon.triangulateCached(firstSprite) catch {
-        return false; // destroy entity
+    // Destroy old shapes
+    destroyShapeIds(entity.shapeIds);
+    allocator.free(entity.shapeIds);
+    freeColliderChunks(entity.colliderChunks);
+
+    // Create new shapes with same collision filter as original
+    const shapeDef = createShapeDefForEntity(entity.*);
+
+    if (isStaticTerrainType(entity.type)) {
+        const newColliderChunks = createColliderChunksForSprite(entity.bodyId, firstSprite, shapeDef) catch |err| {
+            std.log.warn("regenerateColliders: could not rebuild static collider chunks with {}", .{err});
+            entity.colliderChunks = try allocator.alloc(ColliderChunk, 0);
+            entity.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
+            return false;
+        };
+        errdefer destroyAndFreeColliderChunks(newColliderChunks);
+
+        const newShapeIds = try flattenColliderChunkShapeIds(newColliderChunks);
+        entity.colliderChunks = newColliderChunks;
+        entity.shapeIds = newShapeIds;
+        return entity.shapeIds.len > 0;
+    }
+
+    entity.colliderChunks = try allocator.alloc(ColliderChunk, 0);
+
+    const triangles = polygon.triangulateCached(firstSprite) catch |err| {
+        std.log.warn("regenerateColliders: could not triangulate sprite with {}", .{err});
+        entity.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
+        return false;
     };
 
     if (triangles.len == 0) {
-        return false; // destroy entity
+        std.log.warn("regenerateColliders: triangulation produced no triangles", .{});
+        entity.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
+        return false;
     }
-
-    // Destroy old shapes
-    for (entity.shapeIds) |shapeId| {
-        box2d.c.b2DestroyShape(shapeId, true);
-    }
-    allocator.free(entity.shapeIds);
-
-    // Create new shapes with same collision filter as original
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.material.friction = entity.friction;
-    shapeDef.filter.categoryBits = entity.categoryBits;
-    shapeDef.filter.maskBits = entity.maskBits;
 
     const newShapeIds = box2d.createPolygonShape(
         entity.bodyId,
         triangles,
         .{ .x = firstSprite.sizeP.x, .y = firstSprite.sizeP.y },
         shapeDef,
-    ) catch {
-        std.debug.print("Could not create box2d object from regenerated triangles\n", .{});
+    ) catch |err| {
+        std.log.warn("regenerateColliders: could not create regenerated Box2D shapes with {}", .{err});
+        entity.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
         return false;
     };
 
     entity.shapeIds = newShapeIds;
     return true;
+}
+
+pub fn regenerateCollidersInPixelRect(entity: *Entity, dirtyRect: vec.IRect) !bool {
+    if (entity.colliderChunks.len == 0) {
+        return regenerateColliders(entity);
+    }
+
+    const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse {
+        std.log.warn("regenerateCollidersInPixelRect: sprite {d} not found", .{entity.spriteUuids[0]});
+        return false;
+    };
+
+    const surface = firstSprite.surface.*;
+    const width: i32 = @intCast(surface.w);
+    const height: i32 = @intCast(surface.h);
+    const affectedRect = vec.irectExpandedClamped(dirtyRect, 1, width, height);
+    const shapeDef = createShapeDefForEntity(entity.*);
+
+    var regeneratedAny = false;
+    for (entity.colliderChunks) |*colliderChunk| {
+        if (!vec.irectIntersects(colliderChunk.rect, affectedRect)) continue;
+
+        try regenerateColliderChunk(entity.bodyId, firstSprite, shapeDef, colliderChunk);
+        regeneratedAny = true;
+    }
+
+    if (!regeneratedAny) {
+        return true;
+    }
+
+    const newShapeIds = flattenColliderChunkShapeIds(entity.colliderChunks) catch |err| {
+        allocator.free(entity.shapeIds);
+        entity.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
+        return err;
+    };
+    allocator.free(entity.shapeIds);
+    entity.shapeIds = newShapeIds;
+
+    return entity.shapeIds.len > 0;
+}
+
+fn regenerateColliderChunk(
+    bodyId: box2d.c.b2BodyId,
+    s: sprite.Sprite,
+    shapeDef: box2d.c.b2ShapeDef,
+    colliderChunk: *ColliderChunk,
+) !void {
+    destroyShapeIds(colliderChunk.shapeIds);
+    allocator.free(colliderChunk.shapeIds);
+    colliderChunk.shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 0);
+
+    const triangles = polygon.triangulateRegion(s, colliderChunk.rect) catch |err| {
+        if (err != polygon.PolygonError.CouldNotCreateTriangle) {
+            std.log.warn("regenerateColliderChunk: region ({d},{d})-({d},{d}) failed with {}", .{ colliderChunk.rect.minX, colliderChunk.rect.minY, colliderChunk.rect.maxX, colliderChunk.rect.maxY, err });
+        }
+        return;
+    };
+    defer allocator.free(triangles);
+
+    const shapeIds = try box2d.createPolygonShape(
+        bodyId,
+        triangles,
+        .{ .x = s.sizeP.x, .y = s.sizeP.y },
+        shapeDef,
+    );
+
+    allocator.free(colliderChunk.shapeIds);
+    colliderChunk.shapeIds = shapeIds;
 }

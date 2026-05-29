@@ -151,7 +151,7 @@ fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: u
             const hitBodyId = box2d.c.b2Shape_GetBody(result.shapeId);
             try projectile.damagePlayerDirect(hitBodyId, w.directDamage, playerId);
         }
-    } 
+    }
 
     try projectile.explodeAt(hitPoint, explosion, playerId);
 
@@ -229,6 +229,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .bodyId = bodyId,
             .spriteUuids = spriteUuids,
             .shapeIds = shapeIds,
+            .colliderChunks = try allocator.alloc(entity.ColliderChunk, 0),
             .state = null,
             .highlighted = false,
             .animated = false,

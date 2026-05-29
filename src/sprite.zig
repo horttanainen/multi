@@ -5,8 +5,6 @@ const gpu = @import("gpu.zig");
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
-const box = @import("box2d.zig");
-const config = @import("config.zig");
 
 const PI = std.math.pi;
 
@@ -321,7 +319,7 @@ fn iterateCircleOnSurface(
     comptime Context: type,
     context: Context,
     comptime pixelOp: fn (ctx: Context, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void,
-) void {
+) ?vec.IRect {
     const surface = sprite.surface.*;
     const pixels: [*]u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
@@ -362,7 +360,7 @@ fn iterateCircleOnSurface(
     const widthI: i32 = @intCast(width);
     const heightI: i32 = @intCast(height);
 
-    if (rawMaxX < 0 or rawMinX >= widthI or rawMaxY < 0 or rawMinY >= heightI) return;
+    if (rawMaxX < 0 or rawMinX >= widthI or rawMaxY < 0 or rawMinY >= heightI) return null;
 
     const minX: usize = @intCast(@max(0, rawMinX));
     const maxX: usize = @intCast(@min(widthI - 1, rawMaxX));
@@ -384,9 +382,16 @@ fn iterateCircleOnSurface(
             }
         }
     }
+
+    return .{
+        .minX = @intCast(minX),
+        .minY = @intCast(minY),
+        .maxX = @intCast(maxX + 1),
+        .maxY = @intCast(maxY + 1),
+    };
 }
 
-pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !void {
+pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !?vec.IRect {
     const removePixel = struct {
         fn op(_: void, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
             if (bytesPerPixel == 4) {
@@ -395,7 +400,7 @@ pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorl
         }
     }.op;
 
-    iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, void, {}, removePixel);
+    return iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, void, {}, removePixel);
 }
 
 pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
@@ -412,7 +417,7 @@ pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld:
         }
     }.op;
 
-    iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, Color, color, colorPixel);
+    _ = iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, Color, color, colorPixel);
 }
 
 pub fn paintSpriteOnSurface(
@@ -578,123 +583,6 @@ pub fn colorMatchingPixels(spriteUuid: u64, color: Color, comptime predicate: fn
     }
 
     try updateTextureFromSurface(spriteUuid);
-}
-
-pub const SpriteTile = struct {
-    spriteUuid: u64,
-    offsetPos: vec.Vec2, // Offset position in meters relative to original sprite center
-};
-
-pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
-    const originalSprite = sprites.getLocking(originalSpriteUuid) orelse return error.SpriteNotFound;
-
-    const width: u32 = @intCast(originalSprite.surface.w);
-    const height: u32 = @intCast(originalSprite.surface.h);
-
-    var tiles = std.array_list.Managed(SpriteTile).init(allocator);
-    defer tiles.deinit();
-
-    // If sprite is already small enough, return single tile
-    if (width <= maxTileSize and height <= maxTileSize) {
-        try tiles.append(SpriteTile{
-            .spriteUuid = originalSpriteUuid,
-            .offsetPos = vec.zero,
-        });
-        return tiles.toOwnedSlice();
-    }
-
-    // Calculate number of tiles needed
-    const tilesX = (width + maxTileSize - 1) / maxTileSize;
-    const tilesY = (height + maxTileSize - 1) / maxTileSize;
-
-    // Create tiles
-    var tileY: u32 = 0;
-    while (tileY < tilesY) : (tileY += 1) {
-        var tileX: u32 = 0;
-        while (tileX < tilesX) : (tileX += 1) {
-            const startX = tileX * maxTileSize;
-            const startY = tileY * maxTileSize;
-            const tileWidth = @min(maxTileSize, width - startX);
-            const tileHeight = @min(maxTileSize, height - startY);
-
-            // Create new surface for this tile using the same format as the original
-            const format: sdl.PixelFormat = @enumFromInt(originalSprite.surface.format);
-            const tileSurface = sdl.createSurface(
-                @intCast(tileWidth),
-                @intCast(tileHeight),
-                format,
-            ) catch {
-                std.debug.print("Could not create surface. Continuing to next tile", .{});
-                continue;
-            };
-
-            // Copy pixels from original surface to tile surface
-            const srcRect = sdl.Rect{
-                .x = @intCast(startX),
-                .y = @intCast(startY),
-                .w = @intCast(tileWidth),
-                .h = @intCast(tileHeight),
-            };
-            sdl.blitSurface(originalSprite.surface, &srcRect, tileSurface, null) catch continue;
-
-            // Create atlas sub-region texture referencing the parent's atlas region
-            const tileTexture = std.heap.c_allocator.create(tex.Texture) catch continue;
-            tileTexture.* = .{
-                .atlas_x = originalSprite.texture.atlas_x + startX,
-                .atlas_y = originalSprite.texture.atlas_y + startY,
-                .width = @intCast(tileWidth),
-                .height = @intCast(tileHeight),
-                .is_atlas = true,
-            };
-
-            // Calculate tile offset in meters from original sprite center
-            // Tile center in unscaled pixels
-            const tileCenterX = @as(f32, @floatFromInt(startX)) + @as(f32, @floatFromInt(tileWidth)) / 2.0;
-            const tileCenterY = @as(f32, @floatFromInt(startY)) + @as(f32, @floatFromInt(tileHeight)) / 2.0;
-            const spriteCenterX = @as(f32, @floatFromInt(width)) / 2.0;
-            const spriteCenterY = @as(f32, @floatFromInt(height)) / 2.0;
-
-            // Offset in scaled pixels, then convert to meters
-            const offsetPixels = vec.IVec2{
-                .x = @as(i32, @intFromFloat((tileCenterX - spriteCenterX) * originalSprite.scale.x)),
-                .y = @as(i32, @intFromFloat((tileCenterY - spriteCenterY) * originalSprite.scale.y)),
-            };
-            const offsetMetersB2d = conv.p2m(offsetPixels);
-            const offsetMeters = vec.Vec2{ .x = offsetMetersB2d.x, .y = offsetMetersB2d.y };
-
-            // Calculate tile size in pixels and meters
-            const tileSizeP = vec.IVec2{
-                .x = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileWidth)) * originalSprite.scale.x)),
-                .y = @as(i32, @intFromFloat(@as(f32, @floatFromInt(tileHeight)) * originalSprite.scale.y)),
-            };
-            const tileSizeMB2d = conv.p2m(tileSizeP);
-            const tileSizeM = vec.Vec2{ .x = tileSizeMB2d.x, .y = tileSizeMB2d.y };
-
-            // Duplicate imgPath for this tile
-            const imgPath = allocator.dupe(u8, originalSprite.imgPath) catch continue;
-
-            const tileSprite = Sprite{
-                .surface = tileSurface,
-                .imgPath = imgPath,
-                .texture = tileTexture,
-                .scale = originalSprite.scale,
-                .offset = originalSprite.offset,
-                .geometryVersion = originalSprite.geometryVersion,
-                .sizeM = tileSizeM,
-                .sizeP = tileSizeP,
-            };
-
-            const tileUuid = uuid.generate();
-            sprites.putLocking(tileUuid, tileSprite) catch continue;
-
-            tiles.append(SpriteTile{
-                .spriteUuid = tileUuid,
-                .offsetPos = offsetMeters,
-            }) catch continue;
-        }
-    }
-
-    return tiles.toOwnedSlice();
 }
 
 pub fn cleanupLater(spriteUuid: u64) void {

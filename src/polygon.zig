@@ -15,8 +15,13 @@ const allocator = @import("allocator.zig").allocator;
 const PI = std.math.pi;
 
 var triangleCache = std.StringHashMap([][3]IVec2).init(allocator);
+var triangleChunkCache = std.StringHashMap([]TriangleChunk).init(allocator);
 
 pub const PolygonError = error{CouldNotCreateTriangle};
+pub const TriangleChunk = struct {
+    rect: vec.IRect,
+    triangles: []const [3]IVec2,
+};
 
 const BoundaryEdge = struct {
     start: IVec2,
@@ -54,6 +59,12 @@ fn spriteTriangleCacheKey(s: sprite.Sprite) ![]const u8 {
     );
 }
 
+fn spriteTriangleChunkCacheKey(s: sprite.Sprite, chunkSize: i32) ![]const u8 {
+    const baseKey = try spriteTriangleCacheKey(s);
+    defer allocator.free(baseKey);
+    return std.fmt.allocPrint(allocator, "{s}|chunks|{d}", .{ baseKey, chunkSize });
+}
+
 pub fn triangulateCached(s: sprite.Sprite) ![]const [3]IVec2 {
     const cacheKey = try spriteTriangleCacheKey(s);
     errdefer allocator.free(cacheKey);
@@ -71,6 +82,23 @@ pub fn triangulateCached(s: sprite.Sprite) ![]const [3]IVec2 {
     return triangles;
 }
 
+pub fn triangulateChunksCached(s: sprite.Sprite, chunkSize: i32) ![]const TriangleChunk {
+    const cacheKey = try spriteTriangleChunkCacheKey(s, chunkSize);
+    errdefer allocator.free(cacheKey);
+
+    const maybeChunks = triangleChunkCache.get(cacheKey);
+    if (maybeChunks != null) {
+        allocator.free(cacheKey);
+        return maybeChunks.?;
+    }
+
+    const chunks = try triangulateChunks(s, chunkSize);
+    errdefer freeTriangleChunks(chunks);
+
+    try triangleChunkCache.put(cacheKey, chunks);
+    return chunks;
+}
+
 pub fn clearCache() void {
     var iter = triangleCache.iterator();
     while (iter.next()) |entry| {
@@ -78,6 +106,13 @@ pub fn clearCache() void {
         allocator.free(entry.value_ptr.*);
     }
     triangleCache.clearRetainingCapacity();
+
+    var chunkIter = triangleChunkCache.iterator();
+    while (chunkIter.next()) |entry| {
+        allocator.free(entry.key_ptr.*);
+        freeTriangleChunks(entry.value_ptr.*);
+    }
+    triangleChunkCache.clearRetainingCapacity();
 }
 
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
@@ -96,17 +131,98 @@ pub fn triangulateMask(s: sprite.Sprite) ![][3]IVec2 {
     const height: usize = @intCast(surface.h);
     const threshold: u8 = 150;
 
-    var loops = try extractBoundaryLoops(pixels, width, height, pitch, threshold);
+    const rect = fullSurfaceRect(width, height);
+    var loops = try extractBoundaryLoopsInRect(pixels, width, height, pitch, threshold, rect);
     defer deinitBoundaryLoops(&loops);
 
-    if (loops.items.len == 0) {
+    return triangulateBoundaryLoops(s, loops.items);
+}
+
+pub fn triangulateChunks(s: sprite.Sprite, chunkSize: i32) ![]TriangleChunk {
+    if (chunkSize <= 0) {
+        std.log.warn("triangulateChunks: invalid chunk size {d}", .{chunkSize});
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    const surface = s.surface.*;
+    const width: i32 = @intCast(surface.w);
+    const height: i32 = @intCast(surface.h);
+    if (width <= 0 or height <= 0) {
+        std.log.warn("triangulateChunks: invalid surface size {d}x{d}", .{ width, height });
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    var chunks = std.array_list.Managed(TriangleChunk).init(allocator);
+    errdefer {
+        for (chunks.items) |chunk| {
+            allocator.free(chunk.triangles);
+        }
+        chunks.deinit();
+    }
+
+    var y: i32 = 0;
+    while (y < height) : (y += chunkSize) {
+        var x: i32 = 0;
+        while (x < width) : (x += chunkSize) {
+            const rect = vec.IRect{
+                .minX = x,
+                .minY = y,
+                .maxX = @min(width, x + chunkSize),
+                .maxY = @min(height, y + chunkSize),
+            };
+
+            const triangles = triangulateRegion(s, rect) catch |err| {
+                if (err != PolygonError.CouldNotCreateTriangle) {
+                    std.log.warn("triangulateChunks: region ({d},{d})-({d},{d}) failed with {}", .{ rect.minX, rect.minY, rect.maxX, rect.maxY, err });
+                }
+                continue;
+            };
+
+            chunks.append(.{
+                .rect = rect,
+                .triangles = triangles,
+            }) catch |err| {
+                allocator.free(triangles);
+                return err;
+            };
+        }
+    }
+
+    if (chunks.items.len == 0) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    return chunks.toOwnedSlice();
+}
+
+pub fn triangulateRegion(s: sprite.Sprite, rect: vec.IRect) ![][3]IVec2 {
+    const surface = s.surface.*;
+    const pixels: [*]const u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const threshold: u8 = 150;
+    const clampedRect = clampRect(rect, width, height);
+
+    if (clampedRect.minX >= clampedRect.maxX or clampedRect.minY >= clampedRect.maxY) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    var loops = try extractBoundaryLoopsInRect(pixels, width, height, pitch, threshold, clampedRect);
+    defer deinitBoundaryLoops(&loops);
+
+    return triangulateBoundaryLoops(s, loops.items);
+}
+
+fn triangulateBoundaryLoops(s: sprite.Sprite, loops: []const BoundaryLoop) ![][3]IVec2 {
+    if (loops.len == 0) {
         return PolygonError.CouldNotCreateTriangle;
     }
 
     var triangles = std.array_list.Managed([3]IVec2).init(allocator);
     errdefer triangles.deinit();
 
-    for (loops.items) |outerLoop| {
+    for (loops) |outerLoop| {
         if (outerLoop.isHole) continue;
 
         var contours = std.array_list.Managed(triangle.PslgContour).init(allocator);
@@ -116,7 +232,7 @@ pub fn triangulateMask(s: sprite.Sprite) ![][3]IVec2 {
         var holes = std.array_list.Managed(Vec2).init(allocator);
         defer holes.deinit();
 
-        for (loops.items) |holeLoop| {
+        for (loops) |holeLoop| {
             if (!holeLoop.isHole) continue;
             if (!pointInPolygon(holeLoop.holePoint, outerLoop.vertices)) continue;
 
@@ -144,15 +260,15 @@ pub fn triangulateMask(s: sprite.Sprite) ![][3]IVec2 {
     return ownedTriangles;
 }
 
-fn extractBoundaryLoops(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) !std.array_list.Managed(BoundaryLoop) {
+fn extractBoundaryLoopsInRect(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8, rect: vec.IRect) !std.array_list.Managed(BoundaryLoop) {
     var edges = std.array_list.Managed(BoundaryEdge).init(allocator);
     defer edges.deinit();
 
     var edgeStarts = std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)).init(allocator);
     defer deinitEdgeStarts(&edgeStarts);
 
-    try buildBoundaryEdges(&edges, &edgeStarts, pixels, width, height, pitch, threshold);
-    return traceBoundaryLoops(&edges, &edgeStarts, pixels, width, height, pitch, threshold);
+    try buildBoundaryEdges(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
+    return traceBoundaryLoops(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
 }
 
 fn buildBoundaryEdges(
@@ -163,25 +279,28 @@ fn buildBoundaryEdges(
     height: usize,
     pitch: usize,
     threshold: u8,
+    rect: vec.IRect,
 ) !void {
-    var y: usize = 0;
-    while (y < height) : (y += 1) {
-        var x: usize = 0;
-        while (x < width) : (x += 1) {
-            const px: i32 = @intCast(x);
-            const py: i32 = @intCast(y);
-            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py)) continue;
+    _ = height;
 
-            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py - 1)) {
+    var y = rect.minY;
+    while (y < rect.maxY) : (y += 1) {
+        var x = rect.minX;
+        while (x < rect.maxX) : (x += 1) {
+            const px = x;
+            const py = y;
+            if (!isSolidPixelInRect(pixels, width, pitch, threshold, rect, px, py)) continue;
+
+            if (!isSolidPixelInRect(pixels, width, pitch, threshold, rect, px, py - 1)) {
                 try appendBoundaryEdge(edges, edgeStarts, .{ .x = px, .y = py }, .{ .x = px + 1, .y = py });
             }
-            if (!isSolidPixel(pixels, width, height, pitch, threshold, px + 1, py)) {
+            if (!isSolidPixelInRect(pixels, width, pitch, threshold, rect, px + 1, py)) {
                 try appendBoundaryEdge(edges, edgeStarts, .{ .x = px + 1, .y = py }, .{ .x = px + 1, .y = py + 1 });
             }
-            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py + 1)) {
+            if (!isSolidPixelInRect(pixels, width, pitch, threshold, rect, px, py + 1)) {
                 try appendBoundaryEdge(edges, edgeStarts, .{ .x = px + 1, .y = py + 1 }, .{ .x = px, .y = py + 1 });
             }
-            if (!isSolidPixel(pixels, width, height, pitch, threshold, px - 1, py)) {
+            if (!isSolidPixelInRect(pixels, width, pitch, threshold, rect, px - 1, py)) {
                 try appendBoundaryEdge(edges, edgeStarts, .{ .x = px, .y = py + 1 }, .{ .x = px, .y = py });
             }
         }
@@ -219,6 +338,7 @@ fn traceBoundaryLoops(
     height: usize,
     pitch: usize,
     threshold: u8,
+    rect: vec.IRect,
 ) !std.array_list.Managed(BoundaryLoop) {
     var loops = std.array_list.Managed(BoundaryLoop).init(allocator);
     errdefer deinitBoundaryLoops(&loops);
@@ -275,7 +395,7 @@ fn traceBoundaryLoops(
 
         const isHole = area < 0;
         const holePoint = if (isHole)
-            findPointInLoop(simplified, pixels, width, height, pitch, threshold, false) orelse blk: {
+            findPointInLoop(simplified, pixels, width, height, pitch, threshold, rect, false) orelse blk: {
                 std.log.warn("traceBoundaryLoops: could not find transparent pixel inside hole, using centroid", .{});
                 break :blk centroidPoint(simplified);
             }
@@ -313,6 +433,33 @@ fn deinitBoundaryLoops(loops: *std.array_list.Managed(BoundaryLoop)) void {
     loops.deinit();
 }
 
+fn fullSurfaceRect(width: usize, height: usize) vec.IRect {
+    return .{
+        .minX = 0,
+        .minY = 0,
+        .maxX = @intCast(width),
+        .maxY = @intCast(height),
+    };
+}
+
+fn clampRect(rect: vec.IRect, width: usize, height: usize) vec.IRect {
+    const widthI: i32 = @intCast(width);
+    const heightI: i32 = @intCast(height);
+    return .{
+        .minX = @max(0, @min(widthI, rect.minX)),
+        .minY = @max(0, @min(heightI, rect.minY)),
+        .maxX = @max(0, @min(widthI, rect.maxX)),
+        .maxY = @max(0, @min(heightI, rect.maxY)),
+    };
+}
+
+fn freeTriangleChunks(chunks: []const TriangleChunk) void {
+    for (chunks) |chunk| {
+        allocator.free(chunk.triangles);
+    }
+    allocator.free(chunks);
+}
+
 fn isSolidPixel(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8, x: i32, y: i32) bool {
     if (x < 0 or y < 0) return false;
 
@@ -320,6 +467,17 @@ fn isSolidPixel(pixels: [*]const u8, width: usize, height: usize, pitch: usize, 
     const uy: usize = @intCast(y);
     if (ux >= width or uy >= height) return false;
 
+    const alpha = pixels[uy * pitch + ux * 4 + 3];
+    return alpha >= threshold;
+}
+
+fn isSolidPixelInRect(pixels: [*]const u8, width: usize, pitch: usize, threshold: u8, rect: vec.IRect, x: i32, y: i32) bool {
+    if (x < rect.minX or y < rect.minY or x >= rect.maxX or y >= rect.maxY) return false;
+
+    const ux: usize = @intCast(x);
+    if (ux >= width) return false;
+
+    const uy: usize = @intCast(y);
     const alpha = pixels[uy * pitch + ux * 4 + 3];
     return alpha >= threshold;
 }
@@ -388,6 +546,7 @@ fn findPointInLoop(
     height: usize,
     pitch: usize,
     threshold: u8,
+    rect: vec.IRect,
     wantSolid: bool,
 ) ?Vec2 {
     var minX: i32 = vertices[0].x;
@@ -404,10 +563,10 @@ fn findPointInLoop(
 
     const widthI: i32 = @intCast(width);
     const heightI: i32 = @intCast(height);
-    const startX = @max(0, minX);
-    const endX = @min(widthI, maxX);
-    const startY = @max(0, minY);
-    const endY = @min(heightI, maxY);
+    const startX = @max(rect.minX, @max(0, minX));
+    const endX = @min(rect.maxX, @min(widthI, maxX));
+    const startY = @max(rect.minY, @max(0, minY));
+    const endY = @min(rect.maxY, @min(heightI, maxY));
 
     var y = startY;
     while (y < endY) : (y += 1) {
@@ -418,7 +577,7 @@ fn findPointInLoop(
                 .y = @as(f32, @floatFromInt(y)) + 0.5,
             };
             if (!pointInPolygon(point, vertices)) continue;
-            if (isSolidPixel(pixels, width, height, pitch, threshold, x, y) != wantSolid) continue;
+            if (isSolidPixelInRect(pixels, width, pitch, threshold, rect, x, y) != wantSolid) continue;
             return point;
         }
     }

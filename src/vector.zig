@@ -5,10 +5,30 @@ pub const IVec2 = struct {
     y: i32,
 };
 
+pub const IRect = struct {
+    minX: i32,
+    minY: i32,
+    maxX: i32,
+    maxY: i32,
+};
+
 pub const Vec2 = struct {
     x: f32,
     y: f32,
 };
+
+pub fn irectIntersects(a: IRect, b: IRect) bool {
+    return a.minX < b.maxX and a.maxX > b.minX and a.minY < b.maxY and a.maxY > b.minY;
+}
+
+pub fn irectExpandedClamped(rect: IRect, amount: i32, width: i32, height: i32) IRect {
+    return .{
+        .minX = @max(0, rect.minX - amount),
+        .minY = @max(0, rect.minY - amount),
+        .maxX = @min(width, rect.maxX + amount),
+        .maxY = @min(height, rect.maxY + amount),
+    };
+}
 
 pub fn toBox2d(a: Vec2) box2d.c.b2Vec2 {
     return .{
