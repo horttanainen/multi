@@ -49,8 +49,9 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//TODO: ask codex why we added polygon cache instead of just copying the entities
+
 //Level editor
-//TODO: make level editor not generate the level everytime we make changes
 //TODO: add visible grid that can be turned on and off
 //TODO: add option to snap to the grid
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
