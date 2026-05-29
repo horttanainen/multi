@@ -336,6 +336,7 @@ pub fn cleanup() void {
     entity.cleanup();
     background.cleanup();
     animation.cleanup();
+    polygon.clearCache();
     sprite.clearTextureCache();
     gpu.resetAtlasToCheckpoint();
     viewport.cleanup();

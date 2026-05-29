@@ -147,8 +147,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
 
     const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
 
-    const triangles = try polygon.triangulate(s);
-    defer allocator.free(triangles);
+    const triangles = try polygon.triangulateCached(s);
 
     const shapeIds = try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
 
@@ -270,10 +269,9 @@ pub fn serialize(entity: Entity, pos: vec.IVec2, id: u64) ?SerializableEntity {
 pub fn regenerateColliders(entity: *Entity) !bool {
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return false;
 
-    const triangles = polygon.triangulate(firstSprite) catch {
+    const triangles = polygon.triangulateCached(firstSprite) catch {
         return false; // destroy entity
     };
-    defer allocator.free(triangles);
 
     if (triangles.len == 0) {
         return false; // destroy entity

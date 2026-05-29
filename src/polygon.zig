@@ -14,9 +14,59 @@ const vec = @import("vector.zig");
 const allocator = @import("allocator.zig").allocator;
 const PI = std.math.pi;
 
-pub const PolygonError = error{
-    CouldNotCreateTriangle
-};
+var triangleCache = std.StringHashMap([][3]IVec2).init(allocator);
+
+pub const PolygonError = error{CouldNotCreateTriangle};
+
+fn spriteTriangleCacheKey(s: sprite.Sprite) ![]const u8 {
+    const scaleXBits: u32 = @bitCast(s.scale.x);
+    const scaleYBits: u32 = @bitCast(s.scale.y);
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}",
+        .{
+            s.imgPath,
+            s.texture.atlas_x,
+            s.texture.atlas_y,
+            s.texture.width,
+            s.texture.height,
+            @intFromBool(s.texture.is_atlas),
+            s.sizeP.x,
+            s.sizeP.y,
+            scaleXBits,
+            scaleYBits,
+            s.offset.x,
+            s.offset.y,
+            s.geometryVersion,
+        },
+    );
+}
+
+pub fn triangulateCached(s: sprite.Sprite) ![]const [3]IVec2 {
+    const cacheKey = try spriteTriangleCacheKey(s);
+    errdefer allocator.free(cacheKey);
+
+    const maybeTriangles = triangleCache.get(cacheKey);
+    if (maybeTriangles != null) {
+        allocator.free(cacheKey);
+        return maybeTriangles.?;
+    }
+
+    const triangles = try triangulate(s);
+    errdefer allocator.free(triangles);
+
+    try triangleCache.put(cacheKey, triangles);
+    return triangles;
+}
+
+pub fn clearCache() void {
+    var iter = triangleCache.iterator();
+    while (iter.next()) |entry| {
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.*);
+    }
+    triangleCache.clearRetainingCapacity();
+}
 
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
@@ -50,7 +100,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     const simplified = try visvalingam(vertices, epsilonArea);
     defer allocator.free(simplified);
     // std.debug.print("Simplified polygon vertices: {}\n", .{simplified.len});
-    
+
     if (simplified.len < 3) {
         return PolygonError.CouldNotCreateTriangle;
     }
@@ -59,7 +109,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     const withoutDuplicates = try removeDuplicateVertices(simplified);
     defer allocator.free(withoutDuplicates);
     // std.debug.print("Without duplicate vertices: {}\n", .{withoutDuplicates.len});
-    
+
     if (withoutDuplicates.len < 3) {
         return PolygonError.CouldNotCreateTriangle;
     }

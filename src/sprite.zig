@@ -5,7 +5,6 @@ const gpu = @import("gpu.zig");
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
-const polygon = @import("polygon.zig");
 const box = @import("box2d.zig");
 const config = @import("config.zig");
 
@@ -33,6 +32,7 @@ pub const Sprite = struct {
     sizeP: vec.IVec2,
     offset: vec.IVec2,
     imgPath: []const u8,
+    geometryVersion: u64 = 0,
     anchorPointLeft: ?vec.IVec2 = null, // Magenta pixel - left shoulder
     anchorPointRight: ?vec.IVec2 = null, // Green pixel - right shoulder
 };
@@ -252,6 +252,7 @@ pub fn createCopy(spriteUuid: u64) !u64 {
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
         .offset = originalSprite.offset,
+        .geometryVersion = originalSprite.geometryVersion,
         .anchorPointLeft = originalSprite.anchorPointLeft,
         .anchorPointRight = originalSprite.anchorPointRight,
     };
@@ -523,11 +524,13 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
     // allocate a new private atlas region so we don't overwrite shared data.
     if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
         try tex.reallocateAtlasRegion(s.texture, s.surface);
+        s.geometryVersion += 1;
         return;
     }
 
     // Already private or standalone — just re-upload in place
     try tex.reuploadTexture(s.texture, s.surface);
+    s.geometryVersion += 1;
 }
 
 pub fn isAny(_: u8, _: u8, _: u8) bool {
@@ -676,6 +679,7 @@ pub fn splitIntoTiles(originalSpriteUuid: u64, maxTileSize: u32) ![]SpriteTile {
                 .texture = tileTexture,
                 .scale = originalSprite.scale,
                 .offset = originalSprite.offset,
+                .geometryVersion = originalSprite.geometryVersion,
                 .sizeM = tileSizeM,
                 .sizeP = tileSizeP,
             };

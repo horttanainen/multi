@@ -77,7 +77,7 @@ pub fn createBody(bodyDef: c.b2BodyDef) !c.b2BodyId {
     return bodyId;
 }
 
-pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: [][3]vec.IVec2, dimP: vec.IVec2, shapeDef: c.b2ShapeDef) ![]c.b2ShapeId {
+pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: []const [3]vec.IVec2, dimP: vec.IVec2, shapeDef: c.b2ShapeDef) ![]c.b2ShapeId {
     const polygons = try createPolygons(triangles, dimP);
     defer allocator.free(polygons);
     var shapeIds = std.array_list.Managed(c.b2ShapeId).init(allocator);
@@ -90,7 +90,7 @@ pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: [][3]vec.IVec2, dimP: v
     return shapeIds.toOwnedSlice();
 }
 
-fn createPolygons(triangles: [][3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polygon {
+fn createPolygons(triangles: []const [3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polygon {
     var polygons = std.array_list.Managed(c.b2Polygon).init(allocator);
 
     for (triangles) |tri| {
