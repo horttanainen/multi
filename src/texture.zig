@@ -179,6 +179,37 @@ pub fn reuploadTexture(texture: *Texture, surface: *sdl.Surface) !void {
     }
 }
 
+pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl.Rect) !void {
+    if (rect.w <= 0 or rect.h <= 0) {
+        return;
+    }
+
+    const device = gpu.getDevice();
+
+    const sub_surface = c.SDL_CreateSurface(rect.w, rect.h, surface.format);
+    if (sub_surface == null) return error.CreateSurfaceFailed;
+    defer c.SDL_DestroySurface(sub_surface);
+
+    const src_rect = c.SDL_Rect{ .x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h };
+    const dst_rect = c.SDL_Rect{ .x = 0, .y = 0, .w = rect.w, .h = rect.h };
+    if (!c.SDL_BlitSurface(surface, &src_rect, sub_surface, &dst_rect)) {
+        return error.BlitSurfaceFailed;
+    }
+
+    const rgba_surface = c.SDL_ConvertSurface(sub_surface, c.SDL_PIXELFORMAT_ABGR8888);
+    if (rgba_surface == null) return error.ConvertSurfaceFailed;
+    defer c.SDL_DestroySurface(rgba_surface);
+
+    if (texture.is_atlas) {
+        const dstX: u32 = texture.atlas_x + @as(u32, @intCast(rect.x));
+        const dstY: u32 = texture.atlas_y + @as(u32, @intCast(rect.y));
+        uploadToAtlasRegion(device, gpu.getAtlas(), rgba_surface, dstX, dstY, @intCast(rect.w), @intCast(rect.h));
+        return;
+    }
+
+    uploadTextureRegionImmediate(device, texture.standalone_gpu_texture.?, rgba_surface, @intCast(rect.x), @intCast(rect.y));
+}
+
 /// Upload surface pixel data to a sub-region of the atlas texture.
 fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32, w: u32, h: u32) void {
     const pitch: u32 = @intCast(rgba_surface.*.pitch);
@@ -221,6 +252,68 @@ fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface
     };
     const dst_region = c.SDL_GPUTextureRegion{
         .texture = tex_atlas.gpu_texture,
+        .mip_level = 0,
+        .layer = 0,
+        .x = dst_x,
+        .y = dst_y,
+        .z = 0,
+        .w = w,
+        .h = h,
+        .d = 1,
+    };
+    c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
+    c.SDL_EndGPUCopyPass(copy_pass);
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    if (fence) |f| {
+        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
+        c.SDL_ReleaseGPUFence(device, f);
+    }
+    c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+}
+
+fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32) void {
+    const w: u32 = @intCast(rgba_surface.*.w);
+    const h: u32 = @intCast(rgba_surface.*.h);
+    const pitch: u32 = @intCast(rgba_surface.*.pitch);
+    const data_size: u32 = pitch * h;
+
+    const transfer_info = c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = data_size,
+        .props = 0,
+    };
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &transfer_info) orelse return;
+
+    const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+    const pixels: [*]const u8 = @ptrCast(rgba_surface.*.pixels orelse {
+        c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    });
+    const dst: [*]u8 = @ptrCast(mapped);
+    @memcpy(dst[0..data_size], pixels[0..data_size]);
+    c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+
+    const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+
+    const src = c.SDL_GPUTextureTransferInfo{
+        .transfer_buffer = transfer_buf,
+        .offset = 0,
+        .pixels_per_row = pitch / 4,
+        .rows_per_layer = h,
+    };
+    const dst_region = c.SDL_GPUTextureRegion{
+        .texture = gpu_texture,
         .mip_level = 0,
         .layer = 0,
         .x = dst_x,

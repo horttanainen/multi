@@ -30,6 +30,15 @@ pub fn irectExpandedClamped(rect: IRect, amount: i32, width: i32, height: i32) I
     };
 }
 
+pub fn irectUnion(a: IRect, b: IRect) IRect {
+    return .{
+        .minX = @min(a.minX, b.minX),
+        .minY = @min(a.minY, b.minY),
+        .maxX = @max(a.maxX, b.maxX),
+        .maxY = @max(a.maxY, b.maxY),
+    };
+}
+
 pub fn toBox2d(a: Vec2) box2d.c.b2Vec2 {
     return .{
         .x = a.x,

@@ -392,15 +392,32 @@ fn iterateCircleOnSurface(
 }
 
 pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !?vec.IRect {
+    const RemoveContext = struct {
+        changed: bool = false,
+    };
+
     const removePixel = struct {
-        fn op(_: void, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
-            if (bytesPerPixel == 4) {
-                pixels[pixelIndex + 3] = 0; // Set alpha to 0
+        fn op(context: *RemoveContext, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
+            if (bytesPerPixel != 4) {
+                return;
             }
+            if (pixels[pixelIndex + 3] == 0) {
+                return;
+            }
+            pixels[pixelIndex + 3] = 0;
+            context.changed = true;
         }
     }.op;
 
-    return iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, void, {}, removePixel);
+    var context = RemoveContext{};
+    const dirtyRect = iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, *RemoveContext, &context, removePixel);
+    if (dirtyRect == null) {
+        return null;
+    }
+    if (!context.changed) {
+        return null;
+    }
+    return dirtyRect;
 }
 
 pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
@@ -535,6 +552,32 @@ pub fn updateTextureFromSurface(spriteUuid: u64) !void {
 
     // Already private or standalone — just re-upload in place
     try tex.reuploadTexture(s.texture, s.surface);
+    s.geometryVersion += 1;
+}
+
+pub fn updateTextureRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    const s = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
+    const width = s.surface.w;
+    const height = s.surface.h;
+    const rect = vec.irectExpandedClamped(dirtyRect, 1, width, height);
+    if (rect.minX >= rect.maxX or rect.minY >= rect.maxY) {
+        return;
+    }
+
+    // If this atlas texture shares its region with other sprites,
+    // allocate a private atlas region before any partial uploads.
+    if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
+        try tex.reallocateAtlasRegion(s.texture, s.surface);
+        s.geometryVersion += 1;
+        return;
+    }
+
+    try tex.reuploadTextureRegion(s.texture, s.surface, .{
+        .x = rect.minX,
+        .y = rect.minY,
+        .w = rect.maxX - rect.minX,
+        .h = rect.maxY - rect.minY,
+    });
     s.geometryVersion += 1;
 }
 

@@ -80,6 +80,13 @@ const OverlapContext = struct {
     count: usize,
 };
 
+const TerrainEdit = struct {
+    spriteUuid: u64,
+    dirtyRect: vec.IRect,
+};
+
+var terrainEdits = std.AutoArrayHashMap(box2d.c.b2BodyId, TerrainEdit).init(allocator);
+
 fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
 
@@ -102,6 +109,51 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     }
 
     return true; // Continue the query
+}
+
+fn queueTerrainEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    const maybeEdit = terrainEdits.getPtr(bodyId);
+    if (maybeEdit == null) {
+        try terrainEdits.put(bodyId, .{
+            .spriteUuid = spriteUuid,
+            .dirtyRect = dirtyRect,
+        });
+        return;
+    }
+
+    const edit = maybeEdit.?;
+    edit.dirtyRect = vec.irectUnion(edit.dirtyRect, dirtyRect);
+}
+
+fn flushTerrainEdits() !void {
+    if (terrainEdits.count() == 0) {
+        return;
+    }
+    defer terrainEdits.clearRetainingCapacity();
+
+    for (terrainEdits.keys(), terrainEdits.values()) |bodyId, edit| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("flushTerrainEdits: terrain body became invalid before flush", .{});
+            continue;
+        }
+
+        const ent = entity.entities.getPtrLocking(bodyId) orelse {
+            std.log.warn("flushTerrainEdits: terrain entity missing before flush", .{});
+            continue;
+        };
+
+        if (ent.spriteUuids.len == 0) {
+            std.log.warn("flushTerrainEdits: terrain entity has no sprites", .{});
+            continue;
+        }
+
+        try sprite.updateTextureRegionFromSurface(edit.spriteUuid, edit.dirtyRect);
+
+        const stillExists = try entity.regenerateCollidersInPixelRect(ent, edit.dirtyRect);
+        if (!stillExists) {
+            entity.cleanupLater(ent.*);
+        }
+    }
 }
 
 fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
@@ -131,28 +183,29 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
 
-        // Get the entity
-        const maybeEntity = entity.entities.getPtrLocking(bodyId);
-        if (maybeEntity) |ent| {
-            // Get entity position and rotation
-            const state = box2d.getState(bodyId);
-            const entityPos = vec.fromBox2d(state.pos);
-            const rotation = state.rotAngle;
+        const ent = entity.entities.getPtrLocking(bodyId) orelse {
+            std.log.warn("damageTerrainInRadius: terrain body has no entity", .{});
+            continue;
+        };
 
-            if (ent.spriteUuids.len == 0) continue;
-            const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse continue;
+        // Get entity position and rotation
+        const state = box2d.getState(bodyId);
+        const entityPos = vec.fromBox2d(state.pos);
+        const rotation = state.rotAngle;
 
-            const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
-            if (dirtyRect == null) continue;
-
-            try sprite.updateTextureFromSurface(ent.spriteUuids[0]);
-
-            const stillExists = try entity.regenerateCollidersInPixelRect(ent, dirtyRect.?);
-
-            if (!stillExists) {
-                entity.cleanupLater(ent.*);
-            }
+        if (ent.spriteUuids.len == 0) {
+            std.log.warn("damageTerrainInRadius: terrain entity has no sprites", .{});
+            continue;
         }
+        const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse {
+            std.log.warn("damageTerrainInRadius: terrain sprite {d} not found", .{ent.spriteUuids[0]});
+            continue;
+        };
+
+        const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
+        if (dirtyRect == null) continue;
+
+        try queueTerrainEdit(bodyId, ent.spriteUuids[0], dirtyRect.?);
     }
 }
 
@@ -415,6 +468,10 @@ fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2Shap
 }
 
 pub fn checkContacts() !void {
+    errdefer flushTerrainEdits() catch |err| {
+        std.log.err("checkContacts: failed to flush terrain edits: {}", .{err});
+    };
+
     const contactEvents = box2d.getContactEvents();
 
     for (0..@intCast(contactEvents.beginCount)) |i| {
@@ -426,6 +483,8 @@ pub fn checkContacts() !void {
         const event = contactEvents.hitEvents[i];
         try handleProjectileContact(event.shapeIdA, event.shapeIdB);
     }
+
+    try flushTerrainEdits();
 }
 
 pub fn cleanup() void {
@@ -433,6 +492,7 @@ pub fn cleanup() void {
     propulsions.clearAndFree();
     owners.clearAndFree();
     directDamages.clearAndFree();
+    terrainEdits.clearAndFree();
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {
