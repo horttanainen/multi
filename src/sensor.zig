@@ -17,13 +17,14 @@ pub fn createSensorEntityFromImg(
     bodyDef: box2d.c.b2BodyDef,
     entityType: []const u8,
     onBegin: *const fn (box2d.c.b2ShapeId) anyerror!void,
-) !void {
+) !box2d.c.b2BodyId {
     const bodyId = try box2d.createBody(bodyDef);
     const e = entity.createEntityForBody(bodyId, spriteUuid, shapeDef, entityType) catch |err| {
         box2d.c.b2DestroyBody(bodyId);
         return err;
     };
     try sensorEntities.put(bodyId, .{ .entity = e, .onBegin = onBegin });
+    return bodyId;
 }
 
 pub fn processSensorEvents() !void {
@@ -49,4 +50,18 @@ pub fn cleanup() void {
         entity.cleanupOne(se.entity);
     }
     sensorEntities.clearAndFree();
+}
+
+pub fn remove(bodyId: box2d.c.b2BodyId) bool {
+    const maybeKV = sensorEntities.fetchSwapRemove(bodyId);
+    if (maybeKV == null) return false;
+
+    entity.cleanupOne(maybeKV.?.value.entity);
+    return true;
+}
+
+pub fn setHighlighted(bodyId: box2d.c.b2BodyId, highlighted: bool) bool {
+    const sensorEntity = sensorEntities.getPtr(bodyId) orelse return false;
+    sensorEntity.entity.highlighted = highlighted;
+    return true;
 }

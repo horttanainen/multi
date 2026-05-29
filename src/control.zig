@@ -169,6 +169,22 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                 delay.action("levelEditorClick", config.levelEditorClickDelayMs);
             }
         },
+        .undo => {
+            if (!delay.check("levelEditorClick")) {
+                levelEditor.undo() catch |err| {
+                    std.debug.print("Error undoing level editor action: {}\n", .{err});
+                };
+                delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+            }
+        },
+        .redo => {
+            if (!delay.check("levelEditorClick")) {
+                levelEditor.redo() catch |err| {
+                    std.debug.print("Error redoing level editor action: {}\n", .{err});
+                };
+                delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+            }
+        },
         .open_menu => {
             if (!delay.check("menuToggle")) {
                 gameMenu.openGameMenu();

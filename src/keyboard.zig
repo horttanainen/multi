@@ -61,6 +61,8 @@ pub const LevelEditorKeyBindings = struct {
     cursorDown: sdl.Scancode,
     copy: MultiKey,
     paste: MultiKey,
+    undo: MultiKey,
+    redo: MultiKey,
     openMenu: sdl.Scancode,
     openSpritePicker: sdl.Scancode,
     placeSprite: sdl.Scancode,
@@ -74,6 +76,8 @@ pub const defaultEditorBindings = LevelEditorKeyBindings{
     .cursorDown = .s,
     .copy = .{ .modifier = .lctrl, .key = .c_ },
     .paste = .{ .modifier = .lctrl, .key = .v },
+    .undo = .{ .modifier = .lctrl, .key = .z },
+    .redo = .{ .modifier = .lctrl, .key = .y },
     .openMenu = .escape,
     .openSpritePicker = .e,
     .placeSprite = .return_,
@@ -125,6 +129,12 @@ pub fn handleLevelEditor(_: *const controller.Controller) void {
     }
     if (key(keyStates, bindings.paste.modifier) and key(keyStates, bindings.paste.key)) {
         control.executeLevelEditorAction(.paste);
+    }
+    if (key(keyStates, bindings.undo.modifier) and key(keyStates, bindings.undo.key)) {
+        control.executeLevelEditorAction(.undo);
+    }
+    if (key(keyStates, bindings.redo.modifier) and key(keyStates, bindings.redo.key)) {
+        control.executeLevelEditorAction(.redo);
     }
     if (key(keyStates, bindings.openMenu)) {
         control.executeLevelEditorAction(.open_menu);

@@ -42,6 +42,7 @@ pub const Entity = struct {
 };
 
 pub const SerializableEntity = struct {
+    id: u64,
     type: []const u8,
     friction: f32,
     imgPath: []const u8,
@@ -194,7 +195,6 @@ pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
 }
 
 fn markEntityForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
 
@@ -224,11 +224,19 @@ pub fn cleanupOne(entity: Entity) void {
 
     if (entity.animated) {
         animation.cleanupAnimationFrames(entity.bodyId);
-    } 
+    }
     for (entity.spriteUuids) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);
     }
     allocator.free(entity.spriteUuids);
+}
+
+pub fn remove(bodyId: box2d.c.b2BodyId) bool {
+    const maybeKV = entities.fetchSwapRemoveLocking(bodyId);
+    if (maybeKV == null) return false;
+
+    cleanupOne(maybeKV.?.value);
+    return true;
 }
 
 pub fn cleanup() void {
@@ -244,11 +252,12 @@ pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {
     return entities.getPtrLocking(bodyId);
 }
 
-pub fn serialize(entity: Entity, pos: vec.IVec2) ?SerializableEntity {
+pub fn serialize(entity: Entity, pos: vec.IVec2, id: u64) ?SerializableEntity {
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return null;
 
     const breakable = entity.categoryBits == collision.CATEGORY_TERRAIN;
     return SerializableEntity{
+        .id = id,
         .type = entity.type,
         .scale = firstSprite.scale,
         .pos = pos,

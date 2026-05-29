@@ -34,6 +34,8 @@ pub const LevelEditorAction = enum {
     cursor_down,
     copy,
     paste,
+    undo,
+    redo,
     open_menu,
     open_config_menu,
     open_sprite_picker,
@@ -59,7 +61,6 @@ pub fn recalculateControllers() !void {
         const ctrl = entry.value_ptr;
         if (ctrl.inputType == .keyboard) {
             if (gamepad.createController(ctrl.playerId, ctrl.color)) |newCtrl| {
-
                 if (ctrl.keyBindings) |keyBindings| {
                     try keyboard.keyboardBindings.append(allocator, keyBindings);
                 }

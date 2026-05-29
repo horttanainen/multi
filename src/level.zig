@@ -137,77 +137,139 @@ fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
     }
 }
 
+pub fn applyLevelSettings(lev: Level) void {
+    box2d.setGravity(lev.gravity);
+    conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
+    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
+    splitscreen = lev.splitscreen;
+    size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
+}
+
+pub fn spawnParallaxEntity(e: background.SerializableParallaxEntity) !void {
+    const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
+}
+
+fn appendSpawnedEntityBody(bodyIds: *std.array_list.Managed(box2d.c.b2BodyId), spawnedEntity: Entity) !void {
+    bodyIds.append(spawnedEntity.bodyId) catch |err| {
+        _ = entity.remove(spawnedEntity.bodyId);
+        return err;
+    };
+}
+
+fn appendSpawnedSensorBody(bodyIds: *std.array_list.Managed(box2d.c.b2BodyId), bodyId: box2d.c.b2BodyId) !void {
+    bodyIds.append(bodyId) catch |err| {
+        _ = sensor.remove(bodyId);
+        return err;
+    };
+}
+
+fn cleanupSpawnedBodies(bodyIds: []const box2d.c.b2BodyId) void {
+    for (bodyIds) |bodyId| {
+        if (entity.remove(bodyId)) continue;
+        _ = sensor.remove(bodyId);
+    }
+}
+
+pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId {
+    var shapeDef = box2d.c.b2DefaultShapeDef();
+    shapeDef.material.friction = e.friction;
+    shapeDef.enableSensorEvents = true;
+    const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    errdefer sprite.cleanupLater(spriteUuid);
+
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
+    errdefer cleanupSpawnedBodies(bodyIds.items);
+    errdefer bodyIds.deinit();
+
+    const pos = conv.pixel2M(e.pos);
+
+    if (std.mem.eql(u8, e.type, "dynamic")) {
+        const bodyDef = box2d.createDynamicBodyDef(pos);
+        shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
+        shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
+        const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+        try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+        return bodyIds.toOwnedSlice();
+    }
+
+    if (std.mem.eql(u8, e.type, "static")) {
+        const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
+        defer allocator.free(tiles);
+
+        const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
+        const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
+
+        for (tiles) |tile| {
+            const tilePos = vec.Vec2{
+                .x = pos.x + tile.offsetPos.x,
+                .y = pos.y + tile.offsetPos.y,
+            };
+            const bodyDef = box2d.createStaticBodyDef(tilePos);
+            shapeDef.filter.categoryBits = categoryBits;
+            shapeDef.filter.maskBits = maskBits;
+            const spawnedEntity = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
+                if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                    sprite.cleanupLater(tile.spriteUuid);
+                    continue;
+                }
+                return err;
+            };
+            try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+        }
+
+        if (tiles.len > 1) {
+            sprite.cleanupLater(spriteUuid);
+        }
+
+        return bodyIds.toOwnedSlice();
+    }
+
+    if (std.mem.eql(u8, e.type, "goal")) {
+        var goalShapeDef = box2d.c.b2DefaultShapeDef();
+        goalShapeDef.isSensor = true;
+        goalShapeDef.enableSensorEvents = true;
+        goalShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+        goalShapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
+        const goalBodyDef = box2d.createStaticBodyDef(pos);
+        const bodyId = try sensor.createSensorEntityFromImg(spriteUuid, goalShapeDef, goalBodyDef, "goal", onGoalBegin);
+        try appendSpawnedSensorBody(&bodyIds, bodyId);
+        return bodyIds.toOwnedSlice();
+    }
+
+    if (std.mem.eql(u8, e.type, "spawn")) {
+        const bodyDef = box2d.createStaticBodyDef(pos);
+        shapeDef.isSensor = true;
+        shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
+        shapeDef.filter.maskBits = collision.MASK_SENSOR_SPAWN;
+        const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "spawn");
+        try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+        return bodyIds.toOwnedSlice();
+    }
+
+    std.log.warn("spawnSerializableEntity: unknown entity type '{s}' for entity {d}", .{ e.type, e.id });
+    return error.UnknownEntityType;
+}
+
 // Loads parallax backgrounds and entities from a parsed Level. Returns true if a spawn point was found.
 fn loadLevelContents(lev: Level) !bool {
     var hasSpawn = false;
 
     for (lev.parallaxEntities) |e| {
-        const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
-        try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
+        try spawnParallaxEntity(e);
     }
 
     for (lev.entities) |e| {
-        var shapeDef = box2d.c.b2DefaultShapeDef();
-        shapeDef.material.friction = e.friction;
-        shapeDef.enableSensorEvents = true;
-        const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+        const bodyIds = try spawnSerializableEntity(e);
+        defer allocator.free(bodyIds);
 
-        const pos = conv.pixel2M(e.pos);
-
-        if (std.mem.eql(u8, e.type, "dynamic")) {
-            const bodyDef = box2d.createDynamicBodyDef(pos);
-            shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
-            shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
-            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
-        } else if (std.mem.eql(u8, e.type, "static")) {
-            const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
-            defer allocator.free(tiles);
-
-            const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
-            const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
-
-            for (tiles) |tile| {
-                const tilePos = vec.Vec2{
-                    .x = pos.x + tile.offsetPos.x,
-                    .y = pos.y + tile.offsetPos.y,
-                };
-                const bodyDef = box2d.createStaticBodyDef(tilePos);
-                shapeDef.filter.categoryBits = categoryBits;
-                shapeDef.filter.maskBits = maskBits;
-                _ = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
-                    if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-                        sprite.cleanupLater(tile.spriteUuid);
-                    } else {
-                        return err;
-                    }
-                };
-            }
-
-            if (tiles.len > 1) {
-                sprite.cleanupLater(spriteUuid);
-            }
-        } else if (std.mem.eql(u8, e.type, "goal")) {
-            var goalShapeDef = box2d.c.b2DefaultShapeDef();
-            goalShapeDef.isSensor = true;
-            goalShapeDef.enableSensorEvents = true;
-            goalShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
-            goalShapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
-            const goalBodyDef = box2d.createStaticBodyDef(pos);
-            try sensor.createSensorEntityFromImg(spriteUuid, goalShapeDef, goalBodyDef, "goal", onGoalBegin);
-        } else if (std.mem.eql(u8, e.type, "spawn")) {
-            const bodyDef = box2d.createStaticBodyDef(pos);
-            shapeDef.isSensor = true;
-            shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
-            shapeDef.filter.maskBits = collision.MASK_SENSOR_SPAWN;
-            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "spawn");
+        if (std.mem.eql(u8, e.type, "spawn")) {
             spawnLocation = e.pos;
             hasSpawn = true;
         }
     }
 
-    cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
-    splitscreen = lev.splitscreen;
-    size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
     return hasSpawn;
 }
 
@@ -243,9 +305,7 @@ pub fn loadLevel(path: []const u8) !bool {
     defer parsed.deinit();
     const lev = parsed.value;
 
-    box2d.setGravity(lev.gravity);
-    conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
-    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    applyLevelSettings(lev);
     const hasSpawn = try loadLevelContents(lev);
     return hasSpawn;
 }

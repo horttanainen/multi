@@ -68,6 +68,7 @@
     ],
     "entities": [
         {
+            "id": 1,
             "type": "static",
             "breakable": false,
             "friction": 0.5,
@@ -82,6 +83,7 @@
             }
         },
         {
+            "id": 2,
             "type": "static",
             "breakable": true,
             "friction": 0.5,
@@ -96,6 +98,7 @@
             }
         },
         {
+            "id": 3,
             "type": "goal",
             "breakable": false,
             "friction": 0,
@@ -110,6 +113,7 @@
             }
         },
         {
+            "id": 4,
             "type": "spawn",
             "breakable": false,
             "friction": 0,
