@@ -145,8 +145,8 @@ pub const PaintUniforms = extern struct {
 // GPU Batch Renderer State (deferred rendering)
 // ============================================================
 
-const MAX_SPRITE_VERTICES = 64 * 1024; // 64K vertices = ~10K sprites
-const MAX_COLOR_VERTICES = 64 * 1024;
+const INITIAL_SPRITE_VERTEX_CAPACITY = 64 * 1024; // 64K vertices = ~10K sprites
+const INITIAL_COLOR_VERTEX_CAPACITY = 64 * 1024;
 const MAX_BATCH_RECORDS = 8192;
 const MAX_PENDING_DESTROYS = 256;
 
@@ -234,9 +234,11 @@ const GpuState = struct {
     swapchain_h: f32 = 0,
 
     // CPU-side vertex arrays
-    sprite_vertices: [MAX_SPRITE_VERTICES]SpriteVertex = undefined,
+    sprite_vertices: []SpriteVertex,
+    sprite_vertex_capacity: u32,
     sprite_vertex_count: u32 = 0,
-    color_vertices: [MAX_COLOR_VERTICES]ColorVertex = undefined,
+    color_vertices: []ColorVertex,
+    color_vertex_capacity: u32,
     color_vertex_count: u32 = 0,
 
     // Deferred batch records
@@ -520,6 +522,22 @@ fn createOffscreenTexture(device: *c.SDL_GPUDevice, w: u32, h: u32, swapchain_fo
     return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
 }
 
+fn createVertexGpuBuffer(device: *c.SDL_GPUDevice, comptime T: type, capacity: u32) !*c.SDL_GPUBuffer {
+    return c.SDL_CreateGPUBuffer(device, &c.SDL_GPUBufferCreateInfo{
+        .usage = c.SDL_GPU_BUFFERUSAGE_VERTEX,
+        .size = capacity * @sizeOf(T),
+        .props = 0,
+    }) orelse return error.CreateBufferFailed;
+}
+
+fn createVertexTransferBuffer(device: *c.SDL_GPUDevice, comptime T: type, capacity: u32) !*c.SDL_GPUTransferBuffer {
+    return c.SDL_CreateGPUTransferBuffer(device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = capacity * @sizeOf(T),
+        .props = 0,
+    }) orelse return error.CreateBufferFailed;
+}
+
 fn uploadFullscreenQuad(device: *c.SDL_GPUDevice, buffer: *c.SDL_GPUBuffer) void {
     // Fullscreen quad: two triangles covering NDC [-1,1] with UV [0,1]
     const vertices = [6]FullscreenVertex{
@@ -679,31 +697,14 @@ pub fn createRenderer(window: *sdl.Window) !void {
     };
     const gpu_sampler = c.SDL_CreateGPUSampler(device, &sampler_info) orelse return error.CreateSamplerFailed;
 
-    // Pre-allocate GPU vertex buffers
-    const sprite_vb = c.SDL_CreateGPUBuffer(device, &c.SDL_GPUBufferCreateInfo{
-        .usage = c.SDL_GPU_BUFFERUSAGE_VERTEX,
-        .size = MAX_SPRITE_VERTICES * @sizeOf(SpriteVertex),
-        .props = 0,
-    }) orelse return error.CreateBufferFailed;
+    const sprite_vertices = try mem_allocator.alloc(SpriteVertex, INITIAL_SPRITE_VERTEX_CAPACITY);
+    const color_vertices = try mem_allocator.alloc(ColorVertex, INITIAL_COLOR_VERTEX_CAPACITY);
 
-    const color_vb = c.SDL_CreateGPUBuffer(device, &c.SDL_GPUBufferCreateInfo{
-        .usage = c.SDL_GPU_BUFFERUSAGE_VERTEX,
-        .size = MAX_COLOR_VERTICES * @sizeOf(ColorVertex),
-        .props = 0,
-    }) orelse return error.CreateBufferFailed;
+    const sprite_vb = try createVertexGpuBuffer(device, SpriteVertex, INITIAL_SPRITE_VERTEX_CAPACITY);
+    const color_vb = try createVertexGpuBuffer(device, ColorVertex, INITIAL_COLOR_VERTEX_CAPACITY);
 
-    // Pre-allocate transfer buffers (reused each frame)
-    const sprite_tb = c.SDL_CreateGPUTransferBuffer(device, &c.SDL_GPUTransferBufferCreateInfo{
-        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = MAX_SPRITE_VERTICES * @sizeOf(SpriteVertex),
-        .props = 0,
-    }) orelse return error.CreateBufferFailed;
-
-    const color_tb = c.SDL_CreateGPUTransferBuffer(device, &c.SDL_GPUTransferBufferCreateInfo{
-        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = MAX_COLOR_VERTICES * @sizeOf(ColorVertex),
-        .props = 0,
-    }) orelse return error.CreateBufferFailed;
+    const sprite_tb = try createVertexTransferBuffer(device, SpriteVertex, INITIAL_SPRITE_VERTEX_CAPACITY);
+    const color_tb = try createVertexTransferBuffer(device, ColorVertex, INITIAL_COLOR_VERTEX_CAPACITY);
 
     // CRT pipeline
     const crt_pipe = try createPipeline(device, swapchain_format, .{
@@ -816,6 +817,10 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .color_gpu_buffer = color_vb,
         .sprite_transfer_buffer = sprite_tb,
         .color_transfer_buffer = color_tb,
+        .sprite_vertices = sprite_vertices,
+        .sprite_vertex_capacity = INITIAL_SPRITE_VERTEX_CAPACITY,
+        .color_vertices = color_vertices,
+        .color_vertex_capacity = INITIAL_COLOR_VERTEX_CAPACITY,
         .swapchain_format = swapchain_format,
     };
 
@@ -837,6 +842,8 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUTransferBuffer(g.device, g.color_transfer_buffer);
         c.SDL_ReleaseGPUBuffer(g.device, g.sprite_gpu_buffer);
         c.SDL_ReleaseGPUBuffer(g.device, g.color_gpu_buffer);
+        mem_allocator.free(g.sprite_vertices);
+        mem_allocator.free(g.color_vertices);
         c.SDL_ReleaseGPUSampler(g.device, g.sampler);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.sprite_alpha_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.sprite_additive_pipeline);
@@ -919,6 +926,62 @@ fn ensureColorPipeline(g: *GpuState, pipeline_type: PipelineType) void {
         g.current_texture = null;
         g.color_batch_start = g.color_vertex_count;
     }
+}
+
+fn nextVertexCapacity(currentCapacity: u32, neededCapacity: u32) u32 {
+    var newCapacity = currentCapacity;
+    while (newCapacity < neededCapacity) {
+        newCapacity *= 2;
+    }
+    return newCapacity;
+}
+
+fn growSpriteVertexCapacity(g: *GpuState, neededCapacity: u32) !void {
+    if (neededCapacity <= g.sprite_vertex_capacity) return;
+
+    const newCapacity = nextVertexCapacity(g.sprite_vertex_capacity, neededCapacity);
+    const newGpuBuffer = try createVertexGpuBuffer(g.device, SpriteVertex, newCapacity);
+    errdefer c.SDL_ReleaseGPUBuffer(g.device, newGpuBuffer);
+
+    const newTransferBuffer = try createVertexTransferBuffer(g.device, SpriteVertex, newCapacity);
+    errdefer c.SDL_ReleaseGPUTransferBuffer(g.device, newTransferBuffer);
+
+    const newVertices = try mem_allocator.realloc(g.sprite_vertices, newCapacity);
+
+    _ = c.SDL_WaitForGPUIdle(g.device);
+    c.SDL_ReleaseGPUBuffer(g.device, g.sprite_gpu_buffer);
+    c.SDL_ReleaseGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
+
+    g.sprite_vertices = newVertices;
+    g.sprite_vertex_capacity = newCapacity;
+    g.sprite_gpu_buffer = newGpuBuffer;
+    g.sprite_transfer_buffer = newTransferBuffer;
+
+    std.log.info("gpu: grew sprite vertex buffer to {d} vertices", .{newCapacity});
+}
+
+fn growColorVertexCapacity(g: *GpuState, neededCapacity: u32) !void {
+    if (neededCapacity <= g.color_vertex_capacity) return;
+
+    const newCapacity = nextVertexCapacity(g.color_vertex_capacity, neededCapacity);
+    const newGpuBuffer = try createVertexGpuBuffer(g.device, ColorVertex, newCapacity);
+    errdefer c.SDL_ReleaseGPUBuffer(g.device, newGpuBuffer);
+
+    const newTransferBuffer = try createVertexTransferBuffer(g.device, ColorVertex, newCapacity);
+    errdefer c.SDL_ReleaseGPUTransferBuffer(g.device, newTransferBuffer);
+
+    const newVertices = try mem_allocator.realloc(g.color_vertices, newCapacity);
+
+    _ = c.SDL_WaitForGPUIdle(g.device);
+    c.SDL_ReleaseGPUBuffer(g.device, g.color_gpu_buffer);
+    c.SDL_ReleaseGPUTransferBuffer(g.device, g.color_transfer_buffer);
+
+    g.color_vertices = newVertices;
+    g.color_vertex_capacity = newCapacity;
+    g.color_gpu_buffer = newGpuBuffer;
+    g.color_transfer_buffer = newTransferBuffer;
+
+    std.log.info("gpu: grew color vertex buffer to {d} vertices", .{newCapacity});
 }
 
 fn setGpuViewport(pass: *c.SDL_GPURenderPass, vp_x: f32, vp_y: f32, vp_w: f32, vp_h: f32) void {
@@ -1028,7 +1091,7 @@ fn uploadVertexData(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
     if (g.sprite_vertex_count > 0) {
         if (c.SDL_MapGPUTransferBuffer(g.device, g.sprite_transfer_buffer, true)) |mapped| {
             const sprite_data_size = g.sprite_vertex_count * @sizeOf(SpriteVertex);
-            const src_bytes: [*]const u8 = @ptrCast(&g.sprite_vertices);
+            const src_bytes: [*]const u8 = @ptrCast(g.sprite_vertices.ptr);
             const dst_bytes: [*]u8 = @ptrCast(mapped);
             @memcpy(dst_bytes[0..sprite_data_size], src_bytes[0..sprite_data_size]);
             c.SDL_UnmapGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
@@ -1038,7 +1101,7 @@ fn uploadVertexData(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
     if (g.color_vertex_count > 0) {
         if (c.SDL_MapGPUTransferBuffer(g.device, g.color_transfer_buffer, true)) |mapped| {
             const color_data_size = g.color_vertex_count * @sizeOf(ColorVertex);
-            const src_bytes: [*]const u8 = @ptrCast(&g.color_vertices);
+            const src_bytes: [*]const u8 = @ptrCast(g.color_vertices.ptr);
             const dst_bytes: [*]u8 = @ptrCast(mapped);
             @memcpy(dst_bytes[0..color_data_size], src_bytes[0..color_data_size]);
             c.SDL_UnmapGPUTransferBuffer(g.device, g.color_transfer_buffer);
@@ -1611,12 +1674,10 @@ pub fn renderCopyEx(
         };
     }
 
-    // Check if batch is full
-    if (g.sprite_vertex_count + 6 > MAX_SPRITE_VERTICES) {
-        // This shouldn't happen with 64K vertices. Log and skip.
-        std.debug.print("Warning: sprite vertex buffer full, skipping draw\n", .{});
+    growSpriteVertexCapacity(g, g.sprite_vertex_count + 6) catch |err| {
+        std.log.warn("renderCopyEx: failed to grow sprite vertex buffer: {}", .{err});
         return;
-    }
+    };
 
     // Emit two triangles (0,1,2) (0,2,3)
     const idx = g.sprite_vertex_count;
@@ -1641,10 +1702,10 @@ pub fn renderDrawLine(x1: i32, y1: i32, x2: i32, y2: i32) !void {
     const g = getGpu();
     ensureColorPipeline(g, .colored_lines);
 
-    if (g.color_vertex_count + 2 > MAX_COLOR_VERTICES) {
-        std.debug.print("Warning: color vertex buffer full, skipping draw\n", .{});
+    growColorVertexCapacity(g, g.color_vertex_count + 2) catch |err| {
+        std.log.warn("renderDrawLine: failed to grow color vertex buffer: {}", .{err});
         return;
-    }
+    };
 
     const dc = g.draw_color;
     const vc = PackedColor{ .r = dc.r, .g = dc.g, .b = dc.b, .a = dc.a };
@@ -1667,10 +1728,10 @@ pub fn renderFillRect(rect: sdl.Rect) !void {
     const g = getGpu();
     ensureColorPipeline(g, .colored_triangles);
 
-    if (g.color_vertex_count + 6 > MAX_COLOR_VERTICES) {
-        std.debug.print("Warning: color vertex buffer full, skipping draw\n", .{});
+    growColorVertexCapacity(g, g.color_vertex_count + 6) catch |err| {
+        std.log.warn("renderFillRect: failed to grow color vertex buffer: {}", .{err});
         return;
-    }
+    };
 
     const dc = g.draw_color;
     const vc = PackedColor{ .r = dc.r, .g = dc.g, .b = dc.b, .a = dc.a };
