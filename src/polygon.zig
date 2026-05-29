@@ -13,6 +13,7 @@ const vec = @import("vector.zig");
 
 const allocator = @import("allocator.zig").allocator;
 const PI = std.math.pi;
+const boundarySimplificationAreaFactor: f32 = 0.01;
 
 var triangleCache = std.StringHashMap([][3]IVec2).init(allocator);
 var triangleChunkCache = std.StringHashMap([]TriangleChunk).init(allocator);
@@ -379,7 +380,7 @@ fn traceBoundaryLoops(
         if (!closed) continue;
         if (vertices.items.len < 3) continue;
 
-        const simplified = try simplifyBoundaryLoop(vertices.items);
+        const simplified = try simplifyBoundaryLoop(vertices.items, rect);
         errdefer allocator.free(simplified);
 
         if (simplified.len < 3) {
@@ -482,7 +483,7 @@ fn isSolidPixelInRect(pixels: [*]const u8, width: usize, pitch: usize, threshold
     return alpha >= threshold;
 }
 
-fn simplifyBoundaryLoop(vertices: []const IVec2) ![]IVec2 {
+fn simplifyBoundaryLoop(vertices: []const IVec2, rect: vec.IRect) ![]IVec2 {
     const noDuplicates = try removeDuplicateVertices(vertices);
     defer allocator.free(noDuplicates);
 
@@ -490,7 +491,26 @@ fn simplifyBoundaryLoop(vertices: []const IVec2) ![]IVec2 {
         return allocator.alloc(IVec2, 0);
     }
 
-    return removeCollinearVertices(noDuplicates);
+    const simplified = try visvalingam(noDuplicates, simplificationAreaForRect(rect));
+    defer allocator.free(simplified);
+    if (simplified.len < 3) {
+        return allocator.alloc(IVec2, 0);
+    }
+
+    const simplifiedNoDuplicates = try removeDuplicateVertices(simplified);
+    defer allocator.free(simplifiedNoDuplicates);
+    if (simplifiedNoDuplicates.len < 3) {
+        return allocator.alloc(IVec2, 0);
+    }
+
+    return removeCollinearVertices(simplifiedNoDuplicates);
+}
+
+fn simplificationAreaForRect(rect: vec.IRect) f32 {
+    const width = @max(1, rect.maxX - rect.minX);
+    const height = @max(1, rect.maxY - rect.minY);
+    const area = @as(i64, width) * @as(i64, height);
+    return boundarySimplificationAreaFactor * @as(f32, @floatFromInt(area));
 }
 
 fn removeCollinearVertices(vertices: []const IVec2) ![]IVec2 {
