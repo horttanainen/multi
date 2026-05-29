@@ -105,14 +105,14 @@ pub fn clearCache() void {
         allocator.free(entry.key_ptr.*);
         allocator.free(entry.value_ptr.*);
     }
-    triangleCache.clearRetainingCapacity();
+    triangleCache.clearAndFree();
 
     var chunkIter = triangleChunkCache.iterator();
     while (chunkIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         freeTriangleChunks(entry.value_ptr.*);
     }
-    triangleChunkCache.clearRetainingCapacity();
+    triangleChunkCache.clearAndFree();
 }
 
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
