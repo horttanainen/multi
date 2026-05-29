@@ -54,12 +54,24 @@ const Sprite = entity.Sprite;
 //TODO: add visible grid that can be turned on and off
 //TODO: add option to snap to the grid
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
-//TODO: make it possible to stretch entities
+//TODO: add option to draw a rectangle which becames an entity in the game with some magenta prefill
+//TODO: add option to change texture of entity
+//TODO: add option to fill entity with texture tiling
+//TODO: add option to fill entity with stretched texture
+//TODO: make it possible to stretch existing entities
 //TODO: allow for selecting if entity is breakable or not
 //TODO: allow for setting the scale of entity
 //TODO: allow for copying existing entities
+//TODO: allow for creating chain connected objects
+//TODO: allow for connecting dynamic objects with a joint (e.g a fellable tree that is connected to ground with a joint)
 
 //Small improvements
+//TODO: make blood droplets much smaller and realistic.
+//TODO: blood stains should be uneven not perfect circles
+//TODO: explosion holes should be uneven not perfect circles
+//TODO: explosions should char the hole and terrain surface around them
+//TODO: add bones sticking out of giblets
+//TODO: find out which giblets can not be made into box2d objects and fix them
 //TODO: make settings.zig use data.zig to read the json
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
