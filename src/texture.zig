@@ -6,6 +6,13 @@ const c = sdl.c;
 const Atlas = atlas.Atlas;
 const ATLAS_SIZE = atlas.ATLAS_SIZE;
 
+const PendingTextureUpload = struct {
+    transfer_buf: *c.SDL_GPUTransferBuffer,
+    fence: *c.SDL_GPUFence,
+};
+
+var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .{};
+
 pub const Texture = struct {
     atlas_x: u32 = 0,
     atlas_y: u32 = 0,
@@ -101,6 +108,60 @@ pub fn destroyTexture(texture: *Texture) void {
     gpu.getAllocator().destroy(texture);
 }
 
+fn releasePendingUpload(device: *c.SDL_GPUDevice, upload: PendingTextureUpload) void {
+    c.SDL_ReleaseGPUFence(device, upload.fence);
+    c.SDL_ReleaseGPUTransferBuffer(device, upload.transfer_buf);
+}
+
+fn cleanupPendingUploads(device: *c.SDL_GPUDevice, wait: bool) void {
+    var i: usize = 0;
+    while (i < pendingTextureUploads.items.len) {
+        const upload = pendingTextureUploads.items[i];
+
+        if (wait) {
+            var fence = upload.fence;
+            _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&fence), 1);
+        } else if (!c.SDL_QueryGPUFence(device, upload.fence)) {
+            i += 1;
+            continue;
+        }
+
+        releasePendingUpload(device, upload);
+        _ = pendingTextureUploads.swapRemove(i);
+    }
+}
+
+pub fn cleanupCompletedUploads() void {
+    cleanupPendingUploads(gpu.getDevice(), false);
+}
+
+pub fn flushPendingUploads() void {
+    cleanupPendingUploads(gpu.getDevice(), true);
+    pendingTextureUploads.deinit(gpu.getAllocator());
+}
+
+fn submitUploadAndTrackBuffer(device: *c.SDL_GPUDevice, cmd: *c.SDL_GPUCommandBuffer, transfer_buf: *c.SDL_GPUTransferBuffer) void {
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd) orelse {
+        std.log.warn("submitUploadAndTrackBuffer: failed to submit texture upload command buffer", .{});
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+
+    pendingTextureUploads.append(gpu.getAllocator(), .{
+        .transfer_buf = transfer_buf,
+        .fence = fence,
+    }) catch |err| {
+        std.log.warn("submitUploadAndTrackBuffer: failed to track texture upload with {}", .{err});
+        var fenceToWait = fence;
+        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&fenceToWait), 1);
+        c.SDL_ReleaseGPUFence(device, fence);
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+
+    cleanupPendingUploads(device, false);
+}
+
 /// Create a new Texture wrapper that shares the same atlas region.
 pub fn cloneTexture(source: *Texture) !*Texture {
     const texture = try gpu.getAllocator().create(Texture);
@@ -184,6 +245,11 @@ pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl
         return;
     }
 
+    if (surface.format == c.SDL_PIXELFORMAT_BGRA32) {
+        uploadTextureRegionFromBgraSurface(texture, surface, rect);
+        return;
+    }
+
     const device = gpu.getDevice();
 
     const sub_surface = c.SDL_CreateSurface(rect.w, rect.h, surface.format);
@@ -208,6 +274,83 @@ pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl
     }
 
     uploadTextureRegionImmediate(device, texture.standalone_gpu_texture.?, rgba_surface, @intCast(rect.x), @intCast(rect.y));
+}
+
+fn uploadTextureRegionFromBgraSurface(texture: *Texture, surface: *sdl.Surface, rect: sdl.Rect) void {
+    const device = gpu.getDevice();
+    const w: u32 = @intCast(rect.w);
+    const h: u32 = @intCast(rect.h);
+    const data_size: u32 = w * h * 4;
+
+    const transfer_info = c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = data_size,
+        .props = 0,
+    };
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &transfer_info) orelse return;
+
+    const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+    const sourcePixels: [*]const u8 = @ptrCast(surface.pixels orelse {
+        c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    });
+    const sourcePitch: usize = @intCast(surface.pitch);
+    const dst: [*]u8 = @ptrCast(mapped);
+
+    const rectX: usize = @intCast(rect.x);
+    const rectY: usize = @intCast(rect.y);
+    const width: usize = @intCast(w);
+    const height: usize = @intCast(h);
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        const sourceRow = (rectY + y) * sourcePitch + rectX * 4;
+        const dstRow = y * width * 4;
+
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const srcIndex = sourceRow + x * 4;
+            const dstIndex = dstRow + x * 4;
+            dst[dstIndex + 0] = sourcePixels[srcIndex + 2];
+            dst[dstIndex + 1] = sourcePixels[srcIndex + 1];
+            dst[dstIndex + 2] = sourcePixels[srcIndex + 0];
+            dst[dstIndex + 3] = sourcePixels[srcIndex + 3];
+        }
+    }
+    c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+
+    const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+        return;
+    };
+
+    const src = c.SDL_GPUTextureTransferInfo{
+        .transfer_buffer = transfer_buf,
+        .offset = 0,
+        .pixels_per_row = w,
+        .rows_per_layer = h,
+    };
+    const dst_region = c.SDL_GPUTextureRegion{
+        .texture = texture.gpuTexture(),
+        .mip_level = 0,
+        .layer = 0,
+        .x = if (texture.is_atlas) texture.atlas_x + @as(u32, @intCast(rect.x)) else @intCast(rect.x),
+        .y = if (texture.is_atlas) texture.atlas_y + @as(u32, @intCast(rect.y)) else @intCast(rect.y),
+        .z = 0,
+        .w = w,
+        .h = h,
+        .d = 1,
+    };
+    c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
+    c.SDL_EndGPUCopyPass(copy_pass);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
 /// Upload surface pixel data to a sub-region of the atlas texture.
@@ -263,12 +406,7 @@ fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-    if (fence) |f| {
-        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
-        c.SDL_ReleaseGPUFence(device, f);
-    }
-    c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
 fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32) void {
@@ -325,12 +463,7 @@ fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GP
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-    if (fence) |f| {
-        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
-        c.SDL_ReleaseGPUFence(device, f);
-    }
-    c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
 /// Upload surface pixel data to a standalone GPU texture (full replacement).
@@ -388,12 +521,7 @@ fn uploadTextureImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTextu
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-    if (fence) |f| {
-        _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&f), 1);
-        c.SDL_ReleaseGPUFence(device, f);
-    }
-    c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
 pub fn saveAtlasToDisk(path: [*:0]const u8) void {

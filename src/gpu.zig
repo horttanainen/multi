@@ -829,6 +829,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
 
 pub fn destroyRenderer() void {
     if (gpu) |g| {
+        texture.flushPendingUploads();
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
         c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
@@ -1538,6 +1539,7 @@ pub fn loadLutFromIdentity() !void {
 
 fn submitFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
     _ = c.SDL_SubmitGPUCommandBuffer(cmd);
+    texture.cleanupCompletedUploads();
 
     var di: u32 = 0;
     while (di < g.pending_destroy_count) : (di += 1) {

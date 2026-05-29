@@ -21,6 +21,7 @@ const weapon = @import("weapon.zig");
 const gpu = @import("gpu.zig");
 const conv = @import("conversion.zig");
 const fs = @import("fs.zig");
+const c = sdl.c;
 
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
@@ -172,10 +173,153 @@ fn cleanupSpawnedBodies(bodyIds: []const box2d.c.b2BodyId) void {
     }
 }
 
+fn staticShapeDef(serializedEntity: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) box2d.c.b2ShapeDef {
+    var staticDef = shapeDef;
+    staticDef.filter.categoryBits = if (serializedEntity.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
+    staticDef.filter.maskBits = if (serializedEntity.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
+    return staticDef;
+}
+
+fn shouldTileStaticSurface(surface: *sdl.Surface) bool {
+    return surface.w > entity.terrainColliderChunkSizeP or surface.h > entity.terrainColliderChunkSizeP;
+}
+
+fn surfaceRectHasSolidPixels(surface: *sdl.Surface, rect: sdl.Rect) bool {
+    const pixels: [*]const u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const bytesPerPixel: usize = 4;
+    const threshold: u8 = 150;
+
+    const minX: usize = @intCast(rect.x);
+    const maxX: usize = @intCast(rect.x + rect.w);
+    const minY: usize = @intCast(rect.y);
+    const maxY: usize = @intCast(rect.y + rect.h);
+
+    var y = minY;
+    while (y < maxY) : (y += 1) {
+        var x = minX;
+        while (x < maxX) : (x += 1) {
+            const pixelIndex = y * pitch + x * bytesPerPixel;
+            if (pixels[pixelIndex + 3] > threshold) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn createSurfaceRegion(sourceSurface: *sdl.Surface, rect: sdl.Rect) !*sdl.Surface {
+    const tileSurface = c.SDL_CreateSurface(rect.w, rect.h, sourceSurface.format) orelse return error.CreateSurfaceFailed;
+    errdefer sdl.destroySurface(tileSurface);
+
+    try sdl.blitSurface(sourceSurface, &rect, tileSurface, null);
+    return tileSurface;
+}
+
+fn tileCenterPosition(basePos: vec.IVec2, sourceSurface: *sdl.Surface, rect: sdl.Rect, scale: vec.Vec2) vec.IVec2 {
+    const tileCenterX = @as(f32, @floatFromInt(rect.x)) + @as(f32, @floatFromInt(rect.w)) * 0.5;
+    const tileCenterY = @as(f32, @floatFromInt(rect.y)) + @as(f32, @floatFromInt(rect.h)) * 0.5;
+    const sourceCenterX = @as(f32, @floatFromInt(sourceSurface.w)) * 0.5;
+    const sourceCenterY = @as(f32, @floatFromInt(sourceSurface.h)) * 0.5;
+
+    return .{
+        .x = basePos.x + @as(i32, @intFromFloat(@round((tileCenterX - sourceCenterX) * scale.x))),
+        .y = basePos.y + @as(i32, @intFromFloat(@round((tileCenterY - sourceCenterY) * scale.y))),
+    };
+}
+
+fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
+    const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    errdefer sprite.cleanupLater(spriteUuid);
+
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
+    errdefer cleanupSpawnedBodies(bodyIds.items);
+    errdefer bodyIds.deinit();
+
+    const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(e.pos));
+    const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
+        if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+            std.log.warn("spawnSingleStaticEntity: static entity {d} produced no collider triangles", .{e.id});
+            sprite.cleanupLater(spriteUuid);
+            return bodyIds.toOwnedSlice();
+        }
+        return err;
+    };
+
+    try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+    return bodyIds.toOwnedSlice();
+}
+
+fn spawnTiledStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef, sourceSurface: *sdl.Surface) ![]box2d.c.b2BodyId {
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
+    errdefer cleanupSpawnedBodies(bodyIds.items);
+    errdefer bodyIds.deinit();
+
+    const width = sourceSurface.w;
+    const height = sourceSurface.h;
+    const tileSize = entity.terrainColliderChunkSizeP;
+
+    var y: i32 = 0;
+    while (y < height) : (y += tileSize) {
+        var x: i32 = 0;
+        while (x < width) : (x += tileSize) {
+            const rect = sdl.Rect{
+                .x = x,
+                .y = y,
+                .w = @min(tileSize, width - x),
+                .h = @min(tileSize, height - y),
+            };
+            if (!surfaceRectHasSolidPixels(sourceSurface, rect)) continue;
+
+            const tileSurface = try createSurfaceRegion(sourceSurface, rect);
+            const tileSpriteUuid = try sprite.createFromOwnedSurface(e.imgPath, tileSurface, e.scale, vec.izero);
+
+            const tilePos = tileCenterPosition(e.pos, sourceSurface, rect, e.scale);
+            const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(tilePos));
+            const spawnedEntity = entity.createFromImg(tileSpriteUuid, shapeDef, bodyDef, "static") catch |err| {
+                sprite.cleanupLater(tileSpriteUuid);
+                if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                    continue;
+                }
+                return err;
+            };
+
+            try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+        }
+    }
+
+    return bodyIds.toOwnedSlice();
+}
+
+fn spawnStaticSerializableEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
+    const staticDef = staticShapeDef(e, shapeDef);
+
+    const imgPathZ = try allocator.dupeZ(u8, e.imgPath);
+    defer allocator.free(imgPathZ);
+    const loadedSurface = try sdl.image.load(imgPathZ);
+    defer sdl.destroySurface(loadedSurface);
+
+    if (!shouldTileStaticSurface(loadedSurface)) {
+        return spawnSingleStaticEntity(e, staticDef);
+    }
+
+    const sourceSurface = c.SDL_ConvertSurface(loadedSurface, c.SDL_PIXELFORMAT_BGRA32);
+    if (sourceSurface == null) return error.ConvertSurfaceFailed;
+    defer c.SDL_DestroySurface(sourceSurface);
+
+    return spawnTiledStaticEntity(e, staticDef, sourceSurface);
+}
+
 pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.material.friction = e.friction;
     shapeDef.enableSensorEvents = true;
+
+    if (std.mem.eql(u8, e.type, "static")) {
+        return spawnStaticSerializableEntity(e, shapeDef);
+    }
+
     const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
     errdefer sprite.cleanupLater(spriteUuid);
 
@@ -190,25 +334,6 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
         shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
         const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
-        try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
-        return bodyIds.toOwnedSlice();
-    }
-
-    if (std.mem.eql(u8, e.type, "static")) {
-        const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
-        const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
-        shapeDef.filter.categoryBits = categoryBits;
-        shapeDef.filter.maskBits = maskBits;
-
-        const bodyDef = box2d.createStaticBodyDef(pos);
-        const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
-            if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-                std.log.warn("spawnSerializableEntity: static entity {d} produced no collider triangles", .{e.id});
-                sprite.cleanupLater(spriteUuid);
-                return bodyIds.toOwnedSlice();
-            }
-            return err;
-        };
         try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
         return bodyIds.toOwnedSlice();
     }

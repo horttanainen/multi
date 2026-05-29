@@ -56,6 +56,44 @@ const CachedTexInfo = struct {
 };
 var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
 
+fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    const spriteUuid = uuid.generate();
+
+    const imgPath = try allocator.dupe(u8, imagePath);
+    errdefer allocator.free(imgPath);
+
+    const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
+    const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
+
+    var size: sdl.Point = undefined;
+    try tex.queryTexture(texture, &size.x, &size.y);
+
+    size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
+    size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
+    const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
+
+    const sprite = Sprite{
+        .surface = surface,
+        .imgPath = imgPath,
+        .texture = texture,
+        .scale = scale,
+        .offset = offset,
+        .anchorPointLeft = anchorPointLeft,
+        .anchorPointRight = anchorPointRight,
+        .sizeM = .{
+            .x = sizeM.x,
+            .y = sizeM.y,
+        },
+        .sizeP = .{
+            .x = size.x,
+            .y = size.y,
+        },
+    };
+
+    try sprites.putLocking(spriteUuid, sprite);
+    return spriteUuid;
+}
+
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
     // Calculate top-left corner from center position
     const halfW = @divTrunc(sprite.sizeP.x, 2);
@@ -142,18 +180,10 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 }
 
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    const spriteUuid = uuid.generate();
-
-    const imgPath = try allocator.dupe(u8, imagePath);
-    errdefer allocator.free(imgPath);
-
     const imgPathZ = try allocator.dupeZ(u8, imagePath);
     defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
-
-    const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
-    const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
 
     // Check texture cache - share atlas region for sprites with same image
     const texture = if (textureCache.get(imagePath)) |cached| blk: {
@@ -169,7 +199,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
         break :blk new_tex;
     } else blk: {
         const new_tex = try tex.addToAtlas(surface);
-        const cacheKey = allocator.dupe(u8, imgPath) catch break :blk new_tex;
+        const cacheKey = allocator.dupe(u8, imagePath) catch break :blk new_tex;
         textureCache.put(cacheKey, .{
             .atlas_x = new_tex.atlas_x,
             .atlas_y = new_tex.atlas_y,
@@ -182,34 +212,16 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     };
     errdefer tex.destroyTexture(texture);
 
-    var size: sdl.Point = undefined;
-    try tex.queryTexture(texture, &size.x, &size.y);
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset);
+}
 
-    size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
-    size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
-    const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
+pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    errdefer sdl.destroySurface(surface);
 
-    const sprite = Sprite{
-        .surface = surface,
-        .imgPath = imgPath,
-        .texture = texture,
-        .scale = scale,
-        .offset = offset,
-        .anchorPointLeft = anchorPointLeft,
-        .anchorPointRight = anchorPointRight,
-        .sizeM = .{
-            .x = sizeM.x,
-            .y = sizeM.y,
-        },
-        .sizeP = .{
-            .x = size.x,
-            .y = size.y,
-        },
-    };
+    const texture = try tex.addToAtlas(surface);
+    errdefer tex.destroyTexture(texture);
 
-    try sprites.putLocking(spriteUuid, sprite);
-
-    return spriteUuid;
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset);
 }
 
 pub fn cleanup(sprite: Sprite) void {
