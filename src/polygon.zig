@@ -18,6 +18,18 @@ var triangleCache = std.StringHashMap([][3]IVec2).init(allocator);
 
 pub const PolygonError = error{CouldNotCreateTriangle};
 
+const BoundaryEdge = struct {
+    start: IVec2,
+    end: IVec2,
+    used: bool = false,
+};
+
+const BoundaryLoop = struct {
+    vertices: []IVec2,
+    isHole: bool,
+    holePoint: Vec2,
+};
+
 fn spriteTriangleCacheKey(s: sprite.Sprite) ![]const u8 {
     const scaleXBits: u32 = @bitCast(s.scale.x);
     const scaleYBits: u32 = @bitCast(s.scale.y);
@@ -69,6 +81,373 @@ pub fn clearCache() void {
 }
 
 pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
+    return triangulateMask(s) catch |err| {
+        std.log.warn("triangulate: full-mask triangulation failed for '{s}' with {}, falling back to largest component", .{ s.imgPath, err });
+        return triangulateLargestComponent(s);
+    };
+}
+
+pub fn triangulateMask(s: sprite.Sprite) ![][3]IVec2 {
+    const img = s.surface;
+    const surface = img.*;
+    const pixels: [*]const u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const threshold: u8 = 150;
+
+    var loops = try extractBoundaryLoops(pixels, width, height, pitch, threshold);
+    defer deinitBoundaryLoops(&loops);
+
+    if (loops.items.len == 0) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    var triangles = std.array_list.Managed([3]IVec2).init(allocator);
+    errdefer triangles.deinit();
+
+    for (loops.items) |outerLoop| {
+        if (outerLoop.isHole) continue;
+
+        var contours = std.array_list.Managed(triangle.PslgContour).init(allocator);
+        defer contours.deinit();
+        try contours.append(.{ .vertices = outerLoop.vertices });
+
+        var holes = std.array_list.Managed(Vec2).init(allocator);
+        defer holes.deinit();
+
+        for (loops.items) |holeLoop| {
+            if (!holeLoop.isHole) continue;
+            if (!pointInPolygon(holeLoop.holePoint, outerLoop.vertices)) continue;
+
+            try contours.append(.{ .vertices = holeLoop.vertices });
+            try holes.append(holeLoop.holePoint);
+        }
+
+        const componentTriangles = triangle.splitPslg(contours.items, holes.items) catch |err| {
+            std.log.warn("triangulateMask: failed to triangulate contour for '{s}' with {}", .{ s.imgPath, err });
+            continue;
+        };
+        defer allocator.free(componentTriangles);
+
+        for (componentTriangles) |componentTriangle| {
+            try triangles.append(componentTriangle);
+        }
+    }
+
+    if (triangles.items.len == 0) {
+        return PolygonError.CouldNotCreateTriangle;
+    }
+
+    const ownedTriangles = try triangles.toOwnedSlice();
+    scaleTriangles(ownedTriangles, s.scale);
+    return ownedTriangles;
+}
+
+fn extractBoundaryLoops(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8) !std.array_list.Managed(BoundaryLoop) {
+    var edges = std.array_list.Managed(BoundaryEdge).init(allocator);
+    defer edges.deinit();
+
+    var edgeStarts = std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)).init(allocator);
+    defer deinitEdgeStarts(&edgeStarts);
+
+    try buildBoundaryEdges(&edges, &edgeStarts, pixels, width, height, pitch, threshold);
+    return traceBoundaryLoops(&edges, &edgeStarts, pixels, width, height, pitch, threshold);
+}
+
+fn buildBoundaryEdges(
+    edges: *std.array_list.Managed(BoundaryEdge),
+    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    pixels: [*]const u8,
+    width: usize,
+    height: usize,
+    pitch: usize,
+    threshold: u8,
+) !void {
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const px: i32 = @intCast(x);
+            const py: i32 = @intCast(y);
+            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py)) continue;
+
+            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py - 1)) {
+                try appendBoundaryEdge(edges, edgeStarts, .{ .x = px, .y = py }, .{ .x = px + 1, .y = py });
+            }
+            if (!isSolidPixel(pixels, width, height, pitch, threshold, px + 1, py)) {
+                try appendBoundaryEdge(edges, edgeStarts, .{ .x = px + 1, .y = py }, .{ .x = px + 1, .y = py + 1 });
+            }
+            if (!isSolidPixel(pixels, width, height, pitch, threshold, px, py + 1)) {
+                try appendBoundaryEdge(edges, edgeStarts, .{ .x = px + 1, .y = py + 1 }, .{ .x = px, .y = py + 1 });
+            }
+            if (!isSolidPixel(pixels, width, height, pitch, threshold, px - 1, py)) {
+                try appendBoundaryEdge(edges, edgeStarts, .{ .x = px, .y = py + 1 }, .{ .x = px, .y = py });
+            }
+        }
+    }
+}
+
+fn appendBoundaryEdge(
+    edges: *std.array_list.Managed(BoundaryEdge),
+    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    start: IVec2,
+    end: IVec2,
+) !void {
+    const edgeIndex = edges.items.len;
+    try edges.append(.{ .start = start, .end = end });
+
+    const entry = try edgeStarts.getOrPut(start);
+    if (!entry.found_existing) {
+        entry.value_ptr.* = std.array_list.Managed(usize).init(allocator);
+    }
+    try entry.value_ptr.append(edgeIndex);
+}
+
+fn deinitEdgeStarts(edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize))) void {
+    for (edgeStarts.values()) |*indices| {
+        indices.deinit();
+    }
+    edgeStarts.deinit();
+}
+
+fn traceBoundaryLoops(
+    edges: *std.array_list.Managed(BoundaryEdge),
+    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    pixels: [*]const u8,
+    width: usize,
+    height: usize,
+    pitch: usize,
+    threshold: u8,
+) !std.array_list.Managed(BoundaryLoop) {
+    var loops = std.array_list.Managed(BoundaryLoop).init(allocator);
+    errdefer deinitBoundaryLoops(&loops);
+
+    for (0..edges.items.len) |firstEdgeIndex| {
+        if (edges.items[firstEdgeIndex].used) continue;
+
+        var vertices = std.array_list.Managed(IVec2).init(allocator);
+        defer vertices.deinit();
+
+        const startPoint = edges.items[firstEdgeIndex].start;
+        var edgeIndex = firstEdgeIndex;
+        var closed = false;
+
+        while (true) {
+            if (edges.items[edgeIndex].used) {
+                std.log.warn("traceBoundaryLoops: boundary edge was already used before loop closed", .{});
+                break;
+            }
+
+            edges.items[edgeIndex].used = true;
+            try vertices.append(edges.items[edgeIndex].start);
+
+            const endPoint = edges.items[edgeIndex].end;
+            if (vec.iequals(endPoint, startPoint)) {
+                closed = true;
+                break;
+            }
+
+            const maybeNextEdge = nextUnusedEdgeFrom(edgeStarts, edges, endPoint);
+            if (maybeNextEdge == null) {
+                std.log.warn("traceBoundaryLoops: open boundary at ({d},{d}), discarding loop", .{ endPoint.x, endPoint.y });
+                break;
+            }
+            edgeIndex = maybeNextEdge.?;
+        }
+
+        if (!closed) continue;
+        if (vertices.items.len < 3) continue;
+
+        const simplified = try simplifyBoundaryLoop(vertices.items);
+        errdefer allocator.free(simplified);
+
+        if (simplified.len < 3) {
+            allocator.free(simplified);
+            continue;
+        }
+
+        const area = signedArea(simplified);
+        if (area == 0) {
+            allocator.free(simplified);
+            continue;
+        }
+
+        const isHole = area < 0;
+        const holePoint = if (isHole)
+            findPointInLoop(simplified, pixels, width, height, pitch, threshold, false) orelse blk: {
+                std.log.warn("traceBoundaryLoops: could not find transparent pixel inside hole, using centroid", .{});
+                break :blk centroidPoint(simplified);
+            }
+        else
+            centroidPoint(simplified);
+
+        try loops.append(.{
+            .vertices = simplified,
+            .isHole = isHole,
+            .holePoint = holePoint,
+        });
+    }
+
+    return loops;
+}
+
+fn nextUnusedEdgeFrom(
+    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    edges: *std.array_list.Managed(BoundaryEdge),
+    point: IVec2,
+) ?usize {
+    const indices = edgeStarts.getPtr(point) orelse return null;
+    for (indices.items) |edgeIndex| {
+        if (!edges.items[edgeIndex].used) {
+            return edgeIndex;
+        }
+    }
+    return null;
+}
+
+fn deinitBoundaryLoops(loops: *std.array_list.Managed(BoundaryLoop)) void {
+    for (loops.items) |boundaryLoop| {
+        allocator.free(boundaryLoop.vertices);
+    }
+    loops.deinit();
+}
+
+fn isSolidPixel(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8, x: i32, y: i32) bool {
+    if (x < 0 or y < 0) return false;
+
+    const ux: usize = @intCast(x);
+    const uy: usize = @intCast(y);
+    if (ux >= width or uy >= height) return false;
+
+    const alpha = pixels[uy * pitch + ux * 4 + 3];
+    return alpha >= threshold;
+}
+
+fn simplifyBoundaryLoop(vertices: []const IVec2) ![]IVec2 {
+    const noDuplicates = try removeDuplicateVertices(vertices);
+    defer allocator.free(noDuplicates);
+
+    if (noDuplicates.len < 3) {
+        return allocator.alloc(IVec2, 0);
+    }
+
+    return removeCollinearVertices(noDuplicates);
+}
+
+fn removeCollinearVertices(vertices: []const IVec2) ![]IVec2 {
+    var compact = std.array_list.Managed(IVec2).init(allocator);
+    defer compact.deinit();
+
+    if (vertices.len <= 3) {
+        try compact.appendSlice(vertices);
+        return compact.toOwnedSlice();
+    }
+
+    for (vertices, 0..) |current, i| {
+        const prev = vertices[if (i == 0) vertices.len - 1 else i - 1];
+        const next = vertices[(i + 1) % vertices.len];
+
+        const dx1 = @as(i64, current.x) - @as(i64, prev.x);
+        const dy1 = @as(i64, current.y) - @as(i64, prev.y);
+        const dx2 = @as(i64, next.x) - @as(i64, current.x);
+        const dy2 = @as(i64, next.y) - @as(i64, current.y);
+        if (dx1 * dy2 == dy1 * dx2) continue;
+
+        try compact.append(current);
+    }
+
+    return compact.toOwnedSlice();
+}
+
+fn signedArea(vertices: []const IVec2) i64 {
+    var area: i64 = 0;
+    for (vertices, 0..) |current, i| {
+        const next = vertices[(i + 1) % vertices.len];
+        area += @as(i64, current.x) * @as(i64, next.y) - @as(i64, next.x) * @as(i64, current.y);
+    }
+    return area;
+}
+
+fn centroidPoint(vertices: []const IVec2) Vec2 {
+    var x: f32 = 0;
+    var y: f32 = 0;
+    for (vertices) |vertex| {
+        x += @floatFromInt(vertex.x);
+        y += @floatFromInt(vertex.y);
+    }
+
+    const len: f32 = @floatFromInt(vertices.len);
+    return .{ .x = x / len, .y = y / len };
+}
+
+fn findPointInLoop(
+    vertices: []const IVec2,
+    pixels: [*]const u8,
+    width: usize,
+    height: usize,
+    pitch: usize,
+    threshold: u8,
+    wantSolid: bool,
+) ?Vec2 {
+    var minX: i32 = vertices[0].x;
+    var maxX: i32 = vertices[0].x;
+    var minY: i32 = vertices[0].y;
+    var maxY: i32 = vertices[0].y;
+
+    for (vertices) |vertex| {
+        minX = @min(minX, vertex.x);
+        maxX = @max(maxX, vertex.x);
+        minY = @min(minY, vertex.y);
+        maxY = @max(maxY, vertex.y);
+    }
+
+    const widthI: i32 = @intCast(width);
+    const heightI: i32 = @intCast(height);
+    const startX = @max(0, minX);
+    const endX = @min(widthI, maxX);
+    const startY = @max(0, minY);
+    const endY = @min(heightI, maxY);
+
+    var y = startY;
+    while (y < endY) : (y += 1) {
+        var x = startX;
+        while (x < endX) : (x += 1) {
+            const point = Vec2{
+                .x = @as(f32, @floatFromInt(x)) + 0.5,
+                .y = @as(f32, @floatFromInt(y)) + 0.5,
+            };
+            if (!pointInPolygon(point, vertices)) continue;
+            if (isSolidPixel(pixels, width, height, pitch, threshold, x, y) != wantSolid) continue;
+            return point;
+        }
+    }
+
+    return null;
+}
+
+fn pointInPolygon(point: Vec2, vertices: []const IVec2) bool {
+    var inside = false;
+    var j = vertices.len - 1;
+    for (vertices, 0..) |vertex, i| {
+        const xi: f32 = @floatFromInt(vertex.x);
+        const yi: f32 = @floatFromInt(vertex.y);
+        const xj: f32 = @floatFromInt(vertices[j].x);
+        const yj: f32 = @floatFromInt(vertices[j].y);
+
+        if ((yi > point.y) != (yj > point.y)) {
+            const intersectX = (xj - xi) * (point.y - yi) / (yj - yi) + xi;
+            if (point.x < intersectX) {
+                inside = !inside;
+            }
+        }
+
+        j = i;
+    }
+    return inside;
+}
+
+fn triangulateLargestComponent(s: sprite.Sprite) ![][3]IVec2 {
     // std.debug.print("Surface pixel format enum: {any}\n", .{img.format});
 
     const img = s.surface;
@@ -129,7 +508,7 @@ pub fn triangulate(s: sprite.Sprite) ![][3]IVec2 {
     return triangles;
 }
 
-pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
+pub fn removeDuplicateVertices(vertices: []const IVec2) ![]IVec2 {
     var unique = std.array_list.Managed(IVec2).init(allocator);
     defer unique.deinit();
 
@@ -143,7 +522,7 @@ pub fn removeDuplicateVertices(vertices: []IVec2) ![]IVec2 {
     return unique.toOwnedSlice();
 }
 
-pub fn ensureCounterClockwise(vertices: []IVec2) ![]IVec2 {
+pub fn ensureCounterClockwise(vertices: []const IVec2) ![]IVec2 {
     if (isCounterClockwise(vertices)) {
         const copy = try allocator.alloc(IVec2, vertices.len);
         @memcpy(copy, vertices);
@@ -170,7 +549,7 @@ fn scaleTriangles(triangles: [][3]IVec2, scale: Vec2) void {
     }
 }
 
-fn isCounterClockwise(vertices: []IVec2) bool {
+fn isCounterClockwise(vertices: []const IVec2) bool {
     var sum: i64 = 0;
     const n = vertices.len;
     for (0..n) |i| {

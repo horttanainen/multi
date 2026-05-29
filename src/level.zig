@@ -195,34 +195,21 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
     }
 
     if (std.mem.eql(u8, e.type, "static")) {
-        const tiles = try sprite.splitIntoTiles(spriteUuid, 64);
-        defer allocator.free(tiles);
-
         const categoryBits = if (e.breakable) collision.CATEGORY_TERRAIN else collision.CATEGORY_UNBREAKABLE;
         const maskBits = if (e.breakable) collision.MASK_TERRAIN else collision.MASK_UNBREAKABLE;
+        shapeDef.filter.categoryBits = categoryBits;
+        shapeDef.filter.maskBits = maskBits;
 
-        for (tiles) |tile| {
-            const tilePos = vec.Vec2{
-                .x = pos.x + tile.offsetPos.x,
-                .y = pos.y + tile.offsetPos.y,
-            };
-            const bodyDef = box2d.createStaticBodyDef(tilePos);
-            shapeDef.filter.categoryBits = categoryBits;
-            shapeDef.filter.maskBits = maskBits;
-            const spawnedEntity = entity.createFromImg(tile.spriteUuid, shapeDef, bodyDef, "static") catch |err| {
-                if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-                    sprite.cleanupLater(tile.spriteUuid);
-                    continue;
-                }
-                return err;
-            };
-            try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
-        }
-
-        if (tiles.len > 1) {
-            sprite.cleanupLater(spriteUuid);
-        }
-
+        const bodyDef = box2d.createStaticBodyDef(pos);
+        const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
+            if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                std.log.warn("spawnSerializableEntity: static entity {d} produced no collider triangles", .{e.id});
+                sprite.cleanupLater(spriteUuid);
+                return bodyIds.toOwnedSlice();
+            }
+            return err;
+        };
+        try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
         return bodyIds.toOwnedSlice();
     }
 

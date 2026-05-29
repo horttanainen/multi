@@ -15,6 +15,7 @@ const std = @import("std");
 const vec = @import("vector.zig");
 
 const time = @import("time.zig");
+const config = @import("config.zig");
 
 const conv = @import("conversion.zig");
 const allocator = @import("allocator.zig").allocator;
@@ -92,6 +93,7 @@ pub fn createPolygonShape(bodyId: c.b2BodyId, triangles: []const [3]vec.IVec2, d
 
 fn createPolygons(triangles: []const [3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polygon {
     var polygons = std.array_list.Managed(c.b2Polygon).init(allocator);
+    var skippedDegenerateTriangles: usize = 0;
 
     for (triangles) |tri| {
         var triangle: [3]vec.IVec2 = undefined;
@@ -106,17 +108,17 @@ fn createPolygons(triangles: []const [3]vec.IVec2, dimP: vec.IVec2) ![]c.b2Polyg
         const hull = c.b2ComputeHull(&verts[0], 3);
 
         if (hull.count < 3 or !c.b2ValidateHull(&hull)) {
-            std.debug.print("box2d: skipping degenerate triangle ({d},{d}) ({d},{d}) ({d},{d})\n", .{
-                verts[0].x, verts[0].y,
-                verts[1].x, verts[1].y,
-                verts[2].x, verts[2].y,
-            });
+            skippedDegenerateTriangles += 1;
             continue;
         }
 
         const poly: c.b2Polygon = c.b2MakePolygon(&hull, 0.01);
 
         try polygons.append(poly);
+    }
+
+    if (config.debugLog and skippedDegenerateTriangles > 0) {
+        std.debug.print("box2d: skipped {d} degenerate collider triangles\n", .{skippedDegenerateTriangles});
     }
 
     return polygons.toOwnedSlice();
