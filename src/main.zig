@@ -156,6 +156,15 @@ const Sprite = entity.Sprite;
 //TODO: make it possible to tweak crt effect (own menu)
 //TODO: make it possible to turn crt effect off in the settings.
 
+fn perfNow() u64 {
+    return sdl.getPerformanceCounter();
+}
+
+fn perfElapsedUs(start: u64) u64 {
+    const elapsed = sdl.getPerformanceCounter() - start;
+    return elapsed * 1_000_000 / sdl.getPerformanceFrequency();
+}
+
 fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     std.log.info("Ran successfully for 5 seconds", .{});
     return 0;
@@ -189,10 +198,19 @@ pub fn main() !void {
     _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
 
     while (!state.quitGame) {
-        time.frameBegin();
-        try physics.step();
-        try input.handle();
+        const framePerfStart = perfNow();
 
+        time.frameBegin();
+
+        const physicsStart = perfNow();
+        try physics.step();
+        const physicsUs = perfElapsedUs(physicsStart);
+
+        const inputStart = perfNow();
+        try input.handle();
+        const inputUs = perfElapsedUs(inputStart);
+
+        const logicStart = perfNow();
         if (state.editingBackground) {
             backgroundConfigMenu.sync();
         } else if (state.editingLevel) {
@@ -202,9 +220,28 @@ pub fn main() !void {
         } else {
             try gameLoop();
         }
+        const logicUs = perfElapsedUs(logicStart);
 
+        const renderStart = perfNow();
         try renderer.render();
+        const renderUs = perfElapsedUs(renderStart);
+
         time.frameEnd();
+
+        if (projectile.consumePerfFrameLog()) {
+            std.log.info(
+                "perf.frame total_us={d} physics_us={d} input_us={d} logic_us={d} render_us={d} pending_texture={d} pending_collider={d}",
+                .{
+                    perfElapsedUs(framePerfStart),
+                    physicsUs,
+                    inputUs,
+                    logicUs,
+                    renderUs,
+                    projectile.pendingTerrainTextureUpdateCount(),
+                    projectile.pendingTerrainColliderUpdateCount(),
+                },
+            );
+        }
     }
 
     levelEditor.cleanup() catch |err| {
@@ -245,6 +282,8 @@ fn gameLoop() !void {
 
     player.clampAllSpeeds();
     projectile.applyPropulsion();
+    projectile.processTerrainTextureUpdates();
+    projectile.processTerrainColliderUpdates();
 
     try rope.checkHookContacts();
     rope.applyTension();

@@ -84,7 +84,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
     shapeDef.filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
 
-    const animCopy = try animation.copyAnimation(proj.animation);
+    const animCopy = try animation.copyAnimationSharedFrames(proj.animation);
 
     const firstFrameUuid = animCopy.frames[0];
     const pos = conv.pixel2M(position);
@@ -96,6 +96,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     bodyDef.rotation = box2d.c.b2MakeRot(angle + std.math.pi * 0.5);
 
     const projectileEntity = try entity.createFromImg(firstFrameUuid, shapeDef, bodyDef, "projectile");
+    entity.markSpriteUuidsShared(projectileEntity.bodyId);
 
     const impulse = vec.mul(vec.normalize(.{
         .x = direction.x,
@@ -118,7 +119,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     try animations.put("main", animCopy);
 
     if (proj.propulsionAnimation) |propAnim| {
-        const propAnimCopy = try animation.copyAnimation(propAnim);
+        const propAnimCopy = try animation.copyAnimationSharedFrames(propAnim);
 
         try entity.addSprite(projectileEntity.bodyId, propAnimCopy.frames[0]);
 

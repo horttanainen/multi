@@ -24,7 +24,7 @@ const animation = @import("animation.zig");
 const config = @import("config.zig");
 const collision = @import("collision.zig");
 
-pub const terrainColliderChunkSizeP: i32 = 256;
+pub const terrainColliderChunkSizeP: i32 = 64;
 
 pub const ColliderChunk = struct {
     rect: vec.IRect,
@@ -45,6 +45,7 @@ pub const Entity = struct {
     categoryBits: u64,
     maskBits: u64,
     enabled: bool,
+    ownsSpriteUuids: bool = true,
     color: ?sprite.Color = null,
     glow: bool = false,
 };
@@ -300,6 +301,15 @@ pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
     }
 }
 
+pub fn markSpriteUuidsShared(bodyId: box2d.c.b2BodyId) void {
+    const ent = entities.getPtrLocking(bodyId) orelse {
+        std.log.warn("markSpriteUuidsShared: entity missing for body", .{});
+        return;
+    };
+
+    ent.ownsSpriteUuids = false;
+}
+
 fn markEntityForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
@@ -332,8 +342,10 @@ pub fn cleanupOne(entity: Entity) void {
     if (entity.animated) {
         animation.cleanupAnimationFrames(entity.bodyId);
     }
-    for (entity.spriteUuids) |spriteUuid| {
-        sprite.cleanupLater(spriteUuid);
+    if (entity.ownsSpriteUuids) {
+        for (entity.spriteUuids) |spriteUuid| {
+            sprite.cleanupLater(spriteUuid);
+        }
     }
     allocator.free(entity.spriteUuids);
 }

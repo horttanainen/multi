@@ -53,7 +53,7 @@ pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(allocator);
 var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
 
 fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
-    const animCopy = try animation.copyAnimation(anim);
+    const animCopy = try animation.copyAnimationSharedFrames(anim);
 
     var bodyDef = box2d.createStaticBodyDef(pos);
 
@@ -71,6 +71,7 @@ fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
     // Create a simple box shape for the explosion entity
     const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
     const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
+    entity.markSpriteUuidsShared(explosionEntity.bodyId);
 
     try animation.register(explosionEntity.bodyId, animCopy);
 }
@@ -85,7 +86,52 @@ const TerrainEdit = struct {
     dirtyRect: vec.IRect,
 };
 
+const terrainTextureUpdatesPerFrame: usize = 2;
+const terrainColliderUpdatesPerFrame: usize = 1;
+const perfLogFramesAfterExplosion: u32 = 120;
+
 var terrainEdits = std.AutoArrayHashMap(box2d.c.b2BodyId, TerrainEdit).init(allocator);
+var terrainTextureUpdates = std.AutoArrayHashMap(box2d.c.b2BodyId, TerrainEdit).init(allocator);
+var terrainColliderUpdates = std.AutoArrayHashMap(box2d.c.b2BodyId, vec.IRect).init(allocator);
+var perfExplosionId: u64 = 0;
+var perfLogFramesRemaining: u32 = 0;
+
+fn perfNow() u64 {
+    return sdl.getPerformanceCounter();
+}
+
+fn perfElapsedUs(start: u64) u64 {
+    const elapsed = sdl.getPerformanceCounter() - start;
+    return elapsed * 1_000_000 / sdl.getPerformanceFrequency();
+}
+
+fn beginExplosionPerfLog() u64 {
+    perfExplosionId += 1;
+    perfLogFramesRemaining = perfLogFramesAfterExplosion;
+    std.log.info("perf.explosion begin id={d}", .{perfExplosionId});
+    return perfExplosionId;
+}
+
+fn logExplosionStage(perfId: u64, label: []const u8, start: u64) void {
+    std.log.info("perf.explosion id={d} stage={s} us={d}", .{ perfId, label, perfElapsedUs(start) });
+}
+
+pub fn consumePerfFrameLog() bool {
+    if (perfLogFramesRemaining == 0) {
+        return false;
+    }
+
+    perfLogFramesRemaining -= 1;
+    return true;
+}
+
+pub fn pendingTerrainTextureUpdateCount() usize {
+    return terrainTextureUpdates.count();
+}
+
+pub fn pendingTerrainColliderUpdateCount() usize {
+    return terrainColliderUpdates.count();
+}
 
 fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
@@ -125,6 +171,28 @@ fn queueTerrainEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IR
     edit.dirtyRect = vec.irectUnion(edit.dirtyRect, dirtyRect);
 }
 
+fn queueTerrainColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !void {
+    const maybeDirtyRect = terrainColliderUpdates.getPtr(bodyId);
+    if (maybeDirtyRect == null) {
+        try terrainColliderUpdates.put(bodyId, dirtyRect);
+        return;
+    }
+
+    const dirtyRectPtr = maybeDirtyRect.?;
+    dirtyRectPtr.* = vec.irectUnion(dirtyRectPtr.*, dirtyRect);
+}
+
+fn queueTerrainTextureUpdate(bodyId: box2d.c.b2BodyId, edit: TerrainEdit) !void {
+    const maybeEdit = terrainTextureUpdates.getPtr(bodyId);
+    if (maybeEdit == null) {
+        try terrainTextureUpdates.put(bodyId, edit);
+        return;
+    }
+
+    const pendingEdit = maybeEdit.?;
+    pendingEdit.dirtyRect = vec.irectUnion(pendingEdit.dirtyRect, edit.dirtyRect);
+}
+
 fn flushTerrainEdits() !void {
     if (terrainEdits.count() == 0) {
         return;
@@ -147,16 +215,104 @@ fn flushTerrainEdits() !void {
             continue;
         }
 
-        try sprite.updateTextureRegionFromSurface(edit.spriteUuid, edit.dirtyRect);
+        try queueTerrainTextureUpdate(bodyId, edit);
+    }
+}
 
-        const stillExists = try entity.regenerateCollidersInPixelRect(ent, edit.dirtyRect);
+pub fn processTerrainTextureUpdates() void {
+    const totalStart = perfNow();
+    var updateUs: u64 = 0;
+    var queueUs: u64 = 0;
+    var updatedPixels: usize = 0;
+    var processed: usize = 0;
+    while (processed < terrainTextureUpdatesPerFrame and terrainTextureUpdates.count() > 0) : (processed += 1) {
+        const bodyId = terrainTextureUpdates.keys()[0];
+        const edit = terrainTextureUpdates.values()[0];
+        _ = terrainTextureUpdates.swapRemove(bodyId);
+
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("processTerrainTextureUpdates: terrain body became invalid before texture update", .{});
+            continue;
+        }
+
+        const rectWidth = edit.dirtyRect.maxX - edit.dirtyRect.minX;
+        const rectHeight = edit.dirtyRect.maxY - edit.dirtyRect.minY;
+        if (rectWidth > 0 and rectHeight > 0) {
+            updatedPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
+        }
+
+        const updateStart = perfNow();
+        sprite.updateTextureRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
+            std.log.warn("processTerrainTextureUpdates: terrain texture update failed with {}", .{err});
+        };
+        updateUs += perfElapsedUs(updateStart);
+
+        const queueStart = perfNow();
+        queueTerrainColliderUpdate(bodyId, edit.dirtyRect) catch |err| {
+            std.log.warn("processTerrainTextureUpdates: failed to queue terrain collider update with {}", .{err});
+        };
+        queueUs += perfElapsedUs(queueStart);
+    }
+
+    if (processed == 0) {
+        return;
+    }
+
+    std.log.info(
+        "perf.terrain_texture_queue processed={d} remaining={d} pixels={d} update_us={d} queue_us={d} total_us={d}",
+        .{ processed, terrainTextureUpdates.count(), updatedPixels, updateUs, queueUs, perfElapsedUs(totalStart) },
+    );
+}
+
+pub fn processTerrainColliderUpdates() void {
+    const totalStart = perfNow();
+    var rebuildUs: u64 = 0;
+    var rebuiltPixels: usize = 0;
+    var processed: usize = 0;
+    while (processed < terrainColliderUpdatesPerFrame and terrainColliderUpdates.count() > 0) : (processed += 1) {
+        const bodyId = terrainColliderUpdates.keys()[0];
+        const dirtyRect = terrainColliderUpdates.values()[0];
+        _ = terrainColliderUpdates.swapRemove(bodyId);
+
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("processTerrainColliderUpdates: terrain body became invalid before collider rebuild", .{});
+            continue;
+        }
+
+        const ent = entity.entities.getPtrLocking(bodyId) orelse {
+            std.log.warn("processTerrainColliderUpdates: terrain entity missing before collider rebuild", .{});
+            continue;
+        };
+
+        const rectWidth = dirtyRect.maxX - dirtyRect.minX;
+        const rectHeight = dirtyRect.maxY - dirtyRect.minY;
+        if (rectWidth > 0 and rectHeight > 0) {
+            rebuiltPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
+        }
+
+        const rebuildStart = perfNow();
+        const stillExists = entity.regenerateCollidersInPixelRect(ent, dirtyRect) catch |err| {
+            std.log.warn("processTerrainColliderUpdates: terrain collider rebuild failed with {}", .{err});
+            continue;
+        };
+        rebuildUs += perfElapsedUs(rebuildStart);
         if (!stillExists) {
             entity.cleanupLater(ent.*);
         }
     }
+
+    if (processed == 0) {
+        return;
+    }
+
+    std.log.info(
+        "perf.terrain_collider_queue processed={d} remaining={d} pixels={d} rebuild_us={d} total_us={d}",
+        .{ processed, terrainColliderUpdates.count(), rebuiltPixels, rebuildUs, perfElapsedUs(totalStart) },
+    );
 }
 
-fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
+fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
+    const totalStart = perfNow();
     // Setup overlap query
     var context = OverlapContext{
         .bodies = undefined,
@@ -178,8 +334,14 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
     // Query for overlapping bodies
+    const overlapStart = perfNow();
     box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
+    const overlapUs = perfElapsedUs(overlapStart);
 
+    var changed: usize = 0;
+    var carvedPixels: usize = 0;
+    var carveUs: u64 = 0;
+    var queueUs: u64 = 0;
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
 
@@ -202,11 +364,28 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
             continue;
         };
 
+        const carveStart = perfNow();
         const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
+        carveUs += perfElapsedUs(carveStart);
         if (dirtyRect == null) continue;
 
-        try queueTerrainEdit(bodyId, ent.spriteUuids[0], dirtyRect.?);
+        const rect = dirtyRect.?;
+        const rectWidth = rect.maxX - rect.minX;
+        const rectHeight = rect.maxY - rect.minY;
+        if (rectWidth > 0 and rectHeight > 0) {
+            carvedPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
+        }
+        changed += 1;
+
+        const queueStart = perfNow();
+        try queueTerrainEdit(bodyId, ent.spriteUuids[0], rect);
+        queueUs += perfElapsedUs(queueStart);
     }
+
+    std.log.info(
+        "perf.terrain_damage id={d} bodies={d} changed={d} pixels={d} overlap_us={d} carve_us={d} queue_us={d} total_us={d}",
+        .{ perfId, context.count, changed, carvedPixels, overlapUs, carveUs, queueUs, perfElapsedUs(totalStart) },
+    );
 }
 
 fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
@@ -346,8 +525,15 @@ pub fn cleanupShrapnel() !void {
 }
 
 pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
-    const explosionBodies = try createExplosion(pos, explosion);
+    const perfId = beginExplosionPerfLog();
+    const totalStart = perfNow();
 
+    const createExplosionStart = perfNow();
+    const explosionBodies = try createExplosion(pos, explosion);
+    logExplosionStage(perfId, "create_shrapnel", createExplosionStart);
+    std.log.info("perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
+
+    const registerShrapnelStart = perfNow();
     if (explosionBodies.len > 0) {
         const timerId = sdl.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
         try shrapnel.appendLocking(.{
@@ -360,16 +546,24 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
     } else {
         allocator.free(explosionBodies);
     }
+    logExplosionStage(perfId, "register_shrapnel", registerShrapnelStart);
 
+    const animationStart = perfNow();
     if (explosion.animation) |anim| {
         try createExplosionAnimation(pos, anim);
     }
+    logExplosionStage(perfId, "animation", animationStart);
 
-    try damageTerrainInRadius(pos, explosion.blastRadius);
+    const terrainStart = perfNow();
+    try damageTerrainInRadius(pos, explosion.blastRadius, perfId);
+    logExplosionStage(perfId, "terrain_damage", terrainStart);
 
+    const playerDamageStart = perfNow();
     if (explosion.damagePlayers) {
         try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
     }
+    logExplosionStage(perfId, "player_damage", playerDamageStart);
+    logExplosionStage(perfId, "total", totalStart);
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
@@ -493,6 +687,8 @@ pub fn cleanup() void {
     owners.clearAndFree();
     directDamages.clearAndFree();
     terrainEdits.clearAndFree();
+    terrainTextureUpdates.clearAndFree();
+    terrainColliderUpdates.clearAndFree();
 
     shrapnel.mutex.lock();
     for (shrapnel.list.items) |item| {

@@ -17,6 +17,7 @@ pub const Animation = struct {
     frames: []u64,
     spriteIndex: usize, // Which sprite slot this animates (0, 1, 2, etc.)
     loop: bool,
+    ownsFrameSprites: bool = true,
     switchDelay: f64 = 0, // Delay in seconds before switching to this animation
 };
 
@@ -29,7 +30,6 @@ pub const AnimationSet = struct {
 var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(allocator);
 
 var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool){};
-
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
@@ -113,7 +113,7 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
 }
 
 fn delayedSwitchCallback(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-    const ready: *bool = @alignCast(@ptrCast(param));
+    const ready: *bool = @ptrCast(@alignCast(param));
     ready.* = true;
     return 0;
 }
@@ -232,8 +232,10 @@ pub fn cleanup() void {
 }
 
 pub fn cleanupOne(anim: Animation) void {
-    for (anim.frames) |frameUuid| {
-        sprite.cleanupLater(frameUuid);
+    if (anim.ownsFrameSprites) {
+        for (anim.frames) |frameUuid| {
+            sprite.cleanupLater(frameUuid);
+        }
     }
     allocator.free(anim.frames);
 }
@@ -248,6 +250,7 @@ pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: v
         .frames = frameUuids,
         .spriteIndex = spriteIndex,
         .loop = loop,
+        .ownsFrameSprites = true,
     };
 }
 
@@ -267,5 +270,23 @@ pub fn copyAnimation(anim: Animation) !Animation {
         .frames = framesCopy,
         .spriteIndex = anim.spriteIndex,
         .loop = anim.loop,
+        .ownsFrameSprites = true,
+        .switchDelay = anim.switchDelay,
+    };
+}
+
+pub fn copyAnimationSharedFrames(anim: Animation) !Animation {
+    const framesCopy = try allocator.alloc(u64, anim.frames.len);
+    @memcpy(framesCopy, anim.frames);
+
+    return Animation{
+        .fps = anim.fps,
+        .current = 0,
+        .lastTime = 0.0,
+        .frames = framesCopy,
+        .spriteIndex = anim.spriteIndex,
+        .loop = anim.loop,
+        .ownsFrameSprites = false,
+        .switchDelay = anim.switchDelay,
     };
 }
