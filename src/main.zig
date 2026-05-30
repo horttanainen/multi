@@ -41,6 +41,7 @@ const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const perf = @import("perf.zig");
 const background_paint = @import("background_paint.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const musicConfigMenu = @import("musicConfigMenu.zig");
@@ -158,15 +159,6 @@ const Sprite = entity.Sprite;
 //TODO: make it possible to tweak crt effect (own menu)
 //TODO: make it possible to turn crt effect off in the settings.
 
-fn perfNow() u64 {
-    return sdl.getPerformanceCounter();
-}
-
-fn perfElapsedUs(start: u64) u64 {
-    const elapsed = sdl.getPerformanceCounter() - start;
-    return elapsed * 1_000_000 / sdl.getPerformanceFrequency();
-}
-
 fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     std.log.info("Ran successfully for 5 seconds", .{});
     return 0;
@@ -202,19 +194,20 @@ pub fn main(init: std.process.Init) !void {
     _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
 
     while (!state.quitGame) {
-        const framePerfStart = perfNow();
+        const collectFramePerf = projectile.shouldCollectPerfFrameLog();
+        const framePerfStart = if (collectFramePerf) perf.begin(.explosion) else 0;
 
         time.frameBegin();
 
-        const physicsStart = perfNow();
+        const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         try physics.step();
-        const physicsUs = perfElapsedUs(physicsStart);
+        const physicsUs = perf.elapsedUs(physicsStart);
 
-        const inputStart = perfNow();
+        const inputStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         try input.handle();
-        const inputUs = perfElapsedUs(inputStart);
+        const inputUs = perf.elapsedUs(inputStart);
 
-        const logicStart = perfNow();
+        const logicStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         if (state.editingBackground) {
             backgroundConfigMenu.sync();
         } else if (state.editingLevel) {
@@ -224,19 +217,20 @@ pub fn main(init: std.process.Init) !void {
         } else {
             try gameLoop();
         }
-        const logicUs = perfElapsedUs(logicStart);
+        const logicUs = perf.elapsedUs(logicStart);
 
-        const renderStart = perfNow();
+        const renderStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         try renderer.render();
-        const renderUs = perfElapsedUs(renderStart);
+        const renderUs = perf.elapsedUs(renderStart);
 
         time.frameEnd();
 
         if (projectile.consumePerfFrameLog()) {
-            std.log.info(
+            perf.log(
+                .explosion,
                 "perf.frame total_us={d} physics_us={d} input_us={d} logic_us={d} render_us={d} pending_texture={d} pending_collider={d}",
                 .{
-                    perfElapsedUs(framePerfStart),
+                    perf.elapsedUs(framePerfStart),
                     physicsUs,
                     inputUs,
                     logicUs,

@@ -15,6 +15,7 @@ const conv = @import("conversion.zig");
 const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const particle = @import("particle.zig");
+const perf = @import("perf.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
@@ -97,27 +98,28 @@ var terrainColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, vec
 var perfExplosionId: u64 = 0;
 var perfLogFramesRemaining: u32 = 0;
 
-fn perfNow() u64 {
-    return sdl.getPerformanceCounter();
-}
-
-fn perfElapsedUs(start: u64) u64 {
-    const elapsed = sdl.getPerformanceCounter() - start;
-    return elapsed * 1_000_000 / sdl.getPerformanceFrequency();
-}
-
 fn beginExplosionPerfLog() u64 {
+    if (!perf.enabled(.explosion)) return 0;
+
     perfExplosionId += 1;
     perfLogFramesRemaining = perfLogFramesAfterExplosion;
-    std.log.info("perf.explosion begin id={d}", .{perfExplosionId});
+    perf.log(.explosion, "perf.explosion begin id={d}", .{perfExplosionId});
     return perfExplosionId;
 }
 
 fn logExplosionStage(perfId: u64, label: []const u8, start: u64) void {
-    std.log.info("perf.explosion id={d} stage={s} us={d}", .{ perfId, label, perfElapsedUs(start) });
+    perf.log(.explosion, "perf.explosion id={d} stage={s} us={d}", .{ perfId, label, perf.elapsedUs(start) });
+}
+
+pub fn shouldCollectPerfFrameLog() bool {
+    return perf.enabled(.explosion) and perfLogFramesRemaining > 0;
 }
 
 pub fn consumePerfFrameLog() bool {
+    if (!perf.enabled(.explosion)) {
+        return false;
+    }
+
     if (perfLogFramesRemaining == 0) {
         return false;
     }
@@ -221,7 +223,7 @@ fn flushTerrainEdits() !void {
 }
 
 pub fn processTerrainTextureUpdates() void {
-    const totalStart = perfNow();
+    const totalStart = perf.begin(.explosion);
     var updateUs: u64 = 0;
     var queueUs: u64 = 0;
     var updatedPixels: usize = 0;
@@ -242,31 +244,32 @@ pub fn processTerrainTextureUpdates() void {
             updatedPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
         }
 
-        const updateStart = perfNow();
+        const updateStart = perf.begin(.explosion);
         sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
             std.log.warn("processTerrainTextureUpdates: terrain texture update failed with {}", .{err});
         };
-        updateUs += perfElapsedUs(updateStart);
+        updateUs += perf.elapsedUs(updateStart);
 
-        const queueStart = perfNow();
+        const queueStart = perf.begin(.explosion);
         queueTerrainColliderUpdate(bodyId, edit.dirtyRect) catch |err| {
             std.log.warn("processTerrainTextureUpdates: failed to queue terrain collider update with {}", .{err});
         };
-        queueUs += perfElapsedUs(queueStart);
+        queueUs += perf.elapsedUs(queueStart);
     }
 
     if (processed == 0) {
         return;
     }
 
-    std.log.info(
+    perf.log(
+        .explosion,
         "perf.terrain_texture_queue processed={d} remaining={d} pixels={d} update_us={d} queue_us={d} total_us={d}",
-        .{ processed, terrainTextureUpdates.count(), updatedPixels, updateUs, queueUs, perfElapsedUs(totalStart) },
+        .{ processed, terrainTextureUpdates.count(), updatedPixels, updateUs, queueUs, perf.elapsedUs(totalStart) },
     );
 }
 
 pub fn processTerrainColliderUpdates() void {
-    const totalStart = perfNow();
+    const totalStart = perf.begin(.explosion);
     var rebuildUs: u64 = 0;
     var rebuiltPixels: usize = 0;
     var processed: usize = 0;
@@ -291,12 +294,12 @@ pub fn processTerrainColliderUpdates() void {
             rebuiltPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
         }
 
-        const rebuildStart = perfNow();
+        const rebuildStart = perf.begin(.explosion);
         const stillExists = entity.regenerateCollidersInPixelRect(ent, dirtyRect) catch |err| {
             std.log.warn("processTerrainColliderUpdates: terrain collider rebuild failed with {}", .{err});
             continue;
         };
-        rebuildUs += perfElapsedUs(rebuildStart);
+        rebuildUs += perf.elapsedUs(rebuildStart);
         if (!stillExists) {
             entity.cleanupLater(ent.*);
         }
@@ -306,14 +309,15 @@ pub fn processTerrainColliderUpdates() void {
         return;
     }
 
-    std.log.info(
+    perf.log(
+        .explosion,
         "perf.terrain_collider_queue processed={d} remaining={d} pixels={d} rebuild_us={d} total_us={d}",
-        .{ processed, terrainColliderUpdates.count(), rebuiltPixels, rebuildUs, perfElapsedUs(totalStart) },
+        .{ processed, terrainColliderUpdates.count(), rebuiltPixels, rebuildUs, perf.elapsedUs(totalStart) },
     );
 }
 
 fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
-    const totalStart = perfNow();
+    const totalStart = perf.begin(.explosion);
     // Setup overlap query
     var context = OverlapContext{
         .bodies = undefined,
@@ -335,9 +339,9 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
     filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
     // Query for overlapping bodies
-    const overlapStart = perfNow();
+    const overlapStart = perf.begin(.explosion);
     box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
-    const overlapUs = perfElapsedUs(overlapStart);
+    const overlapUs = perf.elapsedUs(overlapStart);
 
     var changed: usize = 0;
     var carvedPixels: usize = 0;
@@ -365,9 +369,9 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
             continue;
         };
 
-        const carveStart = perfNow();
+        const carveStart = perf.begin(.explosion);
         const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
-        carveUs += perfElapsedUs(carveStart);
+        carveUs += perf.elapsedUs(carveStart);
         if (dirtyRect == null) continue;
 
         const rect = dirtyRect.?;
@@ -378,14 +382,15 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
         }
         changed += 1;
 
-        const queueStart = perfNow();
+        const queueStart = perf.begin(.explosion);
         try queueTerrainEdit(bodyId, ent.spriteUuids[0], rect);
-        queueUs += perfElapsedUs(queueStart);
+        queueUs += perf.elapsedUs(queueStart);
     }
 
-    std.log.info(
+    perf.log(
+        .explosion,
         "perf.terrain_damage id={d} bodies={d} changed={d} pixels={d} overlap_us={d} carve_us={d} queue_us={d} total_us={d}",
-        .{ perfId, context.count, changed, carvedPixels, overlapUs, carveUs, queueUs, perfElapsedUs(totalStart) },
+        .{ perfId, context.count, changed, carvedPixels, overlapUs, carveUs, queueUs, perf.elapsedUs(totalStart) },
     );
 }
 
@@ -527,14 +532,14 @@ pub fn cleanupShrapnel() !void {
 
 pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
     const perfId = beginExplosionPerfLog();
-    const totalStart = perfNow();
+    const totalStart = perf.begin(.explosion);
 
-    const createExplosionStart = perfNow();
+    const createExplosionStart = perf.begin(.explosion);
     const explosionBodies = try createExplosion(pos, explosion);
     logExplosionStage(perfId, "create_shrapnel", createExplosionStart);
-    std.log.info("perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
+    perf.log(.explosion, "perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
 
-    const registerShrapnelStart = perfNow();
+    const registerShrapnelStart = perf.begin(.explosion);
     if (explosionBodies.len > 0) {
         const timerId = sdl.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
         try shrapnel.appendLocking(.{
@@ -549,17 +554,17 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
     }
     logExplosionStage(perfId, "register_shrapnel", registerShrapnelStart);
 
-    const animationStart = perfNow();
+    const animationStart = perf.begin(.explosion);
     if (explosion.animation) |anim| {
         try createExplosionAnimation(pos, anim);
     }
     logExplosionStage(perfId, "animation", animationStart);
 
-    const terrainStart = perfNow();
+    const terrainStart = perf.begin(.explosion);
     try damageTerrainInRadius(pos, explosion.blastRadius, perfId);
     logExplosionStage(perfId, "terrain_damage", terrainStart);
 
-    const playerDamageStart = perfNow();
+    const playerDamageStart = perf.begin(.explosion);
     if (explosion.damagePlayers) {
         try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
     }

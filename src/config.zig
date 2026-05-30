@@ -9,6 +9,11 @@ pub const window = .{
 pub const debug = true;
 pub const debugLog = false;
 
+pub const perf = .{
+    .explosion = false,
+    .level_editor_static_spawn = true,
+};
+
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 

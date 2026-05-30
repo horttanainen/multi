@@ -24,6 +24,7 @@ const conv = @import("conversion.zig");
 const animation = @import("animation.zig");
 const config = @import("config.zig");
 const collision = @import("collision.zig");
+const perf = @import("perf.zig");
 
 pub const terrainColliderChunkSizeP: i32 = 64;
 
@@ -144,13 +145,39 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
 }
 
 pub fn createFromImg(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
+    const measureStaticSpawn = isStaticTerrainType(entityType);
+    const totalStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
+    const bodyStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const bodyId = try box2d.createBody(bodyDef);
+    const createBodyUs = perf.elapsedUs(bodyStart);
+
+    const entityStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const entity = createEntityForBody(bodyId, spriteUuid, shapeDef, entityType) catch |err| {
+        if (measureStaticSpawn) {
+            perf.addLevelEditorStaticEntityMetrics(.{
+                .create_from_img_calls = 1,
+                .create_body_us = createBodyUs,
+                .create_entity_us = perf.elapsedUs(entityStart),
+                .create_from_img_total_us = perf.elapsedUs(totalStart),
+            });
+        }
         // Clean up bodyId if entity creation fails
         box2d.c.b2DestroyBody(bodyId);
         return err;
     };
+    const createEntityUs = perf.elapsedUs(entityStart);
+
+    const putStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     try entities.putLocking(bodyId, entity);
+    if (measureStaticSpawn) {
+        perf.addLevelEditorStaticEntityMetrics(.{
+            .create_from_img_calls = 1,
+            .create_body_us = createBodyUs,
+            .create_entity_us = createEntityUs,
+            .entities_put_us = perf.elapsedUs(putStart),
+            .create_from_img_total_us = perf.elapsedUs(totalStart),
+        });
+    }
     return entity;
 }
 
@@ -204,7 +231,15 @@ fn createColliderChunksForSprite(
     s: sprite.Sprite,
     shapeDef: box2d.c.b2ShapeDef,
 ) ![]ColliderChunk {
+    const totalStart = perf.begin(.level_editor_static_spawn);
+    const triangulateStart = perf.begin(.level_editor_static_spawn);
     const triangleChunks = try polygon.triangulateChunksCached(s, terrainColliderChunkSizeP);
+    const triangulateUs = perf.elapsedUs(triangulateStart);
+    var triangleCount: usize = 0;
+    for (triangleChunks) |triangleChunk| {
+        triangleCount += triangleChunk.triangles.len;
+    }
+
     var colliderChunks = std.array_list.Managed(ColliderChunk).init(allocator);
     errdefer {
         for (colliderChunks.items) |colliderChunk| {
@@ -214,14 +249,24 @@ fn createColliderChunksForSprite(
         colliderChunks.deinit();
     }
 
+    var shapeUs: u64 = 0;
+    var appendUs: u64 = 0;
+    var shapeCount: usize = 0;
+    var emptyShapeChunks: usize = 0;
+
     for (triangleChunks) |triangleChunk| {
+        const shapeStart = perf.begin(.level_editor_static_spawn);
         const shapeIds = try box2d.createPolygonShape(bodyId, triangleChunk.triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
+        shapeUs += perf.elapsedUs(shapeStart);
+        shapeCount += shapeIds.len;
 
         if (shapeIds.len == 0) {
+            emptyShapeChunks += 1;
             allocator.free(shapeIds);
             continue;
         }
 
+        const appendStart = perf.begin(.level_editor_static_spawn);
         colliderChunks.append(.{
             .rect = triangleChunk.rect,
             .shapeIds = shapeIds,
@@ -230,27 +275,67 @@ fn createColliderChunksForSprite(
             allocator.free(shapeIds);
             return err;
         };
+        appendUs += perf.elapsedUs(appendStart);
     }
 
     if (colliderChunks.items.len == 0) {
+        perf.addLevelEditorStaticColliderMetrics(.{
+            .calls = 1,
+            .no_triangle_calls = 1,
+            .chunks_in = triangleChunks.len,
+            .triangles = triangleCount,
+            .shapes = shapeCount,
+            .empty_shape_chunks = emptyShapeChunks,
+            .triangulate_us = triangulateUs,
+            .shape_us = shapeUs,
+            .append_us = appendUs,
+            .total_us = perf.elapsedUs(totalStart),
+        });
         return polygon.PolygonError.CouldNotCreateTriangle;
     }
 
-    return colliderChunks.toOwnedSlice();
+    const ownedStart = perf.begin(.level_editor_static_spawn);
+    const result = try colliderChunks.toOwnedSlice();
+    perf.addLevelEditorStaticColliderMetrics(.{
+        .calls = 1,
+        .chunks_in = triangleChunks.len,
+        .chunks_out = result.len,
+        .triangles = triangleCount,
+        .shapes = shapeCount,
+        .empty_shape_chunks = emptyShapeChunks,
+        .triangulate_us = triangulateUs,
+        .shape_us = shapeUs,
+        .append_us = appendUs,
+        .owned_slice_us = perf.elapsedUs(ownedStart),
+        .total_us = perf.elapsedUs(totalStart),
+    });
+    return result;
 }
 
 pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
+    const measureStaticSpawn = isStaticTerrainType(eType);
+    const totalStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
+    const typeStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const entityType = try allocator.dupe(u8, eType);
     errdefer allocator.free(entityType);
+    const dupeTypeUs = perf.elapsedUs(typeStart);
 
-    const s = sprite.getSprite(spriteUuid) orelse return error.SpriteNotFound;
+    const spriteStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
+    const s = sprite.getSprite(spriteUuid) orelse {
+        std.log.warn("createEntityForBody: sprite {d} not found for type {s}", .{ spriteUuid, eType });
+        return error.SpriteNotFound;
+    };
+    const getSpriteUs = perf.elapsedUs(spriteStart);
 
+    const colliderStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const colliderChunks = if (isStaticTerrainType(eType))
         try createColliderChunksForSprite(bodyId, s, shapeDef)
     else
         try allocator.alloc(ColliderChunk, 0);
     errdefer freeColliderChunks(colliderChunks);
+    const colliderChunksUs = perf.elapsedUs(colliderStart);
 
+    const shapeStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const shapeIds = if (colliderChunks.len > 0) blk: {
         break :blk try flattenColliderChunkShapeIds(colliderChunks);
     } else blk: {
@@ -258,9 +343,12 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         break :blk try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
     };
     errdefer allocator.free(shapeIds);
+    const shapeIdsUs = perf.elapsedUs(shapeStart);
 
+    const spriteListStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     var spriteUuids = try allocator.alloc(u64, 1);
     spriteUuids[0] = spriteUuid;
+    const spriteUuidAllocUs = perf.elapsedUs(spriteListStart);
 
     const entity = Entity{
         .type = entityType,
@@ -277,6 +365,17 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .maskBits = shapeDef.filter.maskBits,
         .enabled = true,
     };
+    if (measureStaticSpawn) {
+        perf.addLevelEditorStaticEntityMetrics(.{
+            .entity_for_body_calls = 1,
+            .dupe_type_us = dupeTypeUs,
+            .get_sprite_us = getSpriteUs,
+            .collider_chunks_us = colliderChunksUs,
+            .shape_ids_us = shapeIdsUs,
+            .sprite_uuid_alloc_us = spriteUuidAllocUs,
+            .entity_for_body_total_us = perf.elapsedUs(totalStart),
+        });
+    }
     return entity;
 }
 

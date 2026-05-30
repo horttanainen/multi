@@ -18,6 +18,7 @@ const controller = @import("controller.zig");
 const rope = @import("rope.zig");
 const runtime = @import("runtime.zig");
 const weapon = @import("weapon.zig");
+const perf = @import("perf.zig");
 
 const gpu = @import("gpu.zig");
 const conv = @import("conversion.zig");
@@ -185,7 +186,13 @@ fn shouldTileStaticSurface(surface: *sdl.Surface) bool {
     return surface.w > entity.terrainColliderChunkSizeP or surface.h > entity.terrainColliderChunkSizeP;
 }
 
-fn surfaceRectHasSolidPixels(surface: *sdl.Surface, rect: sdl.Rect) bool {
+const TileSolidity = enum {
+    empty,
+    full,
+    partial,
+};
+
+fn surfaceRectSolidity(surface: *sdl.Surface, rect: sdl.Rect) TileSolidity {
     const pixels: [*]const u8 = @ptrCast(surface.pixels);
     const pitch: usize = @intCast(surface.pitch);
     const bytesPerPixel: usize = 4;
@@ -196,18 +203,28 @@ fn surfaceRectHasSolidPixels(surface: *sdl.Surface, rect: sdl.Rect) bool {
     const minY: usize = @intCast(rect.y);
     const maxY: usize = @intCast(rect.y + rect.h);
 
+    var hasSolidPixels = false;
+    var hasTransparentPixels = false;
+
     var y = minY;
     while (y < maxY) : (y += 1) {
         var x = minX;
         while (x < maxX) : (x += 1) {
             const pixelIndex = y * pitch + x * bytesPerPixel;
-            if (pixels[pixelIndex + 3] > threshold) {
-                return true;
+            if (pixels[pixelIndex + 3] >= threshold) {
+                hasSolidPixels = true;
+            } else {
+                hasTransparentPixels = true;
+            }
+
+            if (hasSolidPixels and hasTransparentPixels) {
+                return .partial;
             }
         }
     }
 
-    return false;
+    if (hasSolidPixels) return .full;
+    return .empty;
 }
 
 fn createSurfaceRegion(sourceSurface: *sdl.Surface, rect: sdl.Rect) !*sdl.Surface {
@@ -230,29 +247,70 @@ fn tileCenterPosition(basePos: vec.IVec2, sourceSurface: *sdl.Surface, rect: sdl
     };
 }
 
+fn fullTileBoxShape(rect: sdl.Rect, scale: vec.Vec2) box2d.c.b2Polygon {
+    const halfWidthM = @as(f32, @floatFromInt(rect.w)) * scale.x / conv.met2pix * 0.5;
+    const halfHeightM = @as(f32, @floatFromInt(rect.h)) * scale.y / conv.met2pix * 0.5;
+    return box2d.c.b2MakeBox(halfWidthM, halfHeightM);
+}
+
 fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
+    const totalStart = perf.begin(.level_editor_static_spawn);
+    const spriteStart = perf.begin(.level_editor_static_spawn);
     const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
     errdefer sprite.cleanupLater(spriteUuid);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_single entity={d} stage=create_sprite sprite={d} us={d}",
+        .{ e.id, spriteUuid, perf.elapsedUs(spriteStart) },
+    );
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
     errdefer cleanupSpawnedBodies(bodyIds.items);
     errdefer bodyIds.deinit();
 
     const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(e.pos));
+    const entityStart = perf.begin(.level_editor_static_spawn);
     const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
+        const entityUs = perf.elapsedUs(entityStart);
         if (err == polygon.PolygonError.CouldNotCreateTriangle) {
             std.log.warn("spawnSingleStaticEntity: static entity {d} produced no collider triangles", .{e.id});
             sprite.cleanupLater(spriteUuid);
-            return bodyIds.toOwnedSlice();
+            const emptyBodies = try bodyIds.toOwnedSlice();
+            perf.log(
+                .level_editor_static_spawn,
+                "perf.level_static_single entity={d} stage=create_entity_no_triangles us={d} total_us={d}",
+                .{ e.id, entityUs, perf.elapsedUs(totalStart) },
+            );
+            return emptyBodies;
         }
         return err;
     };
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_single entity={d} stage=create_entity us={d}",
+        .{ e.id, perf.elapsedUs(entityStart) },
+    );
 
+    const appendStart = perf.begin(.level_editor_static_spawn);
     try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
-    return bodyIds.toOwnedSlice();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_single entity={d} stage=append_body body_count={d} us={d}",
+        .{ e.id, bodyIds.items.len, perf.elapsedUs(appendStart) },
+    );
+
+    const ownedStart = perf.begin(.level_editor_static_spawn);
+    const result = try bodyIds.toOwnedSlice();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_single entity={d} stage=to_owned_slice body_count={d} us={d} total_us={d}",
+        .{ e.id, result.len, perf.elapsedUs(ownedStart), perf.elapsedUs(totalStart) },
+    );
+    return result;
 }
 
 fn spawnTiledStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef, sourceSurface: *sdl.Surface) ![]box2d.c.b2BodyId {
+    const totalStart = perf.begin(.level_editor_static_spawn);
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
     errdefer cleanupSpawnedBodies(bodyIds.items);
     errdefer bodyIds.deinit();
@@ -260,56 +318,222 @@ fn spawnTiledStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Shap
     const width = sourceSurface.w;
     const height = sourceSurface.h;
     const tileSize = entity.terrainColliderChunkSizeP;
+    var tilesVisited: usize = 0;
+    var solidTiles: usize = 0;
+    var fullTiles: usize = 0;
+    var partialTiles: usize = 0;
+    var noColliderTiles: usize = 0;
+    var solidCheckUs: u64 = 0;
+    var surfaceUs: u64 = 0;
+    var spriteUs: u64 = 0;
+    var entityUs: u64 = 0;
+    var fullEntityUs: u64 = 0;
+    var appendUs: u64 = 0;
 
     var y: i32 = 0;
     while (y < height) : (y += tileSize) {
         var x: i32 = 0;
         while (x < width) : (x += tileSize) {
+            tilesVisited += 1;
             const rect = sdl.Rect{
                 .x = x,
                 .y = y,
                 .w = @min(tileSize, width - x),
                 .h = @min(tileSize, height - y),
             };
-            if (!surfaceRectHasSolidPixels(sourceSurface, rect)) continue;
+            const solidStart = perf.begin(.level_editor_static_spawn);
+            const solidity = surfaceRectSolidity(sourceSurface, rect);
+            solidCheckUs += perf.elapsedUs(solidStart);
+            if (solidity == .empty) continue;
+            solidTiles += 1;
 
+            const surfaceStart = perf.begin(.level_editor_static_spawn);
             const tileSurface = try createSurfaceRegion(sourceSurface, rect);
+            surfaceUs += perf.elapsedUs(surfaceStart);
+
+            const spriteStart = perf.begin(.level_editor_static_spawn);
             const tileSpriteUuid = try sprite.createFromOwnedSurface(e.imgPath, tileSurface, e.scale, vec.izero);
+            spriteUs += perf.elapsedUs(spriteStart);
 
             const tilePos = tileCenterPosition(e.pos, sourceSurface, rect, e.scale);
             const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(tilePos));
-            const spawnedEntity = entity.createFromImg(tileSpriteUuid, shapeDef, bodyDef, "static") catch |err| {
-                sprite.cleanupLater(tileSpriteUuid);
-                if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-                    continue;
-                }
-                return err;
+            const entityStart = perf.begin(.level_editor_static_spawn);
+            var tileEntityUs: u64 = 0;
+            const spawnedEntity = if (solidity == .full) blk: {
+                fullTiles += 1;
+                const boxShape = fullTileBoxShape(rect, e.scale);
+                const fullTileEntity = entity.createFromShape(tileSpriteUuid, boxShape, shapeDef, bodyDef, "static") catch |err| {
+                    sprite.cleanupLater(tileSpriteUuid);
+                    return err;
+                };
+                tileEntityUs = perf.elapsedUs(entityStart);
+                fullEntityUs += tileEntityUs;
+                break :blk fullTileEntity;
+            } else blk: {
+                partialTiles += 1;
+                const partialTileEntity = entity.createFromImg(tileSpriteUuid, shapeDef, bodyDef, "static") catch |err| {
+                    tileEntityUs = perf.elapsedUs(entityStart);
+                    entityUs += tileEntityUs;
+                    sprite.cleanupLater(tileSpriteUuid);
+                    if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                        noColliderTiles += 1;
+                        continue;
+                    }
+                    return err;
+                };
+                tileEntityUs = perf.elapsedUs(entityStart);
+                break :blk partialTileEntity;
             };
+            entityUs += tileEntityUs;
 
+            const appendStart = perf.begin(.level_editor_static_spawn);
             try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
+            appendUs += perf.elapsedUs(appendStart);
         }
     }
 
-    return bodyIds.toOwnedSlice();
+    const ownedStart = perf.begin(.level_editor_static_spawn);
+    const result = try bodyIds.toOwnedSlice();
+    const ownedUs = perf.elapsedUs(ownedStart);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_tiles entity={d} size={d}x{d} tile_size={d} visited={d} solid={d} full={d} partial={d} no_collider={d} bodies={d} solid_check_us={d} surface_us={d} sprite_us={d} entity_us={d} full_entity_us={d} append_us={d} owned_slice_us={d} total_us={d}",
+        .{ e.id, width, height, tileSize, tilesVisited, solidTiles, fullTiles, partialTiles, noColliderTiles, result.len, solidCheckUs, surfaceUs, spriteUs, entityUs, fullEntityUs, appendUs, ownedUs, perf.elapsedUs(totalStart) },
+    );
+    return result;
+}
+
+fn logStaticSpawnMetrics(entityId: u64) void {
+    const entityMetrics = perf.levelEditorStaticEntityMetrics();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_entity_metrics entity={d} create_from_img_calls={d} create_body_us={d} create_entity_us={d} entities_put_us={d} create_from_img_total_us={d} entity_for_body_calls={d} dupe_type_us={d} get_sprite_us={d} collider_chunks_us={d} shape_ids_us={d} sprite_uuid_alloc_us={d} entity_for_body_total_us={d}",
+        .{
+            entityId,
+            entityMetrics.create_from_img_calls,
+            entityMetrics.create_body_us,
+            entityMetrics.create_entity_us,
+            entityMetrics.entities_put_us,
+            entityMetrics.create_from_img_total_us,
+            entityMetrics.entity_for_body_calls,
+            entityMetrics.dupe_type_us,
+            entityMetrics.get_sprite_us,
+            entityMetrics.collider_chunks_us,
+            entityMetrics.shape_ids_us,
+            entityMetrics.sprite_uuid_alloc_us,
+            entityMetrics.entity_for_body_total_us,
+        },
+    );
+
+    const colliderMetrics = perf.levelEditorStaticColliderMetrics();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_collider_metrics entity={d} calls={d} no_triangle_calls={d} chunks_in={d} chunks_out={d} triangles={d} shapes={d} empty_shape_chunks={d} triangulate_us={d} shape_us={d} append_us={d} owned_slice_us={d} total_us={d}",
+        .{
+            entityId,
+            colliderMetrics.calls,
+            colliderMetrics.no_triangle_calls,
+            colliderMetrics.chunks_in,
+            colliderMetrics.chunks_out,
+            colliderMetrics.triangles,
+            colliderMetrics.shapes,
+            colliderMetrics.empty_shape_chunks,
+            colliderMetrics.triangulate_us,
+            colliderMetrics.shape_us,
+            colliderMetrics.append_us,
+            colliderMetrics.owned_slice_us,
+            colliderMetrics.total_us,
+        },
+    );
+
+    const polygonMetrics = perf.levelEditorStaticPolygonMetrics();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_polygon_metrics entity={d} extract_calls={d} boundary_edges={d} loops={d} raw_vertices={d} simplified_vertices={d} simplify_calls={d} triangle_calls={d} output_triangles={d} build_edges_us={d} trace_loops_us={d} simplify_us={d} triangle_us={d} scale_us={d} extract_us={d} boundary_triangulate_us={d}",
+        .{
+            entityId,
+            polygonMetrics.extract_calls,
+            polygonMetrics.boundary_edges,
+            polygonMetrics.loops,
+            polygonMetrics.raw_vertices,
+            polygonMetrics.simplified_vertices,
+            polygonMetrics.simplify_calls,
+            polygonMetrics.triangle_calls,
+            polygonMetrics.output_triangles,
+            polygonMetrics.build_edges_us,
+            polygonMetrics.trace_loops_us,
+            polygonMetrics.simplify_us,
+            polygonMetrics.triangle_us,
+            polygonMetrics.scale_us,
+            polygonMetrics.extract_us,
+            polygonMetrics.boundary_triangulate_us,
+        },
+    );
 }
 
 fn spawnStaticSerializableEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
+    const totalStart = perf.begin(.level_editor_static_spawn);
+    perf.resetLevelEditorStaticMetrics();
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_spawn begin entity={d} image='{s}' pos=({d},{d}) scale=({d},{d})",
+        .{ e.id, e.imgPath, e.pos.x, e.pos.y, e.scale.x, e.scale.y },
+    );
+
     const staticDef = staticShapeDef(e, shapeDef);
 
+    const dupeStart = perf.begin(.level_editor_static_spawn);
     const imgPathZ = try allocator.dupeZ(u8, e.imgPath);
     defer allocator.free(imgPathZ);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_spawn entity={d} stage=dupe_image_path us={d}",
+        .{ e.id, perf.elapsedUs(dupeStart) },
+    );
+
+    const loadStart = perf.begin(.level_editor_static_spawn);
     const loadedSurface = try sdl.image.load(imgPathZ);
     defer sdl.destroySurface(loadedSurface);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_spawn entity={d} stage=load_image size={d}x{d} us={d}",
+        .{ e.id, loadedSurface.w, loadedSurface.h, perf.elapsedUs(loadStart) },
+    );
 
     if (!shouldTileStaticSurface(loadedSurface)) {
-        return spawnSingleStaticEntity(e, staticDef);
+        const singleStart = perf.begin(.level_editor_static_spawn);
+        const bodyIds = try spawnSingleStaticEntity(e, staticDef);
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_static_spawn entity={d} stage=single_static body_count={d} us={d} total_us={d}",
+            .{ e.id, bodyIds.len, perf.elapsedUs(singleStart), perf.elapsedUs(totalStart) },
+        );
+        logStaticSpawnMetrics(e.id);
+        return bodyIds;
     }
 
+    const convertStart = perf.begin(.level_editor_static_spawn);
     const sourceSurface = c.SDL_ConvertSurface(loadedSurface, c.SDL_PIXELFORMAT_BGRA32);
-    if (sourceSurface == null) return error.ConvertSurfaceFailed;
+    if (sourceSurface == null) {
+        std.log.warn("spawnStaticSerializableEntity: failed to convert surface for static entity {d}", .{e.id});
+        return error.ConvertSurfaceFailed;
+    }
     defer c.SDL_DestroySurface(sourceSurface);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_spawn entity={d} stage=convert_surface us={d}",
+        .{ e.id, perf.elapsedUs(convertStart) },
+    );
 
-    return spawnTiledStaticEntity(e, staticDef, sourceSurface);
+    const tiledStart = perf.begin(.level_editor_static_spawn);
+    const bodyIds = try spawnTiledStaticEntity(e, staticDef, sourceSurface);
+    perf.log(
+        .level_editor_static_spawn,
+        "perf.level_static_spawn entity={d} stage=tiled_static body_count={d} us={d} total_us={d}",
+        .{ e.id, bodyIds.len, perf.elapsedUs(tiledStart), perf.elapsedUs(totalStart) },
+    );
+    logStaticSpawnMetrics(e.id);
+    return bodyIds;
 }
 
 pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId {

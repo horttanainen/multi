@@ -8,6 +8,7 @@ const conv = @import("conversion.zig");
 const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const level = @import("level.zig");
+const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const sensor = @import("sensor.zig");
 const state = @import("state.zig");
@@ -443,10 +444,22 @@ fn destroyRuntimeEntity(entityId: u64) bool {
 }
 
 fn registerRuntimeEntity(serializedEntity: entity.SerializableEntity, bodyIds: []box2d.c.b2BodyId) !void {
+    const measureStaticSpawn = std.mem.eql(u8, serializedEntity.type, "static");
+    const totalStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const entityPos = conv.pixel2M(serializedEntity.pos);
+
+    const allocStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     var runtimeBodies = try allocator.alloc(RuntimeBody, bodyIds.len);
     errdefer allocator.free(runtimeBodies);
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=runtime_body_alloc body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(allocStart) },
+        );
+    }
 
+    const offsetStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     for (bodyIds, 0..) |bodyId, idx| {
         const bodyState = box2d.getState(bodyId);
         runtimeBodies[idx] = .{
@@ -457,9 +470,24 @@ fn registerRuntimeEntity(serializedEntity: entity.SerializableEntity, bodyIds: [
             },
         };
     }
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=runtime_body_offsets body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(offsetStart) },
+        );
+    }
 
+    const entityMapStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     try entityBodies.put(allocator, serializedEntity.id, runtimeBodies);
     errdefer _ = entityBodies.swapRemove(serializedEntity.id);
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=entity_body_map_put body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(entityMapStart) },
+        );
+    }
 
     var mappedBodies: usize = 0;
     errdefer {
@@ -468,18 +496,79 @@ fn registerRuntimeEntity(serializedEntity: entity.SerializableEntity, bodyIds: [
         }
     }
 
+    const bodyMapStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     for (runtimeBodies) |runtimeBody| {
         try bodyToEntity.put(allocator, runtimeBody.bodyId, serializedEntity.id);
         mappedBodies += 1;
     }
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=body_entity_map_put body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(bodyMapStart) },
+        );
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=register_runtime_entity_total body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(totalStart) },
+        );
+    }
 }
 
 fn spawnRuntimeEntity(serializedEntity: entity.SerializableEntity) !void {
+    const measureStaticSpawn = std.mem.eql(u8, serializedEntity.type, "static");
+    if (measureStaticSpawn) {
+        perf.enter(.level_editor_static_spawn);
+    }
+    defer {
+        if (measureStaticSpawn) {
+            perf.exit(.level_editor_static_spawn);
+        }
+    }
+
+    const totalStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn begin entity={d} image='{s}' pos=({d},{d}) scale=({d},{d}) breakable={}",
+            .{
+                serializedEntity.id,
+                serializedEntity.imgPath,
+                serializedEntity.pos.x,
+                serializedEntity.pos.y,
+                serializedEntity.scale.x,
+                serializedEntity.scale.y,
+                serializedEntity.breakable,
+            },
+        );
+    }
+
+    const spawnStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     const bodyIds = try level.spawnSerializableEntity(serializedEntity);
     defer allocator.free(bodyIds);
     errdefer destroyRawBodyIds(bodyIds);
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=spawn_serializable body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(spawnStart) },
+        );
+    }
 
+    const registerStart = if (measureStaticSpawn) perf.begin(.level_editor_static_spawn) else 0;
     try registerRuntimeEntity(serializedEntity, bodyIds);
+    if (measureStaticSpawn) {
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn entity={d} stage=register_runtime body_count={d} us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(registerStart) },
+        );
+        perf.log(
+            .level_editor_static_spawn,
+            "perf.level_editor_static_spawn end entity={d} body_count={d} total_us={d}",
+            .{ serializedEntity.id, bodyIds.len, perf.elapsedUs(totalStart) },
+        );
+    }
 }
 
 fn recreateRuntimeEntity(serializedEntity: entity.SerializableEntity) !void {
