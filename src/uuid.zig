@@ -1,5 +1,5 @@
-const std = @import("std");
+const runtime = @import("runtime.zig");
 
 pub fn generate() u64 {
-    return std.crypto.random.int(u64);
+    return runtime.random().int(u64);
 }

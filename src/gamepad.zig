@@ -90,7 +90,7 @@ pub const defaultBindings = GamepadBindings{
     .weaponPrevButton = .dpad_left,
 };
 
-pub var availableGamepads: std.ArrayList(GamepadState) = .{};
+pub var availableGamepads: std.ArrayList(GamepadState) = .empty;
 
 pub var assignedGamepads: std.AutoHashMapUnmanaged(usize, GamepadState) = .{};
 

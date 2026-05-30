@@ -7,6 +7,7 @@ const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
+const runtime = @import("runtime.zig");
 const collision = @import("collision.zig");
 const animation = @import("animation.zig");
 const allocator = @import("allocator.zig").allocator;
@@ -60,7 +61,7 @@ const Trail = struct {
     durationMs: u32,
 };
 
-var activeTrails: std.ArrayListUnmanaged(Trail) = .{};
+var activeTrails: std.ArrayListUnmanaged(Trail) = .empty;
 
 pub fn shoot(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
     if (w.hitscanExplosion != null) {
@@ -187,8 +188,8 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
         };
 
         // Randomly offset spawn position within a small circle
-        const randAngle = std.crypto.random.float(f32) * 2.0 * std.math.pi;
-        const randDist = std.crypto.random.float(f32) * pel.spawnRadius;
+        const randAngle = runtime.random().float(f32) * 2.0 * std.math.pi;
+        const randDist = runtime.random().float(f32) * pel.spawnRadius;
         const pelletPos = vec.Vec2{
             .x = pos.x + @cos(randAngle) * randDist,
             .y = pos.y + @sin(randAngle) * randDist,

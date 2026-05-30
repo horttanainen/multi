@@ -7,7 +7,7 @@ pub const PlayerScore = struct {
     suicides: i32,
 };
 
-pub var scores: std.AutoArrayHashMapUnmanaged(usize, PlayerScore) = .{};
+pub var scores: std.AutoArrayHashMapUnmanaged(usize, PlayerScore) = .empty;
 
 pub fn registerPlayer(playerId: usize) !void {
     try scores.put(allocator, playerId, .{ .kills = 0, .deaths = 0, .suicides = 0 });

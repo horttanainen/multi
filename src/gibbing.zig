@@ -8,6 +8,7 @@ const config = @import("config.zig");
 const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
+const runtime = @import("runtime.zig");
 
 const GibletSet = struct {
     heads: []u64,
@@ -89,9 +90,9 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
     };
 
     if (gibletSet.heads.len > 0) {
-        const headCount = std.crypto.random.intRangeAtMost(u32, 0, 1);
+        const headCount = runtime.random().intRangeAtMost(u32, 0, 1);
         for (0..headCount) |_| {
-            const randomIndex = std.crypto.random.intRangeAtMost(usize, 0, gibletSet.heads.len - 1);
+            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.heads.len - 1);
             spawnGiblet(gibletSet.heads[randomIndex], posM) catch |err| {
                 std.debug.print("Failed to spawnGiblet: {}\n", .{err});
             };
@@ -99,9 +100,9 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
     }
 
     if (gibletSet.legs.len > 0) {
-        const legCount = std.crypto.random.intRangeAtMost(u32, 0, 2);
+        const legCount = runtime.random().intRangeAtMost(u32, 0, 2);
         for (0..legCount) |_| {
-            const randomIndex = std.crypto.random.intRangeAtMost(usize, 0, gibletSet.legs.len - 1);
+            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.legs.len - 1);
             spawnGiblet(gibletSet.legs[randomIndex], posM) catch |err| {
                 std.debug.print("Failed to spawnGiblet: {}\n", .{err});
             };
@@ -109,9 +110,9 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
     }
 
     if (gibletSet.meat.len > 0) {
-        const meatCount = std.crypto.random.intRangeAtMost(u32, 0, 3);
+        const meatCount = runtime.random().intRangeAtMost(u32, 0, 3);
         for (0..meatCount) |_| {
-            const randomIndex = std.crypto.random.intRangeAtMost(usize, 0, gibletSet.meat.len - 1);
+            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.meat.len - 1);
             spawnGiblet(gibletSet.meat[randomIndex], posM) catch |err| {
                 std.debug.print("Failed to spawnGiblet: {}\n", .{err});
             };
@@ -123,8 +124,8 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
     const spriteCopyUuid = try sprite.createCopy(gibletSpriteUuid);
 
     const variedPosM: vec.Vec2 = .{
-        .x = posM.x + std.crypto.random.float(f32) * 2 - 1,
-        .y = posM.y - std.crypto.random.float(f32) * 2,
+        .x = posM.x + runtime.random().float(f32) * 2 - 1,
+        .y = posM.y - runtime.random().float(f32) * 2,
     };
 
     const bodyDef = box2d.createDynamicBodyDef(variedPosM);
@@ -137,8 +138,8 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
     const gibEntity = try entity.createFromImg(spriteCopyUuid, shapeDef, bodyDef, "dynamic");
 
     // Apply random impulse to scatter giblets
-    const angle = std.crypto.random.float(f32) * std.math.pi * 2.0;
-    const force = 5.0 + std.crypto.random.float(f32) * 10.0;
+    const angle = runtime.random().float(f32) * std.math.pi * 2.0;
+    const force = 5.0 + runtime.random().float(f32) * 10.0;
     const impulse = box2d.c.b2Vec2{
         .x = std.math.cos(angle) * force,
         .y = std.math.sin(angle) * force,

@@ -2,8 +2,9 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 
 const thread_safe = @import("thread_safe_array_list.zig");
+const runtime = @import("runtime.zig");
 
-const AutoArrayHashMap = std.AutoArrayHashMap;
+const AutoArrayHashMap = std.AutoArrayHashMapUnmanaged;
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
@@ -65,16 +66,16 @@ var entitiesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(a
 pub var entities = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator);
 
 pub fn updateStates() void {
-    entities.mutex.lock();
-    defer entities.mutex.unlock();
+    entities.mutex.lockUncancelable(runtime.io());
+    defer entities.mutex.unlock(runtime.io());
     for (entities.map.values()) |*e| {
         e.state = box2d.getState(e.bodyId);
     }
 }
 
 pub fn drawAll() !void {
-    entities.mutex.lock();
-    defer entities.mutex.unlock();
+    entities.mutex.lockUncancelable(runtime.io());
+    defer entities.mutex.unlock(runtime.io());
     for (entities.map.values()) |*e| {
         // Skip drawing disabled entities
         if (!e.enabled) continue;
@@ -291,7 +292,7 @@ pub fn cleanupLater(entity: Entity) void {
 pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
     const maybeEnt = entities.getPtrLocking(bodyId);
     if (maybeEnt) |ent| {
-        var uuids: std.ArrayListUnmanaged(u64) = .{};
+        var uuids: std.ArrayListUnmanaged(u64) = .empty;
         for (ent.spriteUuids) |uuid| {
             try uuids.append(allocator, uuid);
         }
@@ -320,8 +321,8 @@ fn markEntityForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c)
 }
 
 pub fn cleanupEntities() void {
-    entitiesToCleanup.mutex.lock();
-    defer entitiesToCleanup.mutex.unlock();
+    entitiesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer entitiesToCleanup.mutex.unlock(runtime.io());
 
     for (entitiesToCleanup.list.items) |bodyId| {
         const maybeKV = entities.fetchSwapRemoveLocking(bodyId);
@@ -359,12 +360,12 @@ pub fn remove(bodyId: box2d.c.b2BodyId) bool {
 }
 
 pub fn cleanup() void {
-    entities.mutex.lock();
+    entities.mutex.lockUncancelable(runtime.io());
     for (entities.map.values()) |entity| {
         cleanupOne(entity);
     }
-    entities.mutex.unlock();
-    entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).init(allocator));
+    entities.mutex.unlock(runtime.io());
+    entities.replaceLocking(AutoArrayHashMap(box2d.c.b2BodyId, Entity).empty);
 }
 
 pub fn getEntity(bodyId: box2d.c.b2BodyId) ?*Entity {

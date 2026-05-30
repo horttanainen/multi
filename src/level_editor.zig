@@ -8,6 +8,7 @@ const conv = @import("conversion.zig");
 const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const level = @import("level.zig");
+const runtime = @import("runtime.zig");
 const sensor = @import("sensor.zig");
 const state = @import("state.zig");
 const uuid = @import("uuid.zig");
@@ -53,8 +54,8 @@ var editFilePath: []const u8 = "";
 var maybeDocument: ?LevelDocument = null;
 var tryingLevel: bool = false;
 
-var entityBodies = std.AutoArrayHashMap(u64, []RuntimeBody).init(allocator);
-var bodyToEntity = std.AutoArrayHashMap(box2d.c.b2BodyId, u64).init(allocator);
+var entityBodies = std.AutoArrayHashMapUnmanaged(u64, []RuntimeBody).empty;
+var bodyToEntity = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, u64).empty;
 
 const default_config = Config{
     .gravity = 10.0,
@@ -89,7 +90,7 @@ fn createRandomAlphabeticalString(length: usize) ![]const u8 {
     var buffer = std.array_list.Managed(u8).init(allocator);
 
     for (0..length) |_| {
-        const randomInt = std.crypto.random.intRangeAtMost(u8, 97, 122);
+        const randomInt = runtime.random().intRangeAtMost(u8, 97, 122);
         try buffer.append(randomInt);
     }
 
@@ -284,11 +285,12 @@ fn createEmptyLevelData() !level.Level {
 }
 
 fn writeLevelToPath(lev: level.Level, path: []const u8) !void {
-    const f = try std.fs.cwd().createFile(path, .{ .truncate = true });
-    defer f.close();
+    const io_value = runtime.io();
+    const f = try std.Io.Dir.cwd().createFile(io_value, path, .{ .truncate = true });
+    defer f.close(io_value);
 
     var buf: [config.maxLevelSizeInBytes]u8 = undefined;
-    var writer = f.writer(&buf);
+    var writer = f.writer(io_value, &buf);
     var s = std.json.Stringify{
         .writer = &writer.interface,
         .options = .{ .whitespace = .indent_2 },
@@ -448,7 +450,7 @@ fn registerRuntimeEntity(serializedEntity: entity.SerializableEntity, bodyIds: [
         };
     }
 
-    try entityBodies.put(serializedEntity.id, runtimeBodies);
+    try entityBodies.put(allocator, serializedEntity.id, runtimeBodies);
     errdefer _ = entityBodies.swapRemove(serializedEntity.id);
 
     var mappedBodies: usize = 0;
@@ -459,7 +461,7 @@ fn registerRuntimeEntity(serializedEntity: entity.SerializableEntity, bodyIds: [
     }
 
     for (runtimeBodies) |runtimeBody| {
-        try bodyToEntity.put(runtimeBody.bodyId, serializedEntity.id);
+        try bodyToEntity.put(allocator, runtimeBody.bodyId, serializedEntity.id);
         mappedBodies += 1;
     }
 }
@@ -744,7 +746,8 @@ pub fn reloadForEditor() !void {
 pub fn createNewLevel() !void {
     tryingLevel = false;
 
-    std.fs.cwd().makeDir("drafts") catch |err| switch (err) {
+    const io_value = runtime.io();
+    std.Io.Dir.cwd().createDir(io_value, "drafts", .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
@@ -753,7 +756,7 @@ pub fn createNewLevel() !void {
     defer allocator.free(randomString);
 
     editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "drafts/{s}", .{randomString});
-    try std.fs.cwd().makeDir(editDirPath);
+    try std.Io.Dir.cwd().createDir(io_value, editDirPath, .default_dir);
     try setEditFilePath("level.json");
 
     const lev = try createEmptyLevelData();
@@ -794,17 +797,18 @@ fn createCopyOfCurrentLevel() !void {
     });
 
     editDirPath = try std.fmt.bufPrint(&editDirPathBuf, "levels/{s}", .{levelToEditName});
-    try std.fs.cwd().makeDir(editDirPath);
+    const io_value = runtime.io();
+    try std.Io.Dir.cwd().createDir(io_value, editDirPath, .default_dir);
     try setEditFilePath("level.json");
 
     const srcDir = std.fs.path.dirname(level.currentPath) orelse ".";
     const srcFile = std.fs.path.basename(level.currentPath);
 
-    var srcD = try std.fs.cwd().openDir(srcDir, std.fs.Dir.OpenOptions{});
-    defer srcD.close();
-    var editingD = try std.fs.cwd().openDir(editDirPath, std.fs.Dir.OpenOptions{});
-    defer editingD.close();
-    try std.fs.Dir.copyFile(srcD, srcFile, editingD, "level.json", .{});
+    var srcD = try std.Io.Dir.cwd().openDir(io_value, srcDir, .{});
+    defer srcD.close(io_value);
+    var editingD = try std.Io.Dir.cwd().openDir(io_value, editDirPath, .{});
+    defer editingD.close(io_value);
+    try std.Io.Dir.copyFile(srcD, srcFile, editingD, "level.json", io_value, .{});
 }
 
 pub fn exit() void {
@@ -941,15 +945,16 @@ pub fn selectEntityAt(pos: vec.IVec2) !void {
 }
 
 fn findTemporaryFolders() ![][]const u8 {
-    var dir = try std.fs.cwd().openDir("levels", .{});
-    defer dir.close();
+    const io_value = runtime.io();
+    var dir = try std.Io.Dir.cwd().openDir(io_value, "levels", .{ .iterate = true });
+    defer dir.close(io_value);
 
     var folderList = std.array_list.Managed([]const u8).init(allocator);
 
     var dirIterator = dir.iterate();
 
-    while (try dirIterator.next()) |dirContent| {
-        if (dirContent.kind != std.fs.File.Kind.directory) continue;
+    while (try dirIterator.next(io_value)) |dirContent| {
+        if (dirContent.kind != std.Io.File.Kind.directory) continue;
         try folderList.append(try allocator.dupe(u8, dirContent.name));
     }
 
@@ -1004,8 +1009,9 @@ pub fn saveConfig(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, a
 }
 
 pub fn cleanup() !void {
-    var dir = try std.fs.cwd().openDir("levels", .{});
-    defer dir.close();
+    const io_value = runtime.io();
+    var dir = try std.Io.Dir.cwd().openDir(io_value, "levels", .{});
+    defer dir.close(io_value);
 
     if (maybeDocument != null) {
         const randomString = try createRandomAlphabeticalString(4);
@@ -1033,10 +1039,10 @@ pub fn cleanup() !void {
     clearRuntimeIndex();
 
     for (folders) |folder| {
-        try dir.deleteTree(folder);
+        try dir.deleteTree(io_value, folder);
     }
 
     if (wasDraft) {
-        std.fs.cwd().deleteTree(editDirPath) catch {};
+        std.Io.Dir.cwd().deleteTree(io_value, editDirPath) catch {};
     }
 }

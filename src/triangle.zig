@@ -57,8 +57,8 @@ pub fn split(vertices: []const vec.IVec2) ![][3]vec.IVec2 {
 }
 
 pub fn splitPslg(contours: []const PslgContour, holes: []const vec.Vec2) ![][3]vec.IVec2 {
-    var point_indices = std.AutoArrayHashMap(vec.IVec2, usize).init(gpa_allocator);
-    defer point_indices.deinit();
+    var point_indices = std.AutoArrayHashMapUnmanaged(vec.IVec2, usize).empty;
+    defer point_indices.deinit(gpa_allocator);
 
     var points = std.array_list.Managed(vec.IVec2).init(gpa_allocator);
     defer points.deinit();
@@ -66,8 +66,8 @@ pub fn splitPslg(contours: []const PslgContour, holes: []const vec.Vec2) ![][3]v
     var segments = std.array_list.Managed([2]usize).init(gpa_allocator);
     defer segments.deinit();
 
-    var segment_keys = std.AutoArrayHashMap(SegmentKey, void).init(gpa_allocator);
-    defer segment_keys.deinit();
+    var segment_keys = std.AutoArrayHashMapUnmanaged(SegmentKey, void).empty;
+    defer segment_keys.deinit(gpa_allocator);
 
     for (contours) |contour| {
         if (contour.vertices.len < 3) {
@@ -202,11 +202,11 @@ pub fn splitPslg(contours: []const PslgContour, holes: []const vec.Vec2) ![][3]v
 }
 
 fn getOrPutPointIndex(
-    point_indices: *std.AutoArrayHashMap(vec.IVec2, usize),
+    point_indices: *std.AutoArrayHashMapUnmanaged(vec.IVec2, usize),
     points: *std.array_list.Managed(vec.IVec2),
     point: vec.IVec2,
 ) !usize {
-    const entry = try point_indices.getOrPut(point);
+    const entry = try point_indices.getOrPut(gpa_allocator, point);
     if (entry.found_existing) {
         return entry.value_ptr.*;
     }
@@ -219,7 +219,7 @@ fn getOrPutPointIndex(
 
 fn appendUniqueSegment(
     segments: *std.array_list.Managed([2]usize),
-    segment_keys: *std.AutoArrayHashMap(SegmentKey, void),
+    segment_keys: *std.AutoArrayHashMapUnmanaged(SegmentKey, void),
     a: usize,
     b: usize,
 ) !bool {
@@ -228,7 +228,7 @@ fn appendUniqueSegment(
     }
 
     const key = if (a < b) SegmentKey{ .a = a, .b = b } else SegmentKey{ .a = b, .b = a };
-    const entry = try segment_keys.getOrPut(key);
+    const entry = try segment_keys.getOrPut(gpa_allocator, key);
     if (entry.found_existing) {
         return false;
     }

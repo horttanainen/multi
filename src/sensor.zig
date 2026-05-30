@@ -9,7 +9,7 @@ pub const SensorEntity = struct {
     onBegin: *const fn (visitorShapeId: box2d.c.b2ShapeId) anyerror!void,
 };
 
-pub var sensorEntities = std.AutoArrayHashMap(box2d.c.b2BodyId, SensorEntity).init(allocator);
+pub var sensorEntities = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SensorEntity).empty;
 
 pub fn createSensorEntityFromImg(
     spriteUuid: u64,
@@ -23,7 +23,7 @@ pub fn createSensorEntityFromImg(
         box2d.c.b2DestroyBody(bodyId);
         return err;
     };
-    try sensorEntities.put(bodyId, .{ .entity = e, .onBegin = onBegin });
+    try sensorEntities.put(allocator, bodyId, .{ .entity = e, .onBegin = onBegin });
     return bodyId;
 }
 
@@ -49,7 +49,7 @@ pub fn cleanup() void {
     for (sensorEntities.values()) |se| {
         entity.cleanupOne(se.entity);
     }
-    sensorEntities.clearAndFree();
+    sensorEntities.clearAndFree(allocator);
 }
 
 pub fn remove(bodyId: box2d.c.b2BodyId) bool {

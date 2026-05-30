@@ -84,7 +84,7 @@ pub const defaultEditorBindings = LevelEditorKeyBindings{
     .deactivateSprite = .q,
 };
 
-pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .{};
+pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .empty;
 
 pub fn init() !void {
     try keyboardBindings.append(allocator, player2Bindings);

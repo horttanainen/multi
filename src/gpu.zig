@@ -49,7 +49,7 @@ pub const Texture = texture.Texture;
 // Vertex types for batch renderer
 // ============================================================
 
-const PackedColor = packed struct { r: u8, g: u8, b: u8, a: u8 };
+const PackedColor = extern struct { r: u8, g: u8, b: u8, a: u8 };
 
 const SpriteVertex = extern struct {
     x: f32,

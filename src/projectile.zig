@@ -12,6 +12,7 @@ const collision = @import("collision.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
+const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const particle = @import("particle.zig");
 
@@ -30,15 +31,15 @@ pub const Explosion = struct {
     damagePlayers: bool = true,
 };
 
-pub var explosions = std.AutoArrayHashMap(box2d.c.b2BodyId, Explosion).init(allocator);
+pub var explosions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Explosion).empty;
 const PropulsionData = struct {
     magnitude: f32,
     lateralDamping: f32,
 };
 
-pub var propulsions = std.AutoArrayHashMap(box2d.c.b2BodyId, PropulsionData).init(allocator);
-pub var owners = std.AutoArrayHashMap(box2d.c.b2BodyId, usize).init(allocator);
-pub var directDamages = std.AutoArrayHashMap(box2d.c.b2BodyId, f32).init(allocator);
+pub var propulsions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, PropulsionData).empty;
+pub var owners = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, usize).empty;
+pub var directDamages = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f32).empty;
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -57,7 +58,7 @@ fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
 
     var bodyDef = box2d.createStaticBodyDef(pos);
 
-    const randomAngle = std.crypto.random.float(f32) * 2.0 * std.math.pi;
+    const randomAngle = runtime.random().float(f32) * 2.0 * std.math.pi;
     bodyDef.rotation = box2d.c.b2MakeRot(randomAngle);
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
@@ -90,9 +91,9 @@ const terrainTextureUpdatesPerFrame: usize = 2;
 const terrainColliderUpdatesPerFrame: usize = 1;
 const perfLogFramesAfterExplosion: u32 = 120;
 
-var terrainEdits = std.AutoArrayHashMap(box2d.c.b2BodyId, TerrainEdit).init(allocator);
-var terrainTextureUpdates = std.AutoArrayHashMap(box2d.c.b2BodyId, TerrainEdit).init(allocator);
-var terrainColliderUpdates = std.AutoArrayHashMap(box2d.c.b2BodyId, vec.IRect).init(allocator);
+var terrainEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
+var terrainTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
+var terrainColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, vec.IRect).empty;
 var perfExplosionId: u64 = 0;
 var perfLogFramesRemaining: u32 = 0;
 
@@ -160,7 +161,7 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
 fn queueTerrainEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IRect) !void {
     const maybeEdit = terrainEdits.getPtr(bodyId);
     if (maybeEdit == null) {
-        try terrainEdits.put(bodyId, .{
+        try terrainEdits.put(allocator, bodyId, .{
             .spriteUuid = spriteUuid,
             .dirtyRect = dirtyRect,
         });
@@ -174,7 +175,7 @@ fn queueTerrainEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IR
 fn queueTerrainColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !void {
     const maybeDirtyRect = terrainColliderUpdates.getPtr(bodyId);
     if (maybeDirtyRect == null) {
-        try terrainColliderUpdates.put(bodyId, dirtyRect);
+        try terrainColliderUpdates.put(allocator, bodyId, dirtyRect);
         return;
     }
 
@@ -185,7 +186,7 @@ fn queueTerrainColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !v
 fn queueTerrainTextureUpdate(bodyId: box2d.c.b2BodyId, edit: TerrainEdit) !void {
     const maybeEdit = terrainTextureUpdates.getPtr(bodyId);
     if (maybeEdit == null) {
-        try terrainTextureUpdates.put(bodyId, edit);
+        try terrainTextureUpdates.put(allocator, bodyId, edit);
         return;
     }
 
@@ -478,8 +479,8 @@ pub fn explode(bodyId: box2d.c.b2BodyId) !void {
 fn markShrapnelForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const shrapnelId: usize = @intFromPtr(param.?);
 
-    shrapnel.mutex.lock();
-    defer shrapnel.mutex.unlock();
+    shrapnel.mutex.lockUncancelable(runtime.io());
+    defer shrapnel.mutex.unlock(runtime.io());
 
     for (shrapnel.list.items) |*item| {
         if (item.id == shrapnelId) {
@@ -497,7 +498,7 @@ pub fn cleanupShrapnel() !void {
     var shrapnelToDiscard = std.array_list.Managed(Shrapnel).init(allocator);
     defer shrapnelToDiscard.deinit();
 
-    shrapnel.mutex.lock();
+    shrapnel.mutex.lockUncancelable(runtime.io());
     for (shrapnel.list.items) |item| {
         if (item.cleaned) {
             try shrapnelToDiscard.append(item);
@@ -505,15 +506,15 @@ pub fn cleanupShrapnel() !void {
         }
         try shrapnelToKeep.append(item);
     }
-    shrapnel.mutex.unlock();
+    shrapnel.mutex.unlock(runtime.io());
 
     shrapnel.replaceLocking(shrapnelToKeep);
 
-    shrapnelToCleanup.mutex.lock();
+    shrapnelToCleanup.mutex.lockUncancelable(runtime.io());
     for (shrapnelToCleanup.list.items) |toClean| {
         box2d.c.b2DestroyBody(toClean);
     }
-    shrapnelToCleanup.mutex.unlock();
+    shrapnelToCleanup.mutex.unlock(runtime.io());
 
     shrapnelToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(allocator));
 
@@ -567,19 +568,19 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
-    try explosions.put(bodyId, explosion);
+    try explosions.put(allocator, bodyId, explosion);
 }
 
 pub fn registerDirectDamage(bodyId: box2d.c.b2BodyId, damage: f32) !void {
-    try directDamages.put(bodyId, damage);
+    try directDamages.put(allocator, bodyId, damage);
 }
 
 pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32, lateralDamping: f32) !void {
-    try propulsions.put(bodyId, .{ .magnitude = propulsionMagnitude, .lateralDamping = lateralDamping });
+    try propulsions.put(allocator, bodyId, .{ .magnitude = propulsionMagnitude, .lateralDamping = lateralDamping });
 }
 
 pub fn registerOwner(bodyId: box2d.c.b2BodyId, playerId: usize) !void {
-    try owners.put(bodyId, playerId);
+    try owners.put(allocator, bodyId, playerId);
 }
 
 pub fn getOwner(bodyId: box2d.c.b2BodyId) ?usize {
@@ -682,15 +683,15 @@ pub fn checkContacts() !void {
 }
 
 pub fn cleanup() void {
-    explosions.clearAndFree();
-    propulsions.clearAndFree();
-    owners.clearAndFree();
-    directDamages.clearAndFree();
-    terrainEdits.clearAndFree();
-    terrainTextureUpdates.clearAndFree();
-    terrainColliderUpdates.clearAndFree();
+    explosions.clearAndFree(allocator);
+    propulsions.clearAndFree(allocator);
+    owners.clearAndFree(allocator);
+    directDamages.clearAndFree(allocator);
+    terrainEdits.clearAndFree(allocator);
+    terrainTextureUpdates.clearAndFree(allocator);
+    terrainColliderUpdates.clearAndFree(allocator);
 
-    shrapnel.mutex.lock();
+    shrapnel.mutex.lockUncancelable(runtime.io());
     for (shrapnel.list.items) |item| {
         _ = sdl.removeTimer(item.timerId);
         for (item.bodies) |toClean| {
@@ -698,12 +699,12 @@ pub fn cleanup() void {
         }
         allocator.free(item.bodies);
     }
-    shrapnel.mutex.unlock();
+    shrapnel.mutex.unlock(runtime.io());
 
     shrapnel.replaceLocking(std.array_list.Managed(Shrapnel).init(allocator));
 
-    shrapnelToCleanup.mutex.lock();
-    defer shrapnelToCleanup.mutex.unlock();
+    shrapnelToCleanup.mutex.lockUncancelable(runtime.io());
+    defer shrapnelToCleanup.mutex.unlock(runtime.io());
     for (shrapnelToCleanup.list.items) |toClean| {
         box2d.c.b2DestroyBody(toClean);
     }

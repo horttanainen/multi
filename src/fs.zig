@@ -1,6 +1,7 @@
 const std = @import("std");
 const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
+const runtime = @import("runtime.zig");
 const vec = @import("vector.zig");
 
 const FsError = error{
@@ -8,11 +9,12 @@ const FsError = error{
 };
 
 pub fn listFiles(folderPath: []const u8) ![][]const u8 {
-    var dir = std.fs.cwd().openDir(folderPath, .{}) catch |err| {
+    const io_value = runtime.io();
+    var dir = std.Io.Dir.cwd().openDir(io_value, folderPath, .{ .iterate = true }) catch |err| {
         std.debug.print("Warning: Could not open folder {s}: {}\n", .{ folderPath, err });
         return err;
     };
-    defer dir.close();
+    defer dir.close(io_value);
 
     var names = std.array_list.Managed([]const u8).init(allocator);
     errdefer {
@@ -21,7 +23,7 @@ pub fn listFiles(folderPath: []const u8) ![][]const u8 {
     }
 
     var dirIter = dir.iterate();
-    while (try dirIter.next()) |entry| {
+    while (try dirIter.next(io_value)) |entry| {
         if (entry.kind != .file) continue;
         if (std.mem.eql(u8, entry.name, ".DS_Store")) continue;
         try names.append(try allocator.dupe(u8, entry.name));
@@ -37,16 +39,18 @@ pub fn listFiles(folderPath: []const u8) ![][]const u8 {
 }
 
 pub fn readFile(path: []const u8, buf: []u8) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const bytesRead = try file.readAll(buf);
+    const io_value = runtime.io();
+    const file = try std.Io.Dir.cwd().openFile(io_value, path, .{});
+    defer file.close(io_value);
+    const bytesRead = try file.readPositionalAll(io_value, buf, 0);
     return buf[0..bytesRead];
 }
 
 pub fn writeFile(path: []const u8, contents: []const u8) !void {
-    const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(contents);
+    const io_value = runtime.io();
+    const file = try std.Io.Dir.cwd().createFile(io_value, path, .{ .truncate = true });
+    defer file.close(io_value);
+    try file.writeStreamingAll(io_value, contents);
 }
 
 pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]u64 {

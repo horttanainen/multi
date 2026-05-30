@@ -17,7 +17,7 @@ pub const Camera = struct {
     posPx: vec.IVec2,
 };
 
-pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .{};
+pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .empty;
 var nextCameraId: usize = 0;
 // Camera 0 is the persistent pre-level camera spawned at startup; player cameras start at 1.
 const PLAYER_CAMERA_ID_START: usize = 1;

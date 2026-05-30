@@ -1,4 +1,5 @@
 const std = @import("std");
+const runtime = @import("../runtime.zig");
 
 var session_seed: u64 = 0;
 var reset_counter: u64 = 0;
@@ -20,9 +21,9 @@ fn normalizeFixedSeed(seed: u64) u64 {
 }
 
 fn initRandomSessionSeed() void {
-    session_seed = std.crypto.random.int(u64);
+    session_seed = runtime.random().int(u64);
     if (session_seed == 0) {
-        const ts: i64 = std.time.milliTimestamp();
+        const ts: i64 = std.Io.Clock.real.now(runtime.io()).toMilliseconds();
         session_seed = @as(u64, @bitCast(ts));
         if (session_seed == 0) {
             // Keep zero as a reserved "invalid" value.

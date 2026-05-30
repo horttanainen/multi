@@ -8,6 +8,7 @@ const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
 const time = @import("time.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
+const runtime = @import("runtime.zig");
 const fs = @import("fs.zig");
 
 pub const Animation = struct {
@@ -29,7 +30,7 @@ pub const AnimationSet = struct {
 
 var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(allocator);
 
-var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool){};
+var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool).empty;
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
@@ -71,8 +72,8 @@ pub fn registerAnimationSet(
 }
 
 pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void {
-    animationSets.mutex.lock();
-    defer animationSets.mutex.unlock();
+    animationSets.mutex.lockUncancelable(runtime.io());
+    defer animationSets.mutex.unlock(runtime.io());
 
     const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
     const anim = animSet.animations.getPtr(animationKey) orelse return error.AnimationNotFound;
@@ -119,8 +120,8 @@ fn delayedSwitchCallback(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c
 }
 
 pub fn animate() void {
-    animationSets.mutex.lock();
-    defer animationSets.mutex.unlock();
+    animationSets.mutex.lockUncancelable(runtime.io());
+    defer animationSets.mutex.unlock(runtime.io());
 
     var iter = animationSets.map.iterator();
     while (iter.next()) |entry| {
@@ -182,8 +183,8 @@ fn updateEntitySprite(bodyId: box2d.c.b2BodyId, anim: *Animation) void {
 }
 
 pub fn colorAllFrames(bodyId: box2d.c.b2BodyId, color: sprite.Color) !void {
-    animationSets.mutex.lock();
-    defer animationSets.mutex.unlock();
+    animationSets.mutex.lockUncancelable(runtime.io());
+    defer animationSets.mutex.unlock(runtime.io());
 
     const animSet = animationSets.map.getPtr(bodyId) orelse return error.EntityNotAnimated;
 
@@ -198,8 +199,8 @@ pub fn colorAllFrames(bodyId: box2d.c.b2BodyId, color: sprite.Color) !void {
 pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
     _ = delayedSwitches.swapRemove(bodyId);
 
-    animationSets.mutex.lock();
-    defer animationSets.mutex.unlock();
+    animationSets.mutex.lockUncancelable(runtime.io());
+    defer animationSets.mutex.unlock(runtime.io());
 
     const maybeAnimSet = animationSets.map.fetchSwapRemove(bodyId);
     if (maybeAnimSet) |animSet| {
@@ -216,8 +217,8 @@ pub fn cleanupAnimationFrames(bodyId: box2d.c.b2BodyId) void {
 pub fn cleanup() void {
     delayedSwitches.clearAndFree(allocator);
 
-    animationSets.mutex.lock();
-    defer animationSets.mutex.unlock();
+    animationSets.mutex.lockUncancelable(runtime.io());
+    defer animationSets.mutex.unlock(runtime.io());
 
     var animSetIter = animationSets.map.iterator();
     while (animSetIter.next()) |entry| {
@@ -228,7 +229,7 @@ pub fn cleanup() void {
         entry.value_ptr.animations.deinit();
         allocator.free(entry.value_ptr.currentAnimations);
     }
-    animationSets.map.clearAndFree();
+    animationSets.map.clearAndFree(allocator);
 }
 
 pub fn cleanupOne(anim: Animation) void {

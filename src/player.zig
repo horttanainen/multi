@@ -13,6 +13,7 @@ const animation = @import("animation.zig");
 const time = @import("time.zig");
 
 const weapon = @import("weapon.zig");
+const runtime = @import("runtime.zig");
 
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
@@ -65,7 +66,7 @@ pub const Player = struct {
     sprayPaintSpriteUuid: ?u64,
 };
 
-pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .{};
+pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .empty;
 const PlayerError = error{PlayerUnspawned};
 
 var runAnimationFrameCount: usize = 10;
@@ -1015,8 +1016,8 @@ fn gib(p: *Player) !void {
 }
 
 pub fn processRespawns() !void {
-    playersToRespawn.mutex.lock();
-    defer playersToRespawn.mutex.unlock();
+    playersToRespawn.mutex.lockUncancelable(runtime.io());
+    defer playersToRespawn.mutex.unlock(runtime.io());
 
     for (playersToRespawn.list.items) |playerId| {
         const maybePlayer = players.getPtr(playerId);
@@ -1090,7 +1091,7 @@ pub fn cleanup() void {
 
     score.cleanup();
 
-    playersToRespawn.mutex.lock();
-    defer playersToRespawn.mutex.unlock();
+    playersToRespawn.mutex.lockUncancelable(runtime.io());
+    defer playersToRespawn.mutex.unlock(runtime.io());
     playersToRespawn.list.clearAndFree();
 }

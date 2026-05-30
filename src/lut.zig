@@ -3,6 +3,7 @@ const config = @import("config.zig");
 const fs = @import("fs.zig");
 const gpu = @import("gpu.zig");
 const allocator = @import("allocator.zig").allocator;
+const runtime = @import("runtime.zig");
 const sdl = @import("sdl.zig");
 const c = sdl.c;
 
@@ -15,7 +16,7 @@ const LutEntry = struct {
     path: []const u8,
 };
 
-var entries: std.ArrayList(LutEntry) = .{};
+var entries: std.ArrayList(LutEntry) = .empty;
 var current_index: usize = 0;
 
 pub fn init() !void {
@@ -179,7 +180,8 @@ pub fn regenerateBuiltinLuts() void {
 
 fn generateBuiltinLuts(force: bool) void {
     // Create luts/ directory if needed
-    std.fs.cwd().makeDir("luts") catch |err| switch (err) {
+    const io_value = runtime.io();
+    std.Io.Dir.cwd().createDir(io_value, "luts", .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {
             std.log.warn("lut: failed to create luts/ directory: {}", .{err});
@@ -228,7 +230,7 @@ const ColorTransformFn = *const fn (r: f32, g: f32, b: f32) [3]f32;
 fn generateLut(path: []const u8, transform: ColorTransformFn, force: bool) !void {
     // Skip if file already exists
     if (!force) {
-        if (std.fs.cwd().access(path, .{})) {
+        if (std.Io.Dir.cwd().access(runtime.io(), path, .{})) {
             return;
         } else |err| switch (err) {
             error.FileNotFound => {},

@@ -1,6 +1,7 @@
 const box2d = @import("box2d.zig");
 const std = @import("std");
 const sdl = @import("sdl.zig");
+const runtime = @import("runtime.zig");
 
 const config = @import("config.zig");
 const Vec2 = @import("vector.zig").Vec2;
@@ -171,7 +172,9 @@ fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u
     return 0;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    runtime.init(init.io);
+
     try window.init();
     time.init();
     try audio.init();

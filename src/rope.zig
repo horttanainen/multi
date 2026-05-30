@@ -26,7 +26,7 @@ pub const Rope = struct {
     jointId: box2d.c.b2JointId,
 };
 
-pub var ropes: std.AutoArrayHashMapUnmanaged(usize, Rope) = .{};
+pub var ropes: std.AutoArrayHashMapUnmanaged(usize, Rope) = .empty;
 var hookSpriteUuid: ?u64 = null;
 var segmentSpriteUuid: ?u64 = null;
 

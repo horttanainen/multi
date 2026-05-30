@@ -19,7 +19,7 @@ pub var activeViewport: Viewport = .{
     .height = config.window.defaultHeight,
 };
 
-pub var viewports: std.AutoArrayHashMapUnmanaged(usize, Viewport) = .{};
+pub var viewports: std.AutoArrayHashMapUnmanaged(usize, Viewport) = .empty;
 
 pub fn addViewportForCamera(cameraId: usize) !void {
     try viewports.put(allocator, cameraId, .{

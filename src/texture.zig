@@ -11,7 +11,7 @@ const PendingTextureUpload = struct {
     fence: *c.SDL_GPUFence,
 };
 
-var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .{};
+var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .empty;
 
 pub const Texture = struct {
     atlas_x: u32 = 0,

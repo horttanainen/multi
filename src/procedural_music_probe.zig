@@ -3,6 +3,7 @@ const dsp = @import("music/dsp.zig");
 const entropy = @import("music/entropy.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
+const runtime = @import("runtime.zig");
 
 const SAMPLE_RATE_U32: u32 = 48000;
 const CHANNEL_COUNT: u16 = 2;
@@ -42,13 +43,16 @@ const RenderStats = struct {
     peak_abs: f32 = 0.0,
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init) !void {
+    runtime.init(init.io);
+
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit();
+    const args = try init.minimal.args.toSlice(arena_state.allocator());
 
     var show_help = false;
     const cfg = parseConfig(args, &show_help) catch |err| {
@@ -65,8 +69,9 @@ pub fn main() !void {
     applyStyleSettings(cfg);
 
     try ensureParentDir(cfg.out_path);
-    const file = try std.fs.cwd().createFile(cfg.out_path, .{ .truncate = true });
-    defer file.close();
+    const io_value = runtime.io();
+    const file = try std.Io.Dir.cwd().createFile(io_value, cfg.out_path, .{ .truncate = true });
+    defer file.close(io_value);
 
     try writeWavHeader(file, total_frames);
     const stats = try writeStyleFrames(file, cfg.style, total_frames);
@@ -402,10 +407,10 @@ fn frameCount(duration_seconds: f32) !u32 {
 fn ensureParentDir(path: []const u8) !void {
     const parent = std.fs.path.dirname(path) orelse return;
     if (parent.len == 0) return;
-    try std.fs.cwd().makePath(parent);
+    try std.Io.Dir.cwd().createDirPath(runtime.io(), parent);
 }
 
-fn writeWavHeader(file: std.fs.File, total_frames: u32) !void {
+fn writeWavHeader(file: std.Io.File, total_frames: u32) !void {
     const data_size = total_frames * BYTES_PER_FRAME;
     const riff_size = 36 + data_size;
     const byte_rate = SAMPLE_RATE_U32 * BYTES_PER_FRAME;
@@ -427,10 +432,10 @@ fn writeWavHeader(file: std.fs.File, total_frames: u32) !void {
     @memcpy(header[36..40], "data");
     writeU32Le(header[40..44], data_size);
 
-    try file.writeAll(&header);
+    try file.writeStreamingAll(runtime.io(), &header);
 }
 
-fn writeStyleFrames(file: std.fs.File, style: StyleName, total_frames: u32) !RenderStats {
+fn writeStyleFrames(file: std.Io.File, style: StyleName, total_frames: u32) !RenderStats {
     const CHUNK_FRAMES = 1024;
     var samples: [CHUNK_FRAMES * 2]f32 = undefined;
     var bytes: [CHUNK_FRAMES * BYTES_PER_FRAME]u8 = undefined;
@@ -454,7 +459,7 @@ fn writeStyleFrames(file: std.fs.File, style: StyleName, total_frames: u32) !Ren
             byte_idx += BYTES_PER_FRAME;
         }
 
-        try file.writeAll(bytes[0..byte_idx]);
+        try file.writeStreamingAll(runtime.io(), bytes[0..byte_idx]);
         frames_written += chunk_frames;
     }
 

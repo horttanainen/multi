@@ -13,6 +13,7 @@ const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
 
 const conv = @import("conversion.zig");
+const runtime = @import("runtime.zig");
 const uuid = @import("uuid.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 
@@ -645,9 +646,9 @@ pub fn cleanupLater(spriteUuid: u64) void {
         return;
     }
 
-    spritesToCleanup.mutex.lock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
     const acceptTimers = acceptSpriteCleanupTimers;
-    spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.unlock(runtime.io());
     if (!acceptTimers) return;
 
     const uuid_as_ptr: ?*anyopaque = @ptrFromInt(spriteUuid);
@@ -657,8 +658,8 @@ pub fn cleanupLater(spriteUuid: u64) void {
 fn markSpriteForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const spriteUuid: u64 = @intFromPtr(param.?);
 
-    spritesToCleanup.mutex.lock();
-    defer spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer spritesToCleanup.mutex.unlock(runtime.io());
 
     if (!acceptSpriteCleanupTimers) return 0;
     spritesToCleanup.list.append(spriteUuid) catch {};
@@ -667,8 +668,8 @@ fn markSpriteForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c)
 }
 
 pub fn cleanupSprites() void {
-    spritesToCleanup.mutex.lock();
-    defer spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer spritesToCleanup.mutex.unlock(runtime.io());
 
     for (spritesToCleanup.list.items) |spriteUuid| {
         const maybeKV = sprites.fetchSwapRemoveLocking(spriteUuid);
@@ -695,12 +696,12 @@ pub fn clearTextureCache() void {
 }
 
 pub fn cleanupAll() void {
-    spritesToCleanup.mutex.lock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
     spritesToCleanup.list.clearRetainingCapacity();
-    spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.unlock(runtime.io());
 
-    sprites.mutex.lock();
-    defer sprites.mutex.unlock();
+    sprites.mutex.lockUncancelable(runtime.io());
+    defer sprites.mutex.unlock(runtime.io());
 
     for (sprites.map.values()) |s| {
         cleanupOne(s);
@@ -717,19 +718,19 @@ pub fn cleanupAll() void {
 }
 
 pub fn deinit() void {
-    spritesToCleanup.mutex.lock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
     acceptSpriteCleanupTimers = false;
-    spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.unlock(runtime.io());
 
     cleanupAll();
 
-    sprites.mutex.lock();
-    sprites.map.deinit();
-    sprites.mutex.unlock();
+    sprites.mutex.lockUncancelable(runtime.io());
+    sprites.map.deinit(allocator);
+    sprites.mutex.unlock(runtime.io());
 
-    spritesToCleanup.mutex.lock();
+    spritesToCleanup.mutex.lockUncancelable(runtime.io());
     spritesToCleanup.list.deinit();
-    spritesToCleanup.mutex.unlock();
+    spritesToCleanup.mutex.unlock(runtime.io());
 
     textureCache.deinit();
 }

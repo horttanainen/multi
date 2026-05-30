@@ -43,7 +43,7 @@ pub const LevelEditorAction = enum {
     deactivate_sprite,
 };
 
-pub var availableColors: std.ArrayList(sprite.Color) = .{};
+pub var availableColors: std.ArrayList(sprite.Color) = .empty;
 
 pub const Controller = struct {
     playerId: usize,
@@ -53,7 +53,7 @@ pub const Controller = struct {
     gamepadBindings: ?gamepad.GamepadBindings,
 };
 
-pub var controllers: std.AutoArrayHashMapUnmanaged(usize, Controller) = .{};
+pub var controllers: std.AutoArrayHashMapUnmanaged(usize, Controller) = .empty;
 
 pub fn recalculateControllers() !void {
     var iter = controllers.iterator();

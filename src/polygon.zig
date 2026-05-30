@@ -265,7 +265,7 @@ fn extractBoundaryLoopsInRect(pixels: [*]const u8, width: usize, height: usize, 
     var edges = std.array_list.Managed(BoundaryEdge).init(allocator);
     defer edges.deinit();
 
-    var edgeStarts = std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)).init(allocator);
+    var edgeStarts = std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize)).empty;
     defer deinitEdgeStarts(&edgeStarts);
 
     try buildBoundaryEdges(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
@@ -274,7 +274,7 @@ fn extractBoundaryLoopsInRect(pixels: [*]const u8, width: usize, height: usize, 
 
 fn buildBoundaryEdges(
     edges: *std.array_list.Managed(BoundaryEdge),
-    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    edgeStarts: *std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize)),
     pixels: [*]const u8,
     width: usize,
     height: usize,
@@ -310,30 +310,30 @@ fn buildBoundaryEdges(
 
 fn appendBoundaryEdge(
     edges: *std.array_list.Managed(BoundaryEdge),
-    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    edgeStarts: *std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize)),
     start: IVec2,
     end: IVec2,
 ) !void {
     const edgeIndex = edges.items.len;
     try edges.append(.{ .start = start, .end = end });
 
-    const entry = try edgeStarts.getOrPut(start);
+    const entry = try edgeStarts.getOrPut(allocator, start);
     if (!entry.found_existing) {
         entry.value_ptr.* = std.array_list.Managed(usize).init(allocator);
     }
     try entry.value_ptr.append(edgeIndex);
 }
 
-fn deinitEdgeStarts(edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize))) void {
+fn deinitEdgeStarts(edgeStarts: *std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize))) void {
     for (edgeStarts.values()) |*indices| {
         indices.deinit();
     }
-    edgeStarts.deinit();
+    edgeStarts.deinit(allocator);
 }
 
 fn traceBoundaryLoops(
     edges: *std.array_list.Managed(BoundaryEdge),
-    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    edgeStarts: *std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize)),
     pixels: [*]const u8,
     width: usize,
     height: usize,
@@ -414,7 +414,7 @@ fn traceBoundaryLoops(
 }
 
 fn nextUnusedEdgeFrom(
-    edgeStarts: *std.AutoArrayHashMap(IVec2, std.array_list.Managed(usize)),
+    edgeStarts: *std.AutoArrayHashMapUnmanaged(IVec2, std.array_list.Managed(usize)),
     edges: *std.array_list.Managed(BoundaryEdge),
     point: IVec2,
 ) ?usize {

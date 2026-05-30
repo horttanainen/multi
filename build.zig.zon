@@ -2,26 +2,27 @@
     .name = .multi,
     .fingerprint = 0xc59143053b31ea74,
     .version = "0.0.0",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .SDL3 = .{
-            .url = "git+https://github.com/allyourcodebase/SDL3?ref=main#467a4baad2acdda1bcf717065793fbbdf2569f8d",
-            .hash = "sdl-0.0.0-i4QD0WN-qQB1RKdRC9-6iZyTco2jIIr3y2DFrAz-D9CH",
+            .url = "git+https://github.com/allyourcodebase/SDL3#f382eacf4b65f83dbfde2a6d6369ad0721c67976",
+            .hash = "sdl-1.0.1+3.4.4-i4QD0TSTqQBAsHLhwY8pWrOpzif-A_4zOe6-OB4oA5KS",
         },
         .SDL_image = .{
-            .url = "git+https://github.com/allyourcodebase/SDL_image?ref=main#971b1227ecde1450c95acef110191a775cd9da23",
-            .hash = "SDL_image-3.4.0--aJoHcoWAAB0fnqTA4tSSKuhV4Lt_mAPzqiG64dGdPup",
+            .url = "git+https://github.com/allyourcodebase/SDL_image#288bc44cba10e542a872912f62e22160e91bb6dc",
+            .hash = "SDL_image-3.4.2--aJoHbkWAAA9Byk-voi8UuRvTFENE7UKtQUXs4fc_VSc",
         },
         .SDL_ttf = .{
-            .url = "git+https://github.com/allyourcodebase/SDL_ttf?ref=main#00bf02e44d486787034ccdc3eced6e455b125f56",
-            .hash = "SDL_ttf-3.2.2-PNW5xNIRAADcUkA75pWizqojQE4hM75QjOequyw4aET6",
+            .url = "git+https://github.com/allyourcodebase/SDL_ttf#b08907d74f0d8afec47bfafd747e01d3b1a75b8a",
+            .hash = "SDL_ttf-3.2.3-1-PNW5xMMRAADJwwIkWjVS5gqMyk2oVbBm7qOh06Y7hFeu",
         },
-        .box2d = .{
-            .url = "git+https://github.com/allyourcodebase/box2d#0482245bf59bec743a7cb29961a480c3f7497f0c",
-            .hash = "box2d-3.1.1-crFBk74aAAD-TJGY5mHVDB0sV5JntTq0MnlaHYxb5yl5",
+        .box2d_source = .{
+            .url = "git+https://github.com/erincatto/box2d#8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3",
+            .hash = "N-V-__8AAD_GLQC0gE2D_PytnnbJ5Ow_tY-H253NllhDk_n1",
         },
         .triangle = .{
-            .url = "git+https://github.com/horttanainen/triangle#418d046cd07d96859ece5dd7c6f3aef496c35c93",
-            .hash = "triangle-0.0.0-AAAAAHFHCgApqeU5aW6uG4bEOC4i-4mkg7NTaeQ4VoSn",
+            .url = "git+https://github.com/horttanainen/triangle#5173eb4918462b6243018b21b38e1b89ff06914a",
+            .hash = "triangle-0.0.0-q0LNWZhHCgC51cdEna0Pu3IevLChwcPcPqW9I4RumS2a",
         },
     },
     .paths = .{

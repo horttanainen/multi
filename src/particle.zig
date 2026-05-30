@@ -11,6 +11,7 @@ const thread_safe = @import("thread_safe_array_list.zig");
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
+const runtime = @import("runtime.zig");
 
 pub const Particle = struct {
     bodyId: box2d.c.b2BodyId,
@@ -50,16 +51,16 @@ pub fn create(bodyId: box2d.c.b2BodyId, lifetime: u32, color: ?sprite.Color, sca
 }
 
 pub fn updateStates() void {
-    particles.mutex.lock();
-    defer particles.mutex.unlock();
+    particles.mutex.lockUncancelable(runtime.io());
+    defer particles.mutex.unlock(runtime.io());
     for (particles.map.values()) |*p| {
         p.state = box2d.getState(p.bodyId);
     }
 }
 
 pub fn drawAll() !void {
-    particles.mutex.lock();
-    defer particles.mutex.unlock();
+    particles.mutex.lockUncancelable(runtime.io());
+    defer particles.mutex.unlock(runtime.io());
     for (particles.map.values()) |*p| {
         try draw(p);
     }
@@ -95,7 +96,7 @@ pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
         bodyDef.gravityScale = cfg.gravityScale;
 
         // Random velocity variation
-        const speedVariation = cfg.minSpeedVariation + std.crypto.random.float(f32) * (cfg.maxSpeedVariation - cfg.minSpeedVariation);
+        const speedVariation = cfg.minSpeedVariation + runtime.random().float(f32) * (cfg.maxSpeedVariation - cfg.minSpeedVariation);
         bodyDef.linearVelocity = box2d.mul(dir, speedVariation);
 
         const bodyId = try box2d.createBody(bodyDef);
@@ -114,7 +115,7 @@ pub fn createBloodParticles(pos: vec.Vec2, damage: f32) !void {
         _ = box2d.c.b2CreatePolygonShape(bodyId, &boxShapeDef, &boxShape);
 
         // Random scale
-        const scale = cfg.minScale + std.crypto.random.float(f32) * (cfg.maxScale - cfg.minScale);
+        const scale = cfg.minScale + runtime.random().float(f32) * (cfg.maxScale - cfg.minScale);
         try create(bodyId, cfg.lifetimeMs, bloodColor, scale);
     }
 }
@@ -161,7 +162,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
     const bloodVec = vec.fromBox2d(bloodPos);
 
     // Blood stain radius proportional to particle scale
-    const baseStainRadius = cfg.minStainRadius + std.crypto.random.float(f32) * (cfg.maxStainRadius - cfg.minStainRadius);
+    const baseStainRadius = cfg.minStainRadius + runtime.random().float(f32) * (cfg.maxStainRadius - cfg.minStainRadius);
     const bloodStainRadius = baseStainRadius * particleScale;
     const bloodColor = sprite.Color{ .r = cfg.colorR, .g = cfg.colorG, .b = cfg.colorB };
 
@@ -277,8 +278,8 @@ fn markParticleForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.
 }
 
 pub fn cleanupParticles() !void {
-    particlesToCleanup.mutex.lock();
-    defer particlesToCleanup.mutex.unlock();
+    particlesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer particlesToCleanup.mutex.unlock(runtime.io());
 
     for (particlesToCleanup.list.items) |bodyId| {
         const maybeParticle = particles.fetchSwapRemoveLocking(bodyId);
@@ -295,7 +296,7 @@ pub fn cleanupParticles() !void {
 
 pub fn cleanup() void {
     // Cleanup all remaining particles
-    particles.mutex.lock();
+    particles.mutex.lockUncancelable(runtime.io());
     for (particles.map.keys()) |bodyId| {
         const maybeParticle = particles.map.get(bodyId);
         if (maybeParticle) |p| {
@@ -306,11 +307,11 @@ pub fn cleanup() void {
             box2d.c.b2DestroyBody(bodyId);
         }
     }
-    particles.map.clearAndFree();
-    particles.mutex.unlock();
+    particles.map.clearAndFree(allocator);
+    particles.mutex.unlock(runtime.io());
 
-    particlesToCleanup.mutex.lock();
-    defer particlesToCleanup.mutex.unlock();
+    particlesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer particlesToCleanup.mutex.unlock(runtime.io());
     for (particlesToCleanup.list.items) |toClean| {
         box2d.c.b2DestroyBody(toClean);
     }

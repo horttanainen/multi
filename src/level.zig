@@ -16,6 +16,7 @@ const background = @import("background.zig");
 const animation = @import("animation.zig");
 const controller = @import("controller.zig");
 const rope = @import("rope.zig");
+const runtime = @import("runtime.zig");
 const weapon = @import("weapon.zig");
 
 const gpu = @import("gpu.zig");
@@ -118,7 +119,7 @@ pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
 }
 
 pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.fs.cwd().readFileAlloc(allocator, path, config.maxLevelSizeInBytes);
+    const data = try std.Io.Dir.cwd().readFileAlloc(runtime.io(), path, allocator, .limited(config.maxLevelSizeInBytes));
     defer allocator.free(data);
     return parseFromData(data);
 }

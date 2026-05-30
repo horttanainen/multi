@@ -1,6 +1,7 @@
 const std = @import("std");
 const background_paint = @import("background_paint.zig");
 const menu = @import("menu.zig");
+const runtime = @import("runtime.zig");
 const sdl = @import("sdl.zig");
 const settings = @import("settings.zig");
 const state = @import("state.zig");
@@ -603,7 +604,7 @@ pub fn randomize() void {
 }
 
 fn randomizeAlgorithms() void {
-    const rng = std.crypto.random;
+    const rng = runtime.random();
     swirl_type_value = rng.intRangeAtMost(u8, 0, SWIRL_COUNT - 1);
     noise_type_value = rng.intRangeAtMost(u8, 1, NOISE_COUNT - 1);
     color_mode_value = rng.intRangeAtMost(u8, 0, COLOR_COUNT - 1);
@@ -619,14 +620,14 @@ fn fromShader(cfg: *menu.ConfigData, shader: f32) void {
 }
 
 fn randomInRange(cfg: menu.ConfigData) f32 {
-    const rng = std.crypto.random;
+    const rng = runtime.random();
     const lo = cfg.rand_min orelse cfg.min;
     const hi = cfg.rand_max orelse cfg.max;
     return lo + rng.float(f32) * (hi - lo);
 }
 
 fn randomIntInRange(cfg: menu.ConfigData) f32 {
-    const rng = std.crypto.random;
+    const rng = runtime.random();
     const lo: u8 = @intFromFloat(cfg.rand_min orelse cfg.min);
     const hi: u8 = @intFromFloat(cfg.rand_max orelse cfg.max);
     return @floatFromInt(rng.intRangeAtMost(u8, lo, hi));
