@@ -13,24 +13,63 @@ const PendingTextureUpload = struct {
 
 var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .empty;
 
+pub const TextureBacking = enum {
+    immutable_atlas,
+    mutable_atlas,
+    standalone,
+};
+
 pub const Texture = struct {
     atlas_x: u32 = 0,
     atlas_y: u32 = 0,
     width: i32,
     height: i32,
-    is_atlas: bool = true,
+    backing: TextureBacking = .immutable_atlas,
+    atlas_generation: u64 = 0,
     owns_atlas_region: bool = true,
     standalone_gpu_texture: ?*c.SDL_GPUTexture = null,
     color_mod: sdl.Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
     blend_mode: sdl.BlendMode = .blend,
-
-    pub fn gpuTexture(self: *const Texture) *c.SDL_GPUTexture {
-        if (self.is_atlas) {
-            return gpu.getAtlas().gpu_texture;
-        }
-        return self.standalone_gpu_texture.?;
-    }
 };
+
+pub fn isAtlasTexture(texture: *const Texture) bool {
+    return texture.backing != .standalone;
+}
+
+pub fn isImmutableAtlasTexture(texture: *const Texture) bool {
+    return texture.backing == .immutable_atlas;
+}
+
+fn atlasForTexture(texture: *const Texture) ?*Atlas {
+    switch (texture.backing) {
+        .immutable_atlas => return gpu.getAtlas(),
+        .mutable_atlas => return gpu.getMutableAtlas(),
+        .standalone => return null,
+    }
+}
+
+pub fn gpuTexture(texture: *const Texture) *c.SDL_GPUTexture {
+    const tex_atlas = atlasForTexture(texture);
+    if (tex_atlas == null) {
+        return texture.standalone_gpu_texture.?;
+    }
+    return tex_atlas.?.gpu_texture;
+}
+
+fn createGpuTexture(device: *c.SDL_GPUDevice, w: u32, h: u32) !*c.SDL_GPUTexture {
+    const tex_info = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width = w,
+        .height = h,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+}
 
 /// Add a surface to the texture atlas. Returns an atlas-backed Texture.
 pub fn addToAtlas(surface: *sdl.Surface) !*Texture {
@@ -53,7 +92,8 @@ pub fn addToAtlas(surface: *sdl.Surface) !*Texture {
         .atlas_y = region.y,
         .width = @intCast(w),
         .height = @intCast(h),
-        .is_atlas = true,
+        .backing = .immutable_atlas,
+        .atlas_generation = tex_atlas.generation,
     };
 
     uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
@@ -72,24 +112,13 @@ pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
     const w: u32 = @intCast(rgba_surface.*.w);
     const h: u32 = @intCast(rgba_surface.*.h);
 
-    const tex_info = c.SDL_GPUTextureCreateInfo{
-        .type = c.SDL_GPU_TEXTURETYPE_2D,
-        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = w,
-        .height = h,
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
-        .props = 0,
-    };
-    const gpu_texture = c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+    const gpu_texture = try createGpuTexture(device, w, h);
 
     const texture = try allocator.create(Texture);
     texture.* = .{
         .width = @intCast(w),
         .height = @intCast(h),
-        .is_atlas = false,
+        .backing = .standalone,
         .standalone_gpu_texture = gpu_texture,
     };
 
@@ -97,14 +126,60 @@ pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
     return texture;
 }
 
+pub fn createMutableTexture(surface: *sdl.Surface) !*Texture {
+    const device = gpu.getDevice();
+    const allocator = gpu.getAllocator();
+    const tex_atlas = gpu.getMutableAtlas();
+
+    const rgba_surface = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888);
+    if (rgba_surface == null) return error.ConvertSurfaceFailed;
+    defer c.SDL_DestroySurface(rgba_surface);
+
+    const w: u32 = @intCast(rgba_surface.*.w);
+    const h: u32 = @intCast(rgba_surface.*.h);
+    const region = tex_atlas.allocate(w, h) catch |err| {
+        if (err != error.AtlasFull) {
+            std.log.warn("createMutableTexture: mutable atlas allocation failed with {}", .{err});
+            return err;
+        }
+
+        std.log.warn("createMutableTexture: mutable atlas full, using standalone texture", .{});
+        return createStandaloneTexture(surface);
+    };
+
+    const texture = try allocator.create(Texture);
+    texture.* = .{
+        .atlas_x = region.x,
+        .atlas_y = region.y,
+        .width = @intCast(w),
+        .height = @intCast(h),
+        .backing = .mutable_atlas,
+        .atlas_generation = tex_atlas.generation,
+    };
+
+    uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
+    return texture;
+}
+
 pub fn destroyTexture(texture: *Texture) void {
-    if (!texture.is_atlas) {
-        // Standalone texture: release GPU texture
+    if (texture.backing == .standalone) {
         if (texture.standalone_gpu_texture) |gpu_tex| {
             gpu.queueTextureDestroy(gpu_tex);
         }
+    } else if (texture.backing == .mutable_atlas and texture.owns_atlas_region) {
+        const tex_atlas = gpu.getMutableAtlas();
+        if (texture.atlas_generation != tex_atlas.generation) {
+            gpu.getAllocator().destroy(texture);
+            return;
+        }
+
+        tex_atlas.freeRegion(
+            texture.atlas_x,
+            texture.atlas_y,
+            @intCast(texture.width),
+            @intCast(texture.height),
+        );
     }
-    // Atlas textures: just free the wrapper, atlas region is leaked (reclaimed on level reload)
     gpu.getAllocator().destroy(texture);
 }
 
@@ -164,45 +239,87 @@ fn submitUploadAndTrackBuffer(device: *c.SDL_GPUDevice, cmd: *c.SDL_GPUCommandBu
 
 /// Create a new Texture wrapper that shares the same atlas region.
 pub fn cloneTexture(source: *Texture) !*Texture {
+    if (source.backing != .immutable_atlas) {
+        std.log.warn("cloneTexture: refusing to share non-immutable texture backing", .{});
+        return error.CannotCloneMutableTexture;
+    }
+
     const texture = try gpu.getAllocator().create(Texture);
     texture.* = .{
         .atlas_x = source.atlas_x,
         .atlas_y = source.atlas_y,
         .width = source.width,
         .height = source.height,
-        .is_atlas = source.is_atlas,
+        .backing = .immutable_atlas,
+        .atlas_generation = source.atlas_generation,
         .owns_atlas_region = false,
-        .standalone_gpu_texture = source.standalone_gpu_texture,
         .color_mod = source.color_mod,
         .blend_mode = source.blend_mode,
     };
     return texture;
 }
 
-/// Allocate a new private atlas region for a texture and upload surface data there.
-/// Used for copy-on-write when a texture shares its atlas region with the cache.
-pub fn reallocateAtlasRegion(texture: *Texture, surface: *sdl.Surface) !void {
+fn moveTextureToStandalone(texture: *Texture, rgba_surface: *sdl.Surface) !void {
     const device = gpu.getDevice();
-    const tex_atlas = gpu.getAtlas();
 
+    const w: u32 = @intCast(texture.width);
+    const h: u32 = @intCast(texture.height);
+    const gpu_texture = try createGpuTexture(device, w, h);
+    errdefer c.SDL_ReleaseGPUTexture(device, gpu_texture);
+
+    texture.atlas_x = 0;
+    texture.atlas_y = 0;
+    texture.backing = .standalone;
+    texture.atlas_generation = 0;
+    texture.owns_atlas_region = true;
+    texture.standalone_gpu_texture = gpu_texture;
+
+    uploadTextureImmediate(device, gpu_texture, rgba_surface);
+}
+
+pub fn ensureMutableTexture(texture: *Texture, surface: *sdl.Surface) !void {
+    if (texture.backing == .mutable_atlas or texture.backing == .standalone) {
+        return;
+    }
+
+    const device = gpu.getDevice();
     const rgba_surface = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888);
     if (rgba_surface == null) return error.ConvertSurfaceFailed;
     defer c.SDL_DestroySurface(rgba_surface);
 
     const w: u32 = @intCast(texture.width);
     const h: u32 = @intCast(texture.height);
+    const tex_atlas = gpu.getMutableAtlas();
+    const region = tex_atlas.allocate(w, h) catch |err| {
+        if (err != error.AtlasFull) {
+            std.log.warn("ensureMutableTexture: mutable atlas allocation failed with {}", .{err});
+            return err;
+        }
 
-    const region = try tex_atlas.allocate(w, h);
+        std.log.warn("ensureMutableTexture: mutable atlas full, using standalone texture", .{});
+        try moveTextureToStandalone(texture, rgba_surface);
+        return;
+    };
+
     texture.atlas_x = region.x;
     texture.atlas_y = region.y;
+    texture.backing = .mutable_atlas;
+    texture.atlas_generation = tex_atlas.generation;
     texture.owns_atlas_region = true;
+    texture.standalone_gpu_texture = null;
 
     uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
+}
+
+/// Compatibility wrapper for older copy-on-write call sites.
+pub fn reallocateAtlasRegion(texture: *Texture, surface: *sdl.Surface) !void {
+    try ensureMutableTexture(texture, surface);
 }
 
 /// Reset atlas packer state (call on level reload to reclaim all atlas space).
 pub fn resetAtlas() void {
     gpu.getAtlas().init();
+    gpu.getMutableAtlas().init();
 }
 
 pub fn queryTexture(texture: *Texture, w: *i32, h: *i32) !void {
@@ -233,11 +350,13 @@ pub fn reuploadTexture(texture: *Texture, surface: *sdl.Surface) !void {
     if (rgba_surface == null) return error.ConvertSurfaceFailed;
     defer c.SDL_DestroySurface(rgba_surface);
 
-    if (texture.is_atlas) {
-        uploadToAtlasRegion(device, gpu.getAtlas(), rgba_surface, texture.atlas_x, texture.atlas_y, @intCast(texture.width), @intCast(texture.height));
-    } else {
+    const tex_atlas = atlasForTexture(texture);
+    if (tex_atlas == null) {
         uploadTextureImmediate(device, texture.standalone_gpu_texture.?, rgba_surface);
+        return;
     }
+
+    uploadToAtlasRegion(device, tex_atlas.?, rgba_surface, texture.atlas_x, texture.atlas_y, @intCast(texture.width), @intCast(texture.height));
 }
 
 pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl.Rect) !void {
@@ -266,10 +385,11 @@ pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl
     if (rgba_surface == null) return error.ConvertSurfaceFailed;
     defer c.SDL_DestroySurface(rgba_surface);
 
-    if (texture.is_atlas) {
+    const tex_atlas = atlasForTexture(texture);
+    if (tex_atlas != null) {
         const dstX: u32 = texture.atlas_x + @as(u32, @intCast(rect.x));
         const dstY: u32 = texture.atlas_y + @as(u32, @intCast(rect.y));
-        uploadToAtlasRegion(device, gpu.getAtlas(), rgba_surface, dstX, dstY, @intCast(rect.w), @intCast(rect.h));
+        uploadToAtlasRegion(device, tex_atlas.?, rgba_surface, dstX, dstY, @intCast(rect.w), @intCast(rect.h));
         return;
     }
 
@@ -338,11 +458,11 @@ fn uploadTextureRegionFromBgraSurface(texture: *Texture, surface: *sdl.Surface, 
         .rows_per_layer = h,
     };
     const dst_region = c.SDL_GPUTextureRegion{
-        .texture = texture.gpuTexture(),
+        .texture = gpuTexture(texture),
         .mip_level = 0,
         .layer = 0,
-        .x = if (texture.is_atlas) texture.atlas_x + @as(u32, @intCast(rect.x)) else @intCast(rect.x),
-        .y = if (texture.is_atlas) texture.atlas_y + @as(u32, @intCast(rect.y)) else @intCast(rect.y),
+        .x = if (isAtlasTexture(texture)) texture.atlas_x + @as(u32, @intCast(rect.x)) else @intCast(rect.x),
+        .y = if (isAtlasTexture(texture)) texture.atlas_y + @as(u32, @intCast(rect.y)) else @intCast(rect.y),
         .z = 0,
         .w = w,
         .h = h,

@@ -41,14 +41,12 @@ fn spriteTriangleCacheKey(s: sprite.Sprite) ![]const u8 {
     const scaleYBits: u32 = @bitCast(s.scale.y);
     return std.fmt.allocPrint(
         allocator,
-        "{s}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}",
+        "{s}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}|{d}",
         .{
             s.imgPath,
-            s.texture.atlas_x,
-            s.texture.atlas_y,
+            s.geometryId,
             s.texture.width,
             s.texture.height,
-            @intFromBool(s.texture.is_atlas),
             s.sizeP.x,
             s.sizeP.y,
             scaleXBits,

@@ -189,8 +189,9 @@ const GpuState = struct {
     device: *c.SDL_GPUDevice,
     window: *sdl.Window,
 
-    // Texture atlas
+    // Texture atlases
     atlas: atlas.Atlas,
+    mutable_atlas: atlas.Atlas,
 
     // Pipelines
     sprite_alpha_pipeline: *c.SDL_GPUGraphicsPipeline,
@@ -288,12 +289,17 @@ pub fn getAtlas() *atlas.Atlas {
     return &getGpu().atlas;
 }
 
+pub fn getMutableAtlas() *atlas.Atlas {
+    return &getGpu().mutable_atlas;
+}
+
 pub fn saveAtlasCheckpoint() void {
     getGpu().atlas.saveCheckpoint();
 }
 
 pub fn resetAtlasToCheckpoint() void {
     getGpu().atlas.restoreCheckpoint();
+    getGpu().mutable_atlas.init();
 }
 
 pub fn getAllocator() std.mem.Allocator {
@@ -514,6 +520,21 @@ fn createOffscreenTexture(device: *c.SDL_GPUDevice, w: u32, h: u32, swapchain_fo
         .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER | c.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
         .width = w,
         .height = h,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+}
+
+fn createAtlasTexture(device: *c.SDL_GPUDevice) !*c.SDL_GPUTexture {
+    const tex_info = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width = atlas.ATLAS_SIZE,
+        .height = atlas.ATLAS_SIZE,
         .layer_count_or_depth = 1,
         .num_levels = 1,
         .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
@@ -776,25 +797,21 @@ pub fn createRenderer(window: *sdl.Window) !void {
     // Generate and upload identity LUT (32x32x32 stored as 1024x32 RGBA)
     const lut_tex = try createIdentityLut(device);
 
-    // Create atlas GPU texture
-    const atlas_tex_info = c.SDL_GPUTextureCreateInfo{
-        .type = c.SDL_GPU_TEXTURETYPE_2D,
-        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = atlas.ATLAS_SIZE,
-        .height = atlas.ATLAS_SIZE,
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
-        .props = 0,
-    };
-    const atlas_gpu_texture = c.SDL_CreateGPUTexture(device, &atlas_tex_info) orelse return error.CreateGPUTextureFailed;
+    // Create immutable and mutable atlas GPU textures.
+    const atlas_gpu_texture = try createAtlasTexture(device);
+    errdefer c.SDL_ReleaseGPUTexture(device, atlas_gpu_texture);
+    const mutable_atlas_gpu_texture = try createAtlasTexture(device);
 
     gpu_state_storage = .{
         .device = device,
         .window = window,
         .atlas = blk: {
             var a = atlas.Atlas{ .gpu_texture = atlas_gpu_texture };
+            a.init();
+            break :blk a;
+        },
+        .mutable_atlas = blk: {
+            var a = atlas.Atlas{ .gpu_texture = mutable_atlas_gpu_texture };
             a.init();
             break :blk a;
         },
@@ -839,6 +856,7 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUBuffer(g.device, g.fullscreen_quad_buffer);
         c.SDL_ReleaseGPUSampler(g.device, g.crt_sampler);
         c.SDL_ReleaseGPUTexture(g.device, g.atlas.gpu_texture);
+        c.SDL_ReleaseGPUTexture(g.device, g.mutable_atlas.gpu_texture);
         c.SDL_ReleaseGPUTransferBuffer(g.device, g.sprite_transfer_buffer);
         c.SDL_ReleaseGPUTransferBuffer(g.device, g.color_transfer_buffer);
         c.SDL_ReleaseGPUBuffer(g.device, g.sprite_gpu_buffer);
@@ -1574,14 +1592,14 @@ pub fn renderCopyEx(
         .add => .sprite_additive,
         else => .sprite_alpha,
     };
-    ensureSpritePipeline(g, pipeline_type, tex.gpuTexture());
+    ensureSpritePipeline(g, pipeline_type, texture.gpuTexture(tex));
 
     // Source UV coords - atlas vs standalone
     var uv_left: f32 = undefined;
     var uv_top: f32 = undefined;
     var uv_right: f32 = undefined;
     var uv_bottom: f32 = undefined;
-    if (tex.is_atlas) {
+    if (texture.isAtlasTexture(tex)) {
         const atlas_size: f32 = @floatFromInt(atlas.ATLAS_SIZE);
         const ax: f32 = @floatFromInt(tex.atlas_x);
         const ay: f32 = @floatFromInt(tex.atlas_y);

@@ -243,7 +243,7 @@ pub fn processTerrainTextureUpdates() void {
         }
 
         const updateStart = perfNow();
-        sprite.updateTextureRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
+        sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
             std.log.warn("processTerrainTextureUpdates: terrain texture update failed with {}", .{err});
         };
         updateUs += perfElapsedUs(updateStart);

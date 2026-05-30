@@ -656,7 +656,7 @@ pub fn sprayPaint(p: *Player) !void {
                 entityPos,
                 rotation,
             );
-            try sprite.updateTextureFromSurface(e.spriteUuids[0]);
+            try sprite.updateTextureVisualFromSurface(e.spriteUuids[0]);
         }
     }
 

@@ -31,6 +31,7 @@ pub const Sprite = struct {
     sizeP: vec.IVec2,
     offset: vec.IVec2,
     imgPath: []const u8,
+    geometryId: u64,
     geometryVersion: u64 = 0,
     anchorPointLeft: ?vec.IVec2 = null, // Magenta pixel - left shoulder
     anchorPointRight: ?vec.IVec2 = null, // Green pixel - right shoulder
@@ -54,10 +55,12 @@ const CachedTexInfo = struct {
     atlas_y: u32,
     width: i32,
     height: i32,
+    atlas_generation: u64,
+    geometry_id: u64,
 };
 var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
 
-fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2, geometryId: u64) !u64 {
     const spriteUuid = uuid.generate();
 
     const imgPath = try allocator.dupe(u8, imagePath);
@@ -79,6 +82,7 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
         .texture = texture,
         .scale = scale,
         .offset = offset,
+        .geometryId = geometryId,
         .anchorPointLeft = anchorPointLeft,
         .anchorPointRight = anchorPointRight,
         .sizeM = .{
@@ -187,25 +191,31 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     errdefer sdl.destroySurface(surface);
 
     // Check texture cache - share atlas region for sprites with same image
+    var geometryId: u64 = undefined;
     const texture = if (textureCache.get(imagePath)) |cached| blk: {
+        geometryId = cached.geometry_id;
         const new_tex = try std.heap.c_allocator.create(tex.Texture);
         new_tex.* = .{
             .atlas_x = cached.atlas_x,
             .atlas_y = cached.atlas_y,
             .width = cached.width,
             .height = cached.height,
-            .is_atlas = true,
+            .backing = .immutable_atlas,
+            .atlas_generation = cached.atlas_generation,
             .owns_atlas_region = false,
         };
         break :blk new_tex;
     } else blk: {
         const new_tex = try tex.addToAtlas(surface);
+        geometryId = uuid.generate();
         const cacheKey = allocator.dupe(u8, imagePath) catch break :blk new_tex;
         textureCache.put(cacheKey, .{
             .atlas_x = new_tex.atlas_x,
             .atlas_y = new_tex.atlas_y,
             .width = new_tex.width,
             .height = new_tex.height,
+            .atlas_generation = new_tex.atlas_generation,
+            .geometry_id = geometryId,
         }) catch {
             allocator.free(cacheKey);
         };
@@ -213,7 +223,7 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
     };
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset);
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, geometryId);
 }
 
 pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
@@ -222,7 +232,7 @@ pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scal
     const texture = try tex.addToAtlas(surface);
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset);
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, uuid.generate());
 }
 
 pub fn cleanup(sprite: Sprite) void {
@@ -248,8 +258,10 @@ pub fn createCopy(spriteUuid: u64) !u64 {
 
     try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
-    // Share atlas region with original (just copy atlas coordinates)
-    const copiedTexture = try tex.cloneTexture(originalSprite.texture);
+    const copiedTexture = if (tex.isImmutableAtlasTexture(originalSprite.texture))
+        try tex.cloneTexture(originalSprite.texture)
+    else
+        try tex.createMutableTexture(copiedSurface);
     errdefer tex.destroyTexture(copiedTexture);
 
     const imgPathCopy = try allocator.dupe(u8, originalSprite.imgPath);
@@ -263,6 +275,7 @@ pub fn createCopy(spriteUuid: u64) !u64 {
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
         .offset = originalSprite.offset,
+        .geometryId = originalSprite.geometryId,
         .geometryVersion = originalSprite.geometryVersion,
         .anchorPointLeft = originalSprite.anchorPointLeft,
         .anchorPointRight = originalSprite.anchorPointRight,
@@ -552,24 +565,45 @@ pub fn paintSpriteOnSurface(
     }
 }
 
-pub fn updateTextureFromSurface(spriteUuid: u64) !void {
-    const s = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
-
-    // If this atlas texture shares its region with other sprites,
-    // allocate a new private atlas region so we don't overwrite shared data.
-    if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
-        try tex.reallocateAtlasRegion(s.texture, s.surface);
-        s.geometryVersion += 1;
-        return;
-    }
-
-    // Already private or standalone — just re-upload in place
-    try tex.reuploadTexture(s.texture, s.surface);
+fn markGeometryChanged(s: *Sprite) void {
+    s.geometryId = uuid.generate();
     s.geometryVersion += 1;
 }
 
-pub fn updateTextureRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !void {
-    const s = sprites.getPtrLocking(spriteUuid) orelse return error.SpriteNotFound;
+fn uploadTextureFromSurface(s: *Sprite) !void {
+    const movedToMutable = tex.isImmutableAtlasTexture(s.texture);
+    try tex.ensureMutableTexture(s.texture, s.surface);
+    if (movedToMutable) {
+        return;
+    }
+
+    try tex.reuploadTexture(s.texture, s.surface);
+}
+
+pub fn updateTextureVisualFromSurface(spriteUuid: u64) !void {
+    const s = sprites.getPtrLocking(spriteUuid) orelse {
+        std.log.warn("updateTextureVisualFromSurface: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
+    try uploadTextureFromSurface(s);
+}
+
+pub fn updateTextureGeometryFromSurface(spriteUuid: u64) !void {
+    const s = sprites.getPtrLocking(spriteUuid) orelse {
+        std.log.warn("updateTextureGeometryFromSurface: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
+    try uploadTextureFromSurface(s);
+    markGeometryChanged(s);
+}
+
+pub fn updateTextureGeometryRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    const s = sprites.getPtrLocking(spriteUuid) orelse {
+        std.log.warn("updateTextureGeometryRegionFromSurface: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
     const width = s.surface.w;
     const height = s.surface.h;
     const rect = vec.irectExpandedClamped(dirtyRect, 1, width, height);
@@ -577,11 +611,10 @@ pub fn updateTextureRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !vo
         return;
     }
 
-    // If this atlas texture shares its region with other sprites,
-    // allocate a private atlas region before any partial uploads.
-    if (s.texture.is_atlas and !s.texture.owns_atlas_region) {
-        try tex.reallocateAtlasRegion(s.texture, s.surface);
-        s.geometryVersion += 1;
+    const movedToMutable = tex.isImmutableAtlasTexture(s.texture);
+    try tex.ensureMutableTexture(s.texture, s.surface);
+    if (movedToMutable) {
+        markGeometryChanged(s);
         return;
     }
 
@@ -591,7 +624,7 @@ pub fn updateTextureRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !vo
         .w = rect.maxX - rect.minX,
         .h = rect.maxY - rect.minY,
     });
-    s.geometryVersion += 1;
+    markGeometryChanged(s);
 }
 
 pub fn isAny(_: u8, _: u8, _: u8) bool {
@@ -638,7 +671,7 @@ pub fn colorMatchingPixels(spriteUuid: u64, color: Color, comptime predicate: fn
         }
     }
 
-    try updateTextureFromSurface(spriteUuid);
+    try updateTextureVisualFromSurface(spriteUuid);
 }
 
 pub fn cleanupLater(spriteUuid: u64) void {

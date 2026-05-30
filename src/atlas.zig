@@ -1,3 +1,4 @@
+const std = @import("std");
 const sdl = @import("sdl.zig");
 const c = sdl.c;
 
@@ -7,11 +8,19 @@ pub const ATLAS_SIZE: u32 = 8192;
 // Tracks the top edge (skyline) of placed rectangles as a list of (x, y, width) segments.
 // For each allocation, finds the position that results in the lowest Y placement.
 const MAX_SKYLINE_NODES = 4096;
+const MAX_FREE_REGIONS = 4096;
 
 pub const SkylineNode = struct {
     x: u32,
     y: u32,
     width: u32,
+};
+
+pub const Region = struct {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
 };
 
 pub const Atlas = struct {
@@ -20,22 +29,36 @@ pub const Atlas = struct {
     height: u32 = ATLAS_SIZE,
     nodes: [MAX_SKYLINE_NODES]SkylineNode = undefined,
     node_count: u32 = 0,
+    free_regions: [MAX_FREE_REGIONS]Region = undefined,
+    free_region_count: u32 = 0,
+    generation: u64 = 0,
     checkpoint_nodes: [MAX_SKYLINE_NODES]SkylineNode = undefined,
     checkpoint_node_count: u32 = 0,
+    checkpoint_free_regions: [MAX_FREE_REGIONS]Region = undefined,
+    checkpoint_free_region_count: u32 = 0,
+    checkpoint_generation: u64 = 0,
 
     pub fn init(self: *Atlas) void {
         self.nodes[0] = .{ .x = 0, .y = 0, .width = self.width };
         self.node_count = 1;
+        self.free_region_count = 0;
+        self.generation +%= 1;
     }
 
     pub fn saveCheckpoint(self: *Atlas) void {
         @memcpy(&self.checkpoint_nodes, &self.nodes);
         self.checkpoint_node_count = self.node_count;
+        @memcpy(&self.checkpoint_free_regions, &self.free_regions);
+        self.checkpoint_free_region_count = self.free_region_count;
+        self.checkpoint_generation = self.generation;
     }
 
     pub fn restoreCheckpoint(self: *Atlas) void {
         @memcpy(&self.nodes, &self.checkpoint_nodes);
         self.node_count = self.checkpoint_node_count;
+        @memcpy(&self.free_regions, &self.checkpoint_free_regions);
+        self.free_region_count = self.checkpoint_free_region_count;
+        self.generation = self.checkpoint_generation;
     }
 
     /// Check if a rectangle of (w x h) fits when placed starting at skyline node `index`.
@@ -59,9 +82,13 @@ pub const Atlas = struct {
     }
 
     pub fn allocate(self: *Atlas, w: u32, h: u32) !struct { x: u32, y: u32 } {
+        if (self.allocateFromFreeRegion(w, h)) |region| {
+            return .{ .x = region.x, .y = region.y };
+        }
+
         // Find best position (bottom-left heuristic: lowest Y, then leftmost X)
-        var best_y: u32 = @import("std").math.maxInt(u32);
-        var best_x: u32 = @import("std").math.maxInt(u32);
+        var best_y: u32 = std.math.maxInt(u32);
+        var best_x: u32 = std.math.maxInt(u32);
         var best_idx: ?u32 = null;
 
         for (0..self.node_count) |i| {
@@ -78,6 +105,72 @@ pub const Atlas = struct {
         const idx = best_idx orelse return error.AtlasFull;
         self.addSkylineLevel(idx, best_x, best_y + h, w);
         return .{ .x = best_x, .y = best_y };
+    }
+
+    pub fn freeRegion(self: *Atlas, x: u32, y: u32, w: u32, h: u32) void {
+        if (w == 0 or h == 0) {
+            std.log.warn("freeRegion: ignoring invalid {d}x{d} region at ({d},{d})", .{ w, h, x, y });
+            return;
+        }
+
+        if (self.free_region_count >= MAX_FREE_REGIONS) {
+            std.log.warn("freeRegion: free region table full, leaking {d}x{d} region at ({d},{d})", .{ w, h, x, y });
+            return;
+        }
+
+        self.free_regions[self.free_region_count] = .{
+            .x = x,
+            .y = y,
+            .w = w,
+            .h = h,
+        };
+        self.free_region_count += 1;
+    }
+
+    fn allocateFromFreeRegion(self: *Atlas, w: u32, h: u32) ?Region {
+        var best_index: ?u32 = null;
+        var best_area: u64 = std.math.maxInt(u64);
+
+        for (0..self.free_region_count) |i| {
+            const region = self.free_regions[i];
+            if (region.w < w or region.h < h) continue;
+
+            const area = @as(u64, region.w) * @as(u64, region.h);
+            if (area < best_area) {
+                best_area = area;
+                best_index = @intCast(i);
+            }
+        }
+
+        if (best_index == null) return null;
+        const index = best_index.?;
+        const region = self.free_regions[index];
+        self.removeFreeRegion(index);
+        self.addSplitFreeRegions(region, w, h);
+
+        return .{
+            .x = region.x,
+            .y = region.y,
+            .w = w,
+            .h = h,
+        };
+    }
+
+    fn addSplitFreeRegions(self: *Atlas, region: Region, used_w: u32, used_h: u32) void {
+        if (region.w > used_w) {
+            self.freeRegion(region.x + used_w, region.y, region.w - used_w, used_h);
+        }
+        if (region.h > used_h) {
+            self.freeRegion(region.x, region.y + used_h, region.w, region.h - used_h);
+        }
+    }
+
+    fn removeFreeRegion(self: *Atlas, index: u32) void {
+        var i = index;
+        while (i + 1 < self.free_region_count) : (i += 1) {
+            self.free_regions[i] = self.free_regions[i + 1];
+        }
+        self.free_region_count -= 1;
     }
 
     /// Insert a new skyline node and trim/remove nodes it covers.

@@ -207,7 +207,7 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 
             try sprite.colorCircleOnSurface(ent.spriteUuids[0], bloodVec, bloodStainRadius, entityPos, rotation, bloodColor);
 
-            try sprite.updateTextureFromSurface(ent.spriteUuids[0]);
+            try sprite.updateTextureVisualFromSurface(ent.spriteUuids[0]);
         }
     }
 
