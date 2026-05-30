@@ -425,6 +425,14 @@ fn clearRuntimeIndex() void {
     bodyToEntity.clearRetainingCapacity();
 }
 
+fn deinitRuntimeIndex() void {
+    clearRuntimeIndex();
+    entityBodies.deinit(allocator);
+    entityBodies = .empty;
+    bodyToEntity.deinit(allocator);
+    bodyToEntity = .empty;
+}
+
 fn destroyRuntimeEntity(entityId: u64) bool {
     const maybeKV = entityBodies.fetchSwapRemove(entityId);
     if (maybeKV == null) return false;
@@ -1012,6 +1020,7 @@ pub fn cleanup() !void {
     const io_value = runtime.io();
     var dir = try std.Io.Dir.cwd().openDir(io_value, "levels", .{});
     defer dir.close(io_value);
+    defer deinitRuntimeIndex();
 
     if (maybeDocument != null) {
         const randomString = try createRandomAlphabeticalString(4);
@@ -1036,7 +1045,6 @@ pub fn cleanup() !void {
     const wasDraft = maybeDocument != null and std.mem.startsWith(u8, editDirPath, "drafts/");
 
     closeDocument();
-    clearRuntimeIndex();
 
     for (folders) |folder| {
         try dir.deleteTree(io_value, folder);
