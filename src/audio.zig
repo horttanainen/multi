@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const c = sdl.c;
 const allocator = @import("allocator.zig").allocator;
+const runtime = @import("runtime.zig");
 
 pub const AudioError = error{
     FailedToInitialize,
@@ -23,6 +24,8 @@ const SoundEntry = struct {
 
 pub var device_id: c.SDL_AudioDeviceID = 0;
 var activeSounds = std.AutoHashMap(usize, *SoundEntry).init(allocator);
+var activeSoundsMutex: std.Io.Mutex = .init;
+var acceptSoundTimers = false;
 var nextId: usize = 1;
 
 pub fn init() !void {
@@ -36,6 +39,16 @@ pub fn init() !void {
         std.log.err("audio.init: SDL_OpenAudioDevice failed: {s}", .{c.SDL_GetError()});
         return AudioError.FailedToInitialize;
     }
+
+    activeSoundsMutex.lockUncancelable(runtime.io());
+    acceptSoundTimers = true;
+    activeSoundsMutex.unlock(runtime.io());
+}
+
+fn destroySoundEntry(entry: *SoundEntry) void {
+    c.SDL_DestroyAudioStream(entry.stream);
+    c.SDL_free(entry.buf);
+    allocator.destroy(entry);
 }
 
 pub fn playFor(audio: Audio) !void {
@@ -81,6 +94,15 @@ pub fn playFor(audio: Audio) !void {
 
     const entry = try allocator.create(SoundEntry);
     entry.* = .{ .stream = stream, .buf = buf, .len = len };
+    errdefer destroySoundEntry(entry);
+
+    activeSoundsMutex.lockUncancelable(runtime.io());
+    defer activeSoundsMutex.unlock(runtime.io());
+
+    if (!acceptSoundTimers or device_id == 0) {
+        destroySoundEntry(entry);
+        return;
+    }
 
     const id = nextId;
     nextId += 1;
@@ -92,11 +114,15 @@ pub fn playFor(audio: Audio) !void {
 fn shutSound(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const id: usize = @intFromPtr(param.?);
 
+    activeSoundsMutex.lockUncancelable(runtime.io());
+    defer activeSoundsMutex.unlock(runtime.io());
+
+    if (!acceptSoundTimers) {
+        return 0;
+    }
+
     if (activeSounds.fetchRemove(id)) |kv| {
-        const entry = kv.value;
-        c.SDL_DestroyAudioStream(entry.stream);
-        c.SDL_free(entry.buf);
-        allocator.destroy(entry);
+        destroySoundEntry(kv.value);
     }
 
     return 0;
@@ -107,14 +133,16 @@ pub fn cleanupOne(audio: Audio) void {
 }
 
 pub fn cleanup() void {
+    activeSoundsMutex.lockUncancelable(runtime.io());
+    defer activeSoundsMutex.unlock(runtime.io());
+
+    acceptSoundTimers = false;
+
     var it = activeSounds.iterator();
     while (it.next()) |kv| {
-        const entry = kv.value_ptr.*;
-        c.SDL_DestroyAudioStream(entry.stream);
-        c.SDL_free(entry.buf);
-        allocator.destroy(entry);
+        destroySoundEntry(kv.value_ptr.*);
     }
-    activeSounds.deinit();
+    activeSounds.clearAndFree();
 
     if (device_id != 0) {
         c.SDL_CloseAudioDevice(device_id);
