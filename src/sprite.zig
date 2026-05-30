@@ -44,6 +44,11 @@ pub const SerializableEntity = struct {
     pos: vec.IVec2,
 };
 
+pub const Backing = enum {
+    immutable,
+    mutable,
+};
+
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 var acceptSpriteCleanupTimers = true;
@@ -185,15 +190,66 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
 }
 
 pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    return createFromImgWithBacking(imagePath, scale, offset, .immutable);
+}
+
+pub fn createMutableFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    return createFromImgWithBacking(imagePath, scale, offset, .mutable);
+}
+
+pub fn createFromImgWithBacking(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
     const imgPathZ = try allocator.dupeZ(u8, imagePath);
     defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
 
-    // Check texture cache - share atlas region for sprites with same image
-    var geometryId: u64 = undefined;
-    const texture = if (textureCache.get(imagePath)) |cached| blk: {
-        geometryId = cached.geometry_id;
+    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing);
+}
+
+pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .immutable);
+}
+
+pub fn createMutableFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
+    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .mutable);
+}
+
+pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
+    errdefer sdl.destroySurface(surface);
+
+    const texture = switch (backing) {
+        .immutable => try tex.addToAtlas(surface),
+        .mutable => try tex.createMutableTexture(surface),
+    };
+    errdefer tex.destroyTexture(texture);
+
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, uuid.generate());
+}
+
+const TextureForImage = struct {
+    texture: *tex.Texture,
+    geometryId: u64,
+};
+
+fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
+    const textureForImage = try createTextureForImage(imagePath, surface, backing);
+    errdefer tex.destroyTexture(textureForImage.texture);
+
+    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, textureForImage.geometryId);
+}
+
+fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, backing: Backing) !TextureForImage {
+    return switch (backing) {
+        .immutable => createImmutableTextureForImage(imagePath, surface),
+        .mutable => .{
+            .texture = try tex.createMutableTexture(surface),
+            .geometryId = uuid.generate(),
+        },
+    };
+}
+
+fn createImmutableTextureForImage(imagePath: []const u8, surface: *sdl.Surface) !TextureForImage {
+    if (textureCache.get(imagePath)) |cached| {
         const new_tex = try std.heap.c_allocator.create(tex.Texture);
         new_tex.* = .{
             .atlas_x = cached.atlas_x,
@@ -204,35 +260,39 @@ pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) 
             .atlas_generation = cached.atlas_generation,
             .owns_atlas_region = false,
         };
-        break :blk new_tex;
-    } else blk: {
-        const new_tex = try tex.addToAtlas(surface);
-        geometryId = uuid.generate();
-        const cacheKey = allocator.dupe(u8, imagePath) catch break :blk new_tex;
-        textureCache.put(cacheKey, .{
-            .atlas_x = new_tex.atlas_x,
-            .atlas_y = new_tex.atlas_y,
-            .width = new_tex.width,
-            .height = new_tex.height,
-            .atlas_generation = new_tex.atlas_generation,
-            .geometry_id = geometryId,
-        }) catch {
-            allocator.free(cacheKey);
+        return .{
+            .texture = new_tex,
+            .geometryId = cached.geometry_id,
         };
-        break :blk new_tex;
-    };
-    errdefer tex.destroyTexture(texture);
-
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, geometryId);
-}
-
-pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    errdefer sdl.destroySurface(surface);
+    }
 
     const texture = try tex.addToAtlas(surface);
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, uuid.generate());
+    const geometryId = uuid.generate();
+    const cacheKey = allocator.dupe(u8, imagePath) catch |err| {
+        std.log.warn("createImmutableTextureForImage: failed to cache '{s}' with {}", .{ imagePath, err });
+        return .{
+            .texture = texture,
+            .geometryId = geometryId,
+        };
+    };
+
+    textureCache.put(cacheKey, .{
+        .atlas_x = texture.atlas_x,
+        .atlas_y = texture.atlas_y,
+        .width = texture.width,
+        .height = texture.height,
+        .atlas_generation = texture.atlas_generation,
+        .geometry_id = geometryId,
+    }) catch |err| {
+        std.log.warn("createImmutableTextureForImage: failed to store texture cache entry for '{s}' with {}", .{ imagePath, err });
+        allocator.free(cacheKey);
+    };
+    return .{
+        .texture = texture,
+        .geometryId = geometryId,
+    };
 }
 
 pub fn cleanup(sprite: Sprite) void {
@@ -244,7 +304,23 @@ pub fn getSprite(spriteUuid: u64) ?Sprite {
 }
 
 pub fn createCopy(spriteUuid: u64) !u64 {
-    const originalSprite = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
+    const originalSprite = sprites.getLocking(spriteUuid) orelse {
+        std.log.warn("createCopy: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+    const backing: Backing = if (tex.isImmutableAtlasTexture(originalSprite.texture)) .immutable else .mutable;
+    return createCopyWithBacking(spriteUuid, backing);
+}
+
+pub fn createMutableCopy(spriteUuid: u64) !u64 {
+    return createCopyWithBacking(spriteUuid, .mutable);
+}
+
+pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
+    const originalSprite = sprites.getLocking(spriteUuid) orelse {
+        std.log.warn("createCopyWithBacking: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
 
     const newUuid = uuid.generate();
 
@@ -258,10 +334,13 @@ pub fn createCopy(spriteUuid: u64) !u64 {
 
     try sdl.blitSurface(originalSprite.surface, null, copiedSurface, null);
 
-    const copiedTexture = if (tex.isImmutableAtlasTexture(originalSprite.texture))
-        try tex.cloneTexture(originalSprite.texture)
-    else
-        try tex.createMutableTexture(copiedSurface);
+    const copiedTexture = switch (backing) {
+        .immutable => if (tex.isImmutableAtlasTexture(originalSprite.texture))
+            try tex.cloneTexture(originalSprite.texture)
+        else
+            try tex.addToAtlas(copiedSurface),
+        .mutable => try tex.createMutableTexture(copiedSurface),
+    };
     errdefer tex.destroyTexture(copiedTexture);
 
     const imgPathCopy = try allocator.dupe(u8, originalSprite.imgPath);

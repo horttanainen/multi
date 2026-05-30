@@ -242,7 +242,11 @@ pub fn cleanupOne(anim: Animation) void {
 }
 
 pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize) !Animation {
-    const frameUuids = try fs.loadSpritesFromFolder(pathToAnimationDir, scale, offset);
+    return loadWithBacking(pathToAnimationDir, fps, scale, offset, loop, spriteIndex, .immutable);
+}
+
+pub fn loadWithBacking(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize, backing: sprite.Backing) !Animation {
+    const frameUuids = try fs.loadSpritesFromFolderWithBacking(pathToAnimationDir, scale, offset, backing);
 
     return .{
         .fps = fps,

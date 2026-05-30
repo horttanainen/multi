@@ -54,6 +54,10 @@ pub fn writeFile(path: []const u8, contents: []const u8) !void {
 }
 
 pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2) ![]u64 {
+    return loadSpritesFromFolderWithBacking(folderPath, scale, offset, .immutable);
+}
+
+pub fn loadSpritesFromFolderWithBacking(folderPath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: sprite.Backing) ![]u64 {
     const fileNames = try listFiles(folderPath);
     defer {
         for (fileNames) |name| allocator.free(name);
@@ -70,7 +74,7 @@ pub fn loadSpritesFromFolder(folderPath: []const u8, scale: vec.Vec2, offset: ve
         var pathBuf: [256]u8 = undefined;
         const imagePath = try std.fmt.bufPrint(&pathBuf, "{s}/{s}", .{ folderPath, imageName });
 
-        const uuid = try sprite.createFromImg(imagePath, scale, offset);
+        const uuid = try sprite.createFromImgWithBacking(imagePath, scale, offset, backing);
         try spriteUuids.append(uuid);
     }
 

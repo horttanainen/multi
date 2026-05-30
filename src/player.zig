@@ -212,22 +212,24 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
 
     var animations = std.StringHashMap(animation.Animation).init(allocator);
 
-    const idleAnim = try data.createAnimationFrom("player_idle");
+    const playerSpriteBacking: sprite.Backing = .mutable;
+
+    const idleAnim = try data.createAnimationFromWithBacking("player_idle", playerSpriteBacking);
     try animations.put("idle", idleAnim);
 
-    const runAnim = try data.createAnimationFrom("player_run");
+    const runAnim = try data.createAnimationFromWithBacking("player_run", playerSpriteBacking);
     runAnimationFrameCount = runAnim.frames.len;
     try animations.put("run", runAnim);
 
-    const fallAnim = try data.createAnimationFrom("player_fall");
+    const fallAnim = try data.createAnimationFromWithBacking("player_fall", playerSpriteBacking);
     try animations.put("fall", fallAnim);
 
-    const afterJumpAnim = try data.createAnimationFrom("player_afterjump");
+    const afterJumpAnim = try data.createAnimationFromWithBacking("player_afterjump", playerSpriteBacking);
     try animations.put("afterjump", afterJumpAnim);
 
-    const rocketLauncher = try data.createWeaponFrom("rocket_launcher");
-    const shotgun = try data.createWeaponFrom("shotgun");
-    const railgun = try data.createWeaponFrom("railgun");
+    const rocketLauncher = try data.createWeaponFromWithSpriteBacking("rocket_launcher", playerSpriteBacking);
+    const shotgun = try data.createWeaponFromWithSpriteBacking("shotgun", playerSpriteBacking);
+    const railgun = try data.createWeaponFromWithSpriteBacking("railgun", playerSpriteBacking);
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(allocator);
     try weapons.append(rocketLauncher);
@@ -235,7 +237,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     try weapons.append(railgun);
 
     var playerSpriteUuids = try allocator.alloc(u64, 1);
-    playerSpriteUuids[0] = try sprite.createCopy(idleAnim.frames[0]);
+    playerSpriteUuids[0] = try sprite.createMutableCopy(idleAnim.frames[0]);
 
     const playerEntity = entity.Entity{
         .type = try allocator.dupe(u8, "dynamic"),
@@ -253,8 +255,8 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .enabled = true,
     };
 
-    const leftHandSpriteUuid = data.createSpriteFrom("arm_with_hook") orelse return error.SpriteNotFound;
-    const leftHandNoHookSpriteUuid = data.createSpriteFrom("arm_without_hook") orelse return error.SpriteNotFound;
+    const leftHandSpriteUuid = data.createSpriteFromWithBacking("arm_with_hook", playerSpriteBacking) orelse return error.SpriteNotFound;
+    const leftHandNoHookSpriteUuid = data.createSpriteFromWithBacking("arm_without_hook", playerSpriteBacking) orelse return error.SpriteNotFound;
 
     // Load spray paint sprite from data
     var sprayPaintSpriteUuid: ?u64 = null;
@@ -265,7 +267,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         } else |_| {}
     }
 
-    const crosshairUuid = data.createSpriteFrom("crosshair") orelse return error.SpriteNotFound;
+    const crosshairUuid = data.createSpriteFromWithBacking("crosshair", playerSpriteBacking) orelse return error.SpriteNotFound;
 
     // Create camera for this player (or reuse shared camera in non-splitscreen mode)
     const cameraId = if (existingCameraId) |id| id else blk: {

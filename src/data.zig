@@ -486,18 +486,26 @@ fn initWeapons() !void {
 }
 
 pub fn createSpriteFrom(key: []const u8) ?u64 {
+    return createSpriteFromWithBacking(key, .immutable);
+}
+
+pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing) ?u64 {
     const d = spriteDataMap.get(key) orelse return null;
-    return sprite.createFromImg(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero) catch |err| {
+    return sprite.createFromImgWithBacking(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing) catch |err| {
         std.debug.print("Warning: Failed to create sprite for '{s}': {}\n", .{ key, err });
         return null;
     };
 }
 
 pub fn createAnimationFrom(key: []const u8) !animation.Animation {
+    return createAnimationFromWithBacking(key, .immutable);
+}
+
+pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing) !animation.Animation {
     const d = animationDataMap.get(key) orelse return error.AnimationDataNotFound;
     const scale = vec.Vec2{ .x = d.scale, .y = d.scale };
     const offset = vec.IVec2{ .x = d.offsetX, .y = d.offsetY };
-    var anim = try animation.load(d.path, d.fps, scale, offset, d.loop, d.spriteIndex);
+    var anim = try animation.loadWithBacking(d.path, d.fps, scale, offset, d.loop, d.spriteIndex, backing);
     anim.switchDelay = d.switchDelay;
     return anim;
 }
@@ -551,6 +559,10 @@ pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
 }
 
 pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
+    return createWeaponFromWithSpriteBacking(key, .immutable);
+}
+
+pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.Backing) !weapon.Weapon {
     const d = weaponDataMap.get(key) orelse return error.WeaponDataNotFound;
     const sound = createAudioFrom(d.sound) orelse return error.SoundDataNotFound;
     const proj = if (d.projectile) |projKey|
@@ -576,7 +588,7 @@ pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
         try createExplosionFrom(eKey)
     else
         null;
-    const spriteUuid = createSpriteFrom(d.sprite) orelse 0;
+    const spriteUuid = createSpriteFromWithBacking(d.sprite, spriteBacking) orelse 0;
     return weapon.Weapon{
         .name = key,
         .delay = d.delay,

@@ -148,7 +148,7 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
 }
 
 fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
-    const coloredSpriteUuid = try sprite.createCopy(gibletSpriteUuid);
+    const coloredSpriteUuid = try sprite.createMutableCopy(gibletSpriteUuid);
     errdefer sprite.cleanupLater(coloredSpriteUuid);
 
     const bloodColor = sprite.Color{ .r = config.bloodParticle.colorR, .g = config.bloodParticle.colorG, .b = config.bloodParticle.colorB };

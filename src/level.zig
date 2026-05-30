@@ -182,6 +182,15 @@ fn staticShapeDef(serializedEntity: entity.SerializableEntity, shapeDef: box2d.c
     return staticDef;
 }
 
+fn staticSpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
+    return if (serializedEntity.breakable) .mutable else .immutable;
+}
+
+fn entitySpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
+    if (std.mem.eql(u8, serializedEntity.type, "dynamic")) return .mutable;
+    return .immutable;
+}
+
 fn shouldTileStaticSurface(surface: *sdl.Surface) bool {
     return surface.w > entity.terrainColliderChunkSizeP or surface.h > entity.terrainColliderChunkSizeP;
 }
@@ -256,7 +265,7 @@ fn fullTileBoxShape(rect: sdl.Rect, scale: vec.Vec2) box2d.c.b2Polygon {
 fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
     const totalStart = perf.begin(.level_editor_static_spawn);
     const spriteStart = perf.begin(.level_editor_static_spawn);
-    const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e));
     errdefer sprite.cleanupLater(spriteUuid);
     perf.log(
         .level_editor_static_spawn,
@@ -352,7 +361,7 @@ fn spawnTiledStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Shap
             surfaceUs += perf.elapsedUs(surfaceStart);
 
             const spriteStart = perf.begin(.level_editor_static_spawn);
-            const tileSpriteUuid = try sprite.createFromOwnedSurface(e.imgPath, tileSurface, e.scale, vec.izero);
+            const tileSpriteUuid = try sprite.createFromOwnedSurfaceWithBacking(e.imgPath, tileSurface, e.scale, vec.izero, staticSpriteBacking(e));
             spriteUs += perf.elapsedUs(spriteStart);
 
             const tilePos = tileCenterPosition(e.pos, sourceSurface, rect, e.scale);
@@ -545,7 +554,7 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         return spawnStaticSerializableEntity(e, shapeDef);
     }
 
-    const spriteUuid = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, entitySpriteBacking(e));
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
