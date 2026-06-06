@@ -984,6 +984,16 @@ pub fn selectEntityAtCursor() ?box2d.c.b2BodyId {
     return selectEntityAtPosition(worldPos, .{ .x = 0.5, .y = 0.5 });
 }
 
+pub fn selectedEntityBodyAtCursor() ?box2d.c.b2BodyId {
+    const selectedEntityId = maybeSelectedEntityId orelse return null;
+    const worldPos = cursor.getWorldPos();
+    const hit = findEntityAtPosition(worldPos, .{ .x = 0.5, .y = 0.5 }) orelse return null;
+
+    if (hit.entityId != selectedEntityId) return null;
+
+    return hit.bodyId;
+}
+
 pub fn updateCursorHover() void {
     if (cursor.hasPendingSprite()) {
         clearHoveredEntity();

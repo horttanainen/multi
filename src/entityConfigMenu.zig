@@ -37,6 +37,6 @@ fn selectSpawn() anyerror!void {
 
 fn changeType(newType: []const u8) !void {
     try levelEditor.changeEntityType(selected_body_id, newType);
-    delay.action("placeSprite", 400); // prevent re-opening entity config on close
+    delay.action("levelEditorConfirm", 400); // prevent re-opening entity config on close
     menu.close();
 }

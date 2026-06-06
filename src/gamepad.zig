@@ -54,7 +54,7 @@ pub const LevelEditorGamepadBindings = struct {
     moveThreshold: f32,
     configMenuButton: sdl.GamepadButton,
     openPickerButton: sdl.GamepadButton,
-    placeButton: sdl.GamepadButton,
+    confirmButton: sdl.GamepadButton,
     deactivateButton: sdl.GamepadButton,
     snapToggleButton: sdl.GamepadButton,
 };
@@ -65,7 +65,7 @@ pub const defaultEditorBindings = LevelEditorGamepadBindings{
     .moveThreshold = MOVEMENT_THRESHOLD,
     .configMenuButton = .y,
     .openPickerButton = .x,
-    .placeButton = .a,
+    .confirmButton = .a,
     .deactivateButton = .b,
     .snapToggleButton = .rightshoulder,
 };
@@ -222,8 +222,8 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
         control.executeLevelEditorAction(.open_sprite_picker);
         delay.action("pickerOpen", 300);
     }
-    if (sdl.getGamepadButton(sdlGp, bindings.placeButton) and !delay.check("levelEditorClick")) {
-        control.executeLevelEditorAction(.place_sprite);
+    if (sdl.getGamepadButton(sdlGp, bindings.confirmButton) and !delay.check("levelEditorClick")) {
+        control.executeLevelEditorAction(.confirm);
         delay.action("levelEditorClick", config.levelEditorClickDelayMs);
     }
     if (sdl.getGamepadButton(sdlGp, bindings.deactivateButton) and !delay.check("levelEditorClick")) {

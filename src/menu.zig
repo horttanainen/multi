@@ -669,7 +669,7 @@ fn activate(idx: usize) !void {
         },
         .sprite_pick => |key| {
             cursor.attachSprite(key);
-            delay.action("placeSprite", 400);
+            delay.action("levelEditorConfirm", 400);
             close();
         },
     }

@@ -20,6 +20,7 @@ const controller = @import("controller.zig");
 const data = @import("data.zig");
 const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
+const entityConfigMenu = @import("entityConfigMenu.zig");
 const levelConfigMenu = @import("levelConfigMenu.zig");
 const spritePicker = @import("spritePicker.zig");
 
@@ -206,19 +207,10 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                 delay.action("pickerOpen", 300);
             }
         },
-        .place_sprite => {
-            if (!delay.check("placeSprite")) {
-                if (cursor.hasPendingSprite()) {
-                    if (cursor.getPendingImgPath()) |imgPath| {
-                        const pos = cursor.getWorldPos();
-                        levelEditor.placeSprite(imgPath, cursor.getPendingScale(), pos) catch |err| {
-                            std.debug.print("Error placing sprite: {}\n", .{err});
-                        };
-                    }
-                } else {
-                    _ = levelEditor.selectEntityAtCursor();
-                }
-                delay.action("placeSprite", 300);
+        .confirm => {
+            if (!delay.check("levelEditorConfirm")) {
+                confirmLevelEditorAction();
+                delay.action("levelEditorConfirm", 300);
             }
         },
         .deactivate_sprite => {
@@ -231,6 +223,29 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
             }
         },
     }
+}
+
+fn confirmLevelEditorAction() void {
+    if (!cursor.hasPendingSprite()) {
+        const selectedBodyId = levelEditor.selectedEntityBodyAtCursor();
+        if (selectedBodyId != null) {
+            entityConfigMenu.open(selectedBodyId.?);
+            return;
+        }
+
+        _ = levelEditor.selectEntityAtCursor();
+        return;
+    }
+
+    const imgPath = cursor.getPendingImgPath() orelse {
+        std.log.warn("confirmLevelEditorAction: pending sprite has no image path", .{});
+        return;
+    };
+
+    const pos = cursor.getWorldPos();
+    levelEditor.placeSprite(imgPath, cursor.getPendingScale(), pos) catch |err| {
+        std.debug.print("Error placing sprite: {}\n", .{err});
+    };
 }
 
 pub fn handleLevelEditorMouseInput() void {

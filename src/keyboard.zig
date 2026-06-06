@@ -65,7 +65,7 @@ pub const LevelEditorKeyBindings = struct {
     redo: MultiKey,
     openMenu: sdl.Scancode,
     openSpritePicker: sdl.Scancode,
-    placeSprite: sdl.Scancode,
+    confirm: sdl.Scancode,
     deactivateSprite: sdl.Scancode,
 };
 
@@ -80,7 +80,7 @@ pub const defaultEditorBindings = LevelEditorKeyBindings{
     .redo = .{ .modifier = .lctrl, .key = .y },
     .openMenu = .escape,
     .openSpritePicker = .e,
-    .placeSprite = .return_,
+    .confirm = .return_,
     .deactivateSprite = .q,
 };
 
@@ -142,8 +142,8 @@ pub fn handleLevelEditor(_: *const controller.Controller) void {
     if (key(keyStates, bindings.openSpritePicker)) {
         control.executeLevelEditorAction(.open_sprite_picker);
     }
-    if (key(keyStates, bindings.placeSprite)) {
-        control.executeLevelEditorAction(.place_sprite);
+    if (key(keyStates, bindings.confirm)) {
+        control.executeLevelEditorAction(.confirm);
     }
     if (key(keyStates, bindings.deactivateSprite)) {
         control.executeLevelEditorAction(.deactivate_sprite);

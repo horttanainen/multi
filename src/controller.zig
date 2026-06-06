@@ -39,7 +39,7 @@ pub const LevelEditorAction = enum {
     open_menu,
     open_config_menu,
     open_sprite_picker,
-    place_sprite,
+    confirm,
     deactivate_sprite,
     toggle_snap,
 };
