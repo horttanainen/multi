@@ -15,6 +15,7 @@ const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
 const cursor = @import("cursor.zig");
 const level = @import("level.zig");
+const level_editor_grid = @import("level_editor_grid.zig");
 const viewport = @import("viewport.zig");
 const particle = @import("particle.zig");
 const rope = @import("rope.zig");
@@ -52,6 +53,7 @@ pub fn render() !void {
             // renderCamera draws UI last, and UI rendering resets zoom to 1.0.
             // Editor overlays are world-space, so restore camera zoom before drawing them.
             gpu.setZoom(zoom);
+            try level_editor_grid.draw();
             try drawLevelBorder();
             try cursor.draw();
         } else {

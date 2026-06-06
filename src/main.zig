@@ -51,8 +51,6 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
-//TODO: ask codex why we added polygon cache instead of just copying the entities
-
 //Level editor
 //TODO: add visible grid that can be turned on and off
 //TODO: add option to snap to the grid

@@ -2,6 +2,7 @@ const std = @import("std");
 
 const level = @import("level.zig");
 const levelEditor = @import("level_editor.zig");
+const levelEditorGrid = @import("level_editor_grid.zig");
 const menu = @import("menu.zig");
 const aspectRatioMenu = @import("aspectRatioMenu.zig");
 
@@ -12,9 +13,18 @@ var aspect_ratio_label_buf: [64]u8 = undefined;
 var gravity_config = menu.ConfigData{ .value = 10.0, .step = 0.5, .min = 0.0, .max = 200.0 };
 var level_height_meters_config = menu.ConfigData{ .value = 12.0, .step = 0.5, .min = 1.0, .max = 200.0 };
 var camera_zoom_meters_config = menu.ConfigData{ .value = level.defaultCameraZoomMeters, .step = 0.5, .min = 1.0, .max = 200.0 };
+var grid_granularity_config = menu.ConfigData{
+    .value = levelEditorGrid.defaultGranularityMeters,
+    .step = 0.25,
+    .min = levelEditorGrid.minGranularityMeters,
+    .max = levelEditorGrid.maxGranularityMeters,
+    .repeat_delay_ms = 75,
+    .on_change = actionSetGridGranularity,
+};
 
 const aspect_ratio_item_index = 3;
 const splitscreen_item_index = 4;
+const grid_toggle_item_index = 5;
 
 var items = [_]menu.Item{
     .{ .label = "Gravity", .kind = .{ .config = &gravity_config }, .font = .medium },
@@ -22,6 +32,8 @@ var items = [_]menu.Item{
     .{ .label = "Camera Zoom (m)", .kind = .{ .config = &camera_zoom_meters_config }, .font = .medium },
     .{ .label = "Aspect Ratio", .kind = .{ .button = actionOpenAspectRatio }, .font = .medium },
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
+    .{ .label = "Grid: OFF", .kind = .{ .button = actionToggleGrid } },
+    .{ .label = "Grid Size (m)", .kind = .{ .config = &grid_granularity_config }, .font = .medium },
     .{ .label = "Save Changes", .kind = .{ .button = actionSaveChanges } },
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
 };
@@ -34,6 +46,7 @@ pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectR
     splitscreen_value = splitscreen;
     updateAspectRatioLabel();
     updateSplitscreenLabel();
+    syncLevelEditorGridItems();
     menu.open(&items, .{});
 }
 
@@ -70,6 +83,24 @@ fn actionOpenAspectRatio() anyerror!void {
 fn actionToggleSplitscreen() anyerror!void {
     splitscreen_value = !splitscreen_value;
     updateSplitscreenLabel();
+}
+
+fn actionToggleGrid() anyerror!void {
+    levelEditorGrid.toggleVisible();
+    updateGridToggleLabel();
+}
+
+fn actionSetGridGranularity(value: f32) void {
+    levelEditorGrid.setGranularityMeters(value);
+}
+
+fn syncLevelEditorGridItems() void {
+    grid_granularity_config.value = levelEditorGrid.granularityMeters();
+    updateGridToggleLabel();
+}
+
+fn updateGridToggleLabel() void {
+    items[grid_toggle_item_index].label = if (levelEditorGrid.isVisible()) "Grid: ON" else "Grid: OFF";
 }
 
 fn actionSaveChanges() anyerror!void {

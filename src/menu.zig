@@ -23,6 +23,7 @@ pub const ConfigData = struct {
     shader_offset: f32 = 0.0,
     shader_scale: f32 = 1.0,
     repeat_delay_ms: u32 = 150,
+    on_change: ?*const fn (f32) void = null,
 };
 
 pub const ItemKind = union(enum) {
@@ -392,12 +393,12 @@ fn handleEditConfig(cfg: *ConfigData) void {
     const keys = sdl.getKeyboardState();
     if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
         editing_value = @min(cfg.max, editing_value + cfg.step);
-        cfg.value = editing_value;
+        setConfigValue(cfg, editing_value);
         delay.action("menuNav", cfg.repeat_delay_ms);
     }
     if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
         editing_value = @max(cfg.min, editing_value - cfg.step);
-        cfg.value = editing_value;
+        setConfigValue(cfg, editing_value);
         delay.action("menuNav", cfg.repeat_delay_ms);
     }
     if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
@@ -405,12 +406,12 @@ fn handleEditConfig(cfg: *ConfigData) void {
         delay.action("menuConfirm", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
-        cfg.value = pre_edit_value;
+        setConfigValue(cfg, pre_edit_value);
         editing_index = null;
         delay.action("menuToggle", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
-        cfg.value = pre_edit_value;
+        setConfigValue(cfg, pre_edit_value);
         editing_index = null;
         close();
         delay.action("menuToggle", 400);
@@ -421,12 +422,12 @@ fn handleEditConfig(cfg: *ConfigData) void {
         const sdlGp = gp.gamepad orelse continue;
         if (sdl.getGamepadButton(sdlGp, .dpad_up) and !delay.check("menuNav")) {
             editing_value = @min(cfg.max, editing_value + cfg.step);
-            cfg.value = editing_value;
+            setConfigValue(cfg, editing_value);
             delay.action("menuNav", cfg.repeat_delay_ms);
         }
         if (sdl.getGamepadButton(sdlGp, .dpad_down) and !delay.check("menuNav")) {
             editing_value = @max(cfg.min, editing_value - cfg.step);
-            cfg.value = editing_value;
+            setConfigValue(cfg, editing_value);
             delay.action("menuNav", cfg.repeat_delay_ms);
         }
         if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
@@ -434,17 +435,23 @@ fn handleEditConfig(cfg: *ConfigData) void {
             delay.action("menuConfirm", 200);
         }
         if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
-            cfg.value = pre_edit_value;
+            setConfigValue(cfg, pre_edit_value);
             editing_index = null;
             close();
             delay.action("menuToggle", 400);
         }
         if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
-            cfg.value = pre_edit_value;
+            setConfigValue(cfg, pre_edit_value);
             editing_index = null;
             delay.action("menuToggle", 200);
         }
     }
+}
+
+fn setConfigValue(cfg: *ConfigData, value: f32) void {
+    cfg.value = value;
+    const on_change = cfg.on_change orelse return;
+    on_change(value);
 }
 
 fn handleEditButton(action: *const fn () anyerror!void) !void {
