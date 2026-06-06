@@ -37,6 +37,7 @@ pub const Item = struct {
     kind: ItemKind,
     font: text.Font = .large,
     disabled: bool = false,
+    hidden: bool = false,
     image: ?u64 = null,
     preview_color: ?*const fn () sdl.Color = null,
     cycle_names: ?[]const [:0]const u8 = null,
@@ -119,7 +120,7 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions, mo
 
     is_open = true;
     active_items = items;
-    focused_index = 0;
+    focused_index = firstVisibleIndex() orelse 0;
     scroll_offset = 0;
     scroll_anim = 0.0;
     editing_index = null;
@@ -171,14 +172,25 @@ pub fn setFocusedIndex(index: usize) void {
         std.log.warn("menu.setFocusedIndex: index {d} is out of bounds for {d} items", .{ index, active_items.len });
         return;
     }
+    if (active_items[index].hidden) {
+        std.log.warn("menu.setFocusedIndex: index {d} is hidden", .{index});
+        return;
+    }
 
     focused_index = index;
-    if (focused_index < scroll_offset) {
-        scroll_offset = focused_index;
-    } else if (focused_index >= scroll_offset + VISIBLE) {
-        scroll_offset = focused_index - (VISIBLE - 1);
-    }
+    adjustScrollForFocus();
     scroll_anim = @floatFromInt(scroll_offset);
+}
+
+pub fn ensureFocusedVisible() void {
+    if (active_items.len == 0) return;
+    if (focused_index < active_items.len and !active_items[focused_index].hidden) {
+        adjustScrollForFocus();
+        return;
+    }
+
+    focused_index = firstVisibleIndex() orelse 0;
+    adjustScrollForFocus();
 }
 
 // ============================================================
@@ -193,28 +205,88 @@ pub fn handleInput() !void {
     }
 }
 
-fn navUp() void {
-    const n = active_items.len;
-    if (focused_index == 0) {
-        focused_index = n - 1;
-        scroll_offset = if (n > VISIBLE) n - VISIBLE else 0;
-        scroll_anim = @floatFromInt(scroll_offset);
-    } else {
-        focused_index -= 1;
-        if (focused_index < scroll_offset) scroll_offset -= 1;
+fn visibleCount() usize {
+    var count: usize = 0;
+    for (active_items) |item| {
+        if (!item.hidden) count += 1;
+    }
+    return count;
+}
+
+fn firstVisibleIndex() ?usize {
+    for (active_items, 0..) |item, index| {
+        if (!item.hidden) return index;
+    }
+    return null;
+}
+
+fn visibleOrdinal(index: usize) ?usize {
+    if (index >= active_items.len) return null;
+    if (active_items[index].hidden) return null;
+
+    var ordinal: usize = 0;
+    var i: usize = 0;
+    while (i < index) : (i += 1) {
+        if (!active_items[i].hidden) ordinal += 1;
+    }
+    return ordinal;
+}
+
+fn previousVisibleIndex(index: usize) ?usize {
+    const count = visibleCount();
+    if (count == 0) return null;
+
+    var i = if (index == 0) active_items.len - 1 else index - 1;
+    while (true) {
+        if (!active_items[i].hidden) return i;
+        if (i == index) return null;
+        i = if (i == 0) active_items.len - 1 else i - 1;
     }
 }
 
-fn navDown() void {
-    const n = active_items.len;
-    if (focused_index + 1 >= n) {
-        focused_index = 0;
-        scroll_offset = 0;
-        scroll_anim = @floatFromInt(scroll_offset);
-    } else {
-        focused_index += 1;
-        if (focused_index >= scroll_offset + VISIBLE) scroll_offset += 1;
+fn nextVisibleIndex(index: usize) ?usize {
+    const count = visibleCount();
+    if (count == 0) return null;
+
+    var i = if (index + 1 >= active_items.len) 0 else index + 1;
+    while (true) {
+        if (!active_items[i].hidden) return i;
+        if (i == index) return null;
+        i = if (i + 1 >= active_items.len) 0 else i + 1;
     }
+}
+
+fn adjustScrollForFocus() void {
+    const ordinal = visibleOrdinal(focused_index) orelse {
+        scroll_offset = 0;
+        scroll_anim = 0;
+        return;
+    };
+
+    if (ordinal < scroll_offset) {
+        scroll_offset = ordinal;
+    } else if (ordinal >= scroll_offset + VISIBLE) {
+        scroll_offset = ordinal - (VISIBLE - 1);
+    }
+    const count = visibleCount();
+    if (count <= VISIBLE) {
+        scroll_offset = 0;
+    } else if (scroll_offset + VISIBLE > count) {
+        scroll_offset = count - VISIBLE;
+    }
+    scroll_anim = @floatFromInt(scroll_offset);
+}
+
+fn navUp() void {
+    const prev = previousVisibleIndex(focused_index) orelse return;
+    focused_index = prev;
+    adjustScrollForFocus();
+}
+
+fn navDown() void {
+    const next = nextVisibleIndex(focused_index) orelse return;
+    focused_index = next;
+    adjustScrollForFocus();
 }
 
 fn handleBrowseInput() !void {
@@ -353,6 +425,7 @@ fn restoreState(state: NavState) void {
     current_minimal_edit = state.minimal_edit;
     current_back_fn = state.back_fn;
     close_fn = state.close_fn;
+    ensureFocusedVisible();
 }
 
 fn clearNavStack() void {
@@ -536,11 +609,27 @@ fn revertCycleEdit(item: *Item) void {
 }
 
 fn fmtConfigLabel(buf: []u8, label: [:0]const u8, cfg: *const ConfigData) [:0]const u8 {
-    if (cfg.step < 0.095) {
-        return std.fmt.bufPrintZ(buf, "{s}: {d:.2}", .{ label, cfg.value }) catch label;
-    } else {
-        return std.fmt.bufPrintZ(buf, "{s}: {d:.1}", .{ label, cfg.value }) catch label;
+    return switch (decimalPlacesForStep(cfg.step)) {
+        0 => std.fmt.bufPrintZ(buf, "{s}: {d:.0}", .{ label, cfg.value }) catch label,
+        1 => std.fmt.bufPrintZ(buf, "{s}: {d:.1}", .{ label, cfg.value }) catch label,
+        2 => std.fmt.bufPrintZ(buf, "{s}: {d:.2}", .{ label, cfg.value }) catch label,
+        3 => std.fmt.bufPrintZ(buf, "{s}: {d:.3}", .{ label, cfg.value }) catch label,
+        4 => std.fmt.bufPrintZ(buf, "{s}: {d:.4}", .{ label, cfg.value }) catch label,
+        5 => std.fmt.bufPrintZ(buf, "{s}: {d:.5}", .{ label, cfg.value }) catch label,
+        else => std.fmt.bufPrintZ(buf, "{s}: {d:.6}", .{ label, cfg.value }) catch label,
+    };
+}
+
+fn decimalPlacesForStep(step: f32) u8 {
+    if (!std.math.isFinite(step) or step <= 0) return 1;
+
+    var scaled = @abs(step);
+    var places: u8 = 0;
+    while (places < 6) : (places += 1) {
+        if (@abs(scaled - @round(scaled)) < 0.00001) return places;
+        scaled *= 10.0;
     }
+    return places;
 }
 
 fn cycleItem(item: *Item, direction: i2) void {
@@ -557,6 +646,7 @@ fn cycleItem(item: *Item, direction: i2) void {
 }
 
 fn activate(idx: usize) !void {
+    if (active_items[idx].hidden) return;
     if (active_items[idx].disabled) return;
 
     switch (active_items[idx].kind) {
@@ -642,13 +732,18 @@ fn drawVertical() !void {
 
     var hint_y: i32 = screen_cy;
 
+    var visible_i: usize = 0;
     for (active_items, 0..) |item, i| {
-        const fi: f32 = @floatFromInt(i);
+        if (item.hidden) continue;
+
+        const fi: f32 = @floatFromInt(visible_i);
         const y: i32 = screen_cy - @divFloor(BTN_H, 2) + @as(i32, @intFromFloat(@round((fi - center_item) * step)));
+        visible_i += 1;
 
         if (y + BTN_H < 0 or y > window.height) continue;
 
-        const in_window = i >= scroll_offset and i < scroll_offset + VISIBLE;
+        const ordinal = visible_i - 1;
+        const in_window = ordinal >= scroll_offset and ordinal < scroll_offset + VISIBLE;
         const is_editing = if (editing_index) |ei| ei == i else false;
         const color = if (item.disabled)
             COLOR_DISABLED
@@ -792,13 +887,18 @@ fn drawHorizontal() !void {
     const screen_cx: i32 = @divFloor(window.width, 2);
     const screen_cy: i32 = @divFloor(window.height, 2);
 
+    var visible_i: usize = 0;
     for (active_items, 0..) |item, i| {
-        const fi: f32 = @floatFromInt(i);
+        if (item.hidden) continue;
+
+        const fi: f32 = @floatFromInt(visible_i);
         const x: i32 = screen_cx - @divFloor(btn_w, 2) + @as(i32, @intFromFloat(@round((fi - center_item) * step)));
+        visible_i += 1;
 
         if (x + btn_w < 0 or x > window.width) continue;
 
-        const in_window = i >= scroll_offset and i < scroll_offset + VISIBLE;
+        const ordinal = visible_i - 1;
+        const in_window = ordinal >= scroll_offset and ordinal < scroll_offset + VISIBLE;
         const color = if (item.disabled)
             COLOR_DISABLED
         else if (i == focused_index)

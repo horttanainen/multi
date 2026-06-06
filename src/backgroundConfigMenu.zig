@@ -63,6 +63,7 @@ var mid_mode_value: u8 = 1;
 var high_mode_value: u8 = 1;
 var loudness_mode_value: u8 = 1;
 var onset_mode_value: u8 = 1;
+var initial_uniforms: @TypeOf(background_paint.uniforms) = undefined;
 
 const SWIRL_COUNT = 8;
 const NOISE_COUNT = 8;
@@ -168,7 +169,7 @@ var main_items = [_]menu.Item{
     .{ .label = "Tweak Music", .kind = .{ .button = actionOpenMusicMenu }, .font = .medium },
     .{ .label = "Randomize", .kind = .{ .button = actionRandomize }, .font = .medium },
     .{ .label = "Randomize All", .kind = .{ .button = actionRandomizeAll }, .font = .medium },
-    .{ .label = "Save Preset", .kind = .{ .button = actionSavePreset }, .font = .medium },
+    .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges }, .font = .medium },
 };
 
 // ============================================================
@@ -286,10 +287,11 @@ pub fn push() void {
 const OpenMode = enum { replace, push };
 
 fn openImpl(mode: OpenMode) void {
+    initial_uniforms = background_paint.uniforms;
     loadFromUniforms();
     switch (mode) {
-        .replace => menu.open(&main_items, .{ .minimal_edit = true }),
-        .push => menu.push(&main_items, .{ .minimal_edit = true }),
+        .replace => menu.openWithCleanup(&main_items, cleanupBackgroundConfigMenu, .{ .minimal_edit = true }),
+        .push => menu.pushWithCleanup(&main_items, cleanupBackgroundConfigMenu, .{ .minimal_edit = true }),
     }
 }
 
@@ -661,14 +663,22 @@ fn actionRandomizeAll() anyerror!void {
 // Persistence / exit
 // ============================================================
 
-fn actionSavePreset() anyerror!void {
-    sync();
-    try settings.saveBackgroundPreset(background_paint.uniforms);
+fn actionResetChanges() anyerror!void {
+    background_paint.uniforms = initial_uniforms;
+    loadFromUniforms();
 }
 
 fn actionExitEditor() anyerror!void {
     state.editingBackground = false;
     try menu.back();
+}
+
+fn cleanupBackgroundConfigMenu() void {
+    sync();
+    settings.saveBackgroundPreset(background_paint.uniforms) catch |err| {
+        std.log.warn("backgroundConfigMenu.cleanupBackgroundConfigMenu: failed to save background preset: {}", .{err});
+    };
+    state.editingBackground = false;
 }
 
 pub fn hsvToRgb(h: f32, s: f32, v: f32) [3]f32 {

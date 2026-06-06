@@ -27,6 +27,10 @@ pub fn toggleVisible() void {
     visible = !visible;
 }
 
+pub fn setVisible(value: bool) void {
+    visible = value;
+}
+
 pub fn granularityMeters() f32 {
     return granularity_meters;
 }

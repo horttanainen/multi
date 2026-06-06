@@ -9,6 +9,14 @@ const aspectRatioMenu = @import("aspectRatioMenu.zig");
 var splitscreen_value: bool = true;
 var aspect_ratio_value: level.AspectRatio = level.defaultAspectRatio;
 var aspect_ratio_label_buf: [64]u8 = undefined;
+var initial_gravity: f32 = 10.0;
+var initial_level_height_meters: f32 = 12.0;
+var initial_camera_zoom_meters: f32 = level.defaultCameraZoomMeters;
+var initial_aspect_ratio: level.AspectRatio = level.defaultAspectRatio;
+var initial_splitscreen: bool = true;
+var initial_grid_visible: bool = false;
+var initial_grid_granularity_meters: f32 = levelEditorGrid.defaultGranularityMeters;
+var suppress_cleanup_save: bool = false;
 
 var gravity_config = menu.ConfigData{ .value = 10.0, .step = 0.5, .min = 0.0, .max = 200.0 };
 var level_height_meters_config = menu.ConfigData{ .value = 12.0, .step = 0.5, .min = 1.0, .max = 200.0 };
@@ -34,11 +42,20 @@ var items = [_]menu.Item{
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
     .{ .label = "Grid: OFF", .kind = .{ .button = actionToggleGrid } },
     .{ .label = "Grid Size (m)", .kind = .{ .config = &grid_granularity_config }, .font = .medium },
-    .{ .label = "Save Changes", .kind = .{ .button = actionSaveChanges } },
+    .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges } },
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
 };
 
 pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectRatio: level.AspectRatio, splitscreen: bool) void {
+    initial_gravity = gravity;
+    initial_level_height_meters = levelHeightMeters;
+    initial_camera_zoom_meters = cameraZoomMeters;
+    initial_aspect_ratio = aspectRatio;
+    initial_splitscreen = splitscreen;
+    initial_grid_visible = levelEditorGrid.isVisible();
+    initial_grid_granularity_meters = levelEditorGrid.granularityMeters();
+    suppress_cleanup_save = false;
+
     gravity_config.value = gravity;
     level_height_meters_config.value = levelHeightMeters;
     camera_zoom_meters_config.value = cameraZoomMeters;
@@ -47,7 +64,7 @@ pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectR
     updateAspectRatioLabel();
     updateSplitscreenLabel();
     syncLevelEditorGridItems();
-    menu.open(&items, .{});
+    menu.openWithCleanup(&items, cleanupLevelConfigMenu, .{});
 }
 
 fn updateAspectRatioLabel() void {
@@ -103,13 +120,38 @@ fn updateGridToggleLabel() void {
     items[grid_toggle_item_index].label = if (levelEditorGrid.isVisible()) "Grid: ON" else "Grid: OFF";
 }
 
-fn actionSaveChanges() anyerror!void {
+fn saveAndReload() !void {
     try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value);
     try levelEditor.reloadForEditor();
+}
+
+fn actionResetChanges() anyerror!void {
+    gravity_config.value = initial_gravity;
+    level_height_meters_config.value = initial_level_height_meters;
+    camera_zoom_meters_config.value = initial_camera_zoom_meters;
+    aspect_ratio_value = initial_aspect_ratio;
+    splitscreen_value = initial_splitscreen;
+    levelEditorGrid.setVisible(initial_grid_visible);
+    levelEditorGrid.setGranularityMeters(initial_grid_granularity_meters);
+    updateAspectRatioLabel();
+    updateSplitscreenLabel();
+    syncLevelEditorGridItems();
 }
 
 fn actionTryLevel() anyerror!void {
     try levelEditor.saveConfig(getGravity(), getLevelHeightMeters(), getCameraZoomMeters(), aspect_ratio_value, splitscreen_value);
     try levelEditor.tryCurrentLevel();
+    suppress_cleanup_save = true;
     menu.close();
+}
+
+fn cleanupLevelConfigMenu() void {
+    if (suppress_cleanup_save) {
+        suppress_cleanup_save = false;
+        return;
+    }
+
+    saveAndReload() catch |err| {
+        std.log.warn("levelConfigMenu.cleanupLevelConfigMenu: failed to save level config: {}", .{err});
+    };
 }

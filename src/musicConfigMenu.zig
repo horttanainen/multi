@@ -23,6 +23,20 @@ const style_targets = [_]music.Style{
 const STYLE_COUNT = style_targets.len;
 var style_value: u8 = 0;
 
+const SavedMusicSettings = struct {
+    style: music.Style,
+    volume: f32,
+    bpm: f32,
+    reverb_mix: f32,
+    ambient_cue: u8,
+    choir_cue: u8,
+    african_cue: u8,
+    taiko_cue: u8,
+    americana_guitar_cue: u8,
+};
+
+var initial_settings: SavedMusicSettings = undefined;
+
 const style_names = [STYLE_COUNT][:0]const u8{
     "Style: Ambient",
     "Style: Choir",
@@ -91,11 +105,12 @@ var bpm_config    = menu.ConfigData{ .value = 1.0, .step = 0.01, .min = 0, .max 
 // Menu items
 // ============================================================
 
-const IDX_STYLE: usize = 1;
-const IDX_CUE: usize = 2;
+const IDX_STYLE: usize = 2;
+const IDX_CUE: usize = 3;
 
 var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
+    .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges }, .font = .medium },
     .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
     .{ .label = "Cue: Dawn", .kind = .{ .button = actionCycleCue }, .font = .medium, .cycle_names = &ambient_cue_names, .cycle_index = &ambient_cue_value, .on_cycle = onCycleCue },
     .{ .label = "Volume", .kind = .{ .config = &volume_config }, .font = .medium },
@@ -119,14 +134,15 @@ const OpenMode = enum { replace, push };
 
 fn openImpl(back_fn: ?*const fn () anyerror!void, mode: OpenMode) void {
     state.editingMusic = true;
+    initial_settings = captureSettings();
     loadFromParams();
     const options = menu.OpenOptions{
         .minimal_edit = true,
         .back_fn = back_fn,
     };
     switch (mode) {
-        .replace => menu.open(&main_items, options),
-        .push => menu.push(&main_items, options),
+        .replace => menu.openWithCleanup(&main_items, cleanupMusicConfigMenu, options),
+        .push => menu.pushWithCleanup(&main_items, cleanupMusicConfigMenu, options),
     }
 }
 
@@ -158,6 +174,33 @@ fn loadFromParams() void {
     taiko_cue_value = settings.music_taiko_cue;
     americana_guitar_cue_value = settings.music_americana_guitar_cue;
     updateCueRow();
+}
+
+fn captureSettings() SavedMusicSettings {
+    return .{
+        .style = settings.music_style,
+        .volume = settings.music_volume,
+        .bpm = settings.music_bpm,
+        .reverb_mix = settings.music_reverb_mix,
+        .ambient_cue = settings.music_ambient_cue,
+        .choir_cue = settings.music_choir_cue,
+        .african_cue = settings.music_african_cue,
+        .taiko_cue = settings.music_taiko_cue,
+        .americana_guitar_cue = settings.music_americana_guitar_cue,
+    };
+}
+
+fn restoreSettings(saved: SavedMusicSettings) void {
+    settings.music_style = saved.style;
+    settings.music_volume = saved.volume;
+    settings.music_bpm = saved.bpm;
+    settings.music_reverb_mix = saved.reverb_mix;
+    settings.music_ambient_cue = saved.ambient_cue;
+    settings.music_choir_cue = saved.choir_cue;
+    settings.music_african_cue = saved.african_cue;
+    settings.music_taiko_cue = saved.taiko_cue;
+    settings.music_americana_guitar_cue = saved.americana_guitar_cue;
+    settings.applyMusic();
 }
 
 fn updateStyleLabel() void {
@@ -246,9 +289,12 @@ fn styleToCycleIndex(style: music.Style) u8 {
 // ============================================================
 
 fn actionBack() anyerror!void {
-    try applyMenuToSettings(true);
-    state.editingMusic = false;
     try menu.back();
+}
+
+fn actionResetChanges() anyerror!void {
+    restoreSettings(initial_settings);
+    loadFromParams();
 }
 
 fn actionCycleStyle() anyerror!void {
@@ -313,4 +359,11 @@ fn triggerCurrentCue() void {
         .taiko => procedural_taiko.triggerCue(),
         .americana_guitar => procedural_americana_guitar.triggerCue(),
     }
+}
+
+fn cleanupMusicConfigMenu() void {
+    applyMenuToSettings(true) catch |err| {
+        std.log.warn("musicConfigMenu.cleanupMusicConfigMenu: failed to save music settings: {}", .{err});
+    };
+    state.editingMusic = false;
 }

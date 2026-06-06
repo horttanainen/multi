@@ -16,7 +16,7 @@ var items = [_]menu.Item{
     .{ .label = "Color Grading: None", .kind = .{ .button = actionOpenLutPicker } },
     .{ .label = "LUT Strength", .kind = .{ .config = &lut_strength_config } },
     .{ .label = "Regenerate Built-in Gradients", .kind = .{ .button = actionRegenerateBuiltinLuts } },
-    .{ .label = "Save Changes", .kind = .{ .button = actionSaveChanges } },
+    .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges } },
 };
 
 var lut_picker_items: []menu.Item = &.{};
@@ -51,14 +51,14 @@ fn actionRegenerateBuiltinLuts() anyerror!void {
     lut.regenerateBuiltinLuts();
 }
 
-fn actionSaveChanges() anyerror!void {
+fn saveChanges() !void {
     settings.setLutStrength(lut_strength_config.value);
 
     if (staged_preferred_lut_index == 0) {
         try settings.setPreferredColorGrading(null);
     } else {
         const name = lut.entryName(staged_preferred_lut_index) orelse {
-            std.log.warn("settingsMenu.actionSaveChanges: staged LUT {d} has no name", .{staged_preferred_lut_index});
+            std.log.warn("settingsMenu.saveChanges: staged LUT {d} has no name", .{staged_preferred_lut_index});
             return;
         };
         try settings.setPreferredColorGrading(name);
@@ -66,7 +66,14 @@ fn actionSaveChanges() anyerror!void {
 
     try settings.save();
     settings.apply();
-    menu.close();
+}
+
+fn actionResetChanges() anyerror!void {
+    staged_preferred_lut_index = getSavedLutIndex();
+    lut_strength_config.value = settings.lutStrength();
+    settings.apply();
+    refreshColorGradingLabel();
+    refreshLutPickerLabels();
 }
 
 fn actionBackToSettings() anyerror!void {
@@ -131,9 +138,11 @@ fn openLutPicker(focus_index: usize) !void {
 }
 
 fn cleanupSettingsMenu() void {
+    saveChanges() catch |err| {
+        std.log.warn("settingsMenu.cleanupSettingsMenu: failed to save settings: {}", .{err});
+    };
     is_open = false;
     showing_lut_picker = false;
-    settings.apply();
 
     if (on_back) |back_fn| back_fn();
 }
