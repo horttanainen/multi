@@ -52,7 +52,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Level editor
-//TODO: add visible grid that can be turned on and off
 //TODO: add option to snap to the grid
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
 //TODO: add option to draw a rectangle which becames an entity in the game with some magenta prefill
@@ -152,10 +151,6 @@ const Sprite = entity.Sprite;
 //TODO: read https://mas-bandwidth.com/what-is-lag/
 //TODO: read https://mas-bandwidth.com/choosing-the-right-network-model-for-your-multiplayer-game/
 //TODO: read https://gafferongames.com/post/deterministic_lockstep/
-
-//Background ideas
-//TODO: make it possible to tweak crt effect (own menu)
-//TODO: make it possible to turn crt effect off in the settings.
 
 fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     std.log.info("Ran successfully for 5 seconds", .{});
