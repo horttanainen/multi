@@ -22,7 +22,6 @@ const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
 const levelConfigMenu = @import("levelConfigMenu.zig");
 const spritePicker = @import("spritePicker.zig");
-const entityConfigMenu = @import("entityConfigMenu.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -217,9 +216,7 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                         };
                     }
                 } else {
-                    if (levelEditor.selectEntityAtCursor()) |bodyId| {
-                        entityConfigMenu.open(bodyId);
-                    }
+                    _ = levelEditor.selectEntityAtCursor();
                 }
                 delay.action("placeSprite", 300);
             }

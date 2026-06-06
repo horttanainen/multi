@@ -105,24 +105,7 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
 }
 
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
-    // Calculate top-left corner from center position
-    const halfW = @divTrunc(sprite.sizeP.x, 2);
-    const halfH = @divTrunc(sprite.sizeP.y, 2);
-
-    // Handle sprite offset (rotated for sub-sprites/tiles)
-    const cosAngle = @cos(angle);
-    const sinAngle = @sin(angle);
-    const offsetX = @as(f32, @floatFromInt(sprite.offset.x));
-    const offsetY = @as(f32, @floatFromInt(sprite.offset.y));
-    const rotatedOffsetX = offsetX * cosAngle - offsetY * sinAngle;
-    const rotatedOffsetY = offsetX * sinAngle + offsetY * cosAngle;
-
-    const rect = sdl.Rect{
-        .x = centerPos.x - halfW + @as(i32, @intFromFloat(rotatedOffsetX)),
-        .y = centerPos.y - halfH + @as(i32, @intFromFloat(rotatedOffsetY)),
-        .w = sprite.sizeP.x,
-        .h = sprite.sizeP.y,
-    };
+    const rect = drawRectForSprite(sprite, centerPos, angle);
 
     try tex.setTextureColorMod(sprite.texture, 255, 255, 255);
     if (fog > 0) {
@@ -149,6 +132,32 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
 
     const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
     try gpu.renderCopyEx(sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
+}
+
+pub fn drawSelectionMask(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, alpha: u8) !void {
+    if (alpha == 0) return;
+
+    const rect = drawRectForSprite(s, centerPos, angle);
+    try gpu.renderSelectionMaskCopyEx(s.texture, null, &rect, angle * 180.0 / PI, null, if (flip) .horizontal else .none, alpha);
+}
+
+fn drawRectForSprite(s: Sprite, centerPos: vec.IVec2, angle: f32) sdl.Rect {
+    const halfW = @divTrunc(s.sizeP.x, 2);
+    const halfH = @divTrunc(s.sizeP.y, 2);
+
+    const cosAngle = @cos(angle);
+    const sinAngle = @sin(angle);
+    const offsetX = @as(f32, @floatFromInt(s.offset.x));
+    const offsetY = @as(f32, @floatFromInt(s.offset.y));
+    const rotatedOffsetX = offsetX * cosAngle - offsetY * sinAngle;
+    const rotatedOffsetY = offsetX * sinAngle + offsetY * cosAngle;
+
+    return .{
+        .x = centerPos.x - halfW + @as(i32, @intFromFloat(rotatedOffsetX)),
+        .y = centerPos.y - halfH + @as(i32, @intFromFloat(rotatedOffsetY)),
+        .w = s.sizeP.x,
+        .h = s.sizeP.y,
+    };
 }
 
 pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeColor: ?Color) !void {

@@ -20,6 +20,11 @@ const RuntimeBody = struct {
     offsetM: vec.Vec2,
 };
 
+const CursorEntityHit = struct {
+    bodyId: box2d.c.b2BodyId,
+    entityId: u64,
+};
+
 const EntityUpdateCommand = struct {
     before: entity.SerializableEntity,
     after: entity.SerializableEntity,
@@ -45,6 +50,7 @@ const LevelDocument = struct {
 };
 
 var maybeSelectedEntityId: ?u64 = null;
+var maybeHoveredEntityId: ?u64 = null;
 var maybeCopiedEntityId: ?u64 = null;
 
 var editDirPathBuf: [100]u8 = undefined;
@@ -593,6 +599,23 @@ fn setRuntimeEntityHighlight(entityId: u64, highlighted: bool) void {
     }
 }
 
+fn setRuntimeEntityHover(entityId: u64, hovered: bool) void {
+    const runtimeBodies = entityBodies.get(entityId) orelse {
+        std.log.warn("setRuntimeEntityHover: entity {d} has no runtime bodies", .{entityId});
+        return;
+    };
+
+    for (runtimeBodies) |runtimeBody| {
+        const maybeE = entity.getEntity(runtimeBody.bodyId);
+        if (maybeE != null) {
+            maybeE.?.hovered = hovered;
+            continue;
+        }
+
+        if (sensor.setHovered(runtimeBody.bodyId, hovered)) continue;
+    }
+}
+
 fn selectEntity(entityId: u64) void {
     if (maybeSelectedEntityId) |selectedEntityId| {
         setRuntimeEntityHighlight(selectedEntityId, false);
@@ -600,6 +623,22 @@ fn selectEntity(entityId: u64) void {
 
     maybeSelectedEntityId = entityId;
     setRuntimeEntityHighlight(entityId, true);
+}
+
+fn setHoveredEntity(entityId: u64) void {
+    if (maybeHoveredEntityId != null and maybeHoveredEntityId.? == entityId) return;
+
+    clearHoveredEntity();
+    maybeHoveredEntityId = entityId;
+    setRuntimeEntityHover(entityId, true);
+}
+
+fn clearHoveredEntity() void {
+    if (maybeHoveredEntityId) |hoveredEntityId| {
+        setRuntimeEntityHover(hoveredEntityId, false);
+    }
+
+    maybeHoveredEntityId = null;
 }
 
 fn clearSelection() void {
@@ -658,6 +697,9 @@ fn deleteEntity(entityId: u64, recordHistory: bool) !void {
     if (maybeSelectedEntityId != null and maybeSelectedEntityId.? == entityId) {
         maybeSelectedEntityId = null;
     }
+    if (maybeHoveredEntityId != null and maybeHoveredEntityId.? == entityId) {
+        maybeHoveredEntityId = null;
+    }
     if (maybeCopiedEntityId != null and maybeCopiedEntityId.? == entityId) {
         maybeCopiedEntityId = null;
     }
@@ -693,6 +735,9 @@ fn updateEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool
 
     if (maybeSelectedEntityId != null and maybeSelectedEntityId.? == serializedEntity.id) {
         setRuntimeEntityHighlight(serializedEntity.id, true);
+    }
+    if (maybeHoveredEntityId != null and maybeHoveredEntityId.? == serializedEntity.id) {
+        setRuntimeEntityHover(serializedEntity.id, true);
     }
 
     updateSpawnLocationFromDocument();
@@ -830,6 +875,7 @@ fn spawnDocumentRuntime() !void {
 }
 
 pub fn reloadForEditor() !void {
+    clearHoveredEntity();
     level.reset();
     clearRuntimeIndex();
     try spawnDocumentRuntime();
@@ -838,6 +884,7 @@ pub fn reloadForEditor() !void {
     if (maybeSelectedEntityId) |selectedEntityId| {
         setRuntimeEntityHighlight(selectedEntityId, true);
     }
+    updateCursorHover();
 }
 
 pub fn createNewLevel() !void {
@@ -909,6 +956,7 @@ fn createCopyOfCurrentLevel() !void {
 }
 
 pub fn exit() void {
+    clearHoveredEntity();
     clearSelection();
     cursor.deinit();
     state.editingLevel = false;
@@ -936,7 +984,31 @@ pub fn selectEntityAtCursor() ?box2d.c.b2BodyId {
     return selectEntityAtPosition(worldPos, .{ .x = 0.5, .y = 0.5 });
 }
 
+pub fn updateCursorHover() void {
+    if (cursor.hasPendingSprite()) {
+        clearHoveredEntity();
+        return;
+    }
+
+    const worldPos = cursor.getWorldPos();
+    const hit = findEntityAtPosition(worldPos, .{ .x = 0.5, .y = 0.5 }) orelse {
+        clearHoveredEntity();
+        return;
+    };
+    setHoveredEntity(hit.entityId);
+}
+
 fn selectEntityAtPosition(pos: vec.IVec2, halfExtents: box2d.c.b2Vec2) ?box2d.c.b2BodyId {
+    const hit = findEntityAtPosition(pos, halfExtents) orelse {
+        clearSelection();
+        return null;
+    };
+
+    selectEntity(hit.entityId);
+    return hit.bodyId;
+}
+
+fn findEntityAtPosition(pos: vec.IVec2, halfExtents: box2d.c.b2Vec2) ?CursorEntityHit {
     const posM = conv.p2m(pos);
     const aabb = box2d.c.b2AABB{
         .lowerBound = box2d.subtract(posM, halfExtents),
@@ -946,19 +1018,14 @@ fn selectEntityAtPosition(pos: vec.IVec2, halfExtents: box2d.c.b2Vec2) ?box2d.c.
     var result: ?box2d.c.b2BodyId = null;
     box2d.overlapAABB(aabb, filter, cursorOverlapCallback, &result);
 
-    const bodyId = result orelse {
-        clearSelection();
-        return null;
-    };
+    const bodyId = result orelse return null;
 
     const entityId = bodyToEntity.get(bodyId) orelse {
-        std.log.warn("selectEntityAtPosition: selected body has no entity mapping", .{});
-        clearSelection();
+        std.log.warn("findEntityAtPosition: selected body has no entity mapping", .{});
         return null;
     };
 
-    selectEntity(entityId);
-    return bodyId;
+    return .{ .bodyId = bodyId, .entityId = entityId };
 }
 
 fn cursorOverlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {

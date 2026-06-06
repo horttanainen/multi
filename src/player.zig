@@ -248,6 +248,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .colliderChunks = try allocator.alloc(entity.ColliderChunk, 0),
         .state = null,
         .highlighted = false,
+        .hovered = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = collision.CATEGORY_PLAYER,

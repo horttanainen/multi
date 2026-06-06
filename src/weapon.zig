@@ -234,6 +234,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .colliderChunks = try allocator.alloc(entity.ColliderChunk, 0),
             .state = null,
             .highlighted = false,
+            .hovered = false,
             .animated = false,
             .flipEntityHorizontally = false,
             .categoryBits = shapeDef.filter.categoryBits,

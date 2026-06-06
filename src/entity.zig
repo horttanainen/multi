@@ -22,7 +22,6 @@ const Sprite = sprite.Sprite;
 
 const conv = @import("conversion.zig");
 const animation = @import("animation.zig");
-const config = @import("config.zig");
 const collision = @import("collision.zig");
 const perf = @import("perf.zig");
 
@@ -40,6 +39,7 @@ pub const Entity = struct {
     state: ?box2d.State,
     spriteUuids: []u64,
     highlighted: bool,
+    hovered: bool,
     shapeIds: []box2d.c.b2ShapeId,
     colliderChunks: []ColliderChunk,
     animated: bool,
@@ -101,13 +101,21 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
         const entitySprite = sprite.getSprite(spriteUuid) orelse continue;
 
         const pos = camera.relativePosition(conv.m2Pixel(state.pos));
+        try drawEditorSelectionMask(entity.*, entitySprite, pos, state.rotAngle, flip);
 
         if (entity.glow) {
             try sprite.drawGlow(entitySprite, pos, state.rotAngle, flip, entity.color);
         } else {
-            try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, entity.highlighted, flip, 0, entity.color, null);
+            try sprite.drawWithOptions(entitySprite, pos, state.rotAngle, false, flip, 0, entity.color, null);
         }
     }
+}
+
+fn drawEditorSelectionMask(entity: Entity, entitySprite: Sprite, pos: vec.IVec2, angle: f32, flip: bool) !void {
+    if (!entity.highlighted and !entity.hovered) return;
+
+    const alpha: u8 = if (entity.highlighted) 255 else 115;
+    try sprite.drawSelectionMask(entitySprite, pos, angle, flip, alpha);
 }
 
 pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
@@ -133,6 +141,7 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .shapeIds = shapeIds,
         .colliderChunks = colliderChunks,
         .highlighted = false,
+        .hovered = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
@@ -359,6 +368,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .shapeIds = shapeIds,
         .colliderChunks = colliderChunks,
         .highlighted = false,
+        .hovered = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,

@@ -92,6 +92,13 @@ const LutUniforms = extern struct {
     strength: f32,
 };
 
+const SelectionOutlineUniforms = extern struct {
+    resolution: [2]f32,
+    radius: f32,
+    _pad0: f32 = 0,
+    color: [4]f32,
+};
+
 pub const PaintUniforms = extern struct {
     resolution: [2]f32,
     spin_rotation: f32,
@@ -154,10 +161,12 @@ const INITIAL_SPRITE_VERTEX_CAPACITY = 64 * 1024; // 64K vertices = ~10K sprites
 const INITIAL_COLOR_VERTEX_CAPACITY = 64 * 1024;
 const MAX_BATCH_RECORDS = 8192;
 const MAX_PENDING_DESTROYS = 256;
+const SELECTION_OUTLINE_RADIUS_PIXELS = 4.0;
 
 const PipelineType = enum {
     sprite_alpha,
     sprite_additive,
+    selection_mask,
     colored_triangles,
     colored_lines,
 };
@@ -173,6 +182,11 @@ const BatchRecord = union(enum) {
     },
     draw_colored: struct {
         pipeline: PipelineType,
+        vertex_offset: u32,
+        vertex_count: u32,
+    },
+    draw_selection_sprites: struct {
+        texture: *c.SDL_GPUTexture,
         vertex_offset: u32,
         vertex_count: u32,
     },
@@ -201,6 +215,8 @@ const GpuState = struct {
     // Pipelines
     sprite_alpha_pipeline: *c.SDL_GPUGraphicsPipeline,
     sprite_additive_pipeline: *c.SDL_GPUGraphicsPipeline,
+    selection_mask_pipeline: *c.SDL_GPUGraphicsPipeline,
+    selection_outline_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_triangles_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_lines_pipeline: *c.SDL_GPUGraphicsPipeline,
 
@@ -209,6 +225,7 @@ const GpuState = struct {
     offscreen_texture: *c.SDL_GPUTexture,
     offscreen_w: u32,
     offscreen_h: u32,
+    selection_mask_texture: *c.SDL_GPUTexture,
     crt_pipeline: *c.SDL_GPUGraphicsPipeline,
     fullscreen_quad_buffer: *c.SDL_GPUBuffer,
     crt_sampler: *c.SDL_GPUSampler,
@@ -333,6 +350,7 @@ const colored_frag_msl = @embedFile("shaders/colored.metal");
 const crt_msl = @embedFile("shaders/crt.metal");
 const lut_msl = @embedFile("shaders/lut.metal");
 const paint_msl = @embedFile("shaders/background_paint.metal");
+const selection_msl = @embedFile("shaders/selection.metal");
 
 fn createShader(
     device: *c.SDL_GPUDevice,
@@ -684,6 +702,24 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .vertex_layout = sprite_vertex_layout,
         .blend_state = additive_blend,
     });
+    const selection_mask = try createPipeline(device, swapchain_format, .{
+        .shader_code = selection_msl,
+        .vert_entry = "selection_mask_vert",
+        .frag_entry = "selection_mask_frag",
+        .vert_uniforms = 1,
+        .frag_samplers = 1,
+        .vertex_layout = sprite_vertex_layout,
+        .blend_state = alpha_blend,
+    });
+    const selection_outline = try createPipeline(device, swapchain_format, .{
+        .shader_code = selection_msl,
+        .vert_entry = "selection_outline_vert",
+        .frag_entry = "selection_outline_frag",
+        .frag_samplers = 1,
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
+        .blend_state = alpha_blend,
+    });
     const colored_triangles = try createPipeline(device, swapchain_format, .{
         .shader_code = colored_vert_msl,
         .vert_entry = "colored_vert",
@@ -798,6 +834,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
     const oh: u32 = if (init_h > 0) @intCast(init_h) else 480;
     const offscreen_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
     const offscreen_tex_b = try createOffscreenTexture(device, ow, oh, swapchain_format);
+    const selection_mask_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
 
     // Generate and upload identity LUT (32x32x32 stored as 1024x32 RGBA)
     const lut_tex = try createIdentityLut(device);
@@ -822,11 +859,14 @@ pub fn createRenderer(window: *sdl.Window) !void {
         },
         .sprite_alpha_pipeline = sprite_alpha,
         .sprite_additive_pipeline = sprite_additive,
+        .selection_mask_pipeline = selection_mask,
+        .selection_outline_pipeline = selection_outline,
         .colored_triangles_pipeline = colored_triangles,
         .colored_lines_pipeline = colored_lines,
         .offscreen_texture = offscreen_tex,
         .offscreen_w = ow,
         .offscreen_h = oh,
+        .selection_mask_texture = selection_mask_tex,
         .paint_pipeline = paint_pipe,
         .crt_pipeline = crt_pipe,
         .fullscreen_quad_buffer = quad_buffer,
@@ -854,6 +894,7 @@ pub fn destroyRenderer() void {
         texture.flushPendingUploads();
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
+        c.SDL_ReleaseGPUTexture(g.device, g.selection_mask_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.paint_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
@@ -871,6 +912,8 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUSampler(g.device, g.sampler);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.sprite_alpha_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.sprite_additive_pipeline);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.selection_mask_pipeline);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.selection_outline_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_triangles_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_lines_pipeline);
         c.SDL_ReleaseWindowFromGPUDevice(g.device, g.window);
@@ -1056,12 +1099,30 @@ pub fn renderClear() !void {
     g.swapchain_w = @floatFromInt(sw_w);
     g.swapchain_h = @floatFromInt(sw_h);
 
-    // Recreate offscreen textures if window was resized (needed for post-processing)
-    if ((g.crt_enabled or g.lut_enabled) and (sw_w != g.offscreen_w or sw_h != g.offscreen_h)) {
+    // Recreate offscreen textures if window was resized.
+    if (sw_w != g.offscreen_w or sw_h != g.offscreen_h) {
+        const new_offscreen_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch |err| {
+            std.log.warn("renderClear: failed to resize offscreen texture: {}", .{err});
+            return error.AcquireSwapchainFailed;
+        };
+        const new_offscreen_texture_b = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch |err| {
+            std.log.warn("renderClear: failed to resize secondary offscreen texture: {}", .{err});
+            c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture);
+            return error.AcquireSwapchainFailed;
+        };
+        const new_selection_mask_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch |err| {
+            std.log.warn("renderClear: failed to resize selection mask texture: {}", .{err});
+            c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture);
+            c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture_b);
+            return error.AcquireSwapchainFailed;
+        };
+
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
-        g.offscreen_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
-        g.offscreen_texture_b = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch return error.AcquireSwapchainFailed;
+        c.SDL_ReleaseGPUTexture(g.device, g.selection_mask_texture);
+        g.offscreen_texture = new_offscreen_texture;
+        g.offscreen_texture_b = new_offscreen_texture_b;
+        g.selection_mask_texture = new_selection_mask_texture;
         g.offscreen_w = sw_w;
         g.offscreen_h = sw_h;
     }
@@ -1094,16 +1155,20 @@ pub fn renderPresent() void {
 
     if (g.lut_enabled and g.crt_enabled) {
         renderScene(g, cmd, g.offscreen_texture);
+        renderSelectionOverlay(g, cmd, g.offscreen_texture);
         applyLutEffect(g, cmd, g.offscreen_texture, g.offscreen_texture_b);
         applyCrtEffect(g, cmd, g.offscreen_texture_b, swapchain_tex);
     } else if (g.lut_enabled) {
         renderScene(g, cmd, g.offscreen_texture);
+        renderSelectionOverlay(g, cmd, g.offscreen_texture);
         applyLutEffect(g, cmd, g.offscreen_texture, swapchain_tex);
     } else if (g.crt_enabled) {
         renderScene(g, cmd, g.offscreen_texture);
+        renderSelectionOverlay(g, cmd, g.offscreen_texture);
         applyCrtEffect(g, cmd, g.offscreen_texture, swapchain_tex);
     } else {
         renderScene(g, cmd, swapchain_tex);
+        renderSelectionOverlay(g, cmd, swapchain_tex);
     }
 
     submitFrame(g, cmd);
@@ -1282,10 +1347,161 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
 
                 c.SDL_DrawGPUPrimitives(rp, batch.vertex_count, 1, 0, 0);
             },
+            .draw_selection_sprites => {},
         }
     }
 
     c.SDL_EndGPURenderPass(rp);
+}
+
+fn hasSelectionMaskRecords(g: *GpuState) bool {
+    var i: u32 = 0;
+    while (i < g.batch_count) : (i += 1) {
+        switch (g.batch_records[i]) {
+            .draw_selection_sprites => return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn renderSelectionOverlay(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SDL_GPUTexture) void {
+    if (!hasSelectionMaskRecords(g)) return;
+
+    renderSelectionMask(g, cmd);
+    compositeSelectionOutline(g, cmd, target_texture);
+}
+
+fn renderSelectionMask(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
+    const color_target = c.SDL_GPUColorTargetInfo{
+        .texture = g.selection_mask_texture,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .load_op = c.SDL_GPU_LOADOP_CLEAR,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const render_pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null) orelse {
+        std.log.warn("renderSelectionMask: failed to begin render pass", .{});
+        return;
+    };
+
+    setGpuViewport(render_pass, 0, 0, g.swapchain_w, g.swapchain_h);
+
+    var current_vp_w: f32 = g.swapchain_w;
+    var current_vp_h: f32 = g.swapchain_h;
+    var current_zoom: f32 = 1.0;
+    var last_texture: ?*c.SDL_GPUTexture = null;
+    var pipeline_bound = false;
+    var uniforms_dirty = true;
+    var i: u32 = 0;
+    while (i < g.batch_count) : (i += 1) {
+        switch (g.batch_records[i]) {
+            .set_viewport => |vp| {
+                setGpuViewport(render_pass, vp.x, vp.y, vp.w, vp.h);
+                current_vp_w = vp.w;
+                current_vp_h = vp.h;
+                uniforms_dirty = true;
+            },
+            .set_zoom => |z| {
+                current_zoom = z.zoom;
+                uniforms_dirty = true;
+            },
+            .draw_selection_sprites => |batch| {
+                if (!pipeline_bound) {
+                    c.SDL_BindGPUGraphicsPipeline(render_pass, g.selection_mask_pipeline);
+                    pipeline_bound = true;
+                    uniforms_dirty = true;
+                }
+
+                if (uniforms_dirty) {
+                    const uniforms = ViewportUniforms{ .viewport_size = .{ current_vp_w / current_zoom, current_vp_h / current_zoom } };
+                    c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(ViewportUniforms));
+                    uniforms_dirty = false;
+                }
+
+                const binding = c.SDL_GPUBufferBinding{
+                    .buffer = g.sprite_gpu_buffer,
+                    .offset = batch.vertex_offset * @sizeOf(SpriteVertex),
+                };
+                c.SDL_BindGPUVertexBuffers(render_pass, 0, &binding, 1);
+
+                if (last_texture != batch.texture) {
+                    const sampler_binding = c.SDL_GPUTextureSamplerBinding{
+                        .texture = batch.texture,
+                        .sampler = g.sampler,
+                    };
+                    c.SDL_BindGPUFragmentSamplers(render_pass, 0, &sampler_binding, 1);
+                    last_texture = batch.texture;
+                }
+
+                c.SDL_DrawGPUPrimitives(render_pass, batch.vertex_count, 1, 0, 0);
+            },
+            .draw_sprites, .draw_colored, .draw_paint_background => {},
+        }
+    }
+
+    c.SDL_EndGPURenderPass(render_pass);
+}
+
+fn compositeSelectionOutline(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SDL_GPUTexture) void {
+    const color_target = c.SDL_GPUColorTargetInfo{
+        .texture = target_texture,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .load_op = c.SDL_GPU_LOADOP_LOAD,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const render_pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null) orelse {
+        std.log.warn("compositeSelectionOutline: failed to begin render pass", .{});
+        return;
+    };
+
+    setGpuViewport(render_pass, 0, 0, g.swapchain_w, g.swapchain_h);
+    c.SDL_BindGPUGraphicsPipeline(render_pass, g.selection_outline_pipeline);
+
+    const quad_binding = c.SDL_GPUBufferBinding{
+        .buffer = g.fullscreen_quad_buffer,
+        .offset = 0,
+    };
+    c.SDL_BindGPUVertexBuffers(render_pass, 0, &quad_binding, 1);
+
+    const sampler_binding = c.SDL_GPUTextureSamplerBinding{
+        .texture = g.selection_mask_texture,
+        .sampler = g.crt_sampler,
+    };
+    c.SDL_BindGPUFragmentSamplers(render_pass, 0, &sampler_binding, 1);
+
+    const outline_color = config.menu.colorFocused;
+    const uniforms = SelectionOutlineUniforms{
+        .resolution = .{ g.swapchain_w, g.swapchain_h },
+        .radius = SELECTION_OUTLINE_RADIUS_PIXELS,
+        .color = .{
+            @as(f32, @floatFromInt(outline_color.r)) / 255.0,
+            @as(f32, @floatFromInt(outline_color.g)) / 255.0,
+            @as(f32, @floatFromInt(outline_color.b)) / 255.0,
+            @as(f32, @floatFromInt(outline_color.a)) / 255.0,
+        },
+    };
+    c.SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, @sizeOf(SelectionOutlineUniforms));
+
+    c.SDL_DrawGPUPrimitives(render_pass, 6, 1, 0, 0);
+    c.SDL_EndGPURenderPass(render_pass);
 }
 
 fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.SDL_GPUTexture, output_texture: *c.SDL_GPUTexture) void {
@@ -1584,6 +1800,11 @@ pub fn renderCopy(tex: *Texture, src_rect: ?*const sdl.Rect, dst_rect: ?*const s
     try renderCopyEx(tex, src_rect, dst_rect, 0, null, .none);
 }
 
+const SpriteVertexRange = struct {
+    vertex_offset: u32,
+    vertex_count: u32,
+};
+
 pub fn renderCopyEx(
     tex: *Texture,
     src_rect: ?*const sdl.Rect,
@@ -1601,6 +1822,55 @@ pub fn renderCopyEx(
     };
     ensureSpritePipeline(g, pipeline_type, texture.gpuTexture(tex));
 
+    const cm = tex.color_mod;
+    const color = PackedColor{ .r = cm.r, .g = cm.g, .b = cm.b, .a = cm.a };
+    _ = appendSpriteVertices(g, tex, src_rect, dst_rect, angle, center, flip, color) catch |err| {
+        std.log.warn("renderCopyEx: failed to append sprite vertices: {}", .{err});
+        return;
+    };
+}
+
+pub fn renderSelectionMaskCopyEx(
+    tex: *Texture,
+    src_rect: ?*const sdl.Rect,
+    dst_rect: ?*const sdl.Rect,
+    angle: f64,
+    center: ?*const sdl.Point,
+    flip: sdl.FlipMode,
+    alpha: u8,
+) !void {
+    const g = getGpu();
+    finalizeBatch(g);
+
+    if (g.batch_count >= MAX_BATCH_RECORDS) {
+        std.log.warn("renderSelectionMaskCopyEx: batch record capacity exceeded, skipping selection mask sprite", .{});
+        return;
+    }
+
+    const color = PackedColor{ .r = 255, .g = 255, .b = 255, .a = alpha };
+    const range = appendSpriteVertices(g, tex, src_rect, dst_rect, angle, center, flip, color) catch |err| {
+        std.log.warn("renderSelectionMaskCopyEx: failed to append sprite vertices: {}", .{err});
+        return;
+    };
+
+    g.batch_records[g.batch_count] = .{ .draw_selection_sprites = .{
+        .texture = texture.gpuTexture(tex),
+        .vertex_offset = range.vertex_offset,
+        .vertex_count = range.vertex_count,
+    } };
+    g.batch_count += 1;
+}
+
+fn appendSpriteVertices(
+    g: *GpuState,
+    tex: *Texture,
+    src_rect: ?*const sdl.Rect,
+    dst_rect: ?*const sdl.Rect,
+    angle: f64,
+    center: ?*const sdl.Point,
+    flip: sdl.FlipMode,
+    color: PackedColor,
+) !SpriteVertexRange {
     // Source UV coords - atlas vs standalone
     var uv_left: f32 = undefined;
     var uv_top: f32 = undefined;
@@ -1661,10 +1931,6 @@ pub fn renderCopyEx(
         uv_bottom = tmp;
     }
 
-    // Color modulation
-    const cm = tex.color_mod;
-    const vc = PackedColor{ .r = cm.r, .g = cm.g, .b = cm.b, .a = cm.a };
-
     // Generate 4 corners relative to center of rotation
     const cx: f32 = if (center) |ctr| @floatFromInt(ctr.x) else dw / 2.0;
     const cy: f32 = if (center) |ctr| @floatFromInt(ctr.y) else dh / 2.0;
@@ -1701,10 +1967,7 @@ pub fn renderCopyEx(
         };
     }
 
-    growSpriteVertexCapacity(g, g.sprite_vertex_count + 6) catch |err| {
-        std.log.warn("renderCopyEx: failed to grow sprite vertex buffer: {}", .{err});
-        return;
-    };
+    try growSpriteVertexCapacity(g, g.sprite_vertex_count + 6);
 
     // Emit two triangles (0,1,2) (0,2,3)
     const idx = g.sprite_vertex_count;
@@ -1715,10 +1978,11 @@ pub fn renderCopyEx(
             .y = rotated[vi][1],
             .u = uvs[vi][0],
             .v = uvs[vi][1],
-            .color = vc,
+            .color = color,
         };
     }
     g.sprite_vertex_count += 6;
+    return .{ .vertex_offset = idx, .vertex_count = 6 };
 }
 
 // ============================================================

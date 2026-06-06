@@ -65,3 +65,9 @@ pub fn setHighlighted(bodyId: box2d.c.b2BodyId, highlighted: bool) bool {
     sensorEntity.entity.highlighted = highlighted;
     return true;
 }
+
+pub fn setHovered(bodyId: box2d.c.b2BodyId, hovered: bool) bool {
+    const sensorEntity = sensorEntities.getPtr(bodyId) orelse return false;
+    sensorEntity.entity.hovered = hovered;
+    return true;
+}
