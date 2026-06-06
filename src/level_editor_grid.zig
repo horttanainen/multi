@@ -16,7 +16,8 @@ const maxLinesPerAxis: i32 = 1200;
 const gridColor = sdl.Color{ .r = 120, .g = 150, .b = 170, .a = 80 };
 const axisColor = sdl.Color{ .r = 220, .g = 220, .b = 220, .a = 135 };
 
-var visible: bool = false;
+var visible: bool = true;
+var snap_enabled: bool = false;
 var granularity_meters: f32 = defaultGranularityMeters;
 
 pub fn isVisible() bool {
@@ -29,6 +30,18 @@ pub fn toggleVisible() void {
 
 pub fn setVisible(value: bool) void {
     visible = value;
+}
+
+pub fn isSnapEnabled() bool {
+    return snap_enabled;
+}
+
+pub fn toggleSnap() void {
+    snap_enabled = !snap_enabled;
+}
+
+pub fn setSnapEnabled(value: bool) void {
+    snap_enabled = value;
 }
 
 pub fn granularityMeters() f32 {
@@ -74,6 +87,23 @@ pub fn draw() !void {
     try drawHorizontalLines(bounds, y_spacing);
 }
 
+pub fn snapPosition(pos: vec.IVec2) vec.IVec2 {
+    const spacing = spacingPixels();
+    if (spacing <= 0) {
+        std.log.warn("level_editor_grid.snapPosition: invalid spacing {d}, returning original position", .{spacing});
+        return pos;
+    }
+
+    return .{
+        .x = snapCoordinate(pos.x, spacing),
+        .y = snapCoordinate(pos.y, spacing),
+    };
+}
+
+pub fn snapStepPixels() i32 {
+    return spacingPixels();
+}
+
 fn spacingPixels() i32 {
     const pixels = granularity_meters * conv.met2pix;
     if (!std.math.isFinite(pixels)) {
@@ -82,6 +112,11 @@ fn spacingPixels() i32 {
     }
 
     return @max(1, @as(i32, @intFromFloat(@round(pixels))));
+}
+
+fn snapCoordinate(value: i32, spacing: i32) i32 {
+    const snapped = @round(@as(f32, @floatFromInt(value)) / @as(f32, @floatFromInt(spacing)));
+    return @as(i32, @intFromFloat(snapped)) * spacing;
 }
 
 fn levelBounds() vec.IRect {

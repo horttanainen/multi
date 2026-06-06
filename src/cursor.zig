@@ -3,8 +3,10 @@ const std = @import("std");
 const data = @import("data.zig");
 const sprite = @import("sprite.zig");
 const camera = @import("camera.zig");
+const delay = @import("delay.zig");
 const vec = @import("vector.zig");
 const level = @import("level.zig");
+const levelEditorGrid = @import("level_editor_grid.zig");
 const config = @import("config.zig");
 const renderer = @import("renderer.zig");
 
@@ -61,7 +63,7 @@ pub fn cameraFollow() void {
         camera.centerOn(level.position, renderer.zoom);
         return;
     }
-    camera.centerOn(posPx, renderer.zoom);
+    camera.centerOn(displayPosition(), renderer.zoom);
 }
 
 pub fn attachSprite(key: []const u8) void {
@@ -97,6 +99,9 @@ pub fn getWorldPos() vec.IVec2 {
         std.log.warn("getWorldPos: cursor not created, returning origin", .{});
         return vec.izero;
     }
+    if (pendingKey != null and levelEditorGrid.isSnapEnabled()) {
+        return levelEditorGrid.snapPosition(posPx);
+    }
     return posPx;
 }
 
@@ -115,6 +120,11 @@ pub fn moveDown() void {
 
 fn moveByScreenPixels(delta: vec.IVec2) void {
     if (!created) return;
+    if (pendingKey != null and levelEditorGrid.isSnapEnabled() and usesSteppedSnapMovement()) {
+        movePendingByGrid(delta);
+        return;
+    }
+
     if (renderer.zoom <= 0) {
         std.log.warn("moveByScreenPixels: invalid renderer zoom {d}, skipping cursor movement", .{renderer.zoom});
         return;
@@ -133,9 +143,46 @@ fn moveByScreenPixels(delta: vec.IVec2) void {
     posPx = vec.iadd(posPx, worldDelta);
 }
 
+fn movePendingByGrid(delta: vec.IVec2) void {
+    if (delta.x == 0 and delta.y == 0) return;
+    if (delay.check("levelEditorSnapMove")) return;
+
+    const step = levelEditorGrid.snapStepPixels();
+    if (step <= 0) {
+        std.log.warn("movePendingByGrid: invalid grid snap step {d}, skipping cursor movement", .{step});
+        return;
+    }
+
+    var snapped = levelEditorGrid.snapPosition(posPx);
+    if (delta.x != 0) {
+        snapped.x += if (delta.x > 0) step else -step;
+    }
+    if (delta.y != 0) {
+        snapped.y += if (delta.y > 0) step else -step;
+    }
+    posPx = snapped;
+    delay.action("levelEditorSnapMove", config.levelEditorSnapMoveDelayMs);
+}
+
+fn usesSteppedSnapMovement() bool {
+    const granularity_meters = levelEditorGrid.granularityMeters();
+    if (!std.math.isFinite(granularity_meters)) {
+        std.log.warn("usesSteppedSnapMovement: invalid grid granularity {d}, using continuous movement", .{granularity_meters});
+        return false;
+    }
+    return granularity_meters >= config.levelEditorSteppedSnapMinGranularityMeters;
+}
+
+fn displayPosition() vec.IVec2 {
+    if (pendingKey != null and levelEditorGrid.isSnapEnabled()) {
+        return levelEditorGrid.snapPosition(posPx);
+    }
+    return posPx;
+}
+
 pub fn draw() !void {
     if (!created) return;
-    const screenPos = camera.relativePosition(posPx);
+    const screenPos = camera.relativePosition(displayPosition());
 
     if (pendingUuid) |uuid| {
         const s = sprite.getSprite(uuid) orelse return;

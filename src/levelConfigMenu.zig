@@ -15,6 +15,7 @@ var initial_camera_zoom_meters: f32 = level.defaultCameraZoomMeters;
 var initial_aspect_ratio: level.AspectRatio = level.defaultAspectRatio;
 var initial_splitscreen: bool = true;
 var initial_grid_visible: bool = false;
+var initial_snap_enabled: bool = false;
 var initial_grid_granularity_meters: f32 = levelEditorGrid.defaultGranularityMeters;
 var suppress_cleanup_save: bool = false;
 
@@ -33,6 +34,7 @@ var grid_granularity_config = menu.ConfigData{
 const aspect_ratio_item_index = 3;
 const splitscreen_item_index = 4;
 const grid_toggle_item_index = 5;
+const snap_toggle_item_index = 6;
 
 var items = [_]menu.Item{
     .{ .label = "Gravity", .kind = .{ .config = &gravity_config }, .font = .medium },
@@ -41,6 +43,7 @@ var items = [_]menu.Item{
     .{ .label = "Aspect Ratio", .kind = .{ .button = actionOpenAspectRatio }, .font = .medium },
     .{ .label = "Splitscreen: ON", .kind = .{ .button = actionToggleSplitscreen } },
     .{ .label = "Grid: OFF", .kind = .{ .button = actionToggleGrid } },
+    .{ .label = "Snap: OFF", .kind = .{ .button = actionToggleSnap } },
     .{ .label = "Grid Size (m)", .kind = .{ .config = &grid_granularity_config }, .font = .medium },
     .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges } },
     .{ .label = "Try Level", .kind = .{ .button = actionTryLevel } },
@@ -53,6 +56,7 @@ pub fn open(gravity: f32, levelHeightMeters: f32, cameraZoomMeters: f32, aspectR
     initial_aspect_ratio = aspectRatio;
     initial_splitscreen = splitscreen;
     initial_grid_visible = levelEditorGrid.isVisible();
+    initial_snap_enabled = levelEditorGrid.isSnapEnabled();
     initial_grid_granularity_meters = levelEditorGrid.granularityMeters();
     suppress_cleanup_save = false;
 
@@ -107,6 +111,11 @@ fn actionToggleGrid() anyerror!void {
     updateGridToggleLabel();
 }
 
+fn actionToggleSnap() anyerror!void {
+    levelEditorGrid.toggleSnap();
+    updateSnapToggleLabel();
+}
+
 fn actionSetGridGranularity(value: f32) void {
     levelEditorGrid.setGranularityMeters(value);
 }
@@ -114,10 +123,15 @@ fn actionSetGridGranularity(value: f32) void {
 fn syncLevelEditorGridItems() void {
     grid_granularity_config.value = levelEditorGrid.granularityMeters();
     updateGridToggleLabel();
+    updateSnapToggleLabel();
 }
 
 fn updateGridToggleLabel() void {
     items[grid_toggle_item_index].label = if (levelEditorGrid.isVisible()) "Grid: ON" else "Grid: OFF";
+}
+
+fn updateSnapToggleLabel() void {
+    items[snap_toggle_item_index].label = if (levelEditorGrid.isSnapEnabled()) "Snap: ON" else "Snap: OFF";
 }
 
 fn saveAndReload() !void {
@@ -132,6 +146,7 @@ fn actionResetChanges() anyerror!void {
     aspect_ratio_value = initial_aspect_ratio;
     splitscreen_value = initial_splitscreen;
     levelEditorGrid.setVisible(initial_grid_visible);
+    levelEditorGrid.setSnapEnabled(initial_snap_enabled);
     levelEditorGrid.setGranularityMeters(initial_grid_granularity_meters);
     updateAspectRatioLabel();
     updateSplitscreenLabel();
