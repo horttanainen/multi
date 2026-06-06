@@ -9,6 +9,7 @@ const window = @import("window.zig");
 const ui = @import("ui.zig");
 const menu = @import("menu.zig");
 const settingsMenu = @import("settingsMenu.zig");
+const crtConfigMenu = @import("crtConfigMenu.zig");
 const debug = @import("debug.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
@@ -39,7 +40,7 @@ pub fn updateZoom() void {
 }
 
 pub fn render() !void {
-    gpu.setCrtParams(if (menu.isOpen() and !menu.isMinimalEditing()) config.crtMenu else config.crt);
+    gpu.setCrtParams(if (menu.isOpen() and !menu.isMinimalEditing()) crtConfigMenu.menuCrtParams() else crtConfigMenu.gameCrtParams());
     gpu.setLutParams(.{ .strength = settingsMenu.lutStrength() });
 
     // Clear to black then draw the paint-swirl background.

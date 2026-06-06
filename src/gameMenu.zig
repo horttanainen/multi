@@ -2,6 +2,7 @@ const state = @import("state.zig");
 const menu = @import("menu.zig");
 const levelEditor = @import("level_editor.zig");
 const settingsMenu = @import("settingsMenu.zig");
+const crtConfigMenu = @import("crtConfigMenu.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const musicConfigMenu = @import("musicConfigMenu.zig");
 
@@ -9,6 +10,7 @@ var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionClose } },
     .{ .label = "Play", .kind = .{ .button = actionPlay } },
     .{ .label = "Settings", .kind = .{ .button = actionOpenSettings } },
+    .{ .label = "CRT Effect", .kind = .{ .button = actionOpenCrtSettings } },
     .{ .label = "Music", .kind = .{ .button = actionOpenMusic } },
     .{ .label = "Background Editor", .kind = .{ .button = actionOpenBackgroundEditor } },
     .{ .label = "Level Editor", .kind = .{ .button = actionOpenLevelEditorMenu } },
@@ -20,6 +22,7 @@ var try_level_main_items = [_]menu.Item{
     .{ .label = "Return to Editor", .kind = .{ .button = actionReturnToEditor } },
     .{ .label = "Play", .kind = .{ .button = actionPlay } },
     .{ .label = "Settings", .kind = .{ .button = actionOpenSettings } },
+    .{ .label = "CRT Effect", .kind = .{ .button = actionOpenCrtSettings } },
     .{ .label = "Music", .kind = .{ .button = actionOpenMusic } },
     .{ .label = "Background Editor", .kind = .{ .button = actionOpenBackgroundEditor } },
     .{ .label = "Level Editor", .kind = .{ .button = actionOpenLevelEditorMenu } },
@@ -46,6 +49,10 @@ fn actionClose() anyerror!void {
 
 fn actionOpenSettings() anyerror!void {
     settingsMenu.push();
+}
+
+fn actionOpenCrtSettings() anyerror!void {
+    crtConfigMenu.push();
 }
 
 fn actionOpenLevelEditorMenu() anyerror!void {

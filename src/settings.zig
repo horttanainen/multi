@@ -1,5 +1,6 @@
 const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
+const config = @import("config.zig");
 const fs = @import("fs.zig");
 const gpu = @import("gpu.zig");
 const lut = @import("lut.zig");
@@ -14,6 +15,28 @@ const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 
 const SETTINGS_PATH = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
+pub const minCrtBarrel: f32 = 0.0;
+pub const maxCrtBarrel: f32 = 5.0;
+pub const minCrtAberration: f32 = 0.0;
+pub const maxCrtAberration: f32 = 0.05;
+pub const minCrtZoom: f32 = 1.0;
+pub const maxCrtZoom: f32 = 3.0;
+pub const minCrtResolution: f32 = 180.0;
+pub const maxCrtResolution: f32 = 1440.0;
+const DEFAULT_MENU_CRT_ENABLED: bool = config.crtMenu.enabled;
+const DEFAULT_MENU_CRT_BARREL: f32 = config.crtMenu.distortion_strength;
+const DEFAULT_MENU_CRT_ABERRATION: f32 = config.crtMenu.aberration;
+const DEFAULT_MENU_CRT_ZOOM: f32 = config.crtMenu.zoom;
+const DEFAULT_MENU_CRT_VIRTUAL_RESOLUTION_ENABLED: bool = config.crtMenu.virtual_resolution_enabled;
+const DEFAULT_MENU_CRT_SCANLINES_ENABLED: bool = config.crtMenu.scanlines_enabled;
+const DEFAULT_MENU_CRT_RESOLUTION: f32 = config.crtMenu.resolution[1];
+const DEFAULT_GAME_CRT_ENABLED: bool = config.crt.enabled;
+const DEFAULT_GAME_CRT_BARREL: f32 = config.crt.distortion_strength;
+const DEFAULT_GAME_CRT_ABERRATION: f32 = config.crt.aberration;
+const DEFAULT_GAME_CRT_ZOOM: f32 = config.crt.zoom;
+const DEFAULT_GAME_CRT_VIRTUAL_RESOLUTION_ENABLED: bool = config.crt.virtual_resolution_enabled;
+const DEFAULT_GAME_CRT_SCANLINES_ENABLED: bool = config.crt.scanlines_enabled;
+const DEFAULT_GAME_CRT_RESOLUTION: f32 = config.crt.resolution[1];
 const DEFAULT_MUSIC_STYLE: music.Style = .ambient;
 const DEFAULT_MUSIC_BPM: f32 = 1.0;
 const DEFAULT_MUSIC_REVERB_MIX: f32 = 0.35;
@@ -45,6 +68,20 @@ const DEFAULT_AMERICANA_GUITAR_CUE: u8 = @intFromEnum(procedural_americana_guita
 const StoredSettings = struct {
     lut_strength: ?f32 = null,
     preferred_color_grading: ?[]const u8 = null,
+    crt_menu_enabled: ?bool = null,
+    crt_menu_barrel: ?f32 = null,
+    crt_menu_aberration: ?f32 = null,
+    crt_menu_zoom: ?f32 = null,
+    crt_menu_virtual_resolution_enabled: ?bool = null,
+    crt_menu_scanlines_enabled: ?bool = null,
+    crt_menu_resolution: ?f32 = null,
+    crt_game_enabled: ?bool = null,
+    crt_game_barrel: ?f32 = null,
+    crt_game_aberration: ?f32 = null,
+    crt_game_zoom: ?f32 = null,
+    crt_game_virtual_resolution_enabled: ?bool = null,
+    crt_game_scanlines_enabled: ?bool = null,
+    crt_game_resolution: ?f32 = null,
     bg_spin_rotation: ?f32 = null,
     bg_spin_speed: ?f32 = null,
     bg_contrast: ?f32 = null,
@@ -123,6 +160,20 @@ const StoredSettings = struct {
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
 var preferred_color_grading: ?[]u8 = null;
+pub var crt_menu_enabled: bool = DEFAULT_MENU_CRT_ENABLED;
+pub var crt_menu_barrel: f32 = DEFAULT_MENU_CRT_BARREL;
+pub var crt_menu_aberration: f32 = DEFAULT_MENU_CRT_ABERRATION;
+pub var crt_menu_zoom: f32 = DEFAULT_MENU_CRT_ZOOM;
+pub var crt_menu_virtual_resolution_enabled: bool = DEFAULT_MENU_CRT_VIRTUAL_RESOLUTION_ENABLED;
+pub var crt_menu_scanlines_enabled: bool = DEFAULT_MENU_CRT_SCANLINES_ENABLED;
+pub var crt_menu_resolution: f32 = DEFAULT_MENU_CRT_RESOLUTION;
+pub var crt_game_enabled: bool = DEFAULT_GAME_CRT_ENABLED;
+pub var crt_game_barrel: f32 = DEFAULT_GAME_CRT_BARREL;
+pub var crt_game_aberration: f32 = DEFAULT_GAME_CRT_ABERRATION;
+pub var crt_game_zoom: f32 = DEFAULT_GAME_CRT_ZOOM;
+pub var crt_game_virtual_resolution_enabled: bool = DEFAULT_GAME_CRT_VIRTUAL_RESOLUTION_ENABLED;
+pub var crt_game_scanlines_enabled: bool = DEFAULT_GAME_CRT_SCANLINES_ENABLED;
+pub var crt_game_resolution: f32 = DEFAULT_GAME_CRT_RESOLUTION;
 var has_bg_preset: bool = false;
 var bg_preset: gpu.PaintUniforms = undefined;
 pub var music_style: music.Style = DEFAULT_MUSIC_STYLE;
@@ -156,6 +207,7 @@ pub var music_americana_guitar_cue: u8 = DEFAULT_AMERICANA_GUITAR_CUE;
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
     freePreferredColorGrading();
+    resetCrtSettings();
     has_bg_preset = false;
     resetMusicSettings();
 
@@ -188,6 +240,7 @@ pub fn init() !void {
     }
 
     loadBgPreset(parsed.value);
+    loadCrtSettings(parsed.value);
     loadMusicSettings(parsed.value);
 }
 
@@ -238,6 +291,23 @@ fn loadBgPreset(s: StoredSettings) void {
     normalizeBackgroundPreset(&bg_preset);
 }
 
+fn loadCrtSettings(s: StoredSettings) void {
+    crt_menu_enabled = s.crt_menu_enabled orelse DEFAULT_MENU_CRT_ENABLED;
+    crt_menu_barrel = std.math.clamp(s.crt_menu_barrel orelse DEFAULT_MENU_CRT_BARREL, minCrtBarrel, maxCrtBarrel);
+    crt_menu_aberration = std.math.clamp(s.crt_menu_aberration orelse DEFAULT_MENU_CRT_ABERRATION, minCrtAberration, maxCrtAberration);
+    crt_menu_zoom = std.math.clamp(s.crt_menu_zoom orelse DEFAULT_MENU_CRT_ZOOM, minCrtZoom, maxCrtZoom);
+    crt_menu_virtual_resolution_enabled = s.crt_menu_virtual_resolution_enabled orelse DEFAULT_MENU_CRT_VIRTUAL_RESOLUTION_ENABLED;
+    crt_menu_scanlines_enabled = s.crt_menu_scanlines_enabled orelse DEFAULT_MENU_CRT_SCANLINES_ENABLED;
+    crt_menu_resolution = std.math.clamp(s.crt_menu_resolution orelse DEFAULT_MENU_CRT_RESOLUTION, minCrtResolution, maxCrtResolution);
+    crt_game_enabled = s.crt_game_enabled orelse DEFAULT_GAME_CRT_ENABLED;
+    crt_game_barrel = std.math.clamp(s.crt_game_barrel orelse DEFAULT_GAME_CRT_BARREL, minCrtBarrel, maxCrtBarrel);
+    crt_game_aberration = std.math.clamp(s.crt_game_aberration orelse DEFAULT_GAME_CRT_ABERRATION, minCrtAberration, maxCrtAberration);
+    crt_game_zoom = std.math.clamp(s.crt_game_zoom orelse DEFAULT_GAME_CRT_ZOOM, minCrtZoom, maxCrtZoom);
+    crt_game_virtual_resolution_enabled = s.crt_game_virtual_resolution_enabled orelse DEFAULT_GAME_CRT_VIRTUAL_RESOLUTION_ENABLED;
+    crt_game_scanlines_enabled = s.crt_game_scanlines_enabled orelse DEFAULT_GAME_CRT_SCANLINES_ENABLED;
+    crt_game_resolution = std.math.clamp(s.crt_game_resolution orelse DEFAULT_GAME_CRT_RESOLUTION, minCrtResolution, maxCrtResolution);
+}
+
 pub fn cleanup() void {
     freePreferredColorGrading();
 }
@@ -259,6 +329,55 @@ pub fn setPreferredColorGrading(name: ?[]const u8) !void {
     if (name) |value| {
         preferred_color_grading = try allocator.dupe(u8, value);
     }
+}
+
+pub fn menuCrtParams() config.CrtParams {
+    return .{
+        .enabled = crt_menu_enabled,
+        .distortion_strength = crt_menu_barrel,
+        .aberration = crt_menu_aberration,
+        .zoom = crt_menu_zoom,
+        .virtual_resolution_enabled = crt_menu_virtual_resolution_enabled,
+        .scanlines_enabled = crt_menu_scanlines_enabled,
+        .resolution = crtResolution(crt_menu_resolution),
+    };
+}
+
+pub fn gameCrtParams() config.CrtParams {
+    return .{
+        .enabled = crt_game_enabled,
+        .distortion_strength = crt_game_barrel,
+        .aberration = crt_game_aberration,
+        .zoom = crt_game_zoom,
+        .virtual_resolution_enabled = crt_game_virtual_resolution_enabled,
+        .scanlines_enabled = crt_game_scanlines_enabled,
+        .resolution = crtResolution(crt_game_resolution),
+    };
+}
+
+pub fn setMenuCrtSettings(enabled: bool, barrel: f32, aberration: f32, zoom: f32, virtual_resolution_enabled: bool, scanlines_enabled: bool, resolution: f32) void {
+    crt_menu_enabled = enabled;
+    crt_menu_barrel = std.math.clamp(barrel, minCrtBarrel, maxCrtBarrel);
+    crt_menu_aberration = std.math.clamp(aberration, minCrtAberration, maxCrtAberration);
+    crt_menu_zoom = std.math.clamp(zoom, minCrtZoom, maxCrtZoom);
+    crt_menu_virtual_resolution_enabled = virtual_resolution_enabled;
+    crt_menu_scanlines_enabled = scanlines_enabled;
+    crt_menu_resolution = std.math.clamp(resolution, minCrtResolution, maxCrtResolution);
+}
+
+pub fn setGameCrtSettings(enabled: bool, barrel: f32, aberration: f32, zoom: f32, virtual_resolution_enabled: bool, scanlines_enabled: bool, resolution: f32) void {
+    crt_game_enabled = enabled;
+    crt_game_barrel = std.math.clamp(barrel, minCrtBarrel, maxCrtBarrel);
+    crt_game_aberration = std.math.clamp(aberration, minCrtAberration, maxCrtAberration);
+    crt_game_zoom = std.math.clamp(zoom, minCrtZoom, maxCrtZoom);
+    crt_game_virtual_resolution_enabled = virtual_resolution_enabled;
+    crt_game_scanlines_enabled = scanlines_enabled;
+    crt_game_resolution = std.math.clamp(resolution, minCrtResolution, maxCrtResolution);
+}
+
+fn crtResolution(height: f32) [2]f32 {
+    const clamped_height = std.math.clamp(height, minCrtResolution, maxCrtResolution);
+    return .{ clamped_height * (16.0 / 9.0), clamped_height };
 }
 
 pub fn apply() void {
@@ -362,10 +481,24 @@ fn normalizeBackgroundPreset(u: *gpu.PaintUniforms) void {
 }
 
 pub fn save() !void {
-    var buf: [4096]u8 = undefined;
+    var buf: [16384]u8 = undefined;
     var stored = StoredSettings{
         .lut_strength = lut_strength,
         .preferred_color_grading = if (preferred_color_grading) |p| @as(?[]const u8, p) else null,
+        .crt_menu_enabled = crt_menu_enabled,
+        .crt_menu_barrel = crt_menu_barrel,
+        .crt_menu_aberration = crt_menu_aberration,
+        .crt_menu_zoom = crt_menu_zoom,
+        .crt_menu_virtual_resolution_enabled = crt_menu_virtual_resolution_enabled,
+        .crt_menu_scanlines_enabled = crt_menu_scanlines_enabled,
+        .crt_menu_resolution = crt_menu_resolution,
+        .crt_game_enabled = crt_game_enabled,
+        .crt_game_barrel = crt_game_barrel,
+        .crt_game_aberration = crt_game_aberration,
+        .crt_game_zoom = crt_game_zoom,
+        .crt_game_virtual_resolution_enabled = crt_game_virtual_resolution_enabled,
+        .crt_game_scanlines_enabled = crt_game_scanlines_enabled,
+        .crt_game_resolution = crt_game_resolution,
         .music_style = music_style,
         .music_volume = music_volume,
         .music_bpm = music_bpm,
@@ -460,6 +593,23 @@ fn freePreferredColorGrading() void {
         allocator.free(name);
         preferred_color_grading = null;
     }
+}
+
+fn resetCrtSettings() void {
+    crt_menu_enabled = DEFAULT_MENU_CRT_ENABLED;
+    crt_menu_barrel = DEFAULT_MENU_CRT_BARREL;
+    crt_menu_aberration = DEFAULT_MENU_CRT_ABERRATION;
+    crt_menu_zoom = DEFAULT_MENU_CRT_ZOOM;
+    crt_menu_virtual_resolution_enabled = DEFAULT_MENU_CRT_VIRTUAL_RESOLUTION_ENABLED;
+    crt_menu_scanlines_enabled = DEFAULT_MENU_CRT_SCANLINES_ENABLED;
+    crt_menu_resolution = DEFAULT_MENU_CRT_RESOLUTION;
+    crt_game_enabled = DEFAULT_GAME_CRT_ENABLED;
+    crt_game_barrel = DEFAULT_GAME_CRT_BARREL;
+    crt_game_aberration = DEFAULT_GAME_CRT_ABERRATION;
+    crt_game_zoom = DEFAULT_GAME_CRT_ZOOM;
+    crt_game_virtual_resolution_enabled = DEFAULT_GAME_CRT_VIRTUAL_RESOLUTION_ENABLED;
+    crt_game_scanlines_enabled = DEFAULT_GAME_CRT_SCANLINES_ENABLED;
+    crt_game_resolution = DEFAULT_GAME_CRT_RESOLUTION;
 }
 
 fn resetMusicSettings() void {

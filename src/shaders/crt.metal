@@ -16,6 +16,8 @@ struct CrtUniforms {
     float distortion_strength;
     float aberration;
     float zoom;
+    float virtual_resolution_enabled;
+    float scanlines_enabled;
 };
 
 vertex CrtVertexOutput crt_vert(
@@ -54,8 +56,11 @@ fragment float4 crt_frag(
     }
 
     // Downsample to virtual CRT resolution by snapping UVs to pixel grid
-    float2 pixel = floor(distorted_uv * uniforms.resolution) + 0.5;
-    float2 snapped_uv = pixel / uniforms.resolution;
+    float2 snapped_uv = distorted_uv;
+    if (uniforms.virtual_resolution_enabled > 0.5) {
+        float2 pixel = floor(distorted_uv * uniforms.resolution) + 0.5;
+        snapped_uv = pixel / uniforms.resolution;
+    }
 
     // Chromatic aberration - offset R/G/B channels slightly
     float2 dir = snapped_uv - 0.5;
@@ -65,10 +70,12 @@ fragment float4 crt_frag(
     float3 color = float3(r, g, b);
 
     // Scanlines - darken every other pixel row
-    float scanline_freq = uniforms.resolution.y;
-    float scanline = sin(distorted_uv.y * scanline_freq * 3.14159) * 0.5 + 0.5;
-    scanline = mix(0.75, 1.0, scanline);
-    color *= scanline;
+    if (uniforms.scanlines_enabled > 0.5) {
+        float scanline_freq = uniforms.resolution.y;
+        float scanline = sin(distorted_uv.y * scanline_freq * 3.14159) * 0.5 + 0.5;
+        scanline = mix(0.75, 1.0, scanline);
+        color *= scanline;
+    }
 
     // Vignette - darken edges and corners
     float2 vig_uv = uv * (1.0 - uv);

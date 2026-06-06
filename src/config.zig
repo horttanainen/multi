@@ -125,25 +125,34 @@ pub const sprayPaintDelayMs = 2000;
 pub const sprayPaintWorldSize: f32 = 5;
 
 pub const CrtParams = struct {
+    enabled: bool,
     distortion_strength: f32,
     aberration: f32,
     // zoom > 1 crops into the image to hide black borders from barrel distortion
     zoom: f32,
+    virtual_resolution_enabled: bool,
+    scanlines_enabled: bool,
     // virtual CRT resolution for scanline/pixelation effect
     resolution: [2]f32,
 };
 
 pub const crt = CrtParams{
+    .enabled = true,
     .distortion_strength = 0.15,
     .aberration = 0.004,
     .zoom = 1.0,
+    .virtual_resolution_enabled = true,
+    .scanlines_enabled = true,
     .resolution = .{ 1280.0, 720.0 },
 };
 
 pub const crtMenu = CrtParams{
+    .enabled = true,
     .distortion_strength = 5.0,
     .aberration = 0.015,
     .zoom = 2.0,
+    .virtual_resolution_enabled = true,
+    .scanlines_enabled = true,
     .resolution = .{ 640.0, 360.0 },
 };
 

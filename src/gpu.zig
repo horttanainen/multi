@@ -15,6 +15,9 @@ var lut_params: LutParams = .{ .strength = 1.0 };
 
 pub fn setCrtParams(params: config.CrtParams) void {
     crt_params = params;
+    if (gpu) |g| {
+        g.crt_enabled = params.enabled;
+    }
 }
 
 pub fn setLutParams(params: LutParams) void {
@@ -81,6 +84,8 @@ const CrtUniforms = extern struct {
     distortion_strength: f32,
     aberration: f32,
     zoom: f32,
+    virtual_resolution_enabled: f32,
+    scanlines_enabled: f32,
 };
 
 const LutUniforms = extern struct {
@@ -1320,6 +1325,8 @@ fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.
             .distortion_strength = crt_params.distortion_strength,
             .aberration = crt_params.aberration,
             .zoom = crt_params.zoom,
+            .virtual_resolution_enabled = if (crt_params.virtual_resolution_enabled) 1.0 else 0.0,
+            .scanlines_enabled = if (crt_params.scanlines_enabled) 1.0 else 0.0,
         };
         c.SDL_PushGPUFragmentUniformData(cmd, 0, &crt_uniforms, @sizeOf(CrtUniforms));
 
