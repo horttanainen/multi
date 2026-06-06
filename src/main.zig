@@ -52,7 +52,6 @@ const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
 //Level editor
-//TODO: add option to snap to the grid
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
 //TODO: add option to draw a rectangle which becames an entity in the game with some magenta prefill
 //TODO: add option to change texture of entity

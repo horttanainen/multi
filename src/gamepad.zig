@@ -56,6 +56,7 @@ pub const LevelEditorGamepadBindings = struct {
     openPickerButton: sdl.GamepadButton,
     placeButton: sdl.GamepadButton,
     deactivateButton: sdl.GamepadButton,
+    snapToggleButton: sdl.GamepadButton,
 };
 
 pub const defaultEditorBindings = LevelEditorGamepadBindings{
@@ -66,6 +67,7 @@ pub const defaultEditorBindings = LevelEditorGamepadBindings{
     .openPickerButton = .x,
     .placeButton = .a,
     .deactivateButton = .b,
+    .snapToggleButton = .rightshoulder,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -227,6 +229,9 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
     if (sdl.getGamepadButton(sdlGp, bindings.deactivateButton) and !delay.check("levelEditorClick")) {
         control.executeLevelEditorAction(.deactivate_sprite);
         delay.action("levelEditorClick", config.levelEditorClickDelayMs);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.snapToggleButton)) {
+        control.executeLevelEditorAction(.toggle_snap);
     }
 }
 

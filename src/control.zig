@@ -11,6 +11,7 @@ const state = @import("state.zig");
 const player = @import("player.zig");
 const entity = @import("entity.zig");
 const levelEditor = @import("level_editor.zig");
+const levelEditorGrid = @import("level_editor_grid.zig");
 const level = @import("level.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
@@ -225,6 +226,12 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         },
         .deactivate_sprite => {
             cursor.detachSprite();
+        },
+        .toggle_snap => {
+            if (!delay.check("levelEditorSnapToggle")) {
+                levelEditorGrid.toggleSnap();
+                delay.action("levelEditorSnapToggle", config.levelEditorClickDelayMs);
+            }
         },
     }
 }

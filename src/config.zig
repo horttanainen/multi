@@ -6,7 +6,7 @@ pub const window = .{
     .defaultHeight = 1200,
 };
 
-pub const debug = true;
+pub const debug = false;
 pub const debugLog = false;
 
 pub const perf = .{
@@ -111,6 +111,8 @@ pub const lut = .{
 };
 
 pub const levelEditorCursorMovePixels = 10;
+pub const levelEditorSnapMoveDelayMs = 150;
+pub const levelEditorSteppedSnapMinGranularityMeters: f32 = 1.0;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;
