@@ -120,6 +120,11 @@ pub const BlendMode = enum(c_uint) {
     add = c.SDL_BLENDMODE_ADD,
 };
 
+pub const ScaleMode = enum(c_int) {
+    nearest = c.SDL_SCALEMODE_NEAREST,
+    linear = c.SDL_SCALEMODE_LINEAR,
+};
+
 pub const PixelFormat = enum(c_uint) {
     rgba8888 = c.SDL_PIXELFORMAT_RGBA8888,
     bgra8888 = c.SDL_PIXELFORMAT_BGRA8888,
@@ -197,6 +202,12 @@ pub fn blitSurface(src: *Surface, src_rect: ?*const Rect, dst_surface: *Surface,
     const sr = if (src_rect) |r| &c.SDL_Rect{ .x = r.x, .y = r.y, .w = r.w, .h = r.h } else null;
     const dr = if (dst_rect) |r| &c.SDL_Rect{ .x = r.x, .y = r.y, .w = r.w, .h = r.h } else null;
     if (!c.SDL_BlitSurface(src, sr, dst_surface, dr)) return error.BlitSurfaceFailed;
+}
+
+pub fn blitSurfaceScaled(src: *Surface, src_rect: ?*const Rect, dst_surface: *Surface, dst_rect: ?*const Rect, scale_mode: ScaleMode) !void {
+    const sr = if (src_rect) |r| &c.SDL_Rect{ .x = r.x, .y = r.y, .w = r.w, .h = r.h } else null;
+    const dr = if (dst_rect) |r| &c.SDL_Rect{ .x = r.x, .y = r.y, .w = r.w, .h = r.h } else null;
+    if (!c.SDL_BlitSurfaceScaled(src, sr, dst_surface, dr, @intFromEnum(scale_mode))) return error.BlitSurfaceFailed;
 }
 
 pub fn lockSurface(surface: *Surface) !void {
