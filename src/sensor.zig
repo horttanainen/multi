@@ -71,9 +71,3 @@ pub fn setHovered(bodyId: box2d.c.b2BodyId, hovered: bool) bool {
     sensorEntity.entity.hovered = hovered;
     return true;
 }
-
-pub fn setScaleEditing(bodyId: box2d.c.b2BodyId, editing: bool) bool {
-    const sensorEntity = sensorEntities.getPtr(bodyId) orelse return false;
-    sensorEntity.entity.scaleEditing = editing;
-    return true;
-}

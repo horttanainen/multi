@@ -20,8 +20,6 @@ const controller = @import("controller.zig");
 const data = @import("data.zig");
 const gameMenu = @import("gameMenu.zig");
 const cursor = @import("cursor.zig");
-const entityConfigMenu = @import("entityConfigMenu.zig");
-const levelConfigMenu = @import("levelConfigMenu.zig");
 const spritePicker = @import("spritePicker.zig");
 
 const leftButtonMask: u32 = 1;
@@ -192,9 +190,9 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                 delay.action("menuToggle", 400);
             }
         },
-        .open_config_menu => {
+        .open_context_menu => {
             if (!delay.check("menuToggle")) {
-                openLevelEditorConfigMenu();
+                levelEditor.openContextMenu();
                 delay.action("menuToggle", 300);
             }
         },
@@ -214,11 +212,7 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
             }
         },
         .deactivate_sprite => {
-            if (levelEditor.isFreeformScaleEditing()) {
-                levelEditor.endFreeformScaleEdit();
-                return;
-            }
-            cursor.detachSprite();
+            levelEditor.cancelCurrentAction();
         },
         .toggle_snap => {
             if (!delay.check("levelEditorSnapToggle")) {
@@ -233,30 +227,8 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
     }
 }
 
-fn openLevelEditorConfigMenu() void {
-    if (!cursor.hasPendingSprite() and !levelEditor.isFreeformScaleEditing()) {
-        const selectedBodyId = levelEditor.selectedEntityBodyAtCursor();
-        if (selectedBodyId != null) {
-            entityConfigMenu.open(selectedBodyId.?);
-            return;
-        }
-    }
-
-    const cfg = levelEditor.getConfig();
-    levelConfigMenu.open(cfg.gravity, cfg.levelHeightMeters, cfg.cameraZoomMeters, cfg.aspectRatio, cfg.splitscreen);
-}
-
 fn confirmLevelEditorAction() void {
-    if (levelEditor.isFreeformScaleEditing()) return;
-
     if (!cursor.hasPendingSprite()) {
-        if (levelEditor.selectedEntityBodyAtCursor() != null) {
-            levelEditor.beginFreeformScaleEditAtCursor() catch |err| {
-                std.log.warn("confirmLevelEditorAction: failed to begin freeform scale edit: {}", .{err});
-            };
-            return;
-        }
-
         _ = levelEditor.selectEntityAtCursor();
         return;
     }
@@ -273,7 +245,7 @@ fn confirmLevelEditorAction() void {
 }
 
 fn scaleSelectedEntity(direction: levelEditor.FreeformScaleDirection) void {
-    if (!levelEditor.isFreeformScaleEditing()) return;
+    if (cursor.hasPendingSprite()) return;
     if (delay.check("levelEditorScaleEdit")) return;
 
     levelEditor.scaleSelectedEntityFreeform(direction) catch |err| {

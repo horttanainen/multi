@@ -224,7 +224,7 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
     if (axisY < -bindings.moveThreshold) control.executeLevelEditorAction(.cursor_up);
 
     if (sdl.getGamepadButton(sdlGp, bindings.configMenuButton)) {
-        control.executeLevelEditorAction(.open_config_menu);
+        control.executeLevelEditorAction(.open_context_menu);
     }
     if (sdl.getGamepadButton(sdlGp, bindings.openPickerButton) and !delay.check("pickerOpen")) {
         control.executeLevelEditorAction(.open_sprite_picker);

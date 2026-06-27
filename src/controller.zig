@@ -37,7 +37,7 @@ pub const LevelEditorAction = enum {
     undo,
     redo,
     open_menu,
-    open_config_menu,
+    open_context_menu,
     open_sprite_picker,
     confirm,
     deactivate_sprite,

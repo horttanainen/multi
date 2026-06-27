@@ -249,7 +249,6 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .state = null,
         .highlighted = false,
         .hovered = false,
-        .scaleEditing = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = collision.CATEGORY_PLAYER,
