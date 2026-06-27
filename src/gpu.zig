@@ -322,7 +322,8 @@ pub fn saveAtlasCheckpoint() void {
 pub fn resetAtlasToCheckpoint() void {
     getGpu().atlas.restoreCheckpoint();
     getGpu().mutable_atlas.init();
-    texture.clearAtlasTextures();
+    texture.clearImmutableAtlasFreeTextureRegions();
+    texture.clearMutableAtlasTexture();
 }
 
 pub fn getAllocator() std.mem.Allocator {

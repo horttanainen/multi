@@ -559,6 +559,29 @@ fn createAtlasClearStripe(width: u32, height: u32, label: []const u8) ?*sdl.Surf
     return stripe;
 }
 
+fn clearAtlasTextureRect(tex_atlas: *Atlas, label: []const u8, x: u32, y: u32, w: u32, h: u32) void {
+    if (w == 0 or h == 0) return;
+
+    if (x >= tex_atlas.width or y >= tex_atlas.height) {
+        std.log.warn("clearAtlasTextureRect: {s} atlas rect starts outside atlas ({d},{d}) size={d}x{d}", .{ label, x, y, tex_atlas.width, tex_atlas.height });
+        return;
+    }
+
+    const clear_width = @min(w, tex_atlas.width - x);
+    const clear_height = @min(h, tex_atlas.height - y);
+    const stripe_height = @min(atlasClearStripeHeight, clear_height);
+    const stripe = createAtlasClearStripe(clear_width, stripe_height, label) orelse return;
+    defer c.SDL_DestroySurface(stripe);
+
+    const device = gpu.getDevice();
+    var offset_y: u32 = 0;
+    while (offset_y < clear_height) {
+        const stripe_h = @min(stripe_height, clear_height - offset_y);
+        uploadToAtlasRegion(device, tex_atlas, stripe, x, y + offset_y, clear_width, stripe_h);
+        offset_y += stripe_h;
+    }
+}
+
 fn clearAtlasTexture(tex_atlas: *Atlas, label: []const u8) void {
     if (tex_atlas.width == 0 or tex_atlas.height == 0) {
         std.log.warn("clearAtlasTexture: {s} atlas has invalid size {d}x{d}", .{ label, tex_atlas.width, tex_atlas.height });
@@ -566,21 +589,45 @@ fn clearAtlasTexture(tex_atlas: *Atlas, label: []const u8) void {
     }
 
     // Atlas textures are sampler-only, so clear by uploading transparent stripes.
-    const stripe_height = @min(atlasClearStripeHeight, tex_atlas.height);
-    const stripe = createAtlasClearStripe(tex_atlas.width, stripe_height, label) orelse return;
-    defer c.SDL_DestroySurface(stripe);
+    clearAtlasTextureRect(tex_atlas, label, 0, 0, tex_atlas.width, tex_atlas.height);
+}
 
-    const device = gpu.getDevice();
-    var y: u32 = 0;
-    while (y < tex_atlas.height) {
-        const h = @min(stripe_height, tex_atlas.height - y);
-        uploadToAtlasRegion(device, tex_atlas, stripe, 0, y, tex_atlas.width, h);
-        y += h;
+fn clearAtlasFreeTextureRegions(tex_atlas: *Atlas, label: []const u8) void {
+    if (tex_atlas.width == 0 or tex_atlas.height == 0) {
+        std.log.warn("clearAtlasFreeTextureRegions: {s} atlas has invalid size {d}x{d}", .{ label, tex_atlas.width, tex_atlas.height });
+        return;
+    }
+
+    var node_index: u32 = 0;
+    while (node_index < tex_atlas.node_count) : (node_index += 1) {
+        const node = tex_atlas.nodes[node_index];
+        if (node.width == 0) continue;
+        if (node.x >= tex_atlas.width) {
+            std.log.warn("clearAtlasFreeTextureRegions: {s} atlas skyline node {d} starts outside atlas at x={d}", .{ label, node_index, node.x });
+            continue;
+        }
+        if (node.y >= tex_atlas.height) continue;
+
+        clearAtlasTextureRect(tex_atlas, label, node.x, node.y, node.width, tex_atlas.height - node.y);
+    }
+
+    var region_index: u32 = 0;
+    while (region_index < tex_atlas.free_region_count) : (region_index += 1) {
+        const region = tex_atlas.free_regions[region_index];
+        clearAtlasTextureRect(tex_atlas, label, region.x, region.y, region.w, region.h);
     }
 }
 
 pub fn clearAtlasTextures() void {
     clearAtlasTexture(gpu.getAtlas(), "immutable");
+    clearAtlasTexture(gpu.getMutableAtlas(), "mutable");
+}
+
+pub fn clearImmutableAtlasFreeTextureRegions() void {
+    clearAtlasFreeTextureRegions(gpu.getAtlas(), "immutable");
+}
+
+pub fn clearMutableAtlasTexture() void {
     clearAtlasTexture(gpu.getMutableAtlas(), "mutable");
 }
 
