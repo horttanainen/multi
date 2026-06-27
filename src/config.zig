@@ -17,6 +17,75 @@ pub const perf = .{
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 
+pub const RuntimeAtlasConfig = struct {
+    maxQualityZoom: f32,
+    oversample: f32,
+    downscaleThreshold: f32,
+    minTextureEdge: i32,
+    maxTextureEdge: i32,
+    textureBucket: i32,
+};
+
+pub const RuntimeAtlasProfile = enum {
+    balanced_downscale,
+    preserve_detail,
+    aggressive_downscale,
+    cap_256,
+    cap_512,
+    cap_1024,
+    cap_2048,
+    cap_4096,
+};
+
+pub const defaultRuntimeAtlasProfile: RuntimeAtlasProfile = .balanced_downscale;
+
+pub fn runtimeAtlasProfileFromName(name: []const u8) ?RuntimeAtlasProfile {
+    return std.meta.stringToEnum(RuntimeAtlasProfile, name);
+}
+
+fn runtimeAtlasConfigWithMaxTextureEdge(maxTextureEdge: i32) RuntimeAtlasConfig {
+    var profile = runtimeAtlasConfigForProfile(.balanced_downscale);
+    profile.maxTextureEdge = maxTextureEdge;
+    profile.downscaleThreshold = 1.0;
+    return profile;
+}
+
+pub fn runtimeAtlasConfigForProfile(profile: RuntimeAtlasProfile) RuntimeAtlasConfig {
+    return switch (profile) {
+        .balanced_downscale => .{
+            .maxQualityZoom = 2.0,
+            .oversample = 2.0,
+            .downscaleThreshold = 1.25,
+            .minTextureEdge = 128,
+            .maxTextureEdge = 2048,
+            .textureBucket = 64,
+        },
+        .preserve_detail => .{
+            .maxQualityZoom = 2.5,
+            .oversample = 2.0,
+            .downscaleThreshold = 1.5,
+            .minTextureEdge = 256,
+            .maxTextureEdge = 4096,
+            .textureBucket = 128,
+        },
+        .aggressive_downscale => .{
+            .maxQualityZoom = 1.5,
+            .oversample = 1.5,
+            .downscaleThreshold = 1.1,
+            .minTextureEdge = 64,
+            .maxTextureEdge = 1024,
+            .textureBucket = 64,
+        },
+        .cap_256 => runtimeAtlasConfigWithMaxTextureEdge(256),
+        .cap_512 => runtimeAtlasConfigWithMaxTextureEdge(512),
+        .cap_1024 => runtimeAtlasConfigWithMaxTextureEdge(1024),
+        .cap_2048 => runtimeAtlasConfigWithMaxTextureEdge(2048),
+        .cap_4096 => runtimeAtlasConfigWithMaxTextureEdge(4096),
+    };
+}
+
+pub const runtimeAtlas = runtimeAtlasConfigForProfile(defaultRuntimeAtlasProfile);
+
 pub const physics = .{
     .dt = 1.0 / 60.0,
     .subStepCount = 4,

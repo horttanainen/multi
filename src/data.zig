@@ -7,10 +7,12 @@ const fs = @import("fs.zig");
 const audio = @import("audio.zig");
 const projectile = @import("projectile.zig");
 const weapon = @import("weapon.zig");
+const config = @import("config.zig");
 
 pub const SpriteData = struct {
     path: []const u8,
     scale: f32,
+    atlasProfile: config.RuntimeAtlasProfile,
 };
 
 pub const AnimationData = struct {
@@ -109,6 +111,7 @@ fn initSprites() !void {
         key: []const u8,
         path: []const u8,
         scale: f32 = 1.0,
+        atlasProfile: ?[]const u8 = null,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -127,6 +130,7 @@ fn initSprites() !void {
         spriteDataMap.put(allocator, key, .{
             .path = path,
             .scale = entry.scale,
+            .atlasProfile = runtimeAtlasProfileForSpriteEntry(entry.key, entry.atlasProfile),
         }) catch {
             allocator.free(key);
             allocator.free(path);
@@ -135,6 +139,17 @@ fn initSprites() !void {
 
         std.debug.print("Parsed sprite data '{s}'\n", .{key});
     }
+}
+
+fn runtimeAtlasProfileForSpriteEntry(key: []const u8, profileName: ?[]const u8) config.RuntimeAtlasProfile {
+    if (profileName == null) return config.defaultRuntimeAtlasProfile;
+
+    const name = profileName.?;
+    const profile = config.runtimeAtlasProfileFromName(name) orelse {
+        std.log.warn("runtimeAtlasProfileForSpriteEntry: sprite '{s}' has unknown atlasProfile '{s}', using default", .{ key, name });
+        return config.defaultRuntimeAtlasProfile;
+    };
+    return profile;
 }
 
 fn initAnimations() !void {
@@ -491,7 +506,7 @@ pub fn createSpriteFrom(key: []const u8) ?u64 {
 
 pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing) ?u64 {
     const d = spriteDataMap.get(key) orelse return null;
-    return sprite.createFromImgWithBacking(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing) catch |err| {
+    return sprite.createFromImgWithAtlasProfile(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing, d.atlasProfile) catch |err| {
         std.debug.print("Warning: Failed to create sprite for '{s}': {}\n", .{ key, err });
         return null;
     };
