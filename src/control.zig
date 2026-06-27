@@ -71,13 +71,17 @@ pub fn handleGlobalHotkeys() void {
             delay.action("menuToggle", 400);
         }
     }
+}
 
-    // § key - dump atlas texture to disk (try both grave and nonusbackslash for Nordic keyboards)
+pub fn handleAtlasDumpHotkey() void {
+    const currentKeyStates = sdl.getKeyboardState();
+
+    // § key - dump atlas textures to disk (try both grave and nonusbackslash for Nordic keyboards)
     if (currentKeyStates[@intFromEnum(sdl.Scancode.grave)] or
         currentKeyStates[@intFromEnum(sdl.Scancode.nonusbackslash)])
     {
         if (!delay.check("atlasDump")) {
-            tex.saveAtlasToDisk("atlas_dump.png");
+            tex.saveAtlasesToDisk();
             delay.action("atlasDump", 1000);
         }
     }

@@ -32,6 +32,8 @@ pub fn handle() !void {
         }
     }
 
+    control.handleAtlasDumpHotkey();
+
     // Any open menu (game menu or config menu) takes priority
     if (menu.isOpen()) {
         try menu.handleInput();
