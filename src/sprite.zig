@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const tex = @import("texture.zig");
 const gpu = @import("gpu.zig");
+const config = @import("config.zig");
 
 const camera = @import("camera.zig");
 const time = @import("time.zig");
@@ -31,6 +32,7 @@ pub const Sprite = struct {
     sizeP: vec.IVec2,
     offset: vec.IVec2,
     imgPath: []const u8,
+    atlasProfile: config.RuntimeAtlasProfile,
     geometryId: u64,
     geometryVersion: u64 = 0,
     anchorPointLeft: ?vec.IVec2 = null, // Magenta pixel - left shoulder
@@ -61,6 +63,16 @@ pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(alloc
 var spritesToCleanup = thread_safe.ThreadSafeArrayList(u64).init(allocator);
 var acceptSpriteCleanupTimers = true;
 
+const RuntimeTextureSize = struct {
+    width: i32,
+    height: i32,
+};
+
+const RuntimeAtlasSurface = struct {
+    surface: *sdl.Surface,
+    owned: bool,
+};
+
 // Texture cache: maps image path → atlas region + dimensions.
 // Sprites with the same image share the same atlas region for draw call batching.
 const CachedTexInfo = struct {
@@ -73,7 +85,142 @@ const CachedTexInfo = struct {
 };
 var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
 
-fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2, geometryId: u64) !u64 {
+fn sourceTextureSize(surface: *sdl.Surface) RuntimeTextureSize {
+    return .{
+        .width = surface.w,
+        .height = surface.h,
+    };
+}
+
+fn validRuntimeScale(scale: vec.Vec2) bool {
+    return std.math.isFinite(scale.x) and std.math.isFinite(scale.y) and scale.x > 0.0 and scale.y > 0.0;
+}
+
+fn runtimeScaleTargetRatio(sourceSize: RuntimeTextureSize, scale: vec.Vec2, atlasConfig: config.RuntimeAtlasConfig) f32 {
+    const qualityMultiplier = atlasConfig.maxQualityZoom * atlasConfig.oversample;
+    const sourceW: f32 = @floatFromInt(sourceSize.width);
+    const sourceH: f32 = @floatFromInt(sourceSize.height);
+    const logicalW = sourceW * scale.x;
+    const logicalH = sourceH * scale.y;
+    const targetW = logicalW * qualityMultiplier;
+    const targetH = logicalH * qualityMultiplier;
+
+    const targetRatio = @max(targetW / sourceW, targetH / sourceH);
+    const maxEdgeRatio = @min(
+        @as(f32, @floatFromInt(atlasConfig.maxTextureEdge)) / sourceW,
+        @as(f32, @floatFromInt(atlasConfig.maxTextureEdge)) / sourceH,
+    );
+    const minAllowedW = @min(sourceSize.width, atlasConfig.minTextureEdge);
+    const minAllowedH = @min(sourceSize.height, atlasConfig.minTextureEdge);
+    const minEdgeRatio = @max(
+        @as(f32, @floatFromInt(minAllowedW)) / sourceW,
+        @as(f32, @floatFromInt(minAllowedH)) / sourceH,
+    );
+
+    return @min(1.0, @max(minEdgeRatio, @min(targetRatio, maxEdgeRatio)));
+}
+
+fn scaledRuntimeDimension(sourceDimension: i32, ratio: f32) i32 {
+    const scaled = @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(sourceDimension)) * ratio)));
+    return @max(1, @min(sourceDimension, scaled));
+}
+
+fn roundUpToMultiple(value: i32, multiple: i32) i32 {
+    if (value <= 0) return multiple;
+    return @divTrunc(value + multiple - 1, multiple) * multiple;
+}
+
+fn bucketRuntimeTextureSize(sourceSize: RuntimeTextureSize, desiredRatio: f32, atlasConfig: config.RuntimeAtlasConfig) RuntimeTextureSize {
+    const desired = RuntimeTextureSize{
+        .width = scaledRuntimeDimension(sourceSize.width, desiredRatio),
+        .height = scaledRuntimeDimension(sourceSize.height, desiredRatio),
+    };
+    const sourceLongEdge = @max(sourceSize.width, sourceSize.height);
+    var targetLongEdge = @max(desired.width, desired.height);
+    targetLongEdge = roundUpToMultiple(targetLongEdge, atlasConfig.textureBucket);
+    targetLongEdge = @min(targetLongEdge, atlasConfig.maxTextureEdge);
+    targetLongEdge = @min(targetLongEdge, sourceLongEdge);
+
+    const bucketRatio = @as(f32, @floatFromInt(targetLongEdge)) / @as(f32, @floatFromInt(sourceLongEdge));
+    return .{
+        .width = scaledRuntimeDimension(sourceSize.width, bucketRatio),
+        .height = scaledRuntimeDimension(sourceSize.height, bucketRatio),
+    };
+}
+
+fn shouldUseDownscaledRuntimeTexture(sourceSize: RuntimeTextureSize, targetSize: RuntimeTextureSize, atlasConfig: config.RuntimeAtlasConfig) bool {
+    if (targetSize.width >= sourceSize.width and targetSize.height >= sourceSize.height) return false;
+
+    const thresholdW = @as(f32, @floatFromInt(targetSize.width)) * atlasConfig.downscaleThreshold;
+    const thresholdH = @as(f32, @floatFromInt(targetSize.height)) * atlasConfig.downscaleThreshold;
+    return @as(f32, @floatFromInt(sourceSize.width)) > thresholdW or
+        @as(f32, @floatFromInt(sourceSize.height)) > thresholdH;
+}
+
+fn runtimeTextureSizeForSurface(surface: *sdl.Surface, scale: vec.Vec2, atlasConfig: config.RuntimeAtlasConfig) RuntimeTextureSize {
+    const sourceSize = sourceTextureSize(surface);
+    if (sourceSize.width <= 0 or sourceSize.height <= 0) {
+        std.log.warn("runtimeTextureSizeForSurface: invalid source surface size {d}x{d}", .{ sourceSize.width, sourceSize.height });
+        return sourceSize;
+    }
+    if (!validRuntimeScale(scale)) {
+        std.log.warn("runtimeTextureSizeForSurface: invalid scale ({d},{d}), keeping source texture size", .{ scale.x, scale.y });
+        return sourceSize;
+    }
+
+    const desiredRatio = runtimeScaleTargetRatio(sourceSize, scale, atlasConfig);
+    const targetSize = bucketRuntimeTextureSize(sourceSize, desiredRatio, atlasConfig);
+    if (!shouldUseDownscaledRuntimeTexture(sourceSize, targetSize, atlasConfig)) return sourceSize;
+
+    return targetSize;
+}
+
+fn runtimeTextureCacheKey(imagePath: []const u8, runtimeSize: RuntimeTextureSize) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{s}@{d}x{d}", .{ imagePath, runtimeSize.width, runtimeSize.height });
+}
+
+fn createScaledSurface(surface: *sdl.Surface, runtimeSize: RuntimeTextureSize) !*sdl.Surface {
+    const scaledSurface = sdl.c.SDL_CreateSurface(runtimeSize.width, runtimeSize.height, surface.format) orelse return error.CreateSurfaceFailed;
+    errdefer sdl.destroySurface(scaledSurface);
+
+    const sourceRect = sdl.Rect{ .x = 0, .y = 0, .w = surface.w, .h = surface.h };
+    const targetRect = sdl.Rect{ .x = 0, .y = 0, .w = runtimeSize.width, .h = runtimeSize.height };
+    try sdl.blitSurfaceScaled(surface, &sourceRect, scaledSurface, &targetRect, .linear);
+    return scaledSurface;
+}
+
+fn createRuntimeAtlasSurfaceWithSize(surface: *sdl.Surface, runtimeSize: RuntimeTextureSize) !RuntimeAtlasSurface {
+    if (runtimeSize.width == surface.w and runtimeSize.height == surface.h) {
+        return .{ .surface = surface, .owned = false };
+    }
+
+    const scaledSurface = try createScaledSurface(surface, runtimeSize);
+    return .{ .surface = scaledSurface, .owned = true };
+}
+
+fn createRuntimeAtlasSurface(surface: *sdl.Surface, scale: vec.Vec2, atlasConfig: config.RuntimeAtlasConfig) !RuntimeAtlasSurface {
+    const runtimeSize = runtimeTextureSizeForSurface(surface, scale, atlasConfig);
+    return createRuntimeAtlasSurfaceWithSize(surface, runtimeSize);
+}
+
+fn createRuntimeAtlasSurfaceForTexture(surface: *sdl.Surface, texture: *tex.Texture) !RuntimeAtlasSurface {
+    const runtimeSize = RuntimeTextureSize{
+        .width = texture.width,
+        .height = texture.height,
+    };
+    return createRuntimeAtlasSurfaceWithSize(surface, runtimeSize);
+}
+
+fn destroyRuntimeAtlasSurface(runtimeSurface: RuntimeAtlasSurface) void {
+    if (!runtimeSurface.owned) return;
+    sdl.destroySurface(runtimeSurface.surface);
+}
+
+fn surfaceMatchesTexture(surface: *sdl.Surface, texture: *tex.Texture) bool {
+    return surface.w == texture.width and surface.h == texture.height;
+}
+
+fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2, atlasProfile: config.RuntimeAtlasProfile, geometryId: u64) !u64 {
     const spriteUuid = uuid.generate();
 
     const imgPath = try allocator.dupe(u8, imagePath);
@@ -82,9 +229,10 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
     const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
     const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
 
-    var size: sdl.Point = undefined;
-    try tex.queryTexture(texture, &size.x, &size.y);
-
+    var size = sdl.Point{
+        .x = surface.w,
+        .y = surface.h,
+    };
     size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
     size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
     const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
@@ -92,6 +240,7 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
     const sprite = Sprite{
         .surface = surface,
         .imgPath = imgPath,
+        .atlasProfile = atlasProfile,
         .texture = texture,
         .scale = scale,
         .offset = offset,
@@ -215,12 +364,17 @@ pub fn createMutableFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.
 }
 
 pub fn createFromImgWithBacking(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
+    return createFromImgWithAtlasProfile(imagePath, scale, offset, backing, config.defaultRuntimeAtlasProfile);
+}
+
+pub fn createFromImgWithAtlasProfile(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile) !u64 {
     const imgPathZ = try allocator.dupeZ(u8, imagePath);
     defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
 
-    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing);
+    const atlasConfig = config.runtimeAtlasConfigForProfile(atlasProfile);
+    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing, atlasProfile, atlasConfig);
 }
 
 pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
@@ -235,12 +389,20 @@ pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Su
     errdefer sdl.destroySurface(surface);
 
     const texture = switch (backing) {
-        .immutable => try tex.addToAtlas(surface),
-        .mutable => try tex.createMutableTexture(surface),
+        .immutable => blk: {
+            const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, config.runtimeAtlas);
+            defer destroyRuntimeAtlasSurface(runtimeSurface);
+            break :blk try tex.addToAtlas(runtimeSurface.surface);
+        },
+        .mutable => blk: {
+            const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, config.runtimeAtlas);
+            defer destroyRuntimeAtlasSurface(runtimeSurface);
+            break :blk try tex.createMutableTexture(runtimeSurface.surface);
+        },
     };
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, uuid.generate());
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, config.defaultRuntimeAtlasProfile, uuid.generate());
 }
 
 const TextureForImage = struct {
@@ -248,25 +410,34 @@ const TextureForImage = struct {
     geometryId: u64,
 };
 
-fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
-    const textureForImage = try createTextureForImage(imagePath, surface, backing);
+fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile, atlasConfig: config.RuntimeAtlasConfig) !u64 {
+    const textureForImage = try createTextureForImage(imagePath, surface, scale, backing, atlasConfig);
     errdefer tex.destroyTexture(textureForImage.texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, textureForImage.geometryId);
+    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, atlasProfile, textureForImage.geometryId);
 }
 
-fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, backing: Backing) !TextureForImage {
+fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, backing: Backing, atlasConfig: config.RuntimeAtlasConfig) !TextureForImage {
     return switch (backing) {
-        .immutable => createImmutableTextureForImage(imagePath, surface),
-        .mutable => .{
-            .texture = try tex.createMutableTexture(surface),
-            .geometryId = uuid.generate(),
+        .immutable => createImmutableTextureForImage(imagePath, surface, scale, atlasConfig),
+        .mutable => blk: {
+            const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, atlasConfig);
+            defer destroyRuntimeAtlasSurface(runtimeSurface);
+            break :blk .{
+                .texture = try tex.createMutableTexture(runtimeSurface.surface),
+                .geometryId = uuid.generate(),
+            };
         },
     };
 }
 
-fn createImmutableTextureForImage(imagePath: []const u8, surface: *sdl.Surface) !TextureForImage {
-    if (textureCache.get(imagePath)) |cached| {
+fn createImmutableTextureForImage(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, atlasConfig: config.RuntimeAtlasConfig) !TextureForImage {
+    const runtimeSize = runtimeTextureSizeForSurface(surface, scale, atlasConfig);
+    const cacheKey = try runtimeTextureCacheKey(imagePath, runtimeSize);
+    errdefer allocator.free(cacheKey);
+
+    if (textureCache.get(cacheKey)) |cached| {
+        allocator.free(cacheKey);
         const new_tex = try std.heap.c_allocator.create(tex.Texture);
         new_tex.* = .{
             .atlas_x = cached.atlas_x,
@@ -283,17 +454,13 @@ fn createImmutableTextureForImage(imagePath: []const u8, surface: *sdl.Surface) 
         };
     }
 
-    const texture = try tex.addToAtlas(surface);
+    const runtimeSurface = try createRuntimeAtlasSurfaceWithSize(surface, runtimeSize);
+    defer destroyRuntimeAtlasSurface(runtimeSurface);
+
+    const texture = try tex.addToAtlas(runtimeSurface.surface);
     errdefer tex.destroyTexture(texture);
 
     const geometryId = uuid.generate();
-    const cacheKey = allocator.dupe(u8, imagePath) catch |err| {
-        std.log.warn("createImmutableTextureForImage: failed to cache '{s}' with {}", .{ imagePath, err });
-        return .{
-            .texture = texture,
-            .geometryId = geometryId,
-        };
-    };
 
     textureCache.put(cacheKey, .{
         .atlas_x = texture.atlas_x,
@@ -407,6 +574,7 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
         std.log.warn("createCopyWithBacking: sprite {d} not found", .{spriteUuid});
         return error.SpriteNotFound;
     };
+    const atlasConfig = config.runtimeAtlasConfigForProfile(originalSprite.atlasProfile);
 
     const newUuid = uuid.generate();
 
@@ -423,9 +591,16 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
     const copiedTexture = switch (backing) {
         .immutable => if (tex.isImmutableAtlasTexture(originalSprite.texture))
             try tex.cloneTexture(originalSprite.texture)
-        else
-            try tex.addToAtlas(copiedSurface),
-        .mutable => try tex.createMutableTexture(copiedSurface),
+        else blk: {
+            const runtimeSurface = try createRuntimeAtlasSurface(copiedSurface, originalSprite.scale, atlasConfig);
+            defer destroyRuntimeAtlasSurface(runtimeSurface);
+            break :blk try tex.addToAtlas(runtimeSurface.surface);
+        },
+        .mutable => blk: {
+            const runtimeSurface = try createRuntimeAtlasSurface(copiedSurface, originalSprite.scale, atlasConfig);
+            defer destroyRuntimeAtlasSurface(runtimeSurface);
+            break :blk try tex.createMutableTexture(runtimeSurface.surface);
+        },
     };
     errdefer tex.destroyTexture(copiedTexture);
 
@@ -436,6 +611,7 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
         .surface = copiedSurface,
         .texture = copiedTexture,
         .imgPath = imgPathCopy,
+        .atlasProfile = originalSprite.atlasProfile,
         .scale = originalSprite.scale,
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
@@ -737,12 +913,15 @@ fn markGeometryChanged(s: *Sprite) void {
 
 fn uploadTextureFromSurface(s: *Sprite) !void {
     const movedToMutable = tex.isImmutableAtlasTexture(s.texture);
-    try tex.ensureMutableTexture(s.texture, s.surface);
+    const runtimeSurface = try createRuntimeAtlasSurfaceForTexture(s.surface, s.texture);
+    defer destroyRuntimeAtlasSurface(runtimeSurface);
+
+    try tex.ensureMutableTexture(s.texture, runtimeSurface.surface);
     if (movedToMutable) {
         return;
     }
 
-    try tex.reuploadTexture(s.texture, s.surface);
+    try tex.reuploadTexture(s.texture, runtimeSurface.surface);
 }
 
 pub fn updateTextureVisualFromSurface(spriteUuid: u64) !void {
@@ -777,6 +956,12 @@ pub fn updateTextureGeometryRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IR
     }
 
     const movedToMutable = tex.isImmutableAtlasTexture(s.texture);
+    if (!surfaceMatchesTexture(s.surface, s.texture)) {
+        try uploadTextureFromSurface(s);
+        markGeometryChanged(s);
+        return;
+    }
+
     try tex.ensureMutableTexture(s.texture, s.surface);
     if (movedToMutable) {
         markGeometryChanged(s);
@@ -805,33 +990,38 @@ pub fn isCyan(r: u8, _: u8, b: u8) bool {
 }
 
 pub fn colorMatchingPixels(spriteUuid: u64, color: Color, comptime predicate: fn (u8, u8, u8) bool) !void {
-    const s = sprites.getLocking(spriteUuid) orelse return error.SpriteNotFound;
+    {
+        const s = sprites.getLocking(spriteUuid) orelse {
+            std.log.warn("colorMatchingPixels: sprite {d} not found", .{spriteUuid});
+            return error.SpriteNotFound;
+        };
 
-    try sdl.lockSurface(s.surface);
-    defer sdl.unlockSurface(s.surface);
+        try sdl.lockSurface(s.surface);
+        defer sdl.unlockSurface(s.surface);
 
-    const pixels: [*]u8 = @ptrCast(s.surface.pixels);
-    const bytesPerPixel: usize = 4;
-    const width: usize = @intCast(s.surface.w);
-    const height: usize = @intCast(s.surface.h);
+        const pixels: [*]u8 = @ptrCast(s.surface.pixels);
+        const bytesPerPixel: usize = 4;
+        const width: usize = @intCast(s.surface.w);
+        const height: usize = @intCast(s.surface.h);
 
-    var y: usize = 0;
-    while (y < height) : (y += 1) {
-        var x: usize = 0;
-        while (x < width) : (x += 1) {
-            const pixelIndex = (y * width + x) * bytesPerPixel;
+        var y: usize = 0;
+        while (y < height) : (y += 1) {
+            var x: usize = 0;
+            while (x < width) : (x += 1) {
+                const pixelIndex = (y * width + x) * bytesPerPixel;
 
-            const alpha = pixels[pixelIndex + 3];
-            if (alpha == 0) continue;
+                const alpha = pixels[pixelIndex + 3];
+                if (alpha == 0) continue;
 
-            const b = pixels[pixelIndex + 0];
-            const g = pixels[pixelIndex + 1];
-            const r = pixels[pixelIndex + 2];
+                const b = pixels[pixelIndex + 0];
+                const g = pixels[pixelIndex + 1];
+                const r = pixels[pixelIndex + 2];
 
-            if (predicate(r, g, b)) {
-                pixels[pixelIndex + 0] = color.b;
-                pixels[pixelIndex + 1] = color.g;
-                pixels[pixelIndex + 2] = color.r;
+                if (predicate(r, g, b)) {
+                    pixels[pixelIndex + 0] = color.b;
+                    pixels[pixelIndex + 1] = color.g;
+                    pixels[pixelIndex + 2] = color.r;
+                }
             }
         }
     }
