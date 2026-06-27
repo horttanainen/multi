@@ -274,8 +274,8 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
     );
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
-    errdefer cleanupSpawnedBodies(bodyIds.items);
     errdefer bodyIds.deinit();
+    errdefer cleanupSpawnedBodies(bodyIds.items);
 
     const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(e.pos));
     const entityStart = perf.begin(.level_editor_static_spawn);
@@ -321,8 +321,8 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
 fn spawnTiledStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef, sourceSurface: *sdl.Surface) ![]box2d.c.b2BodyId {
     const totalStart = perf.begin(.level_editor_static_spawn);
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
-    errdefer cleanupSpawnedBodies(bodyIds.items);
     errdefer bodyIds.deinit();
+    errdefer cleanupSpawnedBodies(bodyIds.items);
 
     const width = sourceSurface.w;
     const height = sourceSurface.h;
@@ -558,8 +558,8 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
-    errdefer cleanupSpawnedBodies(bodyIds.items);
     errdefer bodyIds.deinit();
+    errdefer cleanupSpawnedBodies(bodyIds.items);
 
     const pos = conv.pixel2M(e.pos);
 

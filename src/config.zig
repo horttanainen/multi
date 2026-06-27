@@ -118,6 +118,7 @@ pub const levelEditorToggleDelayMs: f32 = 1000;
 pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
 pub const levelEditorClickDelayMs = 200;
+pub const levelEditorScaleRepeatDelayMs = 75;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
 pub const respawnDelayMs = 2000;

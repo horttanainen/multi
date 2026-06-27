@@ -37,6 +37,14 @@ pub const Sprite = struct {
     anchorPointRight: ?vec.IVec2 = null, // Green pixel - right shoulder
 };
 
+pub const ScalePreviewState = struct {
+    scale: vec.Vec2,
+    sizeM: vec.Vec2,
+    sizeP: vec.IVec2,
+    anchorPointLeft: ?vec.IVec2,
+    anchorPointRight: ?vec.IVec2,
+};
+
 pub const SerializableEntity = struct {
     type: []const u8,
     friction: f32,
@@ -310,6 +318,75 @@ pub fn cleanup(sprite: Sprite) void {
 
 pub fn getSprite(spriteUuid: u64) ?Sprite {
     return sprites.getLocking(spriteUuid);
+}
+
+pub fn getScalePreviewState(spriteUuid: u64) ?ScalePreviewState {
+    const s = sprites.getLocking(spriteUuid) orelse {
+        std.log.warn("getScalePreviewState: sprite {d} not found", .{spriteUuid});
+        return null;
+    };
+
+    return .{
+        .scale = s.scale,
+        .sizeM = s.sizeM,
+        .sizeP = s.sizeP,
+        .anchorPointLeft = s.anchorPointLeft,
+        .anchorPointRight = s.anchorPointRight,
+    };
+}
+
+pub fn applyScalePreview(spriteUuid: u64, base: ScalePreviewState, ratio: vec.Vec2) void {
+    if (!std.math.isFinite(ratio.x) or !std.math.isFinite(ratio.y) or ratio.x <= 0.0 or ratio.y <= 0.0) {
+        std.log.warn("applyScalePreview: invalid ratio ({d},{d}) for sprite {d}", .{ ratio.x, ratio.y, spriteUuid });
+        return;
+    }
+
+    sprites.mutex.lockUncancelable(runtime.io());
+    defer sprites.mutex.unlock(runtime.io());
+
+    const s = sprites.map.getPtr(spriteUuid) orelse {
+        std.log.warn("applyScalePreview: sprite {d} not found", .{spriteUuid});
+        return;
+    };
+
+    s.scale = .{
+        .x = base.scale.x * ratio.x,
+        .y = base.scale.y * ratio.y,
+    };
+    s.sizeM = .{
+        .x = base.sizeM.x * ratio.x,
+        .y = base.sizeM.y * ratio.y,
+    };
+    s.sizeP = .{
+        .x = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(base.sizeP.x)) * ratio.x)))),
+        .y = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(base.sizeP.y)) * ratio.y)))),
+    };
+    s.anchorPointLeft = scaledAnchor(base.anchorPointLeft, ratio);
+    s.anchorPointRight = scaledAnchor(base.anchorPointRight, ratio);
+}
+
+pub fn restoreScalePreview(spriteUuid: u64, base: ScalePreviewState) void {
+    sprites.mutex.lockUncancelable(runtime.io());
+    defer sprites.mutex.unlock(runtime.io());
+
+    const s = sprites.map.getPtr(spriteUuid) orelse {
+        std.log.warn("restoreScalePreview: sprite {d} not found", .{spriteUuid});
+        return;
+    };
+
+    s.scale = base.scale;
+    s.sizeM = base.sizeM;
+    s.sizeP = base.sizeP;
+    s.anchorPointLeft = base.anchorPointLeft;
+    s.anchorPointRight = base.anchorPointRight;
+}
+
+fn scaledAnchor(anchor: ?vec.IVec2, ratio: vec.Vec2) ?vec.IVec2 {
+    const value = anchor orelse return null;
+    return .{
+        .x = @intFromFloat(@round(@as(f32, @floatFromInt(value.x)) * ratio.x)),
+        .y = @intFromFloat(@round(@as(f32, @floatFromInt(value.y)) * ratio.y)),
+    };
 }
 
 pub fn createCopy(spriteUuid: u64) !u64 {

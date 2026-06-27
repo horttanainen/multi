@@ -8,9 +8,11 @@ const conv = @import("conversion.zig");
 const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const level = @import("level.zig");
+const levelEditorGrid = @import("level_editor_grid.zig");
 const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const sensor = @import("sensor.zig");
+const sprite = @import("sprite.zig");
 const state = @import("state.zig");
 const uuid = @import("uuid.zig");
 const vec = @import("vector.zig");
@@ -23,6 +25,23 @@ const RuntimeBody = struct {
 const CursorEntityHit = struct {
     bodyId: box2d.c.b2BodyId,
     entityId: u64,
+};
+
+pub const FreeformScaleDirection = enum {
+    left,
+    right,
+    up,
+    down,
+};
+
+const EditorMode = enum {
+    normal,
+    freeform_scale,
+};
+
+const ScaleEditSpriteSnapshot = struct {
+    spriteUuid: u64,
+    state: sprite.ScalePreviewState,
 };
 
 const EntityUpdateCommand = struct {
@@ -52,6 +71,10 @@ const LevelDocument = struct {
 var maybeSelectedEntityId: ?u64 = null;
 var maybeHoveredEntityId: ?u64 = null;
 var maybeCopiedEntityId: ?u64 = null;
+var editorMode: EditorMode = .normal;
+var maybeScaleEditOriginalEntity: ?entity.SerializableEntity = null;
+var maybeScaleEditPreviewEntity: ?entity.SerializableEntity = null;
+var scaleEditSpriteSnapshots: []ScaleEditSpriteSnapshot = &.{};
 
 var editDirPathBuf: [100]u8 = undefined;
 var editDirPath: []const u8 = "";
@@ -139,6 +162,28 @@ fn cloneSerializableEntity(e: entity.SerializableEntity) !entity.SerializableEnt
 fn freeSerializableEntity(e: entity.SerializableEntity) void {
     allocator.free(e.type);
     allocator.free(e.imgPath);
+}
+
+fn clearScaleEditEntities() void {
+    if (maybeScaleEditOriginalEntity) |originalEntity| {
+        freeSerializableEntity(originalEntity);
+    }
+    maybeScaleEditOriginalEntity = null;
+
+    if (maybeScaleEditPreviewEntity) |previewEntity| {
+        freeSerializableEntity(previewEntity);
+    }
+    maybeScaleEditPreviewEntity = null;
+}
+
+fn clearScaleEditSpriteSnapshots() void {
+    allocator.free(scaleEditSpriteSnapshots);
+    scaleEditSpriteSnapshots = &.{};
+}
+
+fn clearFreeformScaleEditState() void {
+    clearScaleEditEntities();
+    clearScaleEditSpriteSnapshots();
 }
 
 fn cloneLevelData(src: level.Level) !level.Level {
@@ -249,6 +294,9 @@ fn freeDocument(document: *LevelDocument) void {
 fn closeDocument() void {
     if (maybeDocument == null) return;
 
+    endFreeformScaleEdit();
+    editorMode = .normal;
+    clearFreeformScaleEditState();
     freeDocument(&maybeDocument.?);
     maybeDocument = null;
 }
@@ -582,6 +630,182 @@ fn recreateRuntimeEntity(serializedEntity: entity.SerializableEntity) !void {
     try spawnRuntimeEntity(serializedEntity);
 }
 
+fn runtimeEntityForBody(bodyId: box2d.c.b2BodyId) ?*entity.Entity {
+    const maybeEntity = entity.getEntity(bodyId);
+    if (maybeEntity != null) return maybeEntity.?;
+
+    const maybeSensorEntity = sensor.sensorEntities.getPtr(bodyId);
+    if (maybeSensorEntity != null) return &maybeSensorEntity.?.entity;
+
+    return null;
+}
+
+fn runtimeBodyBounds(runtimeEntity: entity.Entity) ?vec.IRect {
+    if (runtimeEntity.spriteUuids.len == 0) {
+        std.log.warn("runtimeBodyBounds: runtime entity has no sprites", .{});
+        return null;
+    }
+
+    const entitySprite = sprite.getSprite(runtimeEntity.spriteUuids[0]) orelse {
+        std.log.warn("runtimeBodyBounds: sprite {d} not found", .{runtimeEntity.spriteUuids[0]});
+        return null;
+    };
+    const bodyState = box2d.getState(runtimeEntity.bodyId);
+    const center = conv.m2Pixel(bodyState.pos);
+    const halfWidth = @divTrunc(entitySprite.sizeP.x, 2);
+    const halfHeight = @divTrunc(entitySprite.sizeP.y, 2);
+
+    return .{
+        .minX = center.x - halfWidth,
+        .minY = center.y - halfHeight,
+        .maxX = center.x + halfWidth,
+        .maxY = center.y + halfHeight,
+    };
+}
+
+fn runtimeEntityBounds(entityId: u64) ?vec.IRect {
+    const runtimeBodies = entityBodies.get(entityId) orelse {
+        std.log.warn("runtimeEntityBounds: entity {d} has no runtime bodies", .{entityId});
+        return null;
+    };
+
+    var maybeBounds: ?vec.IRect = null;
+    for (runtimeBodies) |runtimeBody| {
+        const runtimeEntity = runtimeEntityForBody(runtimeBody.bodyId) orelse {
+            std.log.warn("runtimeEntityBounds: body for entity {d} has no runtime entity", .{entityId});
+            continue;
+        };
+        const bodyBounds = runtimeBodyBounds(runtimeEntity.*) orelse continue;
+
+        if (maybeBounds == null) {
+            maybeBounds = bodyBounds;
+            continue;
+        }
+
+        maybeBounds = vec.irectUnion(maybeBounds.?, bodyBounds);
+    }
+
+    if (maybeBounds == null) {
+        std.log.warn("runtimeEntityBounds: entity {d} produced no runtime bounds", .{entityId});
+        return null;
+    }
+
+    return maybeBounds.?;
+}
+
+fn collectScaleEditSpriteSnapshots(entityId: u64) ![]ScaleEditSpriteSnapshot {
+    const runtimeBodies = entityBodies.get(entityId) orelse {
+        std.log.warn("collectScaleEditSpriteSnapshots: entity {d} has no runtime bodies", .{entityId});
+        return error.EntityNotFound;
+    };
+
+    var snapshots = std.array_list.Managed(ScaleEditSpriteSnapshot).init(allocator);
+    errdefer snapshots.deinit();
+
+    for (runtimeBodies) |runtimeBody| {
+        const runtimeEntity = runtimeEntityForBody(runtimeBody.bodyId) orelse {
+            std.log.warn("collectScaleEditSpriteSnapshots: body for entity {d} has no runtime entity", .{entityId});
+            return error.EntityNotFound;
+        };
+        if (runtimeEntity.spriteUuids.len == 0) {
+            std.log.warn("collectScaleEditSpriteSnapshots: runtime entity {d} body has no sprites", .{entityId});
+            return error.SpriteNotFound;
+        }
+
+        for (runtimeEntity.spriteUuids) |spriteUuid| {
+            const snapshot = sprite.getScalePreviewState(spriteUuid) orelse return error.SpriteNotFound;
+            try snapshots.append(.{
+                .spriteUuid = spriteUuid,
+                .state = snapshot,
+            });
+        }
+    }
+
+    return snapshots.toOwnedSlice();
+}
+
+fn scaleEditSpriteSnapshot(spriteUuid: u64) ?sprite.ScalePreviewState {
+    for (scaleEditSpriteSnapshots) |snapshot| {
+        if (snapshot.spriteUuid == spriteUuid) return snapshot.state;
+    }
+
+    return null;
+}
+
+fn scaleEditRatio(originalEntity: entity.SerializableEntity, previewEntity: entity.SerializableEntity) !vec.Vec2 {
+    if (!std.math.isFinite(originalEntity.scale.x) or !std.math.isFinite(originalEntity.scale.y) or originalEntity.scale.x <= 0.0 or originalEntity.scale.y <= 0.0) {
+        std.log.warn("scaleEditRatio: original entity {d} has invalid scale ({d},{d})", .{ originalEntity.id, originalEntity.scale.x, originalEntity.scale.y });
+        return error.InvalidScale;
+    }
+    if (!std.math.isFinite(previewEntity.scale.x) or !std.math.isFinite(previewEntity.scale.y) or previewEntity.scale.x <= 0.0 or previewEntity.scale.y <= 0.0) {
+        std.log.warn("scaleEditRatio: preview entity {d} has invalid scale ({d},{d})", .{ previewEntity.id, previewEntity.scale.x, previewEntity.scale.y });
+        return error.InvalidScale;
+    }
+
+    return .{
+        .x = previewEntity.scale.x / originalEntity.scale.x,
+        .y = previewEntity.scale.y / originalEntity.scale.y,
+    };
+}
+
+fn applyScaleEditRuntime(entityId: u64, originalEntity: entity.SerializableEntity, previewEntity: entity.SerializableEntity, persistOffsets: bool) !void {
+    const ratio = try scaleEditRatio(originalEntity, previewEntity);
+    const runtimeBodies = entityBodies.get(entityId) orelse {
+        std.log.warn("applyScaleEditRuntime: entity {d} has no runtime bodies", .{entityId});
+        return error.EntityNotFound;
+    };
+
+    const basePos = conv.pixel2M(previewEntity.pos);
+    for (runtimeBodies) |*runtimeBody| {
+        const scaledOffset = vec.Vec2{
+            .x = runtimeBody.offsetM.x * ratio.x,
+            .y = runtimeBody.offsetM.y * ratio.y,
+        };
+        const pos = box2d.c.b2Vec2{
+            .x = basePos.x + scaledOffset.x,
+            .y = basePos.y + scaledOffset.y,
+        };
+        box2d.c.b2Body_SetTransform(runtimeBody.bodyId, pos, box2d.c.b2Body_GetRotation(runtimeBody.bodyId));
+
+        const runtimeEntity = runtimeEntityForBody(runtimeBody.bodyId) orelse {
+            std.log.warn("applyScaleEditRuntime: body for entity {d} has no runtime entity", .{entityId});
+            return error.EntityNotFound;
+        };
+        for (runtimeEntity.spriteUuids) |spriteUuid| {
+            const snapshot = scaleEditSpriteSnapshot(spriteUuid) orelse {
+                std.log.warn("applyScaleEditRuntime: sprite {d} for entity {d} has no scale snapshot", .{ spriteUuid, entityId });
+                return error.SpriteNotFound;
+            };
+            sprite.applyScalePreview(spriteUuid, snapshot, ratio);
+        }
+
+        if (persistOffsets) {
+            runtimeBody.offsetM = scaledOffset;
+        }
+    }
+}
+
+fn restoreScaleEditRuntime(entityId: u64) void {
+    const originalEntity = maybeScaleEditOriginalEntity orelse {
+        std.log.warn("restoreScaleEditRuntime: no original entity for active scale edit", .{});
+        return;
+    };
+
+    applyScaleEditRuntime(entityId, originalEntity, originalEntity, false) catch |err| {
+        std.log.warn("restoreScaleEditRuntime: failed to restore entity {d}: {}", .{ entityId, err });
+    };
+    for (scaleEditSpriteSnapshots) |snapshot| {
+        sprite.restoreScalePreview(snapshot.spriteUuid, snapshot.state);
+    }
+}
+
+fn scaleEditChanged(originalEntity: entity.SerializableEntity, previewEntity: entity.SerializableEntity) bool {
+    return originalEntity.pos.x != previewEntity.pos.x or
+        originalEntity.pos.y != previewEntity.pos.y or
+        originalEntity.scale.x != previewEntity.scale.x or
+        originalEntity.scale.y != previewEntity.scale.y;
+}
+
 fn setRuntimeEntityHighlight(entityId: u64, highlighted: bool) void {
     const runtimeBodies = entityBodies.get(entityId) orelse {
         std.log.warn("setRuntimeEntityHighlight: entity {d} has no runtime bodies", .{entityId});
@@ -596,6 +820,25 @@ fn setRuntimeEntityHighlight(entityId: u64, highlighted: bool) void {
         }
 
         if (sensor.setHighlighted(runtimeBody.bodyId, highlighted)) continue;
+    }
+}
+
+fn setRuntimeEntityScaleEditing(entityId: u64, editing: bool) void {
+    const runtimeBodies = entityBodies.get(entityId) orelse {
+        std.log.warn("setRuntimeEntityScaleEditing: entity {d} has no runtime bodies", .{entityId});
+        return;
+    };
+
+    for (runtimeBodies) |runtimeBody| {
+        const maybeE = entity.getEntity(runtimeBody.bodyId);
+        if (maybeE != null) {
+            maybeE.?.scaleEditing = editing;
+            continue;
+        }
+
+        if (sensor.setScaleEditing(runtimeBody.bodyId, editing)) continue;
+
+        std.log.warn("setRuntimeEntityScaleEditing: body for entity {d} has no runtime entity", .{entityId});
     }
 }
 
@@ -617,6 +860,8 @@ fn setRuntimeEntityHover(entityId: u64, hovered: bool) void {
 }
 
 fn selectEntity(entityId: u64) void {
+    endFreeformScaleEdit();
+
     if (maybeSelectedEntityId) |selectedEntityId| {
         setRuntimeEntityHighlight(selectedEntityId, false);
     }
@@ -642,6 +887,8 @@ fn clearHoveredEntity() void {
 }
 
 fn clearSelection() void {
+    endFreeformScaleEdit();
+
     if (maybeSelectedEntityId) |selectedEntityId| {
         setRuntimeEntityHighlight(selectedEntityId, false);
     }
@@ -688,6 +935,14 @@ fn addEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool) !
 
 fn deleteEntity(entityId: u64, recordHistory: bool) !void {
     const document = try getDocument();
+
+    if (maybeSelectedEntityId != null and maybeSelectedEntityId.? == entityId) {
+        if (editorMode == .freeform_scale) {
+            setRuntimeEntityScaleEditing(entityId, false);
+            editorMode = .normal;
+            clearFreeformScaleEditState();
+        }
+    }
 
     const removedEntity = try removeEntityFromDocument(document, entityId);
     if (!destroyRuntimeEntity(entityId)) {
@@ -738,6 +993,31 @@ fn updateEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool
     }
     if (maybeHoveredEntityId != null and maybeHoveredEntityId.? == serializedEntity.id) {
         setRuntimeEntityHover(serializedEntity.id, true);
+    }
+    if (editorMode == .freeform_scale and maybeSelectedEntityId != null and maybeSelectedEntityId.? == serializedEntity.id) {
+        setRuntimeEntityScaleEditing(serializedEntity.id, true);
+    }
+
+    updateSpawnLocationFromDocument();
+}
+
+fn updateEntityDocumentOnly(serializedEntity: entity.SerializableEntity, recordHistory: bool) !void {
+    const document = try getDocument();
+
+    const documentEntity = try cloneSerializableEntity(serializedEntity);
+    errdefer freeSerializableEntity(documentEntity);
+
+    const oldEntityForHistory = try cloneSerializableEntity(try getDocumentEntity(document, serializedEntity.id));
+    defer freeSerializableEntity(oldEntityForHistory);
+
+    const oldDocumentEntity = try replaceEntityInDocument(document, documentEntity);
+    freeSerializableEntity(oldDocumentEntity);
+
+    if (recordHistory) {
+        recordCommand(.{ .update_entity = .{
+            .before = oldEntityForHistory,
+            .after = serializedEntity,
+        } });
     }
 
     updateSpawnLocationFromDocument();
@@ -813,6 +1093,11 @@ pub fn copySelection() void {
     maybeCopiedEntityId = maybeSelectedEntityId;
 }
 
+pub fn prepareSpritePlacement() void {
+    clearSelection();
+    clearHoveredEntity();
+}
+
 pub fn pasteSelection(position: vec.IVec2) !void {
     const document = try getDocument();
     const copiedEntityId = maybeCopiedEntityId orelse return;
@@ -851,8 +1136,8 @@ pub fn stopTryingLevel() void {
 
 pub fn tryCurrentLevel() !void {
     _ = try getDocument();
-    try saveDocumentToWorkingFile();
     clearSelection();
+    try saveDocumentToWorkingFile();
     clearRuntimeIndex();
     try level.tryEditorLevel(editFilePath);
     tryingLevel = true;
@@ -875,6 +1160,7 @@ fn spawnDocumentRuntime() !void {
 }
 
 pub fn reloadForEditor() !void {
+    endFreeformScaleEdit();
     clearHoveredEntity();
     level.reset();
     clearRuntimeIndex();
@@ -883,6 +1169,9 @@ pub fn reloadForEditor() !void {
 
     if (maybeSelectedEntityId) |selectedEntityId| {
         setRuntimeEntityHighlight(selectedEntityId, true);
+        if (editorMode == .freeform_scale) {
+            setRuntimeEntityScaleEditing(selectedEntityId, true);
+        }
     }
     updateCursorHover();
 }
@@ -992,6 +1281,164 @@ pub fn selectedEntityBodyAtCursor() ?box2d.c.b2BodyId {
     if (hit.entityId != selectedEntityId) return null;
 
     return hit.bodyId;
+}
+
+pub fn isFreeformScaleEditing() bool {
+    return editorMode == .freeform_scale;
+}
+
+pub fn beginFreeformScaleEditAtCursor() !void {
+    if (editorMode == .freeform_scale) return;
+
+    const selectedEntityId = maybeSelectedEntityId orelse {
+        std.log.warn("beginFreeformScaleEditAtCursor: no selected entity", .{});
+        return error.EntityNotFound;
+    };
+    const worldPos = cursor.getWorldPos();
+    const hit = findEntityAtPosition(worldPos, .{ .x = 0.5, .y = 0.5 }) orelse return;
+    if (hit.entityId != selectedEntityId) return;
+
+    const document = try getDocument();
+    const currentEntity = try getDocumentEntity(document, selectedEntityId);
+    const originalEntity = try cloneSerializableEntity(currentEntity);
+    errdefer freeSerializableEntity(originalEntity);
+    const previewEntity = try cloneSerializableEntity(currentEntity);
+    errdefer freeSerializableEntity(previewEntity);
+    const snapshots = try collectScaleEditSpriteSnapshots(selectedEntityId);
+    errdefer allocator.free(snapshots);
+
+    clearFreeformScaleEditState();
+    maybeScaleEditOriginalEntity = originalEntity;
+    maybeScaleEditPreviewEntity = previewEntity;
+    scaleEditSpriteSnapshots = snapshots;
+    editorMode = .freeform_scale;
+    setRuntimeEntityScaleEditing(selectedEntityId, true);
+}
+
+pub fn endFreeformScaleEdit() void {
+    if (editorMode != .freeform_scale) return;
+
+    if (maybeSelectedEntityId == null) {
+        std.log.warn("endFreeformScaleEdit: scale edit mode had no selected entity", .{});
+        editorMode = .normal;
+        return;
+    }
+
+    const selectedEntityId = maybeSelectedEntityId.?;
+    const originalEntity = maybeScaleEditOriginalEntity orelse {
+        std.log.warn("endFreeformScaleEdit: scale edit mode has no original entity", .{});
+        setRuntimeEntityScaleEditing(selectedEntityId, false);
+        editorMode = .normal;
+        clearFreeformScaleEditState();
+        return;
+    };
+    const previewEntity = maybeScaleEditPreviewEntity orelse {
+        std.log.warn("endFreeformScaleEdit: scale edit mode has no preview entity", .{});
+        restoreScaleEditRuntime(selectedEntityId);
+        setRuntimeEntityScaleEditing(selectedEntityId, false);
+        editorMode = .normal;
+        clearFreeformScaleEditState();
+        return;
+    };
+
+    setRuntimeEntityScaleEditing(selectedEntityId, false);
+    editorMode = .normal;
+
+    if (!scaleEditChanged(originalEntity, previewEntity)) {
+        restoreScaleEditRuntime(selectedEntityId);
+        clearFreeformScaleEditState();
+        return;
+    }
+
+    applyScaleEditRuntime(selectedEntityId, originalEntity, previewEntity, true) catch |err| {
+        std.log.warn("endFreeformScaleEdit: failed to persist runtime preview for entity {d}: {}", .{ selectedEntityId, err });
+        restoreScaleEditRuntime(selectedEntityId);
+        clearFreeformScaleEditState();
+        return;
+    };
+
+    updateEntityDocumentOnly(previewEntity, true) catch |err| {
+        std.log.warn("endFreeformScaleEdit: failed to commit scale edit for entity {d}: {}", .{ selectedEntityId, err });
+        restoreScaleEditRuntime(selectedEntityId);
+        clearFreeformScaleEditState();
+        return;
+    };
+
+    clearFreeformScaleEditState();
+}
+
+fn freeformScaleStepPixels() i32 {
+    if (!levelEditorGrid.isSnapEnabled()) return config.levelEditorCursorMovePixels;
+
+    const step: i32 = @intFromFloat(@round(levelEditorGrid.granularityMeters() * conv.met2pix));
+    return @max(1, step);
+}
+
+fn expandedScaleForAxis(currentScale: f32, currentSizePixels: i32, growPixels: i32, axis: []const u8) !f32 {
+    if (!std.math.isFinite(currentScale) or currentScale <= 0.0) {
+        std.log.warn("expandedScaleForAxis: invalid current {s} scale {d}", .{ axis, currentScale });
+        return error.InvalidScale;
+    }
+    if (currentSizePixels <= 0) {
+        std.log.warn("expandedScaleForAxis: invalid current {s} size {d}", .{ axis, currentSizePixels });
+        return error.InvalidEntityBounds;
+    }
+    if (growPixels <= 0) {
+        std.log.warn("expandedScaleForAxis: invalid grow pixels {d}", .{growPixels});
+        return error.InvalidScaleStep;
+    }
+
+    const currentSize: f32 = @floatFromInt(currentSizePixels);
+    const newSize: f32 = @floatFromInt(currentSizePixels + growPixels);
+    return currentScale * (newSize / currentSize);
+}
+
+pub fn scaleSelectedEntityFreeform(direction: FreeformScaleDirection) !void {
+    if (editorMode != .freeform_scale) return;
+    const entityId = maybeSelectedEntityId orelse {
+        std.log.warn("scaleSelectedEntityFreeform: no selected entity in scale edit mode", .{});
+        return error.EntityNotFound;
+    };
+    const originalEntity = maybeScaleEditOriginalEntity orelse {
+        std.log.warn("scaleSelectedEntityFreeform: no original entity for scale edit", .{});
+        return error.EntityNotFound;
+    };
+    if (maybeScaleEditPreviewEntity == null) {
+        std.log.warn("scaleSelectedEntityFreeform: no preview entity for scale edit", .{});
+        return error.EntityNotFound;
+    }
+
+    const bounds = runtimeEntityBounds(entityId) orelse return error.EntityNotFound;
+    const width = bounds.maxX - bounds.minX;
+    const height = bounds.maxY - bounds.minY;
+    const growPixels = freeformScaleStepPixels();
+    const centerOffset = @divTrunc(growPixels, 2);
+
+    var updatedScale = maybeScaleEditPreviewEntity.?.scale;
+    var updatedPos = maybeScaleEditPreviewEntity.?.pos;
+
+    switch (direction) {
+        .left => {
+            updatedScale.x = try expandedScaleForAxis(updatedScale.x, width, growPixels, "x");
+            updatedPos.x -= centerOffset;
+        },
+        .right => {
+            updatedScale.x = try expandedScaleForAxis(updatedScale.x, width, growPixels, "x");
+            updatedPos.x += centerOffset;
+        },
+        .up => {
+            updatedScale.y = try expandedScaleForAxis(updatedScale.y, height, growPixels, "y");
+            updatedPos.y -= centerOffset;
+        },
+        .down => {
+            updatedScale.y = try expandedScaleForAxis(updatedScale.y, height, growPixels, "y");
+            updatedPos.y += centerOffset;
+        },
+    }
+
+    maybeScaleEditPreviewEntity.?.pos = updatedPos;
+    maybeScaleEditPreviewEntity.?.scale = updatedScale;
+    try applyScaleEditRuntime(entityId, originalEntity, maybeScaleEditPreviewEntity.?, false);
 }
 
 pub fn updateCursorHover() void {

@@ -194,13 +194,13 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
         },
         .open_config_menu => {
             if (!delay.check("menuToggle")) {
-                const cfg = levelEditor.getConfig();
-                levelConfigMenu.open(cfg.gravity, cfg.levelHeightMeters, cfg.cameraZoomMeters, cfg.aspectRatio, cfg.splitscreen);
+                openLevelEditorConfigMenu();
                 delay.action("menuToggle", 300);
             }
         },
         .open_sprite_picker => {
             if (!delay.check("pickerOpen")) {
+                levelEditor.prepareSpritePlacement();
                 spritePicker.open() catch |err| {
                     std.debug.print("Error opening sprite picker: {}\n", .{err});
                 };
@@ -214,6 +214,10 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
             }
         },
         .deactivate_sprite => {
+            if (levelEditor.isFreeformScaleEditing()) {
+                levelEditor.endFreeformScaleEdit();
+                return;
+            }
             cursor.detachSprite();
         },
         .toggle_snap => {
@@ -222,14 +226,34 @@ pub fn executeLevelEditorAction(action: controller.LevelEditorAction) void {
                 delay.action("levelEditorSnapToggle", config.levelEditorClickDelayMs);
             }
         },
+        .scale_left => scaleSelectedEntity(.left),
+        .scale_right => scaleSelectedEntity(.right),
+        .scale_up => scaleSelectedEntity(.up),
+        .scale_down => scaleSelectedEntity(.down),
     }
 }
 
-fn confirmLevelEditorAction() void {
-    if (!cursor.hasPendingSprite()) {
+fn openLevelEditorConfigMenu() void {
+    if (!cursor.hasPendingSprite() and !levelEditor.isFreeformScaleEditing()) {
         const selectedBodyId = levelEditor.selectedEntityBodyAtCursor();
         if (selectedBodyId != null) {
             entityConfigMenu.open(selectedBodyId.?);
+            return;
+        }
+    }
+
+    const cfg = levelEditor.getConfig();
+    levelConfigMenu.open(cfg.gravity, cfg.levelHeightMeters, cfg.cameraZoomMeters, cfg.aspectRatio, cfg.splitscreen);
+}
+
+fn confirmLevelEditorAction() void {
+    if (levelEditor.isFreeformScaleEditing()) return;
+
+    if (!cursor.hasPendingSprite()) {
+        if (levelEditor.selectedEntityBodyAtCursor() != null) {
+            levelEditor.beginFreeformScaleEditAtCursor() catch |err| {
+                std.log.warn("confirmLevelEditorAction: failed to begin freeform scale edit: {}", .{err});
+            };
             return;
         }
 
@@ -246,6 +270,16 @@ fn confirmLevelEditorAction() void {
     levelEditor.placeSprite(imgPath, cursor.getPendingScale(), pos) catch |err| {
         std.debug.print("Error placing sprite: {}\n", .{err});
     };
+}
+
+fn scaleSelectedEntity(direction: levelEditor.FreeformScaleDirection) void {
+    if (!levelEditor.isFreeformScaleEditing()) return;
+    if (delay.check("levelEditorScaleEdit")) return;
+
+    levelEditor.scaleSelectedEntityFreeform(direction) catch |err| {
+        std.log.warn("scaleSelectedEntity: failed to scale selected entity: {}", .{err});
+    };
+    delay.action("levelEditorScaleEdit", config.levelEditorScaleRepeatDelayMs);
 }
 
 pub fn handleLevelEditorMouseInput() void {

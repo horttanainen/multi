@@ -42,6 +42,10 @@ pub const LevelEditorAction = enum {
     confirm,
     deactivate_sprite,
     toggle_snap,
+    scale_left,
+    scale_right,
+    scale_up,
+    scale_down,
 };
 
 pub var availableColors: std.ArrayList(sprite.Color) = .empty;

@@ -40,6 +40,7 @@ pub const Entity = struct {
     spriteUuids: []u64,
     highlighted: bool,
     hovered: bool,
+    scaleEditing: bool,
     shapeIds: []box2d.c.b2ShapeId,
     colliderChunks: []ColliderChunk,
     animated: bool,
@@ -112,10 +113,15 @@ fn drawWithOptions(entity: *Entity, flip: bool) !void {
 }
 
 fn drawEditorSelectionMask(entity: Entity, entitySprite: Sprite, pos: vec.IVec2, angle: f32, flip: bool) !void {
-    if (!entity.highlighted and !entity.hovered) return;
+    if (!entity.highlighted and !entity.hovered and !entity.scaleEditing) return;
 
-    const alpha: u8 = if (entity.highlighted) 255 else 115;
+    const alpha: u8 = if (entity.scaleEditing) scaleEditingSelectionAlpha() else if (entity.highlighted) 255 else 115;
     try sprite.drawSelectionMask(entitySprite, pos, angle, flip, alpha);
+}
+
+fn scaleEditingSelectionAlpha() u8 {
+    const pulse: f32 = @floatCast((std.math.sin(time.now() * 10.0) + 1.0) * 0.5);
+    return @intFromFloat(155.0 + pulse * 100.0);
 }
 
 pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
@@ -142,6 +148,7 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .colliderChunks = colliderChunks,
         .highlighted = false,
         .hovered = false,
+        .scaleEditing = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,
@@ -369,6 +376,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .colliderChunks = colliderChunks,
         .highlighted = false,
         .hovered = false,
+        .scaleEditing = false,
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = shapeDef.filter.categoryBits,

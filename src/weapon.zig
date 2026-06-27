@@ -235,6 +235,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .state = null,
             .highlighted = false,
             .hovered = false,
+            .scaleEditing = false,
             .animated = false,
             .flipEntityHorizontally = false,
             .categoryBits = shapeDef.filter.categoryBits,

@@ -57,6 +57,10 @@ pub const LevelEditorGamepadBindings = struct {
     confirmButton: sdl.GamepadButton,
     deactivateButton: sdl.GamepadButton,
     snapToggleButton: sdl.GamepadButton,
+    scaleLeftButton: sdl.GamepadButton,
+    scaleRightButton: sdl.GamepadButton,
+    scaleUpButton: sdl.GamepadButton,
+    scaleDownButton: sdl.GamepadButton,
 };
 
 pub const defaultEditorBindings = LevelEditorGamepadBindings{
@@ -68,6 +72,10 @@ pub const defaultEditorBindings = LevelEditorGamepadBindings{
     .confirmButton = .a,
     .deactivateButton = .b,
     .snapToggleButton = .rightshoulder,
+    .scaleLeftButton = .dpad_left,
+    .scaleRightButton = .dpad_right,
+    .scaleUpButton = .dpad_up,
+    .scaleDownButton = .dpad_down,
 };
 
 pub const defaultBindings = GamepadBindings{
@@ -232,6 +240,18 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
     }
     if (sdl.getGamepadButton(sdlGp, bindings.snapToggleButton)) {
         control.executeLevelEditorAction(.toggle_snap);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.scaleLeftButton)) {
+        control.executeLevelEditorAction(.scale_left);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.scaleRightButton)) {
+        control.executeLevelEditorAction(.scale_right);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.scaleUpButton)) {
+        control.executeLevelEditorAction(.scale_up);
+    }
+    if (sdl.getGamepadButton(sdlGp, bindings.scaleDownButton)) {
+        control.executeLevelEditorAction(.scale_down);
     }
 }
 

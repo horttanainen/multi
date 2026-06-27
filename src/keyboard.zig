@@ -67,6 +67,10 @@ pub const LevelEditorKeyBindings = struct {
     openSpritePicker: sdl.Scancode,
     confirm: sdl.Scancode,
     deactivateSprite: sdl.Scancode,
+    scaleLeft: sdl.Scancode,
+    scaleRight: sdl.Scancode,
+    scaleUp: sdl.Scancode,
+    scaleDown: sdl.Scancode,
 };
 
 pub const defaultEditorBindings = LevelEditorKeyBindings{
@@ -82,6 +86,10 @@ pub const defaultEditorBindings = LevelEditorKeyBindings{
     .openSpritePicker = .e,
     .confirm = .return_,
     .deactivateSprite = .q,
+    .scaleLeft = .left,
+    .scaleRight = .right,
+    .scaleUp = .up,
+    .scaleDown = .down,
 };
 
 pub var keyboardBindings: std.ArrayList(KeyboardBindings) = .empty;
@@ -147,6 +155,18 @@ pub fn handleLevelEditor(_: *const controller.Controller) void {
     }
     if (key(keyStates, bindings.deactivateSprite)) {
         control.executeLevelEditorAction(.deactivate_sprite);
+    }
+    if (key(keyStates, bindings.scaleLeft)) {
+        control.executeLevelEditorAction(.scale_left);
+    }
+    if (key(keyStates, bindings.scaleRight)) {
+        control.executeLevelEditorAction(.scale_right);
+    }
+    if (key(keyStates, bindings.scaleUp)) {
+        control.executeLevelEditorAction(.scale_up);
+    }
+    if (key(keyStates, bindings.scaleDown)) {
+        control.executeLevelEditorAction(.scale_down);
     }
 }
 
