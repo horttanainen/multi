@@ -11,6 +11,8 @@ const PendingTextureUpload = struct {
     fence: *c.SDL_GPUFence,
 };
 
+const atlasClearStripeHeight: u32 = 256;
+
 var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .empty;
 
 pub const TextureBacking = enum {
@@ -320,6 +322,7 @@ pub fn reallocateAtlasRegion(texture: *Texture, surface: *sdl.Surface) !void {
 pub fn resetAtlas() void {
     gpu.getAtlas().init();
     gpu.getMutableAtlas().init();
+    clearAtlasTextures();
 }
 
 pub fn queryTexture(texture: *Texture, w: *i32, h: *i32) !void {
@@ -527,6 +530,53 @@ fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
     submitUploadAndTrackBuffer(device, cmd, transfer_buf);
+}
+
+fn createAtlasClearStripe(width: u32, height: u32, label: []const u8) ?*sdl.Surface {
+    const stripe = c.SDL_CreateSurface(@intCast(width), @intCast(height), c.SDL_PIXELFORMAT_ABGR8888) orelse {
+        std.log.warn("createAtlasClearStripe: failed to create {s} atlas clear stripe {d}x{d}", .{ label, width, height });
+        return null;
+    };
+
+    if (stripe.*.pitch <= 0) {
+        std.log.warn("createAtlasClearStripe: {s} atlas clear stripe has invalid pitch {d}", .{ label, stripe.*.pitch });
+        c.SDL_DestroySurface(stripe);
+        return null;
+    }
+
+    const pixels: [*]u8 = @ptrCast(stripe.*.pixels orelse {
+        std.log.warn("createAtlasClearStripe: {s} atlas clear stripe has no pixels", .{label});
+        c.SDL_DestroySurface(stripe);
+        return null;
+    });
+    const data_size = @as(usize, @intCast(stripe.*.pitch)) * @as(usize, @intCast(height));
+    @memset(pixels[0..data_size], 0);
+    return stripe;
+}
+
+fn clearAtlasTexture(tex_atlas: *Atlas, label: []const u8) void {
+    if (tex_atlas.width == 0 or tex_atlas.height == 0) {
+        std.log.warn("clearAtlasTexture: {s} atlas has invalid size {d}x{d}", .{ label, tex_atlas.width, tex_atlas.height });
+        return;
+    }
+
+    // Atlas textures are sampler-only, so clear by uploading transparent stripes.
+    const stripe_height = @min(atlasClearStripeHeight, tex_atlas.height);
+    const stripe = createAtlasClearStripe(tex_atlas.width, stripe_height, label) orelse return;
+    defer c.SDL_DestroySurface(stripe);
+
+    const device = gpu.getDevice();
+    var y: u32 = 0;
+    while (y < tex_atlas.height) {
+        const h = @min(stripe_height, tex_atlas.height - y);
+        uploadToAtlasRegion(device, tex_atlas, stripe, 0, y, tex_atlas.width, h);
+        y += h;
+    }
+}
+
+pub fn clearAtlasTextures() void {
+    clearAtlasTexture(gpu.getAtlas(), "immutable");
+    clearAtlasTexture(gpu.getMutableAtlas(), "mutable");
 }
 
 fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32) void {
