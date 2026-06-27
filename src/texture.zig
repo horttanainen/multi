@@ -11,6 +11,11 @@ const PendingTextureUpload = struct {
     fence: *c.SDL_GPUFence,
 };
 
+const AtlasDumpTarget = enum {
+    immutable,
+    mutable,
+};
+
 const atlasClearStripeHeight: u32 = 256;
 
 var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .empty;
@@ -694,9 +699,24 @@ fn uploadTextureImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTextu
     submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
-pub fn saveAtlasToDisk(path: [*:0]const u8) void {
+fn atlasForDumpTarget(target: AtlasDumpTarget) *Atlas {
+    return switch (target) {
+        .immutable => gpu.getAtlas(),
+        .mutable => gpu.getMutableAtlas(),
+    };
+}
+
+fn atlasDumpLabel(target: AtlasDumpTarget) []const u8 {
+    return switch (target) {
+        .immutable => "immutable",
+        .mutable => "mutable",
+    };
+}
+
+fn saveAtlasToDisk(target: AtlasDumpTarget, path: [*:0]const u8) void {
     const device = gpu.getDevice();
-    const tex_atlas = gpu.getAtlas();
+    const tex_atlas = atlasForDumpTarget(target);
+    const label = atlasDumpLabel(target);
 
     const bpp: u32 = 4;
     const data_size: u32 = ATLAS_SIZE * ATLAS_SIZE * bpp;
@@ -707,18 +727,18 @@ pub fn saveAtlasToDisk(path: [*:0]const u8) void {
         .size = data_size,
         .props = 0,
     }) orelse {
-        std.debug.print("Failed to create download transfer buffer\n", .{});
+        std.debug.print("Failed to create download transfer buffer for {s} atlas dump\n", .{label});
         return;
     };
     defer c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
 
     // Download atlas texture via copy pass
     const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse {
-        std.debug.print("Failed to acquire command buffer for atlas dump\n", .{});
+        std.debug.print("Failed to acquire command buffer for {s} atlas dump\n", .{label});
         return;
     };
     const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
-        std.debug.print("Failed to begin copy pass for atlas dump\n", .{});
+        std.debug.print("Failed to begin copy pass for {s} atlas dump\n", .{label});
         return;
     };
 
@@ -750,7 +770,7 @@ pub fn saveAtlasToDisk(path: [*:0]const u8) void {
 
     // Map and create surface from downloaded data
     const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse {
-        std.debug.print("Failed to map transfer buffer for atlas dump\n", .{});
+        std.debug.print("Failed to map transfer buffer for {s} atlas dump\n", .{label});
         return;
     };
 
@@ -763,17 +783,22 @@ pub fn saveAtlasToDisk(path: [*:0]const u8) void {
         @as(i32, @intCast(ATLAS_SIZE * bpp)),
     );
     if (surface == null) {
-        std.debug.print("Failed to create surface for atlas dump\n", .{});
+        std.debug.print("Failed to create surface for {s} atlas dump\n", .{label});
         c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
         return;
     }
 
     if (c.IMG_SavePNG(surface, path)) {
-        std.debug.print("Atlas saved to {s}\n", .{path});
+        std.debug.print("{s} atlas saved to {s}\n", .{ label, path });
     } else {
-        std.debug.print("Failed to save atlas: {s}\n", .{c.SDL_GetError()});
+        std.debug.print("Failed to save {s} atlas: {s}\n", .{ label, c.SDL_GetError() });
     }
 
     c.SDL_DestroySurface(surface);
     c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
+}
+
+pub fn saveAtlasesToDisk() void {
+    saveAtlasToDisk(.immutable, "atlas_immutable_dump.png");
+    saveAtlasToDisk(.mutable, "atlas_mutable_dump.png");
 }
