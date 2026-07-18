@@ -19,6 +19,7 @@ const viewport = @import("viewport.zig");
 const level = @import("level.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
+const gravestone = @import("gravestone.zig");
 const rope = @import("rope.zig");
 const score = @import("score.zig");
 const perf = @import("perf.zig");
@@ -1033,25 +1034,34 @@ pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
 }
 
 pub fn kill(p: *Player, killerId: ?usize) !void {
-    if (p.health <= 0 and !p.isDead) {
-        box2d.c.b2Body_Disable(p.bodyId);
+    if (p.health > 0 or p.isDead) return;
 
-        const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
-        if (maybeEntity) |ent| {
-            ent.enabled = false;
-        }
+    const bodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+    gravestone.schedule(p.id, vec.add(bodyPosition, centerOffset)) catch |err| {
+        std.log.err("kill: could not schedule gravestone for player {d}: {}", .{ p.id, err });
+    };
 
-        // Release rope on death
-        rope.releaseRope(p.id);
+    box2d.c.b2Body_Disable(p.bodyId);
+    disablePlayerEntity(p.id, p.bodyId);
 
-        p.isDead = true;
+    // Release rope on death
+    rope.releaseRope(p.id);
 
-        score.recordKill(killerId, p.id);
+    p.isDead = true;
 
-        //TODO: remove this silly stuff when we have a proper map of players and uuids for IDs
-        // Add 1 to player ID to avoid null pointer (player ID 0 would become null)
-        p.respawnTimerId = sdl.addTimer(config.respawnDelayMs, markPlayerForRespawn, @ptrFromInt(p.id + 1));
-    }
+    score.recordKill(killerId, p.id);
+
+    //TODO: remove this silly stuff when we have a proper map of players and uuids for IDs
+    // Add 1 to player ID to avoid null pointer (player ID 0 would become null)
+    p.respawnTimerId = sdl.addTimer(config.respawnDelayMs, markPlayerForRespawn, @ptrFromInt(p.id + 1));
+}
+
+fn disablePlayerEntity(playerId: usize, bodyId: box2d.c.b2BodyId) void {
+    const playerEntity = entity.entities.getPtrLocking(bodyId) orelse {
+        std.log.warn("disablePlayerEntity: entity is missing for player {d}", .{playerId});
+        return;
+    };
+    playerEntity.enabled = false;
 }
 
 fn gib(p: *Player) !void {

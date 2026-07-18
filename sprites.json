@@ -45,6 +45,12 @@
         "atlasProfile": "preserve_detail"
     },
     {
+        "key": "gravestone",
+        "path": "gravestones/Untitled.png",
+        "scale": 0.3,
+        "atlasProfile": "preserve_detail"
+    },
+    {
         "key": "rocket_launcher",
         "path": "weapons/rocket_launcher/weapon_with_arm.png",
         "scale": 0.2,

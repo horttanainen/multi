@@ -14,6 +14,7 @@ const sprite = @import("sprite.zig");
 const background = @import("background.zig");
 const animation = @import("animation.zig");
 const controller = @import("controller.zig");
+const gravestone = @import("gravestone.zig");
 const rope = @import("rope.zig");
 const runtime = @import("runtime.zig");
 const weapon = @import("weapon.zig");
@@ -317,6 +318,8 @@ fn spawnTwoPlayers() !void {
 // Load a level from any path without spawning players (for level editor view).
 pub fn loadLevel(path: []const u8) !bool {
     reset();
+    try gravestone.warmColliderCache();
+
     const parsed = try parseFromPath(path);
     defer parsed.deinit();
     const lev = parsed.value;
@@ -346,6 +349,7 @@ pub fn reload() !void {
 pub fn cleanup() void {
     rope.cleanup();
     player.cleanup();
+    gravestone.clearScheduledSpawns();
     sensor.cleanup();
     projectile.cleanup();
     weapon.cleanupTrails();

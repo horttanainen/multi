@@ -144,6 +144,7 @@ pub const levelEditorScaleRepeatDelayMs = 75;
 pub const quitGameDelayMs = 500;
 pub const reloadLevelDelayMs = 200;
 pub const respawnDelayMs = 2000;
+pub const gravestoneSpawnDelayMs = 500;
 pub const ropeToggleDelayMs = 300;
 pub const sprayPaintDelayMs = 2000;
 

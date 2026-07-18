@@ -47,6 +47,7 @@ const background_paint = @import("background_paint.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const musicConfigMenu = @import("musicConfigMenu.zig");
 const gibbing = @import("gibbing.zig");
+const gravestone = @import("gravestone.zig");
 const data = @import("data.zig");
 const window = @import("window.zig");
 const Entity = entity.Entity;
@@ -170,6 +171,7 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    try gravestone.init();
     try particle.init("particles/circle.png");
     try blood.init();
     try settings.init();
@@ -253,6 +255,7 @@ pub fn main(init: std.process.Init) !void {
     };
     particle.cleanup();
     level.cleanup();
+    gravestone.cleanup();
     gibbing.cleanup();
     gamepad.cleanup();
     keyboard.cleanup();
@@ -284,6 +287,7 @@ fn gameLoop() !void {
         try level.next();
     }
 
+    gravestone.processScheduledSpawns();
     player.clampAllSpeeds();
     projectile.applyPropulsion();
 
