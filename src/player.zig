@@ -76,6 +76,7 @@ pub const bodyColliderHalfWidth: f32 = 0.2;
 pub const bodyColliderHalfHeight: f32 = 0.6;
 pub const bodyColliderOffset: vec.Vec2 = .{ .x = 0, .y = -0.5 };
 pub const lowerBodyColliderRadius: f32 = 0.3;
+pub const gibHealthThreshold: f32 = -5;
 pub const centerOffset: vec.Vec2 = .{
     .x = 0,
     .y = ((bodyColliderOffset.y - bodyColliderHalfHeight) +
@@ -1002,7 +1003,7 @@ pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
     p.health -= d;
 
     const isFatal = p.health <= 0;
-    const isGibbing = p.health <= -5;
+    const isGibbing = p.health <= gibHealthThreshold;
     const profileDeath = if (isFatal) perf.beginPlayerDeathCapture(p.id, isGibbing) else false;
     const deathTriggerStart = if (profileDeath) perf.begin(.player_death) else 0;
     defer {

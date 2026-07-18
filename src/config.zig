@@ -15,6 +15,8 @@ pub const perf = .{
     .player_death = false,
 };
 
+pub const debugAutoMissileExplosionDelayMs: ?u32 = null;
+
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 

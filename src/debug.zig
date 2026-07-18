@@ -3,15 +3,22 @@ const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
 const box2d = @import("box2d.zig");
 
-const IVec2 = @import("vector.zig").IVec2;
+const vec = @import("vector.zig");
+const IVec2 = vec.IVec2;
 const camera = @import("camera.zig");
 const viewport = @import("viewport.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const m2Pixel = conv.m2Pixel;
 const renderer = @import("renderer.zig");
+const player = @import("player.zig");
+const projectile = @import("projectile.zig");
+const time = @import("time.zig");
 
 var dDraw: ?box2d.c.b2DebugDraw = null;
+var autoMissileExplosionNextAtMs: f64 = 0;
+const autoMissileExplosionMaximumDamage: f32 = 100;
+
 pub fn init() !void {
     var debugDraw = box2d.c.b2DefaultDebugDraw();
     debugDraw.context = null;
@@ -25,6 +32,64 @@ pub fn init() !void {
     debugDraw.drawContacts = true;
     debugDraw.drawFrictionImpulses = false;
     dDraw = debugDraw;
+}
+
+pub fn update() !void {
+    if (comptime config.debugAutoMissileExplosionDelayMs == null) return;
+    try triggerAutoMissileExplosion();
+}
+
+fn triggerAutoMissileExplosion() !void {
+    const delayMs = config.debugAutoMissileExplosionDelayMs orelse return;
+    if (autoMissileExplosionNextAtMs == 0) {
+        autoMissileExplosionNextAtMs = @floatFromInt(delayMs);
+    }
+
+    const nowMs = time.now() * 1000.0;
+    if (nowMs < autoMissileExplosionNextAtMs) return;
+    autoMissileExplosionNextAtMs = nowMs + @as(f64, @floatFromInt(config.respawnDelayMs)) + 100.0;
+
+    const attacker = player.players.get(0) orelse {
+        std.log.err("triggerAutoMissileExplosion: attacker player 0 is missing", .{});
+        return;
+    };
+    const victim = player.players.getPtr(1) orelse {
+        std.log.err("triggerAutoMissileExplosion: victim player 1 is missing", .{});
+        return;
+    };
+    if (victim.isDead) return;
+    if (attacker.weapons.len == 0) {
+        std.log.err("triggerAutoMissileExplosion: attacker player 0 has no weapons", .{});
+        return;
+    }
+
+    const missile = attacker.weapons[0].projectile orelse {
+        std.log.err("triggerAutoMissileExplosion: player 0 weapon 0 has no projectile", .{});
+        return;
+    };
+    const explosion = missile.explosion orelse {
+        std.log.err("triggerAutoMissileExplosion: missile has no explosion", .{});
+        return;
+    };
+
+    const victimBodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(victim.bodyId));
+    const attackerPosition = vec.add(victimBodyPosition, .{ .x = -5, .y = 0 });
+    box2d.c.b2Body_SetTransform(attacker.bodyId, vec.toBox2d(attackerPosition), box2d.c.b2Body_GetRotation(attacker.bodyId));
+    box2d.c.b2Body_SetLinearVelocity(attacker.bodyId, box2d.c.b2Vec2_zero);
+
+    const guaranteedGibHealth = autoMissileExplosionMaximumDamage + player.gibHealthThreshold - 1.0;
+    if (victim.health > guaranteedGibHealth) {
+        const setupDamage = victim.health - guaranteedGibHealth;
+        const setupResult = try player.damage(victim.id, setupDamage, attacker.id);
+        if (!setupResult.applied or setupResult.fatal) {
+            std.log.err("triggerAutoMissileExplosion: failed to prepare victim {d} for gibbing", .{victim.id});
+            return;
+        }
+    }
+
+    const victimCenter = vec.add(victimBodyPosition, player.centerOffset);
+    std.log.info("debug.auto_missile_explosion victim={d} delay_ms={d} health={d:.1}", .{ victim.id, delayMs, victim.health });
+    try projectile.explodeAt(victimCenter, explosion, attacker.id);
 }
 
 fn b2Mul(rot: box2d.c.b2Rot, v: box2d.c.b2Vec2) box2d.c.b2Vec2 {

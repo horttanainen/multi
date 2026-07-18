@@ -4,8 +4,6 @@ const sdl = @import("sdl.zig");
 const runtime = @import("runtime.zig");
 
 const config = @import("config.zig");
-const Vec2 = @import("vector.zig").Vec2;
-const IVec2 = @import("vector.zig").IVec2;
 const allocator = @import("allocator.zig");
 const state = @import("state.zig");
 const gpu = @import("gpu.zig");
@@ -313,6 +311,7 @@ fn gameLoop() !void {
     perf.recordPlayerDeathGameLoopStage(.giblet_contacts, gibletContactsStart);
 
     const projectileContactsStart = perf.begin(.player_death);
+    try debug.update();
     try projectile.checkContacts();
     perf.recordPlayerDeathGameLoopStage(.projectile_contacts, projectileContactsStart);
 
