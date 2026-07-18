@@ -158,7 +158,7 @@ pub fn emit(emission: Emission) !void {
             .group_index = loadedConfig.groupIndex,
             .category_bits = collision.CATEGORY_BLOOD,
             .mask_bits = collision.MASK_BLOOD,
-            .is_bullet = true,
+            .is_bullet = false,
             .behaviors = .{
                 .stain = .{
                     .color = stain.color,
