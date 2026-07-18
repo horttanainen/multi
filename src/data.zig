@@ -84,31 +84,31 @@ pub const WeaponData = struct {
     directDamage: f32,
 };
 
+pub const ParticleStainData = struct {
+    minRadius: f32,
+    maxRadius: f32,
+    color: sprite.Color,
+};
+
 pub const ParticleData = struct {
-    spritePath: []const u8,
-    particlesPerDamage: f32,
+    particlesPerUnit: f32,
     maxParticles: u32,
     minSpeedVariation: f32,
     maxSpeedVariation: f32,
     minScale: f32,
     maxScale: f32,
-    minStainRadius: f32,
-    maxStainRadius: f32,
 
     lifetimeMs: u32,
-    colorR: u8,
-    colorG: u8,
-    colorB: u8,
+    color: sprite.Color,
+    stain: ?ParticleStainData,
 
     linearDamping: f32,
     gravityScale: f32,
     density: f32,
     friction: f32,
     restitution: f32,
-    boxSize: f32,
     groupIndex: i32,
 };
-
 
 pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
@@ -189,25 +189,20 @@ fn initParticles() !void {
 
     const Entry = struct {
         key: []const u8,
-        spritePath: []const u8,
-        particlesPerDamage: f32,
+        particlesPerUnit: f32,
         maxParticles: u32,
         minSpeedVariation: f32,
         maxSpeedVariation: f32,
         minScale: f32,
         maxScale: f32,
-        minStainRadius: f32,
-        maxStainRadius: f32,
         lifetimeMs: u32,
-        colorR: u8,
-        colorG: u8,
-        colorB: u8,
+        color: sprite.Color,
+        stain: ?ParticleStainData = null,
         linearDamping: f32,
         gravityScale: f32,
         density: f32,
         friction: f32,
         restitution: f32,
-        boxSize: f32,
         groupIndex: i32,
     };
 
@@ -219,35 +214,25 @@ fn initParticles() !void {
 
     for (parsed.value) |entry| {
         const key = allocator.dupe(u8, entry.key) catch continue;
-        const spritePath = allocator.dupe(u8, entry.spritePath) catch {
-            allocator.free(key);
-            continue;
-        };
 
         particleDataMap.put(allocator, key, .{
-            .spritePath = spritePath,
-            .particlesPerDamage = entry.particlesPerDamage,
+            .particlesPerUnit = entry.particlesPerUnit,
             .maxParticles = entry.maxParticles,
             .minSpeedVariation = entry.minSpeedVariation,
             .maxSpeedVariation = entry.maxSpeedVariation,
             .minScale = entry.minScale,
             .maxScale = entry.maxScale,
-            .minStainRadius = entry.minStainRadius,
-            .maxStainRadius = entry.maxStainRadius,
             .lifetimeMs = entry.lifetimeMs,
-            .colorR = entry.colorR,
-            .colorG = entry.colorG,
-            .colorB = entry.colorB,
+            .color = entry.color,
+            .stain = entry.stain,
             .linearDamping = entry.linearDamping,
             .gravityScale = entry.gravityScale,
             .density = entry.density,
             .friction = entry.friction,
             .restitution = entry.restitution,
-            .boxSize = entry.boxSize,
             .groupIndex = entry.groupIndex,
         }) catch {
             allocator.free(key);
-            allocator.free(spritePath);
             continue;
         };
 
@@ -746,7 +731,6 @@ pub fn cleanup() void {
     var particleIter = particleDataMap.iterator();
     while (particleIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
-        allocator.free(entry.value_ptr.spritePath);
     }
     particleDataMap.deinit(allocator);
 

@@ -17,7 +17,7 @@ const runtime = @import("runtime.zig");
 
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
-const particle = @import("particle.zig");
+const blood = @import("blood.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const rope = @import("rope.zig");
@@ -981,7 +981,7 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
     // Generate blood if player took damage
     if (d > 0) {
         const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-        try particle.createBloodParticles(playerPosM, d, playerVelocity);
+        try blood.createParticles(playerPosM, d, playerVelocity);
     }
 
     if (p.health <= 0) {

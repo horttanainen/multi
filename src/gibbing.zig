@@ -8,7 +8,7 @@ const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const runtime = @import("runtime.zig");
-const particle = @import("particle.zig");
+const blood = @import("blood.zig");
 const time = @import("time.zig");
 
 const GibletSet = struct {
@@ -162,7 +162,7 @@ fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
     const coloredSpriteUuid = try sprite.createMutableCopy(gibletSpriteUuid);
     errdefer sprite.cleanupLater(coloredSpriteUuid);
 
-    const bloodColor = try particle.currentBloodColor();
+    const bloodColor = try blood.currentColor();
 
     try sprite.colorMatchingPixels(coloredSpriteUuid, bloodColor, sprite.isCyan);
     try sprite.colorMatchingPixels(coloredSpriteUuid, playerColor, sprite.isWhite);
@@ -219,7 +219,7 @@ fn spatterFromGiblet(gibletBodyId: box2d.c.b2BodyId, targetShapeId: box2d.c.b2Sh
     nextAllowed.* = now + gibletBloodCooldownSeconds;
     const pos = vec.fromBox2d(box2d.c.b2Body_GetPosition(gibletBodyId));
     const damage = std.math.clamp((speed - gibletBloodMinImpactSpeed) * gibletBloodDamagePerSpeed, gibletBloodMinDamage, gibletBloodMaxDamage);
-    try particle.createBloodParticlesFromImpact(pos, damage, velocity);
+    try blood.createParticlesFromImpact(pos, damage, velocity);
 }
 
 fn handleGibletContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {

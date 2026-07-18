@@ -73,7 +73,7 @@ const RuntimeAtlasSurface = struct {
     owned: bool,
 };
 
-const BloodSplatSpot = struct {
+const StainSpot = struct {
     offsetX: f32,
     offsetY: f32,
     radius: f32,
@@ -296,6 +296,21 @@ pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlig
 
     const pivotSdl: sdl.Point = if (pivot) |p| p else .{ .x = 0, .y = 0 };
     try gpu.renderCopyEx(sprite.texture, null, &rect, angle * 180.0 / PI, if (pivot != null) &pivotSdl else null, if (flip) .horizontal else .none);
+}
+
+pub fn drawWithScale(spriteValue: Sprite, centerPos: vec.IVec2, angle: f32, scale: vec.Vec2, maybeColor: ?Color) !void {
+    if (scale.x <= 0.0 or scale.y <= 0.0) {
+        return;
+    }
+
+    var scaledSprite = spriteValue;
+    scaledSprite.scale = scale;
+    scaledSprite.sizeP = .{
+        .x = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(spriteValue.surface.w)) * scale.x)))),
+        .y = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(spriteValue.surface.h)) * scale.y)))),
+    };
+    scaledSprite.sizeM = conv.pixel2M(scaledSprite.sizeP);
+    try drawWithOptions(scaledSprite, centerPos, angle, false, false, 0, maybeColor, null);
 }
 
 pub fn drawSelectionMask(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, alpha: u8) !void {
@@ -834,7 +849,7 @@ fn worldDirectionToSpritePixelDirection(directionWorld: vec.Vec2, rotation: f32,
     };
 }
 
-fn blendBloodPixel(pixels: [*]u8, pixelIndex: usize, color: Color, strength: f32, noise: f32) void {
+fn blendStainPixel(pixels: [*]u8, pixelIndex: usize, color: Color, strength: f32, noise: f32) void {
     const tint = std.math.clamp(strength, 0.0, 0.95);
     const keep = 1.0 - tint;
     const darken = 1.0 - tint * 0.32;
@@ -844,16 +859,16 @@ fn blendBloodPixel(pixels: [*]u8, pixelIndex: usize, color: Color, strength: f32
     const oldG = @as(f32, @floatFromInt(pixels[pixelIndex + 1]));
     const oldR = @as(f32, @floatFromInt(pixels[pixelIndex + 2]));
 
-    const bloodB = @as(f32, @floatFromInt(color.b)) * colorJitter;
-    const bloodG = @as(f32, @floatFromInt(color.g)) * colorJitter;
-    const bloodR = @as(f32, @floatFromInt(color.r)) * colorJitter;
+    const stainB = @as(f32, @floatFromInt(color.b)) * colorJitter;
+    const stainG = @as(f32, @floatFromInt(color.g)) * colorJitter;
+    const stainR = @as(f32, @floatFromInt(color.r)) * colorJitter;
 
-    pixels[pixelIndex + 0] = clampByte(oldB * keep * darken + bloodB * tint);
-    pixels[pixelIndex + 1] = clampByte(oldG * keep * darken + bloodG * tint);
-    pixels[pixelIndex + 2] = clampByte(oldR * keep * darken + bloodR * tint);
+    pixels[pixelIndex + 0] = clampByte(oldB * keep * darken + stainB * tint);
+    pixels[pixelIndex + 1] = clampByte(oldG * keep * darken + stainG * tint);
+    pixels[pixelIndex + 2] = clampByte(oldR * keep * darken + stainR * tint);
 }
 
-pub fn bloodSplatOnSurface(
+pub fn stainSplatOnSurface(
     spriteUuid: u64,
     centerWorld: vec.Vec2,
     radiusWorld: f32,
@@ -868,12 +883,12 @@ pub fn bloodSplatOnSurface(
     }
 
     const s = sprites.getLocking(spriteUuid) orelse {
-        std.log.warn("bloodSplatOnSurface: sprite {d} not found", .{spriteUuid});
+        std.log.warn("stainSplatOnSurface: sprite {d} not found", .{spriteUuid});
         return error.SpriteNotFound;
     };
 
     if (s.scale.x <= 0.0 or s.scale.y <= 0.0) {
-        std.log.warn("bloodSplatOnSurface: sprite {d} has invalid scale ({d},{d})", .{ spriteUuid, s.scale.x, s.scale.y });
+        std.log.warn("stainSplatOnSurface: sprite {d} has invalid scale ({d},{d})", .{ spriteUuid, s.scale.x, s.scale.y });
         return null;
     }
 
@@ -891,7 +906,7 @@ pub fn bloodSplatOnSurface(
     const sideDir = vec.Vec2{ .x = -impactDir.y, .y = impactDir.x };
     const mainStretch = 1.0 + @min(impactSpeed * 0.08, 1.25);
 
-    var spots: [11]BloodSplatSpot = undefined;
+    var spots: [11]StainSpot = undefined;
     var spotCount: usize = 0;
     spots[spotCount] = .{
         .offsetX = 0.0,
@@ -928,6 +943,7 @@ pub fn bloodSplatOnSurface(
         }
         spotCount += 1;
     }
+
     var extent = radiusPixels * mainStretch;
     for (spots[0..spotCount]) |spot| {
         extent = @max(extent, @abs(spot.offsetX) + spot.radius);
@@ -951,6 +967,7 @@ pub fn bloodSplatOnSurface(
     const maxX: usize = @intCast(@min(widthI - 1, rawMaxX));
     const minY: usize = @intCast(@max(0, rawMinY));
     const maxY: usize = @intCast(@min(heightI - 1, rawMaxY));
+
     var changed = false;
     var dirtyMinX: i32 = widthI;
     var dirtyMinY: i32 = heightI;
@@ -965,6 +982,7 @@ pub fn bloodSplatOnSurface(
             if (pixels[pixelIndex + 3] == 0) {
                 continue;
             }
+
             const xi: i32 = @intCast(x);
             const yi: i32 = @intCast(y);
             const px = @as(f32, @floatFromInt(xi)) - centerPixelF.x;
@@ -998,7 +1016,7 @@ pub fn bloodSplatOnSurface(
                 continue;
             }
 
-            blendBloodPixel(pixels, pixelIndex, color, strongest, textureNoise);
+            blendStainPixel(pixels, pixelIndex, color, strongest, textureNoise);
             changed = true;
             dirtyMinX = @min(dirtyMinX, xi);
             dirtyMinY = @min(dirtyMinY, yi);

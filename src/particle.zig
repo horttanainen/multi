@@ -1,224 +1,173 @@
 const std = @import("std");
-const sdl = @import("sdl.zig");
 
-const vec = @import("vector.zig");
-const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
-const config = @import("config.zig");
-const collision = @import("collision.zig");
-const thread_safe = @import("thread_safe_array_list.zig");
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const runtime = @import("runtime.zig");
-const data = @import("data.zig");
+const sprite = @import("sprite.zig");
+const thread_safe = @import("thread_safe_array_list.zig");
+const time = @import("time.zig");
+const vec = @import("vector.zig");
+
+pub const StainBehavior = struct {
+    color: sprite.Color,
+    radius: f32,
+    target_mask: u64,
+    query_radius_scale: f32 = 2.4,
+    destroy_on_contact: bool = true,
+};
+
+pub const Behaviors = struct {
+    stain: ?StainBehavior = null,
+};
+
+pub const CircleSpawn = struct {
+    position: vec.Vec2,
+    velocity: vec.Vec2,
+    visual_scale: f32,
+    radius: ?f32 = null,
+    lifetime_ms: u32,
+    color: ?sprite.Color = null,
+    linear_damping: f32 = 0,
+    gravity_scale: f32 = 1,
+    density: f32 = 1,
+    friction: f32 = 0,
+    restitution: f32 = 0,
+    group_index: i32 = 0,
+    category_bits: u64,
+    mask_bits: u64,
+    is_bullet: bool = false,
+    behaviors: Behaviors = .{},
+    seed: u64,
+};
 
 pub const Particle = struct {
     bodyId: box2d.c.b2BodyId,
-    spriteUuid: u64,
     state: ?box2d.State,
     color: ?sprite.Color,
-    timerId: sdl.TimerID,
-    scale: f32,
-    stainRadius: f32,
+    visual_scale: f32,
+    expires_at: f64,
+    behaviors: Behaviors,
     seed: u64,
 };
 
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
-var bloodStainTextureUpdates = std.AutoArrayHashMapUnmanaged(u64, vec.IRect).empty;
-const bloodStainTextureUpdatesPerFrame: usize = 4;
-var loadedBloodParticleConfig: ?data.ParticleData = null;
+var stainTextureUpdates = std.AutoArrayHashMapUnmanaged(u64, vec.IRect).empty;
+const stainTextureUpdatesPerFrame: usize = 4;
+var circleSpriteUuid: ?u64 = null;
 
-pub fn setBloodParticleConfig(cfg: data.ParticleData) void {
-    loadedBloodParticleConfig = cfg;
-}
+pub fn init(circleSpritePath: []const u8) !void {
+    if (circleSpriteUuid != null) {
+        return;
+    }
 
-fn requireBloodParticleConfig(functionName: []const u8) !data.ParticleData {
-    const cfg = loadedBloodParticleConfig orelse {
-        std.log.err("{s}: blood particle config has not been loaded", .{functionName});
-        return error.BloodParticleConfigMissing;
-    };
-    return cfg;
-}
-
-pub fn currentBloodColor() !sprite.Color {
-    const cfg = try requireBloodParticleConfig("currentBloodColor");
-    return .{ .r = cfg.colorR, .g = cfg.colorG, .b = cfg.colorB };
-}
-
-pub fn create(bodyId: box2d.c.b2BodyId, lifetime: u32, color: ?sprite.Color, scale: f32, stainRadius: f32, seed: u64) !void {
-    const cfg = try requireBloodParticleConfig("create");
-    const particleSpriteUuid = try sprite.createFromImg(
-        cfg.spritePath,
-        .{ .x = scale, .y = scale },
-        .{ .x = 0, .y = 0 },
+    circleSpriteUuid = try sprite.createFromImg(
+        circleSpritePath,
+        .{ .x = 1, .y = 1 },
+        vec.izero,
     );
-    errdefer sprite.cleanupLater(particleSpriteUuid);
+}
 
-    const id_int: usize = @bitCast(bodyId);
-    const ptr: ?*anyopaque = @ptrFromInt(id_int);
-    const timerId = sdl.addTimer(lifetime, markParticleForCleanup, ptr);
-    errdefer _ = sdl.removeTimer(timerId);
+fn validateBehaviors(behaviors: Behaviors) !void {
+    const stain = behaviors.stain orelse return;
+    if (stain.radius <= 0 or stain.query_radius_scale <= 0) {
+        std.log.err("validateBehaviors: stain radius and query scale must be positive", .{});
+        return error.InvalidStainBehavior;
+    }
+}
 
-    const particle = Particle{
-        .bodyId = bodyId,
-        .spriteUuid = particleSpriteUuid,
-        .state = null,
-        .color = color,
-        .timerId = timerId,
-        .scale = scale,
-        .stainRadius = stainRadius,
-        .seed = seed,
+pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
+    const spriteUuid = circleSpriteUuid orelse {
+        std.log.err("spawnCircle: particle component is not initialized", .{});
+        return error.ParticleComponentNotInitialized;
     };
+    if (spawn.visual_scale <= 0) {
+        std.log.err("spawnCircle: visual scale must be positive", .{});
+        return error.InvalidCircleParticleSize;
+    }
 
-    try particles.putLocking(bodyId, particle);
+    const circleSprite = sprite.getSprite(spriteUuid) orelse {
+        std.log.err("spawnCircle: shared circle sprite {d} is missing", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+    const defaultRadius = @max(circleSprite.sizeM.x, circleSprite.sizeM.y) * spawn.visual_scale * 0.5;
+    const radius = spawn.radius orelse defaultRadius;
+    if (radius <= 0) {
+        std.log.err("spawnCircle: collider radius must be positive", .{});
+        return error.InvalidCircleParticleSize;
+    }
+    try validateBehaviors(spawn.behaviors);
+
+    var bodyDef = box2d.createNonRotatingDynamicBodyDef(spawn.position);
+    bodyDef.isBullet = spawn.is_bullet;
+    bodyDef.linearDamping = spawn.linear_damping;
+    bodyDef.gravityScale = spawn.gravity_scale;
+    bodyDef.linearVelocity = vec.toBox2d(spawn.velocity);
+
+    const bodyId = try box2d.createBody(bodyDef);
+    errdefer box2d.c.b2DestroyBody(bodyId);
+
+    var shapeDef = box2d.c.b2DefaultShapeDef();
+    shapeDef.density = spawn.density;
+    shapeDef.material.friction = spawn.friction;
+    shapeDef.material.restitution = spawn.restitution;
+    shapeDef.filter.groupIndex = spawn.group_index;
+    shapeDef.filter.categoryBits = spawn.category_bits;
+    shapeDef.filter.maskBits = spawn.mask_bits;
+    shapeDef.enableHitEvents = spawn.behaviors.stain != null;
+    shapeDef.enableContactEvents = spawn.behaviors.stain != null;
+
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = radius,
+    };
+    _ = box2d.c.b2CreateCircleShape(bodyId, &shapeDef, &circle);
+
+    try particles.putLocking(bodyId, .{
+        .bodyId = bodyId,
+        .state = null,
+        .color = spawn.color,
+        .visual_scale = spawn.visual_scale,
+        .expires_at = time.now() + @as(f64, @floatFromInt(spawn.lifetime_ms)) / 1000.0,
+        .behaviors = spawn.behaviors,
+        .seed = spawn.seed,
+    });
+
+    return bodyId;
 }
 
 pub fn updateStates() void {
     particles.mutex.lockUncancelable(runtime.io());
     defer particles.mutex.unlock(runtime.io());
-    for (particles.map.values()) |*p| {
-        p.state = box2d.getState(p.bodyId);
+
+    for (particles.map.values()) |*particle| {
+        particle.state = box2d.getState(particle.bodyId);
     }
 }
 
 pub fn drawAll() !void {
+    const spriteUuid = circleSpriteUuid orelse {
+        std.log.err("drawAll: particle component is not initialized", .{});
+        return error.ParticleComponentNotInitialized;
+    };
+    const circleSprite = sprite.getSprite(spriteUuid) orelse {
+        std.log.err("drawAll: shared circle sprite {d} is missing", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
     particles.mutex.lockUncancelable(runtime.io());
     defer particles.mutex.unlock(runtime.io());
-    for (particles.map.values()) |*p| {
-        try draw(p);
+
+    for (particles.map.values()) |*particle| {
+        const currentState = box2d.getState(particle.bodyId);
+        const state = box2d.getInterpolatedState(particle.state, currentState);
+        const pos = camera.relativePosition(conv.m2Pixel(state.pos));
+        const scale = vec.Vec2{ .x = particle.visual_scale, .y = particle.visual_scale };
+        try sprite.drawWithScale(circleSprite, pos, state.rotAngle, scale, particle.color);
     }
-}
-
-fn draw(particle: *Particle) !void {
-    const particleSprite = sprite.getSprite(particle.spriteUuid) orelse return;
-
-    const currentState = box2d.getState(particle.bodyId);
-    const state = box2d.getInterpolatedState(particle.state, currentState);
-
-    const pos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-    try sprite.drawWithOptions(particleSprite, pos, state.rotAngle, false, false, 0, particle.color, null);
-}
-
-fn randomRange(min: f32, max: f32) f32 {
-    return min + runtime.random().float(f32) * (max - min);
-}
-
-fn randomBaseBloodDirection() box2d.c.b2Vec2 {
-    const roll = runtime.random().float(f32);
-    var angle: f32 = undefined;
-    if (roll < 0.68) {
-        angle = -std.math.pi * 0.5 + randomRange(-std.math.pi * 0.42, std.math.pi * 0.42);
-    } else if (roll < 0.9) {
-        const side: f32 = if (runtime.random().float(f32) < 0.5) -1.0 else 1.0;
-        angle = if (side < 0.0)
-            std.math.pi + randomRange(-std.math.pi * 0.25, std.math.pi * 0.25)
-        else
-            randomRange(-std.math.pi * 0.25, std.math.pi * 0.25);
-    } else {
-        angle = runtime.random().float(f32) * std.math.pi * 2.0;
-    }
-
-    return .{
-        .x = @cos(angle),
-        .y = @sin(angle),
-    };
-}
-
-fn randomBloodDirection(directionBias: vec.Vec2, biasStrength: f32) box2d.c.b2Vec2 {
-    const base = randomBaseBloodDirection();
-    const biasLength = vec.magnitude(directionBias);
-    if (biasLength < 0.001 or biasStrength <= 0.0) {
-        return base;
-    }
-
-    const bias = box2d.c.b2Vec2{
-        .x = directionBias.x / biasLength,
-        .y = directionBias.y / biasLength,
-    };
-    const mix = std.math.clamp(biasStrength, 0.0, 0.9) * (0.35 + runtime.random().float(f32) * 0.65);
-    const mixed = box2d.c.b2Vec2{
-        .x = base.x * (1.0 - mix) + bias.x * mix,
-        .y = base.y * (1.0 - mix) + bias.y * mix,
-    };
-    const length = @sqrt(mixed.x * mixed.x + mixed.y * mixed.y);
-    if (length < 0.001) {
-        return base;
-    }
-
-    return .{
-        .x = mixed.x / length,
-        .y = mixed.y / length,
-    };
-}
-
-fn randomSpawnPosition(pos: vec.Vec2) vec.Vec2 {
-    const angle = runtime.random().float(f32) * std.math.pi * 2.0;
-    const distance = runtime.random().float(f32) * 0.18;
-    return .{
-        .x = pos.x + @cos(angle) * distance,
-        .y = pos.y + @sin(angle) * distance,
-    };
-}
-
-fn createBloodParticlesBiased(pos: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2, directionBiasStrength: f32, inheritedVelocityScale: f32) !void {
-    const cfg = try requireBloodParticleConfig("createBloodParticlesBiased");
-    if (damage <= 0.0) {
-        return;
-    }
-
-    const scaledParticleCount = @ceil(damage * cfg.particlesPerDamage);
-    const particleCount: u32 = @min(cfg.maxParticles, @max(1, @as(u32, @intFromFloat(scaledParticleCount))));
-    if (particleCount == 0) return;
-
-    const bloodColor = sprite.Color{ .r = cfg.colorR, .g = cfg.colorG, .b = cfg.colorB };
-
-    for (0..particleCount) |_| {
-        const dir = randomBloodDirection(inheritedVelocity, directionBiasStrength);
-        const spawnPos = randomSpawnPosition(pos);
-        var bodyDef = box2d.createNonRotatingDynamicBodyDef(spawnPos);
-        bodyDef.isBullet = true;
-        bodyDef.linearDamping = cfg.linearDamping;
-        bodyDef.gravityScale = cfg.gravityScale;
-
-        const speedRoll = runtime.random().float(f32);
-        const speedVariation = cfg.minSpeedVariation + (cfg.maxSpeedVariation - cfg.minSpeedVariation) * speedRoll * speedRoll;
-        const inherited = box2d.mul(vec.toBox2d(inheritedVelocity), inheritedVelocityScale);
-        bodyDef.linearVelocity = box2d.add(box2d.mul(dir, speedVariation), inherited);
-
-        const bodyId = try box2d.createBody(bodyDef);
-
-        var circleShapeDef = box2d.c.b2DefaultShapeDef();
-        circleShapeDef.density = cfg.density;
-        circleShapeDef.material.friction = cfg.friction;
-        circleShapeDef.material.restitution = cfg.restitution;
-        circleShapeDef.filter.groupIndex = cfg.groupIndex;
-        circleShapeDef.filter.categoryBits = collision.CATEGORY_BLOOD;
-        circleShapeDef.filter.maskBits = collision.MASK_BLOOD;
-        circleShapeDef.enableHitEvents = true;
-        circleShapeDef.enableContactEvents = true;
-
-        const circleShape = box2d.c.b2Circle{
-            .center = box2d.c.b2Vec2_zero,
-            .radius = cfg.boxSize,
-        };
-        _ = box2d.c.b2CreateCircleShape(bodyId, &circleShapeDef, &circleShape);
-
-        const scale = cfg.minScale + runtime.random().float(f32) * (cfg.maxScale - cfg.minScale);
-        const stainRadius = cfg.minStainRadius + runtime.random().float(f32) * (cfg.maxStainRadius - cfg.minStainRadius);
-        try create(bodyId, cfg.lifetimeMs, bloodColor, scale, stainRadius, runtime.random().int(u64));
-    }
-}
-
-pub fn createBloodParticles(pos: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2) !void {
-    try createBloodParticlesBiased(pos, damage, inheritedVelocity, 0.25, 0.35);
-}
-
-pub fn createBloodParticlesFromImpact(pos: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2) !void {
-    try createBloodParticlesBiased(pos, damage, inheritedVelocity, 0.85, 0.55);
 }
 
 const OverlapContext = struct {
@@ -228,74 +177,56 @@ const OverlapContext = struct {
 
 fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
-
-    // Get the body from the shape
     const bodyId = box2d.c.b2Shape_GetBody(shapeId);
 
-    // Check if we already have this body (multiple shapes can belong to same body)
     for (ctx.bodies[0..ctx.count]) |existingBody| {
-        if (box2d.c.b2Body_IsValid(existingBody) and
-            box2d.c.B2_ID_EQUALS(existingBody, bodyId))
-        {
-            return true; // Already added, skip
+        if (box2d.c.b2Body_IsValid(existingBody) and box2d.c.B2_ID_EQUALS(existingBody, bodyId)) {
+            return true;
         }
     }
 
-    // Add body if we have space
-    if (ctx.count < 100) {
+    if (ctx.count < ctx.bodies.len) {
         ctx.bodies[ctx.count] = bodyId;
         ctx.count += 1;
     }
-
-    return true; // Continue the query
+    return true;
 }
 
-fn queueBloodStainTextureUpdate(spriteUuid: u64, dirtyRect: vec.IRect) !void {
-    const maybePendingRect = bloodStainTextureUpdates.getPtr(spriteUuid);
-    if (maybePendingRect == null) {
-        try bloodStainTextureUpdates.put(allocator, spriteUuid, dirtyRect);
+fn queueStainTextureUpdate(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    const pendingRect = stainTextureUpdates.getPtr(spriteUuid);
+    if (pendingRect == null) {
+        try stainTextureUpdates.put(allocator, spriteUuid, dirtyRect);
         return;
     }
 
-    const pendingRect = maybePendingRect.?;
-    pendingRect.* = vec.irectUnion(pendingRect.*, dirtyRect);
+    pendingRect.?.* = vec.irectUnion(pendingRect.?.*, dirtyRect);
 }
 
-pub fn processBloodStainTextureUpdates() void {
+pub fn processStainTextureUpdates() void {
+    if (stainTextureUpdates.count() == 0) {
+        return;
+    }
+
     var processed: usize = 0;
-    while (processed < bloodStainTextureUpdatesPerFrame and bloodStainTextureUpdates.count() > 0) : (processed += 1) {
-        const spriteUuid = bloodStainTextureUpdates.keys()[0];
-        const dirtyRect = bloodStainTextureUpdates.values()[0];
-        _ = bloodStainTextureUpdates.swapRemove(spriteUuid);
+    while (processed < stainTextureUpdatesPerFrame and stainTextureUpdates.count() > 0) : (processed += 1) {
+        const spriteUuid = stainTextureUpdates.keys()[0];
+        const dirtyRect = stainTextureUpdates.values()[0];
+        _ = stainTextureUpdates.swapRemove(spriteUuid);
 
         sprite.updateTextureVisualRegionFromSurface(spriteUuid, dirtyRect) catch |err| {
-            std.log.warn("processBloodStainTextureUpdates: sprite {d} update failed with {}", .{ spriteUuid, err });
+            std.log.warn("processStainTextureUpdates: sprite {d} update failed with {}", .{ spriteUuid, err });
         };
     }
 }
 
-fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
-    const cfg = try requireBloodParticleConfig("stainSurface");
-
-    const maybeParticle = particles.getLocking(bloodBodyId);
-    if (maybeParticle == null) {
-        return;
-    }
-    const bloodParticle = maybeParticle.?;
-
-    if (!box2d.c.b2Body_IsValid(bloodBodyId)) {
-        std.log.warn("stainSurface: blood body became invalid before staining", .{});
+fn stainSurfaces(particle: Particle, stain: StainBehavior) !void {
+    if (!box2d.c.b2Body_IsValid(particle.bodyId)) {
+        std.log.warn("stainSurfaces: particle body became invalid before staining", .{});
         return;
     }
 
-    const bloodPos = box2d.c.b2Body_GetPosition(bloodBodyId);
-    const bloodVec = vec.fromBox2d(bloodPos);
-    const impactVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bloodBodyId));
-
-    const bloodStainRadius = bloodParticle.stainRadius;
-    const bloodColor = bloodParticle.color orelse sprite.Color{ .r = cfg.colorR, .g = cfg.colorG, .b = cfg.colorB };
-
-    // Setup overlap query to find all entities within blood stain radius
+    const particlePosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(particle.bodyId));
+    const impactVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(particle.bodyId));
     var context = OverlapContext{
         .bodies = undefined,
         .count = 0,
@@ -303,166 +234,153 @@ fn stainSurface(bloodBodyId: box2d.c.b2BodyId) !void {
 
     const circle = box2d.c.b2Circle{
         .center = box2d.c.b2Vec2_zero,
-        .radius = bloodStainRadius * 2.4,
+        .radius = stain.radius * stain.query_radius_scale,
     };
-
     const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(bloodVec),
+        .p = vec.toBox2d(particlePosition),
         .q = box2d.c.b2Rot_identity,
     };
-
     var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = collision.MASK_BLOOD_QUERY;
-    filter.maskBits = collision.MASK_BLOOD_QUERY;
+    filter.categoryBits = stain.target_mask;
+    filter.maskBits = stain.target_mask;
 
-    // Query for overlapping bodies
     box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
 
-    // Stain all overlapping entities
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             continue;
         }
 
-        const ent = entity.entities.getPtrLocking(bodyId) orelse {
-            std.log.warn("stainSurface: target body has no entity", .{});
+        const target = entity.entities.getPtrLocking(bodyId) orelse {
+            std.log.warn("stainSurfaces: target body has no entity", .{});
             continue;
         };
-        if (ent.spriteUuids.len == 0) {
-            std.log.warn("stainSurface: target entity has no sprites", .{});
+        if (target.spriteUuids.len == 0) {
+            std.log.warn("stainSurfaces: target entity has no sprites", .{});
             continue;
         }
 
         const state = box2d.getState(bodyId);
-        const entityPos = vec.fromBox2d(state.pos);
-        const rotation = state.rotAngle;
-        const spriteUuid = ent.spriteUuids[0];
-
-        const dirtyRect = try sprite.bloodSplatOnSurface(
+        const spriteUuid = target.spriteUuids[0];
+        const dirtyRect = try sprite.stainSplatOnSurface(
             spriteUuid,
-            bloodVec,
-            bloodStainRadius,
-            entityPos,
-            rotation,
-            bloodColor,
+            particlePosition,
+            stain.radius,
+            vec.fromBox2d(state.pos),
+            state.rotAngle,
+            stain.color,
             impactVelocity,
-            bloodParticle.seed,
+            particle.seed,
         );
         if (dirtyRect == null) {
             continue;
         }
 
-        try queueBloodStainTextureUpdate(spriteUuid, dirtyRect.?);
+        try queueStainTextureUpdate(spriteUuid, dirtyRect.?);
+    }
+}
+
+fn processContact(bodyId: box2d.c.b2BodyId) !bool {
+    const particle = particles.getLocking(bodyId) orelse {
+        return false;
+    };
+    const stain = particle.behaviors.stain orelse {
+        return false;
+    };
+
+    try stainSurfaces(particle, stain);
+    if (!stain.destroy_on_contact) {
+        return true;
     }
 
-    // Mark blood particle for cleanup
-    const particleToCleanup = particles.fetchSwapRemoveLocking(bloodBodyId) orelse {
-        return;
-    };
-    _ = sdl.removeTimer(particleToCleanup.value.timerId);
-    sprite.cleanupLater(particleToCleanup.value.spriteUuid);
-    if (box2d.c.b2Body_IsValid(bloodBodyId)) {
-        box2d.c.b2Body_Disable(bloodBodyId);
+    _ = particles.fetchSwapRemoveLocking(bodyId);
+    if (box2d.c.b2Body_IsValid(bodyId)) {
+        box2d.c.b2Body_Disable(bodyId);
     }
-    try particlesToCleanup.appendLocking(bloodBodyId);
+    try particlesToCleanup.appendLocking(bodyId);
+    return true;
+}
+
+fn processShapeContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {
+    if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) {
+        return;
+    }
+
+    const bodyIdA = box2d.c.b2Shape_GetBody(shapeIdA);
+    const bodyIdB = box2d.c.b2Shape_GetBody(shapeIdB);
+    if (try processContact(bodyIdA)) {
+        return;
+    }
+    _ = try processContact(bodyIdB);
 }
 
 pub fn checkContacts() !void {
     const contactEvents = box2d.getContactEvents();
 
-    // Check begin contact events for blood particles
     for (0..@intCast(contactEvents.beginCount)) |i| {
         const event = contactEvents.beginEvents[i];
-
-        if (!box2d.c.b2Shape_IsValid(event.shapeIdA) or !box2d.c.b2Shape_IsValid(event.shapeIdB)) {
-            continue;
-        }
-
-        const bodyIdA = box2d.c.b2Shape_GetBody(event.shapeIdA);
-        const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
-
-        // Check for blood particle collisions
-        if (particles.getLocking(bodyIdA) != null) {
-            try stainSurface(bodyIdA);
-            continue;
-        }
-        if (particles.getLocking(bodyIdB) != null) {
-            try stainSurface(bodyIdB);
-            continue;
-        }
+        try processShapeContact(event.shapeIdA, event.shapeIdB);
     }
 
-    // Check hit events for blood particles
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
-
-        if (!box2d.c.b2Shape_IsValid(event.shapeIdA) or !box2d.c.b2Shape_IsValid(event.shapeIdB)) {
-            continue;
-        }
-
-        const bodyIdA = box2d.c.b2Shape_GetBody(event.shapeIdA);
-        const bodyIdB = box2d.c.b2Shape_GetBody(event.shapeIdB);
-
-        // Check for blood particle collisions
-        if (particles.getLocking(bodyIdA) != null) {
-            try stainSurface(bodyIdA);
-            continue;
-        }
-        if (particles.getLocking(bodyIdB) != null) {
-            try stainSurface(bodyIdB);
-            continue;
-        }
+        try processShapeContact(event.shapeIdA, event.shapeIdB);
     }
 }
 
-fn markParticleForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-    const id_int: usize = @intFromPtr(param.?);
-    const bodyId: box2d.c.b2BodyId = @bitCast(id_int);
-
-    particlesToCleanup.appendLocking(bodyId) catch {};
-
-    return 0;
+fn destroyParticleBody(bodyId: box2d.c.b2BodyId) void {
+    if (box2d.c.b2Body_IsValid(bodyId)) {
+        box2d.c.b2DestroyBody(bodyId);
+    }
 }
 
 pub fn cleanupParticles() !void {
-    particlesToCleanup.mutex.lockUncancelable(runtime.io());
-    defer particlesToCleanup.mutex.unlock(runtime.io());
+    {
+        particlesToCleanup.mutex.lockUncancelable(runtime.io());
+        defer particlesToCleanup.mutex.unlock(runtime.io());
 
-    for (particlesToCleanup.list.items) |bodyId| {
-        const maybeParticle = particles.fetchSwapRemoveLocking(bodyId);
-        if (maybeParticle) |p| {
-            sprite.cleanupLater(p.value.spriteUuid);
+        for (particlesToCleanup.list.items) |bodyId| {
+            _ = particles.fetchSwapRemoveLocking(bodyId);
+            destroyParticleBody(bodyId);
         }
-        if (box2d.c.b2Body_IsValid(bodyId)) {
-            box2d.c.b2DestroyBody(bodyId);
+        particlesToCleanup.list.clearRetainingCapacity();
+    }
+
+    var expiredBodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
+    defer expiredBodyIds.deinit();
+
+    const now = time.now();
+    {
+        particles.mutex.lockUncancelable(runtime.io());
+        defer particles.mutex.unlock(runtime.io());
+
+        for (particles.map.values()) |particle| {
+            if (particle.expires_at <= now) {
+                try expiredBodyIds.append(particle.bodyId);
+            }
         }
     }
 
-    particlesToCleanup.list.clearAndFree();
+    for (expiredBodyIds.items) |bodyId| {
+        _ = particles.fetchSwapRemoveLocking(bodyId);
+        destroyParticleBody(bodyId);
+    }
 }
 
 pub fn cleanup() void {
-    bloodStainTextureUpdates.clearAndFree(allocator);
+    stainTextureUpdates.clearAndFree(allocator);
 
-    // Cleanup all remaining particles
     particles.mutex.lockUncancelable(runtime.io());
     for (particles.map.keys()) |bodyId| {
-        const maybeParticle = particles.map.get(bodyId);
-        if (maybeParticle) |p| {
-            _ = sdl.removeTimer(p.timerId);
-            sprite.cleanupLater(p.spriteUuid);
-        }
-        if (box2d.c.b2Body_IsValid(bodyId)) {
-            box2d.c.b2DestroyBody(bodyId);
-        }
+        destroyParticleBody(bodyId);
     }
     particles.map.clearAndFree(allocator);
     particles.mutex.unlock(runtime.io());
 
     particlesToCleanup.mutex.lockUncancelable(runtime.io());
     defer particlesToCleanup.mutex.unlock(runtime.io());
-    for (particlesToCleanup.list.items) |toClean| {
-        box2d.c.b2DestroyBody(toClean);
+    for (particlesToCleanup.list.items) |bodyId| {
+        destroyParticleBody(bodyId);
     }
     particlesToCleanup.list.clearAndFree();
 }

@@ -41,6 +41,7 @@ const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const blood = @import("blood.zig");
 const perf = @import("perf.zig");
 const background_paint = @import("background_paint.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
@@ -169,11 +170,8 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
-    const bloodParticleConfig = data.getParticleData("blood") orelse {
-        std.log.err("main: particles.json is missing required particle data 'blood'", .{});
-        return error.BloodParticleDataNotFound;
-    };
-    particle.setBloodParticleConfig(bloodParticleConfig);
+    try particle.init("particles/circle.png");
+    try blood.init();
     try settings.init();
     settings.applyMusic();
     try lut.init();
@@ -284,9 +282,10 @@ fn gameLoop() !void {
     rope.applyTension();
 
     try particle.checkContacts();
-    particle.processBloodStainTextureUpdates();
+    particle.processStainTextureUpdates();
     try gibbing.checkContacts();
     try projectile.checkContacts();
+
     try projectile.cleanupShrapnel();
     try particle.cleanupParticles();
 
@@ -297,6 +296,7 @@ fn gameLoop() !void {
 
     entity.cleanupEntities();
     sprite.cleanupSprites();
+
     try player.checkAllSensors();
     try sensor.processSensorEvents();
 
