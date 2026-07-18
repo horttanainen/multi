@@ -114,7 +114,9 @@ const DirectHitDamage = struct {
 const terrainTextureUpdatesPerFrame: usize = 2;
 const terrainColliderUpdatesPerFrame: usize = 1;
 const perfLogFramesAfterExplosion: u32 = 120;
-const hitscanBloodCarrySpeed: f32 = 24;
+const hitscanBloodCarrySpeed: f32 = 45;
+const hitscanBloodCarryFraction: f32 = 0.75;
+const hitscanBloodCarrySpreadRadians: f32 = std.math.degreesToRadians(16);
 
 var terrainEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
 var terrainTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
@@ -668,8 +670,8 @@ pub fn damagePlayerFromHitscan(
         .inherited_velocity = victimVelocity,
         .inherited_velocity_scale = 0.35,
         .carried_velocity = carriedVelocity,
-        .carried_fraction = 0.35,
-        .carried_spread_radians = std.math.pi * 0.12,
+        .carried_fraction = hitscanBloodCarryFraction,
+        .carried_spread_radians = hitscanBloodCarrySpreadRadians,
     });
 }
 
