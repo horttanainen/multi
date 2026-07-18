@@ -12,6 +12,7 @@ pub const debugLog = false;
 pub const perf = .{
     .explosion = false,
     .level_editor_static_spawn = false,
+    .player_death = false,
 };
 
 pub const maxLevelSizeInBytes = 1024 * 1024;

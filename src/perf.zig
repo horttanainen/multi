@@ -6,77 +6,121 @@ const sdl = @import("sdl.zig");
 pub const Scope = enum {
     explosion,
     level_editor_static_spawn,
+    player_death,
 };
 
-pub const StaticEntityMetrics = struct {
-    create_from_img_calls: usize = 0,
-    create_body_us: u64 = 0,
-    create_entity_us: u64 = 0,
-    entities_put_us: u64 = 0,
-    create_from_img_total_us: u64 = 0,
-
-    entity_for_body_calls: usize = 0,
-    dupe_type_us: u64 = 0,
-    get_sprite_us: u64 = 0,
-    collider_chunks_us: u64 = 0,
-    shape_ids_us: u64 = 0,
-    sprite_uuid_alloc_us: u64 = 0,
-    entity_for_body_total_us: u64 = 0,
+pub const PlayerDeathGameLoopMetrics = struct {
+    terrain_updates_us: u64 = 0,
+    rope_us: u64 = 0,
+    blood_contacts_us: u64 = 0,
+    blood_texture_us: u64 = 0,
+    giblet_contacts_us: u64 = 0,
+    projectile_contacts_us: u64 = 0,
+    cleanup_us: u64 = 0,
+    player_and_sensor_us: u64 = 0,
+    animation_and_camera_us: u64 = 0,
 };
 
-pub const StaticColliderMetrics = struct {
+pub const PlayerDeathFrameMetrics = struct {
+    total_us: u64 = 0,
+    physics_us: u64 = 0,
+    input_us: u64 = 0,
+    logic_us: u64 = 0,
+    render_us: u64 = 0,
+    game_loop: PlayerDeathGameLoopMetrics = .{},
+};
+
+pub const PlayerDeathTriggerMetrics = struct {
     calls: usize = 0,
-    no_triangle_calls: usize = 0,
-    chunks_in: usize = 0,
-    chunks_out: usize = 0,
-    triangles: usize = 0,
-    shapes: usize = 0,
-    empty_shape_chunks: usize = 0,
-    triangulate_us: u64 = 0,
-    shape_us: u64 = 0,
-    append_us: u64 = 0,
-    owned_slice_us: u64 = 0,
+    blood_spawn_us: u64 = 0,
+    gib_us: u64 = 0,
+    kill_us: u64 = 0,
     total_us: u64 = 0,
 };
 
-pub const StaticPolygonMetrics = struct {
-    extract_calls: usize = 0,
-    boundary_edges: usize = 0,
-    loops: usize = 0,
-    raw_vertices: usize = 0,
-    simplified_vertices: usize = 0,
-    simplify_calls: usize = 0,
-    triangle_calls: usize = 0,
-    output_triangles: usize = 0,
-    build_edges_us: u64 = 0,
-    trace_loops_us: u64 = 0,
-    simplify_us: u64 = 0,
-    triangle_us: u64 = 0,
-    scale_us: u64 = 0,
-    extract_us: u64 = 0,
-    boundary_triangulate_us: u64 = 0,
+pub const PlayerDeathFrameStage = enum {
+    physics,
+    input,
+    logic,
+    render,
+};
+
+pub const PlayerDeathGameLoopStage = enum {
+    terrain_updates,
+    rope,
+    blood_contacts,
+    blood_texture,
+    giblet_contacts,
+    projectile_contacts,
+    cleanup,
+    player_and_sensor,
+    animation_and_camera,
+};
+
+pub const PlayerDeathTriggerStage = enum {
+    blood_spawn,
+    gib,
+    kill,
+    total,
+};
+
+const playerDeathCaptureFrameCount: usize = 120;
+const playerDeathWorstFrameCount: usize = 8;
+
+const PlayerDeathWorstFrame = struct {
+    valid: bool = false,
+    frame_index: usize = 0,
+    metrics: PlayerDeathFrameMetrics = .{},
+};
+
+const PlayerDeathCapture = struct {
+    active: bool = false,
+    event_id: u64 = 0,
+    victim_id: usize = 0,
+    gibbed: bool = false,
+    frames_recorded: usize = 0,
+    frames_remaining: usize = 0,
+    over_16ms: usize = 0,
+    over_25ms: usize = 0,
+    over_33ms: usize = 0,
+    frame_totals: PlayerDeathFrameMetrics = .{},
+    max_frame_us: u64 = 0,
+    worst_frames: [playerDeathWorstFrameCount]PlayerDeathWorstFrame = [_]PlayerDeathWorstFrame{.{}} ** playerDeathWorstFrameCount,
+    trigger: PlayerDeathTriggerMetrics = .{},
 };
 
 var levelEditorStaticSpawnDepth: u32 = 0;
-var staticEntityMetrics: StaticEntityMetrics = .{};
-var staticColliderMetrics: StaticColliderMetrics = .{};
-var staticPolygonMetrics: StaticPolygonMetrics = .{};
+var playerDeathEventId: u64 = 0;
+var playerDeathCapture: PlayerDeathCapture = .{};
+var currentPlayerDeathFrameMetrics: PlayerDeathFrameMetrics = .{};
 
-pub fn enabled(comptime scope: Scope) bool {
+pub inline fn configured(comptime scope: Scope) bool {
     return switch (scope) {
         .explosion => config.perf.explosion,
-        .level_editor_static_spawn => config.perf.level_editor_static_spawn and levelEditorStaticSpawnDepth > 0,
+        .level_editor_static_spawn => config.perf.level_editor_static_spawn,
+        .player_death => config.perf.player_death,
     };
 }
 
-pub fn enter(comptime scope: Scope) void {
+pub inline fn enabled(comptime scope: Scope) bool {
+    if (comptime !configured(scope)) return false;
+    return switch (scope) {
+        .level_editor_static_spawn => levelEditorStaticSpawnDepth > 0,
+        else => true,
+    };
+}
+
+pub inline fn enter(comptime scope: Scope) void {
+    if (comptime !configured(scope)) return;
     switch (scope) {
         .explosion => {},
         .level_editor_static_spawn => levelEditorStaticSpawnDepth += 1,
+        .player_death => {},
     }
 }
 
-pub fn exit(comptime scope: Scope) void {
+pub inline fn exit(comptime scope: Scope) void {
+    if (comptime !configured(scope)) return;
     switch (scope) {
         .explosion => {},
         .level_editor_static_spawn => {
@@ -86,96 +130,230 @@ pub fn exit(comptime scope: Scope) void {
             }
             levelEditorStaticSpawnDepth -= 1;
         },
+        .player_death => {},
     }
 }
 
-pub fn begin(comptime scope: Scope) u64 {
+pub inline fn begin(comptime scope: Scope) u64 {
+    if (comptime !configured(scope)) return 0;
     if (!enabled(scope)) return 0;
     return sdl.getPerformanceCounter();
 }
 
-pub fn elapsedUs(start: u64) u64 {
+pub inline fn elapsedUs(start: u64) u64 {
     if (start == 0) return 0;
 
     const elapsed = sdl.getPerformanceCounter() - start;
     return elapsed * 1_000_000 / sdl.getPerformanceFrequency();
 }
 
-pub fn log(comptime scope: Scope, comptime fmt: []const u8, args: anytype) void {
+pub inline fn log(comptime scope: Scope, comptime fmt: []const u8, args: anytype) void {
+    if (comptime !configured(scope)) return;
     if (!enabled(scope)) return;
     std.log.info(fmt, args);
 }
 
-pub fn resetLevelEditorStaticMetrics() void {
-    if (!enabled(.level_editor_static_spawn)) return;
-
-    staticEntityMetrics = .{};
-    staticColliderMetrics = .{};
-    staticPolygonMetrics = .{};
+fn addPlayerDeathGameLoopMetrics(target: *PlayerDeathGameLoopMetrics, metrics: PlayerDeathGameLoopMetrics) void {
+    target.terrain_updates_us += metrics.terrain_updates_us;
+    target.rope_us += metrics.rope_us;
+    target.blood_contacts_us += metrics.blood_contacts_us;
+    target.blood_texture_us += metrics.blood_texture_us;
+    target.giblet_contacts_us += metrics.giblet_contacts_us;
+    target.projectile_contacts_us += metrics.projectile_contacts_us;
+    target.cleanup_us += metrics.cleanup_us;
+    target.player_and_sensor_us += metrics.player_and_sensor_us;
+    target.animation_and_camera_us += metrics.animation_and_camera_us;
 }
 
-pub fn addLevelEditorStaticEntityMetrics(metrics: StaticEntityMetrics) void {
-    if (!enabled(.level_editor_static_spawn)) return;
-
-    staticEntityMetrics.create_from_img_calls += metrics.create_from_img_calls;
-    staticEntityMetrics.create_body_us += metrics.create_body_us;
-    staticEntityMetrics.create_entity_us += metrics.create_entity_us;
-    staticEntityMetrics.entities_put_us += metrics.entities_put_us;
-    staticEntityMetrics.create_from_img_total_us += metrics.create_from_img_total_us;
-    staticEntityMetrics.entity_for_body_calls += metrics.entity_for_body_calls;
-    staticEntityMetrics.dupe_type_us += metrics.dupe_type_us;
-    staticEntityMetrics.get_sprite_us += metrics.get_sprite_us;
-    staticEntityMetrics.collider_chunks_us += metrics.collider_chunks_us;
-    staticEntityMetrics.shape_ids_us += metrics.shape_ids_us;
-    staticEntityMetrics.sprite_uuid_alloc_us += metrics.sprite_uuid_alloc_us;
-    staticEntityMetrics.entity_for_body_total_us += metrics.entity_for_body_total_us;
+fn addPlayerDeathFrameMetrics(target: *PlayerDeathFrameMetrics, metrics: PlayerDeathFrameMetrics) void {
+    target.total_us += metrics.total_us;
+    target.physics_us += metrics.physics_us;
+    target.input_us += metrics.input_us;
+    target.logic_us += metrics.logic_us;
+    target.render_us += metrics.render_us;
+    addPlayerDeathGameLoopMetrics(&target.game_loop, metrics.game_loop);
 }
 
-pub fn addLevelEditorStaticColliderMetrics(metrics: StaticColliderMetrics) void {
-    if (!enabled(.level_editor_static_spawn)) return;
+fn insertPlayerDeathWorstFrame(frame_index: usize, metrics: PlayerDeathFrameMetrics) void {
+    var insert_index = playerDeathWorstFrameCount;
+    for (playerDeathCapture.worst_frames, 0..) |worst, index| {
+        if (!worst.valid or metrics.total_us > worst.metrics.total_us) {
+            insert_index = index;
+            break;
+        }
+    }
+    if (insert_index == playerDeathWorstFrameCount) return;
 
-    staticColliderMetrics.calls += metrics.calls;
-    staticColliderMetrics.no_triangle_calls += metrics.no_triangle_calls;
-    staticColliderMetrics.chunks_in += metrics.chunks_in;
-    staticColliderMetrics.chunks_out += metrics.chunks_out;
-    staticColliderMetrics.triangles += metrics.triangles;
-    staticColliderMetrics.shapes += metrics.shapes;
-    staticColliderMetrics.empty_shape_chunks += metrics.empty_shape_chunks;
-    staticColliderMetrics.triangulate_us += metrics.triangulate_us;
-    staticColliderMetrics.shape_us += metrics.shape_us;
-    staticColliderMetrics.append_us += metrics.append_us;
-    staticColliderMetrics.owned_slice_us += metrics.owned_slice_us;
-    staticColliderMetrics.total_us += metrics.total_us;
+    var index = playerDeathWorstFrameCount - 1;
+    while (index > insert_index) : (index -= 1) {
+        playerDeathCapture.worst_frames[index] = playerDeathCapture.worst_frames[index - 1];
+    }
+    playerDeathCapture.worst_frames[insert_index] = .{
+        .valid = true,
+        .frame_index = frame_index,
+        .metrics = metrics,
+    };
 }
 
-pub fn addLevelEditorStaticPolygonMetrics(metrics: StaticPolygonMetrics) void {
-    if (!enabled(.level_editor_static_spawn)) return;
+fn reportPlayerDeathCapture() void {
+    const capture = playerDeathCapture;
+    const frame_count = capture.frames_recorded;
+    if (frame_count == 0) {
+        std.log.warn("reportPlayerDeathCapture: capture {d} has no frames", .{capture.event_id});
+        return;
+    }
 
-    staticPolygonMetrics.extract_calls += metrics.extract_calls;
-    staticPolygonMetrics.boundary_edges += metrics.boundary_edges;
-    staticPolygonMetrics.loops += metrics.loops;
-    staticPolygonMetrics.raw_vertices += metrics.raw_vertices;
-    staticPolygonMetrics.simplified_vertices += metrics.simplified_vertices;
-    staticPolygonMetrics.simplify_calls += metrics.simplify_calls;
-    staticPolygonMetrics.triangle_calls += metrics.triangle_calls;
-    staticPolygonMetrics.output_triangles += metrics.output_triangles;
-    staticPolygonMetrics.build_edges_us += metrics.build_edges_us;
-    staticPolygonMetrics.trace_loops_us += metrics.trace_loops_us;
-    staticPolygonMetrics.simplify_us += metrics.simplify_us;
-    staticPolygonMetrics.triangle_us += metrics.triangle_us;
-    staticPolygonMetrics.scale_us += metrics.scale_us;
-    staticPolygonMetrics.extract_us += metrics.extract_us;
-    staticPolygonMetrics.boundary_triangulate_us += metrics.boundary_triangulate_us;
+    std.log.info(
+        "perf.player_death_summary event={d} victim={d} gibbed={} frames={d} avg_frame_us={d} max_frame_us={d} over_16ms={d} over_25ms={d} over_33ms={d} avg_physics_us={d} avg_input_us={d} avg_logic_us={d} avg_render_us={d}",
+        .{
+            capture.event_id,
+            capture.victim_id,
+            capture.gibbed,
+            frame_count,
+            capture.frame_totals.total_us / frame_count,
+            capture.max_frame_us,
+            capture.over_16ms,
+            capture.over_25ms,
+            capture.over_33ms,
+            capture.frame_totals.physics_us / frame_count,
+            capture.frame_totals.input_us / frame_count,
+            capture.frame_totals.logic_us / frame_count,
+            capture.frame_totals.render_us / frame_count,
+        },
+    );
+    std.log.info(
+        "perf.player_death_game_loop event={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
+        .{
+            capture.event_id,
+            capture.frame_totals.game_loop.terrain_updates_us,
+            capture.frame_totals.game_loop.rope_us,
+            capture.frame_totals.game_loop.blood_contacts_us,
+            capture.frame_totals.game_loop.blood_texture_us,
+            capture.frame_totals.game_loop.giblet_contacts_us,
+            capture.frame_totals.game_loop.projectile_contacts_us,
+            capture.frame_totals.game_loop.cleanup_us,
+            capture.frame_totals.game_loop.player_and_sensor_us,
+            capture.frame_totals.game_loop.animation_and_camera_us,
+        },
+    );
+    std.log.info(
+        "perf.player_death_creation event={d} trigger_calls={d} trigger_total_us={d} initial_blood_us={d} gib_us={d} kill_us={d}",
+        .{
+            capture.event_id,
+            capture.trigger.calls,
+            capture.trigger.total_us,
+            capture.trigger.blood_spawn_us,
+            capture.trigger.gib_us,
+            capture.trigger.kill_us,
+        },
+    );
+
+    for (capture.worst_frames, 0..) |worst, rank| {
+        if (!worst.valid) continue;
+        const frame = worst.metrics;
+        std.log.info(
+            "perf.player_death_worst event={d} rank={d} frame={d} total_us={d} physics_us={d} input_us={d} logic_us={d} render_us={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
+            .{
+                capture.event_id,
+                rank + 1,
+                worst.frame_index,
+                frame.total_us,
+                frame.physics_us,
+                frame.input_us,
+                frame.logic_us,
+                frame.render_us,
+                frame.game_loop.terrain_updates_us,
+                frame.game_loop.rope_us,
+                frame.game_loop.blood_contacts_us,
+                frame.game_loop.blood_texture_us,
+                frame.game_loop.giblet_contacts_us,
+                frame.game_loop.projectile_contacts_us,
+                frame.game_loop.cleanup_us,
+                frame.game_loop.player_and_sensor_us,
+                frame.game_loop.animation_and_camera_us,
+            },
+        );
+    }
 }
 
-pub fn levelEditorStaticEntityMetrics() StaticEntityMetrics {
-    return staticEntityMetrics;
+pub inline fn beginPlayerDeathCapture(victim_id: usize, gibbed: bool) bool {
+    if (comptime !configured(.player_death)) return false;
+    if (playerDeathCapture.active) return false;
+
+    playerDeathEventId += 1;
+    playerDeathCapture = .{
+        .active = true,
+        .event_id = playerDeathEventId,
+        .victim_id = victim_id,
+        .gibbed = gibbed,
+        .frames_remaining = playerDeathCaptureFrameCount,
+        .trigger = .{ .calls = 1 },
+    };
+    return true;
 }
 
-pub fn levelEditorStaticColliderMetrics() StaticColliderMetrics {
-    return staticColliderMetrics;
+pub inline fn beginPlayerDeathFrame() u64 {
+    if (comptime !configured(.player_death)) return 0;
+    currentPlayerDeathFrameMetrics = .{};
+    return sdl.getPerformanceCounter();
 }
 
-pub fn levelEditorStaticPolygonMetrics() StaticPolygonMetrics {
-    return staticPolygonMetrics;
+pub inline fn recordPlayerDeathFrameStage(comptime stage: PlayerDeathFrameStage, start: u64) void {
+    if (comptime !configured(.player_death)) return;
+    const elapsed_us = elapsedUs(start);
+    switch (stage) {
+        .physics => currentPlayerDeathFrameMetrics.physics_us = elapsed_us,
+        .input => currentPlayerDeathFrameMetrics.input_us = elapsed_us,
+        .logic => currentPlayerDeathFrameMetrics.logic_us = elapsed_us,
+        .render => currentPlayerDeathFrameMetrics.render_us = elapsed_us,
+    }
+}
+
+pub inline fn recordPlayerDeathGameLoopStage(comptime stage: PlayerDeathGameLoopStage, start: u64) void {
+    if (comptime !configured(.player_death)) return;
+    const elapsed_us = elapsedUs(start);
+    switch (stage) {
+        .terrain_updates => currentPlayerDeathFrameMetrics.game_loop.terrain_updates_us += elapsed_us,
+        .rope => currentPlayerDeathFrameMetrics.game_loop.rope_us += elapsed_us,
+        .blood_contacts => currentPlayerDeathFrameMetrics.game_loop.blood_contacts_us += elapsed_us,
+        .blood_texture => currentPlayerDeathFrameMetrics.game_loop.blood_texture_us += elapsed_us,
+        .giblet_contacts => currentPlayerDeathFrameMetrics.game_loop.giblet_contacts_us += elapsed_us,
+        .projectile_contacts => currentPlayerDeathFrameMetrics.game_loop.projectile_contacts_us += elapsed_us,
+        .cleanup => currentPlayerDeathFrameMetrics.game_loop.cleanup_us += elapsed_us,
+        .player_and_sensor => currentPlayerDeathFrameMetrics.game_loop.player_and_sensor_us += elapsed_us,
+        .animation_and_camera => currentPlayerDeathFrameMetrics.game_loop.animation_and_camera_us += elapsed_us,
+    }
+}
+
+pub inline fn recordPlayerDeathTriggerStage(comptime stage: PlayerDeathTriggerStage, start: u64) void {
+    if (comptime !configured(.player_death)) return;
+    if (!playerDeathCapture.active) return;
+    const elapsed_us = elapsedUs(start);
+    switch (stage) {
+        .blood_spawn => playerDeathCapture.trigger.blood_spawn_us += elapsed_us,
+        .gib => playerDeathCapture.trigger.gib_us += elapsed_us,
+        .kill => playerDeathCapture.trigger.kill_us += elapsed_us,
+        .total => playerDeathCapture.trigger.total_us += elapsed_us,
+    }
+}
+
+pub inline fn finishPlayerDeathFrame(frame_start: u64) void {
+    if (comptime !configured(.player_death)) return;
+    if (!playerDeathCapture.active) return;
+
+    currentPlayerDeathFrameMetrics.total_us = elapsedUs(frame_start);
+    const metrics = currentPlayerDeathFrameMetrics;
+    addPlayerDeathFrameMetrics(&playerDeathCapture.frame_totals, metrics);
+    playerDeathCapture.max_frame_us = @max(playerDeathCapture.max_frame_us, metrics.total_us);
+    if (metrics.total_us > 16_667) playerDeathCapture.over_16ms += 1;
+    if (metrics.total_us > 25_000) playerDeathCapture.over_25ms += 1;
+    if (metrics.total_us > 33_333) playerDeathCapture.over_33ms += 1;
+    insertPlayerDeathWorstFrame(playerDeathCapture.frames_recorded, metrics);
+
+    playerDeathCapture.frames_recorded += 1;
+    playerDeathCapture.frames_remaining -= 1;
+    if (playerDeathCapture.frames_remaining > 0) return;
+
+    playerDeathCapture.active = false;
+    reportPlayerDeathCapture();
 }

@@ -17,7 +17,6 @@ const controller = @import("controller.zig");
 const rope = @import("rope.zig");
 const runtime = @import("runtime.zig");
 const weapon = @import("weapon.zig");
-const perf = @import("perf.zig");
 
 const gpu = @import("gpu.zig");
 const conv = @import("conversion.zig");
@@ -190,149 +189,30 @@ fn entitySpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backi
 }
 
 fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
-    const totalStart = perf.begin(.level_editor_static_spawn);
-    const spriteStart = perf.begin(.level_editor_static_spawn);
     const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e));
     errdefer sprite.cleanupLater(spriteUuid);
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_single entity={d} stage=create_sprite sprite={d} us={d}",
-        .{ e.id, spriteUuid, perf.elapsedUs(spriteStart) },
-    );
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
     errdefer bodyIds.deinit();
     errdefer cleanupSpawnedBodies(bodyIds.items);
 
     const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(e.pos));
-    const entityStart = perf.begin(.level_editor_static_spawn);
     const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
-        const entityUs = perf.elapsedUs(entityStart);
         if (err == polygon.PolygonError.CouldNotCreateTriangle) {
             std.log.warn("spawnSingleStaticEntity: static entity {d} produced no collider triangles", .{e.id});
             sprite.cleanupLater(spriteUuid);
-            const emptyBodies = try bodyIds.toOwnedSlice();
-            perf.log(
-                .level_editor_static_spawn,
-                "perf.level_static_single entity={d} stage=create_entity_no_triangles us={d} total_us={d}",
-                .{ e.id, entityUs, perf.elapsedUs(totalStart) },
-            );
-            return emptyBodies;
+            return bodyIds.toOwnedSlice();
         }
         return err;
     };
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_single entity={d} stage=create_entity us={d}",
-        .{ e.id, perf.elapsedUs(entityStart) },
-    );
 
-    const appendStart = perf.begin(.level_editor_static_spawn);
     try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_single entity={d} stage=append_body body_count={d} us={d}",
-        .{ e.id, bodyIds.items.len, perf.elapsedUs(appendStart) },
-    );
-
-    const ownedStart = perf.begin(.level_editor_static_spawn);
-    const result = try bodyIds.toOwnedSlice();
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_single entity={d} stage=to_owned_slice body_count={d} us={d} total_us={d}",
-        .{ e.id, result.len, perf.elapsedUs(ownedStart), perf.elapsedUs(totalStart) },
-    );
-    return result;
-}
-
-fn logStaticSpawnMetrics(entityId: u64) void {
-    const entityMetrics = perf.levelEditorStaticEntityMetrics();
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_entity_metrics entity={d} create_from_img_calls={d} create_body_us={d} create_entity_us={d} entities_put_us={d} create_from_img_total_us={d} entity_for_body_calls={d} dupe_type_us={d} get_sprite_us={d} collider_chunks_us={d} shape_ids_us={d} sprite_uuid_alloc_us={d} entity_for_body_total_us={d}",
-        .{
-            entityId,
-            entityMetrics.create_from_img_calls,
-            entityMetrics.create_body_us,
-            entityMetrics.create_entity_us,
-            entityMetrics.entities_put_us,
-            entityMetrics.create_from_img_total_us,
-            entityMetrics.entity_for_body_calls,
-            entityMetrics.dupe_type_us,
-            entityMetrics.get_sprite_us,
-            entityMetrics.collider_chunks_us,
-            entityMetrics.shape_ids_us,
-            entityMetrics.sprite_uuid_alloc_us,
-            entityMetrics.entity_for_body_total_us,
-        },
-    );
-
-    const colliderMetrics = perf.levelEditorStaticColliderMetrics();
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_collider_metrics entity={d} calls={d} no_triangle_calls={d} chunks_in={d} chunks_out={d} triangles={d} shapes={d} empty_shape_chunks={d} triangulate_us={d} shape_us={d} append_us={d} owned_slice_us={d} total_us={d}",
-        .{
-            entityId,
-            colliderMetrics.calls,
-            colliderMetrics.no_triangle_calls,
-            colliderMetrics.chunks_in,
-            colliderMetrics.chunks_out,
-            colliderMetrics.triangles,
-            colliderMetrics.shapes,
-            colliderMetrics.empty_shape_chunks,
-            colliderMetrics.triangulate_us,
-            colliderMetrics.shape_us,
-            colliderMetrics.append_us,
-            colliderMetrics.owned_slice_us,
-            colliderMetrics.total_us,
-        },
-    );
-
-    const polygonMetrics = perf.levelEditorStaticPolygonMetrics();
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_polygon_metrics entity={d} extract_calls={d} boundary_edges={d} loops={d} raw_vertices={d} simplified_vertices={d} simplify_calls={d} triangle_calls={d} output_triangles={d} build_edges_us={d} trace_loops_us={d} simplify_us={d} triangle_us={d} scale_us={d} extract_us={d} boundary_triangulate_us={d}",
-        .{
-            entityId,
-            polygonMetrics.extract_calls,
-            polygonMetrics.boundary_edges,
-            polygonMetrics.loops,
-            polygonMetrics.raw_vertices,
-            polygonMetrics.simplified_vertices,
-            polygonMetrics.simplify_calls,
-            polygonMetrics.triangle_calls,
-            polygonMetrics.output_triangles,
-            polygonMetrics.build_edges_us,
-            polygonMetrics.trace_loops_us,
-            polygonMetrics.simplify_us,
-            polygonMetrics.triangle_us,
-            polygonMetrics.scale_us,
-            polygonMetrics.extract_us,
-            polygonMetrics.boundary_triangulate_us,
-        },
-    );
+    return bodyIds.toOwnedSlice();
 }
 
 fn spawnStaticSerializableEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
-    const totalStart = perf.begin(.level_editor_static_spawn);
-    perf.resetLevelEditorStaticMetrics();
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_spawn begin entity={d} image='{s}' pos=({d},{d}) scale=({d},{d})",
-        .{ e.id, e.imgPath, e.pos.x, e.pos.y, e.scale.x, e.scale.y },
-    );
-
     const staticDef = staticShapeDef(e, shapeDef);
-
-    const singleStart = perf.begin(.level_editor_static_spawn);
-    const bodyIds = try spawnSingleStaticEntity(e, staticDef);
-    perf.log(
-        .level_editor_static_spawn,
-        "perf.level_static_spawn entity={d} stage=single_static body_count={d} us={d} total_us={d}",
-        .{ e.id, bodyIds.len, perf.elapsedUs(singleStart), perf.elapsedUs(totalStart) },
-    );
-    logStaticSpawnMetrics(e.id);
-    return bodyIds;
+    return spawnSingleStaticEntity(e, staticDef);
 }
 
 pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId {

@@ -6,7 +6,6 @@ const connected_components = @import("connected_components.zig");
 const visvalingam = @import("visvalingam.zig").visvalingam;
 const triangle = @import("triangle.zig");
 const sprite = @import("sprite.zig");
-const perf = @import("perf.zig");
 
 const Vec2 = @import("vector.zig").Vec2;
 const IVec2 = @import("vector.zig").IVec2;
@@ -222,12 +221,9 @@ fn triangulateBoundaryLoops(s: sprite.Sprite, loops: []const BoundaryLoop) ![][3
         return PolygonError.CouldNotCreateTriangle;
     }
 
-    const totalStart = perf.begin(.level_editor_static_spawn);
     var triangles = std.array_list.Managed([3]IVec2).init(allocator);
     errdefer triangles.deinit();
 
-    var triangleCalls: usize = 0;
-    var triangleUs: u64 = 0;
     for (loops) |outerLoop| {
         if (outerLoop.isHole) continue;
 
@@ -246,14 +242,10 @@ fn triangulateBoundaryLoops(s: sprite.Sprite, loops: []const BoundaryLoop) ![][3
             try holes.append(holeLoop.holePoint);
         }
 
-        const triangleStart = perf.begin(.level_editor_static_spawn);
         const componentTriangles = triangle.splitPslg(contours.items, holes.items) catch |err| {
-            triangleUs += perf.elapsedUs(triangleStart);
             std.log.warn("triangulateMask: failed to triangulate contour for '{s}' with {}", .{ s.imgPath, err });
             continue;
         };
-        triangleUs += perf.elapsedUs(triangleStart);
-        triangleCalls += 1;
         defer allocator.free(componentTriangles);
 
         for (componentTriangles) |componentTriangle| {
@@ -262,71 +254,28 @@ fn triangulateBoundaryLoops(s: sprite.Sprite, loops: []const BoundaryLoop) ![][3
     }
 
     if (triangles.items.len == 0) {
-        perf.addLevelEditorStaticPolygonMetrics(.{
-            .triangle_calls = triangleCalls,
-            .triangle_us = triangleUs,
-            .boundary_triangulate_us = perf.elapsedUs(totalStart),
-        });
         return PolygonError.CouldNotCreateTriangle;
     }
 
     const ownedTriangles = try triangles.toOwnedSlice();
-    const scaleStart = perf.begin(.level_editor_static_spawn);
     scaleTriangles(ownedTriangles, s.scale);
-    const scaleUs = perf.elapsedUs(scaleStart);
-    perf.addLevelEditorStaticPolygonMetrics(.{
-        .triangle_calls = triangleCalls,
-        .output_triangles = ownedTriangles.len,
-        .triangle_us = triangleUs,
-        .scale_us = scaleUs,
-        .boundary_triangulate_us = perf.elapsedUs(totalStart),
-    });
     return ownedTriangles;
 }
 
 fn extractBoundaryLoopsInRect(pixels: [*]const u8, width: usize, height: usize, pitch: usize, threshold: u8, rect: vec.IRect) !std.array_list.Managed(BoundaryLoop) {
-    const totalStart = perf.begin(.level_editor_static_spawn);
     var edges = std.array_list.Managed(BoundaryEdge).init(allocator);
     defer edges.deinit();
 
     if (rectArea(rect) <= linearBoundaryTraceMaxArea) {
-        const buildStart = perf.begin(.level_editor_static_spawn);
         try buildBoundaryEdges(&edges, null, pixels, width, height, pitch, threshold, rect);
-        const buildUs = perf.elapsedUs(buildStart);
-
-        const traceStart = perf.begin(.level_editor_static_spawn);
-        const loops = try traceBoundaryLoops(&edges, null, pixels, width, height, pitch, threshold, rect);
-        logBoundaryExtractMetrics(loops, edges.items.len, buildUs, perf.elapsedUs(traceStart), perf.elapsedUs(totalStart));
-        return loops;
+        return traceBoundaryLoops(&edges, null, pixels, width, height, pitch, threshold, rect);
     }
 
     var edgeStarts = EdgeStartIndex.empty;
     defer deinitEdgeStarts(&edgeStarts);
 
-    const buildStart = perf.begin(.level_editor_static_spawn);
     try buildBoundaryEdges(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
-    const buildUs = perf.elapsedUs(buildStart);
-
-    const traceStart = perf.begin(.level_editor_static_spawn);
-    const loops = try traceBoundaryLoops(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
-    logBoundaryExtractMetrics(loops, edges.items.len, buildUs, perf.elapsedUs(traceStart), perf.elapsedUs(totalStart));
-    return loops;
-}
-
-fn logBoundaryExtractMetrics(loops: std.array_list.Managed(BoundaryLoop), edgeCount: usize, buildUs: u64, traceUs: u64, totalUs: u64) void {
-    var loopVertices: usize = 0;
-    for (loops.items) |boundaryLoop| {
-        loopVertices += boundaryLoop.vertices.len;
-    }
-    perf.addLevelEditorStaticPolygonMetrics(.{
-        .extract_calls = 1,
-        .boundary_edges = edgeCount,
-        .loops = loops.items.len,
-        .simplified_vertices = loopVertices,
-        .build_edges_us = buildUs,
-        .trace_loops_us = traceUs,
-        .extract_us = totalUs,
-    });
+    return traceBoundaryLoops(&edges, &edgeStarts, pixels, width, height, pitch, threshold, rect);
 }
 
 fn buildBoundaryEdges(
@@ -440,16 +389,8 @@ fn traceBoundaryLoops(
         if (!closed) continue;
         if (vertices.items.len < 3) continue;
 
-        const simplifyStart = perf.begin(.level_editor_static_spawn);
         const simplified = try simplifyBoundaryLoop(vertices.items, rect);
-        const simplifyUs = perf.elapsedUs(simplifyStart);
         errdefer allocator.free(simplified);
-        perf.addLevelEditorStaticPolygonMetrics(.{
-            .raw_vertices = vertices.items.len,
-            .simplified_vertices = simplified.len,
-            .simplify_calls = 1,
-            .simplify_us = simplifyUs,
-        });
 
         if (simplified.len < 3) {
             allocator.free(simplified);

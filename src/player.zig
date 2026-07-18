@@ -22,6 +22,7 @@ const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const rope = @import("rope.zig");
 const score = @import("score.zig");
+const perf = @import("perf.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -976,19 +977,42 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
 
     p.health -= d;
 
+    const isFatal = p.health <= 0;
+    const isGibbing = p.health <= -5;
+    const profileDeath = if (isFatal) perf.beginPlayerDeathCapture(p.id, isGibbing) else false;
+    const deathTriggerStart = if (profileDeath) perf.begin(.player_death) else 0;
+    defer {
+        if (profileDeath) {
+            perf.recordPlayerDeathTriggerStage(.total, deathTriggerStart);
+        }
+    }
+
     const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
 
     // Generate blood if player took damage
     if (d > 0) {
+        const bloodSpawnStart = if (profileDeath) perf.begin(.player_death) else 0;
         const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
         try blood.createParticles(playerPosM, d, playerVelocity);
+        if (profileDeath) {
+            perf.recordPlayerDeathTriggerStage(.blood_spawn, bloodSpawnStart);
+        }
     }
 
-    if (p.health <= 0) {
-        if (p.health <= -5) {
+    if (isFatal) {
+        if (isGibbing) {
+            const gibStart = if (profileDeath) perf.begin(.player_death) else 0;
             try gib(p);
+            if (profileDeath) {
+                perf.recordPlayerDeathTriggerStage(.gib, gibStart);
+            }
         }
+
+        const killStart = if (profileDeath) perf.begin(.player_death) else 0;
         try kill(p, attackerId);
+        if (profileDeath) {
+            perf.recordPlayerDeathTriggerStage(.kill, killStart);
+        }
     }
 }
 

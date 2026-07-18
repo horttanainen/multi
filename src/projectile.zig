@@ -98,7 +98,8 @@ var terrainColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, vec
 var perfExplosionId: u64 = 0;
 var perfLogFramesRemaining: u32 = 0;
 
-fn beginExplosionPerfLog() u64 {
+inline fn beginExplosionPerfLog() u64 {
+    if (comptime !perf.configured(.explosion)) return 0;
     if (!perf.enabled(.explosion)) return 0;
 
     perfExplosionId += 1;
@@ -107,15 +108,18 @@ fn beginExplosionPerfLog() u64 {
     return perfExplosionId;
 }
 
-fn logExplosionStage(perfId: u64, label: []const u8, start: u64) void {
+inline fn logExplosionStage(perfId: u64, label: []const u8, start: u64) void {
+    if (comptime !perf.configured(.explosion)) return;
     perf.log(.explosion, "perf.explosion id={d} stage={s} us={d}", .{ perfId, label, perf.elapsedUs(start) });
 }
 
-pub fn shouldCollectPerfFrameLog() bool {
+pub inline fn shouldCollectPerfFrameLog() bool {
+    if (comptime !perf.configured(.explosion)) return false;
     return perf.enabled(.explosion) and perfLogFramesRemaining > 0;
 }
 
-pub fn consumePerfFrameLog() bool {
+pub inline fn consumePerfFrameLog() bool {
+    if (comptime !perf.configured(.explosion)) return false;
     if (!perf.enabled(.explosion)) {
         return false;
     }
@@ -223,10 +227,6 @@ fn flushTerrainEdits() !void {
 }
 
 pub fn processTerrainTextureUpdates() void {
-    const totalStart = perf.begin(.explosion);
-    var updateUs: u64 = 0;
-    var queueUs: u64 = 0;
-    var updatedPixels: usize = 0;
     var processed: usize = 0;
     while (processed < terrainTextureUpdatesPerFrame and terrainTextureUpdates.count() > 0) : (processed += 1) {
         const bodyId = terrainTextureUpdates.keys()[0];
@@ -238,40 +238,17 @@ pub fn processTerrainTextureUpdates() void {
             continue;
         }
 
-        const rectWidth = edit.dirtyRect.maxX - edit.dirtyRect.minX;
-        const rectHeight = edit.dirtyRect.maxY - edit.dirtyRect.minY;
-        if (rectWidth > 0 and rectHeight > 0) {
-            updatedPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
-        }
-
-        const updateStart = perf.begin(.explosion);
         sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
             std.log.warn("processTerrainTextureUpdates: terrain texture update failed with {}", .{err});
         };
-        updateUs += perf.elapsedUs(updateStart);
 
-        const queueStart = perf.begin(.explosion);
         queueTerrainColliderUpdate(bodyId, edit.dirtyRect) catch |err| {
             std.log.warn("processTerrainTextureUpdates: failed to queue terrain collider update with {}", .{err});
         };
-        queueUs += perf.elapsedUs(queueStart);
     }
-
-    if (processed == 0) {
-        return;
-    }
-
-    perf.log(
-        .explosion,
-        "perf.terrain_texture_queue processed={d} remaining={d} pixels={d} update_us={d} queue_us={d} total_us={d}",
-        .{ processed, terrainTextureUpdates.count(), updatedPixels, updateUs, queueUs, perf.elapsedUs(totalStart) },
-    );
 }
 
 pub fn processTerrainColliderUpdates() void {
-    const totalStart = perf.begin(.explosion);
-    var rebuildUs: u64 = 0;
-    var rebuiltPixels: usize = 0;
     var processed: usize = 0;
     while (processed < terrainColliderUpdatesPerFrame and terrainColliderUpdates.count() > 0) : (processed += 1) {
         const bodyId = terrainColliderUpdates.keys()[0];
@@ -288,36 +265,17 @@ pub fn processTerrainColliderUpdates() void {
             continue;
         };
 
-        const rectWidth = dirtyRect.maxX - dirtyRect.minX;
-        const rectHeight = dirtyRect.maxY - dirtyRect.minY;
-        if (rectWidth > 0 and rectHeight > 0) {
-            rebuiltPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
-        }
-
-        const rebuildStart = perf.begin(.explosion);
         const stillExists = entity.regenerateCollidersInPixelRect(ent, dirtyRect) catch |err| {
             std.log.warn("processTerrainColliderUpdates: terrain collider rebuild failed with {}", .{err});
             continue;
         };
-        rebuildUs += perf.elapsedUs(rebuildStart);
         if (!stillExists) {
             entity.cleanupLater(ent.*);
         }
     }
-
-    if (processed == 0) {
-        return;
-    }
-
-    perf.log(
-        .explosion,
-        "perf.terrain_collider_queue processed={d} remaining={d} pixels={d} rebuild_us={d} total_us={d}",
-        .{ processed, terrainColliderUpdates.count(), rebuiltPixels, rebuildUs, perf.elapsedUs(totalStart) },
-    );
 }
 
-fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
-    const totalStart = perf.begin(.explosion);
+fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     // Setup overlap query
     var context = OverlapContext{
         .bodies = undefined,
@@ -339,14 +297,8 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
     filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
     // Query for overlapping bodies
-    const overlapStart = perf.begin(.explosion);
     box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
-    const overlapUs = perf.elapsedUs(overlapStart);
 
-    var changed: usize = 0;
-    var carvedPixels: usize = 0;
-    var carveUs: u64 = 0;
-    var queueUs: u64 = 0;
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
 
@@ -369,29 +321,12 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32, perfId: u64) !void {
             continue;
         };
 
-        const carveStart = perf.begin(.explosion);
         const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
-        carveUs += perf.elapsedUs(carveStart);
         if (dirtyRect == null) continue;
 
         const rect = dirtyRect.?;
-        const rectWidth = rect.maxX - rect.minX;
-        const rectHeight = rect.maxY - rect.minY;
-        if (rectWidth > 0 and rectHeight > 0) {
-            carvedPixels += @as(usize, @intCast(rectWidth)) * @as(usize, @intCast(rectHeight));
-        }
-        changed += 1;
-
-        const queueStart = perf.begin(.explosion);
         try queueTerrainEdit(bodyId, ent.spriteUuids[0], rect);
-        queueUs += perf.elapsedUs(queueStart);
     }
-
-    perf.log(
-        .explosion,
-        "perf.terrain_damage id={d} bodies={d} changed={d} pixels={d} overlap_us={d} carve_us={d} queue_us={d} total_us={d}",
-        .{ perfId, context.count, changed, carvedPixels, overlapUs, carveUs, queueUs, perf.elapsedUs(totalStart) },
-    );
 }
 
 fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
@@ -537,7 +472,9 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
     const createExplosionStart = perf.begin(.explosion);
     const explosionBodies = try createExplosion(pos, explosion);
     logExplosionStage(perfId, "create_shrapnel", createExplosionStart);
-    perf.log(.explosion, "perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
+    if (comptime perf.configured(.explosion)) {
+        perf.log(.explosion, "perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
+    }
 
     const registerShrapnelStart = perf.begin(.explosion);
     if (explosionBodies.len > 0) {
@@ -561,7 +498,7 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
     logExplosionStage(perfId, "animation", animationStart);
 
     const terrainStart = perf.begin(.explosion);
-    try damageTerrainInRadius(pos, explosion.blastRadius, perfId);
+    try damageTerrainInRadius(pos, explosion.blastRadius);
     logExplosionStage(perfId, "terrain_damage", terrainStart);
 
     const playerDamageStart = perf.begin(.explosion);

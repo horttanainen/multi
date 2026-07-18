@@ -191,18 +191,24 @@ pub fn main(init: std.process.Init) !void {
     while (!state.quitGame) {
         const collectFramePerf = projectile.shouldCollectPerfFrameLog();
         const framePerfStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathFrameStart = perf.beginPlayerDeathFrame();
 
         time.frameBegin();
 
         const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathPhysicsStart = perf.begin(.player_death);
         try physics.step();
+        perf.recordPlayerDeathFrameStage(.physics, playerDeathPhysicsStart);
         const physicsUs = perf.elapsedUs(physicsStart);
 
         const inputStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathInputStart = perf.begin(.player_death);
         try input.handle();
+        perf.recordPlayerDeathFrameStage(.input, playerDeathInputStart);
         const inputUs = perf.elapsedUs(inputStart);
 
         const logicStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathLogicStart = perf.begin(.player_death);
         if (state.editingBackground) {
             backgroundConfigMenu.sync();
         } else if (state.editingLevel) {
@@ -212,10 +218,13 @@ pub fn main(init: std.process.Init) !void {
         } else {
             try gameLoop();
         }
+        perf.recordPlayerDeathFrameStage(.logic, playerDeathLogicStart);
         const logicUs = perf.elapsedUs(logicStart);
 
         const renderStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathRenderStart = perf.begin(.player_death);
         try renderer.render();
+        perf.recordPlayerDeathFrameStage(.render, playerDeathRenderStart);
         const renderUs = perf.elapsedUs(renderStart);
 
         time.frameEnd();
@@ -235,6 +244,8 @@ pub fn main(init: std.process.Init) !void {
                 },
             );
         }
+
+        perf.finishPlayerDeathFrame(playerDeathFrameStart);
     }
 
     levelEditor.cleanup() catch |err| {
@@ -275,31 +286,59 @@ fn gameLoop() !void {
 
     player.clampAllSpeeds();
     projectile.applyPropulsion();
+
+    const terrainUpdatesStart = perf.begin(.player_death);
     projectile.processTerrainTextureUpdates();
     projectile.processTerrainColliderUpdates();
+    perf.recordPlayerDeathGameLoopStage(.terrain_updates, terrainUpdatesStart);
 
+    const ropeStart = perf.begin(.player_death);
     try rope.checkHookContacts();
     rope.applyTension();
+    perf.recordPlayerDeathGameLoopStage(.rope, ropeStart);
 
+    const bloodContactsStart = perf.begin(.player_death);
     try particle.checkContacts();
-    particle.processStainTextureUpdates();
-    try gibbing.checkContacts();
-    try projectile.checkContacts();
+    perf.recordPlayerDeathGameLoopStage(.blood_contacts, bloodContactsStart);
 
+    const bloodTextureStart = perf.begin(.player_death);
+    particle.processStainTextureUpdates();
+    perf.recordPlayerDeathGameLoopStage(.blood_texture, bloodTextureStart);
+
+    const gibletContactsStart = perf.begin(.player_death);
+    try gibbing.checkContacts();
+    perf.recordPlayerDeathGameLoopStage(.giblet_contacts, gibletContactsStart);
+
+    const projectileContactsStart = perf.begin(.player_death);
+    try projectile.checkContacts();
+    perf.recordPlayerDeathGameLoopStage(.projectile_contacts, projectileContactsStart);
+
+    const cleanupStart = perf.begin(.player_death);
     try projectile.cleanupShrapnel();
     try particle.cleanupParticles();
+    perf.recordPlayerDeathGameLoopStage(.cleanup, cleanupStart);
 
+    const playerAndSensorStart = perf.begin(.player_death);
     try player.processRespawns();
+    perf.recordPlayerDeathGameLoopStage(.player_and_sensor, playerAndSensorStart);
 
+    const animationAndCameraStart = perf.begin(.player_death);
     player.updateAllAnimationStates();
     animation.animate();
+    perf.recordPlayerDeathGameLoopStage(.animation_and_camera, animationAndCameraStart);
 
+    const entityCleanupStart = perf.begin(.player_death);
     entity.cleanupEntities();
     sprite.cleanupSprites();
+    perf.recordPlayerDeathGameLoopStage(.cleanup, entityCleanupStart);
 
+    const sensorStart = perf.begin(.player_death);
     try player.checkAllSensors();
     try sensor.processSensorEvents();
+    perf.recordPlayerDeathGameLoopStage(.player_and_sensor, sensorStart);
 
+    const cameraStart = perf.begin(.player_death);
     renderer.updateZoom();
     camera.followAllPlayers(renderer.zoom);
+    perf.recordPlayerDeathGameLoopStage(.animation_and_camera, cameraStart);
 }
