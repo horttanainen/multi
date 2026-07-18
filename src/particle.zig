@@ -53,10 +53,18 @@ pub const Particle = struct {
     seed: u64,
 };
 
+const StainTextureUpdate = struct {
+    spriteUuid: u64,
+    dirtyRect: vec.IRect,
+};
+
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
-var stainTextureUpdates = std.AutoArrayHashMapUnmanaged(u64, vec.IRect).empty;
+var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
+const stainTextureUpdatePixelBudgetPerFrame: usize = 32 * 1024;
 const stainTextureUpdatesPerFrame: usize = 4;
+const stainTextureRegionMaxEdge: i32 = 128;
+const stainTextureMergeDistance: i32 = 2;
 var circleSpriteUuid: ?u64 = null;
 
 pub fn init(circleSpritePath: []const u8) !void {
@@ -192,29 +200,71 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     return true;
 }
 
-fn queueStainTextureUpdate(spriteUuid: u64, dirtyRect: vec.IRect) !void {
-    const pendingRect = stainTextureUpdates.getPtr(spriteUuid);
-    if (pendingRect == null) {
-        try stainTextureUpdates.put(allocator, spriteUuid, dirtyRect);
+fn rectArea(rect: vec.IRect) usize {
+    const width = @max(0, rect.maxX - rect.minX);
+    const height = @max(0, rect.maxY - rect.minY);
+    return @intCast(width * height);
+}
+
+fn queueStainTextureRegion(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    for (stainTextureUpdates.items) |*pendingUpdate| {
+        if (pendingUpdate.spriteUuid != spriteUuid) continue;
+
+        const mergeBounds = vec.IRect{
+            .minX = pendingUpdate.dirtyRect.minX - stainTextureMergeDistance,
+            .minY = pendingUpdate.dirtyRect.minY - stainTextureMergeDistance,
+            .maxX = pendingUpdate.dirtyRect.maxX + stainTextureMergeDistance,
+            .maxY = pendingUpdate.dirtyRect.maxY + stainTextureMergeDistance,
+        };
+        if (!vec.irectIntersects(mergeBounds, dirtyRect)) continue;
+
+        const merged = vec.irectUnion(pendingUpdate.dirtyRect, dirtyRect);
+        if (merged.maxX - merged.minX > stainTextureRegionMaxEdge) continue;
+        if (merged.maxY - merged.minY > stainTextureRegionMaxEdge) continue;
+
+        pendingUpdate.dirtyRect = merged;
         return;
     }
 
-    pendingRect.?.* = vec.irectUnion(pendingRect.?.*, dirtyRect);
+    try stainTextureUpdates.append(allocator, .{
+        .spriteUuid = spriteUuid,
+        .dirtyRect = dirtyRect,
+    });
+}
+
+fn queueStainTextureUpdate(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    if (dirtyRect.minX >= dirtyRect.maxX or dirtyRect.minY >= dirtyRect.maxY) {
+        std.log.warn("queueStainTextureUpdate: dirty rectangle is empty", .{});
+        return;
+    }
+
+    var minY = dirtyRect.minY;
+    while (minY < dirtyRect.maxY) : (minY += stainTextureRegionMaxEdge) {
+        var minX = dirtyRect.minX;
+        while (minX < dirtyRect.maxX) : (minX += stainTextureRegionMaxEdge) {
+            try queueStainTextureRegion(spriteUuid, .{
+                .minX = minX,
+                .minY = minY,
+                .maxX = @min(dirtyRect.maxX, minX + stainTextureRegionMaxEdge),
+                .maxY = @min(dirtyRect.maxY, minY + stainTextureRegionMaxEdge),
+            });
+        }
+    }
 }
 
 pub fn processStainTextureUpdates() void {
-    if (stainTextureUpdates.count() == 0) {
-        return;
-    }
-
+    var processedPixels: usize = 0;
     var processed: usize = 0;
-    while (processed < stainTextureUpdatesPerFrame and stainTextureUpdates.count() > 0) : (processed += 1) {
-        const spriteUuid = stainTextureUpdates.keys()[0];
-        const dirtyRect = stainTextureUpdates.values()[0];
-        _ = stainTextureUpdates.swapRemove(spriteUuid);
+    while (processed < stainTextureUpdatesPerFrame and stainTextureUpdates.items.len > 0) : (processed += 1) {
+        const update = stainTextureUpdates.items[0];
+        const updatePixels = rectArea(update.dirtyRect);
+        if (processed > 0 and processedPixels + updatePixels > stainTextureUpdatePixelBudgetPerFrame) break;
 
-        sprite.updateTextureVisualRegionFromSurface(spriteUuid, dirtyRect) catch |err| {
-            std.log.warn("processStainTextureUpdates: sprite {d} update failed with {}", .{ spriteUuid, err });
+        _ = stainTextureUpdates.swapRemove(0);
+        processedPixels += updatePixels;
+
+        sprite.updateTextureVisualRegionFromSurface(update.spriteUuid, update.dirtyRect) catch |err| {
+            std.log.warn("processStainTextureUpdates: sprite {d} update failed with {}", .{ update.spriteUuid, err });
         };
     }
 }
@@ -368,7 +418,7 @@ pub fn cleanupParticles() !void {
 }
 
 pub fn cleanup() void {
-    stainTextureUpdates.clearAndFree(allocator);
+    stainTextureUpdates.deinit(allocator);
 
     particles.mutex.lockUncancelable(runtime.io());
     for (particles.map.keys()) |bodyId| {

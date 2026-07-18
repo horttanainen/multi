@@ -180,8 +180,8 @@ fn staticShapeDef(serializedEntity: entity.SerializableEntity, shapeDef: box2d.c
     return staticDef;
 }
 
-fn staticSpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
-    return if (serializedEntity.breakable) .mutable else .immutable;
+fn staticSpriteBacking(_: entity.SerializableEntity) sprite.Backing {
+    return .mutable;
 }
 
 fn entitySpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
