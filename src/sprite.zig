@@ -73,6 +73,13 @@ const RuntimeAtlasSurface = struct {
     owned: bool,
 };
 
+const BloodSplatSpot = struct {
+    offsetX: f32,
+    offsetY: f32,
+    radius: f32,
+    strength: f32,
+};
+
 // Texture cache: maps image path → atlas region + dimensions.
 // Sprites with the same image share the same atlas region for draw call batching.
 const CachedTexInfo = struct {
@@ -758,6 +765,260 @@ fn iterateCircleOnSurface(
     };
 }
 
+fn hash64(value: u64) u64 {
+    var x = value;
+    x ^= x >> 30;
+    x *%= 0xbf58476d1ce4e5b9;
+    x ^= x >> 27;
+    x *%= 0x94d049bb133111eb;
+    x ^= x >> 31;
+    return x;
+}
+
+fn randomUnitFromSeed(seed: u64, salt: u64) f32 {
+    const hashed = hash64(seed ^ (salt *% 0x9e3779b97f4a7c15));
+    const value: u32 = @truncate(hashed >> 40);
+    return @as(f32, @floatFromInt(value)) / 16777215.0;
+}
+
+fn pixelNoise(seed: u64, x: i32, y: i32, salt: u64) f32 {
+    const ux: u64 = @bitCast(@as(i64, x));
+    const uy: u64 = @bitCast(@as(i64, y));
+    const hashed = hash64(seed ^ salt ^ (ux *% 0x517cc1b727220a95) ^ (uy *% 0x9e3779b185ebca87));
+    const value: u32 = @truncate(hashed >> 40);
+    return @as(f32, @floatFromInt(value)) / 16777215.0;
+}
+
+fn clampByte(value: f32) u8 {
+    return @intFromFloat(std.math.clamp(value, 0.0, 255.0));
+}
+
+fn worldToSpritePixel(s: Sprite, centerWorld: vec.Vec2, entityPos: vec.Vec2, rotation: f32, width: usize, height: usize) vec.Vec2 {
+    const relativeWorld = vec.Vec2{
+        .x = centerWorld.x - entityPos.x,
+        .y = centerWorld.y - entityPos.y,
+    };
+
+    const cosA = @cos(-rotation);
+    const sinA = @sin(-rotation);
+    const rotatedLocal = vec.Vec2{
+        .x = relativeWorld.x * cosA - relativeWorld.y * sinA,
+        .y = relativeWorld.x * sinA + relativeWorld.y * cosA,
+    };
+
+    const rotatedLocalPixels = conv.m2Pixel(.{ .x = rotatedLocal.x, .y = rotatedLocal.y });
+    return .{
+        .x = @as(f32, @floatFromInt(rotatedLocalPixels.x)) / s.scale.x + @as(f32, @floatFromInt(width)) / 2.0,
+        .y = @as(f32, @floatFromInt(rotatedLocalPixels.y)) / s.scale.y + @as(f32, @floatFromInt(height)) / 2.0,
+    };
+}
+
+fn worldDirectionToSpritePixelDirection(directionWorld: vec.Vec2, rotation: f32, scale: vec.Vec2) vec.Vec2 {
+    const cosA = @cos(-rotation);
+    const sinA = @sin(-rotation);
+    const rotatedLocal = vec.Vec2{
+        .x = directionWorld.x * cosA - directionWorld.y * sinA,
+        .y = directionWorld.x * sinA + directionWorld.y * cosA,
+    };
+    const pixelDirection = vec.Vec2{
+        .x = rotatedLocal.x / scale.x,
+        .y = rotatedLocal.y / scale.y,
+    };
+    const length = vec.magnitude(pixelDirection);
+    if (length < 0.001) {
+        return .{ .x = 0.0, .y = -1.0 };
+    }
+    return .{
+        .x = pixelDirection.x / length,
+        .y = pixelDirection.y / length,
+    };
+}
+
+fn blendBloodPixel(pixels: [*]u8, pixelIndex: usize, color: Color, strength: f32, noise: f32) void {
+    const tint = std.math.clamp(strength, 0.0, 0.95);
+    const keep = 1.0 - tint;
+    const darken = 1.0 - tint * 0.32;
+    const colorJitter = 0.82 + noise * 0.24;
+
+    const oldB = @as(f32, @floatFromInt(pixels[pixelIndex + 0]));
+    const oldG = @as(f32, @floatFromInt(pixels[pixelIndex + 1]));
+    const oldR = @as(f32, @floatFromInt(pixels[pixelIndex + 2]));
+
+    const bloodB = @as(f32, @floatFromInt(color.b)) * colorJitter;
+    const bloodG = @as(f32, @floatFromInt(color.g)) * colorJitter;
+    const bloodR = @as(f32, @floatFromInt(color.r)) * colorJitter;
+
+    pixels[pixelIndex + 0] = clampByte(oldB * keep * darken + bloodB * tint);
+    pixels[pixelIndex + 1] = clampByte(oldG * keep * darken + bloodG * tint);
+    pixels[pixelIndex + 2] = clampByte(oldR * keep * darken + bloodR * tint);
+}
+
+pub fn bloodSplatOnSurface(
+    spriteUuid: u64,
+    centerWorld: vec.Vec2,
+    radiusWorld: f32,
+    entityPos: vec.Vec2,
+    rotation: f32,
+    color: Color,
+    impactVelocityWorld: vec.Vec2,
+    seed: u64,
+) !?vec.IRect {
+    if (radiusWorld <= 0.0) {
+        return null;
+    }
+
+    const s = sprites.getLocking(spriteUuid) orelse {
+        std.log.warn("bloodSplatOnSurface: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
+    if (s.scale.x <= 0.0 or s.scale.y <= 0.0) {
+        std.log.warn("bloodSplatOnSurface: sprite {d} has invalid scale ({d},{d})", .{ spriteUuid, s.scale.x, s.scale.y });
+        return null;
+    }
+
+    const surface = s.surface.*;
+    const pixels: [*]u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const bytesPerPixel: usize = 4;
+
+    const centerPixelF = worldToSpritePixel(s, centerWorld, entityPos, rotation, width, height);
+    const radiusPixels = @max(1.0, (radiusWorld * conv.met2pix) / @max(s.scale.x, s.scale.y));
+    const impactSpeed = vec.magnitude(impactVelocityWorld);
+    const impactDir = worldDirectionToSpritePixelDirection(impactVelocityWorld, rotation, s.scale);
+    const sideDir = vec.Vec2{ .x = -impactDir.y, .y = impactDir.x };
+    const mainStretch = 1.0 + @min(impactSpeed * 0.08, 1.25);
+
+    var spots: [11]BloodSplatSpot = undefined;
+    var spotCount: usize = 0;
+    spots[spotCount] = .{
+        .offsetX = 0.0,
+        .offsetY = 0.0,
+        .radius = radiusPixels,
+        .strength = 0.9,
+    };
+    spotCount += 1;
+
+    const satelliteCount: usize = 5 + @as(usize, @intFromFloat(randomUnitFromSeed(seed, 11) * 5.99));
+    for (0..satelliteCount) |i| {
+        const saltBase = @as(u64, @intCast(i)) * 17;
+        const alongBias = randomUnitFromSeed(seed, 40 + saltBase);
+        const distance = radiusPixels * (0.45 + randomUnitFromSeed(seed, 41 + saltBase) * (1.15 + @min(impactSpeed * 0.035, 0.85)));
+        const radius = radiusPixels * (0.08 + randomUnitFromSeed(seed, 42 + saltBase) * 0.2);
+        const strength = 0.35 + randomUnitFromSeed(seed, 43 + saltBase) * 0.45;
+
+        if (alongBias < 0.62) {
+            const sideOffset = (randomUnitFromSeed(seed, 44 + saltBase) - 0.5) * radiusPixels * 1.15;
+            spots[spotCount] = .{
+                .offsetX = impactDir.x * distance + sideDir.x * sideOffset,
+                .offsetY = impactDir.y * distance + sideDir.y * sideOffset,
+                .radius = radius,
+                .strength = strength,
+            };
+        } else {
+            const angle = randomUnitFromSeed(seed, 45 + saltBase) * std.math.pi * 2.0;
+            spots[spotCount] = .{
+                .offsetX = @cos(angle) * distance,
+                .offsetY = @sin(angle) * distance,
+                .radius = radius,
+                .strength = strength,
+            };
+        }
+        spotCount += 1;
+    }
+    var extent = radiusPixels * mainStretch;
+    for (spots[0..spotCount]) |spot| {
+        extent = @max(extent, @abs(spot.offsetX) + spot.radius);
+        extent = @max(extent, @abs(spot.offsetY) + spot.radius);
+    }
+    extent += 2.0;
+
+    const rawMinX: i32 = @intFromFloat(@floor(centerPixelF.x - extent));
+    const rawMaxX: i32 = @intFromFloat(@ceil(centerPixelF.x + extent));
+    const rawMinY: i32 = @intFromFloat(@floor(centerPixelF.y - extent));
+    const rawMaxY: i32 = @intFromFloat(@ceil(centerPixelF.y + extent));
+
+    const widthI: i32 = @intCast(width);
+    const heightI: i32 = @intCast(height);
+
+    if (rawMaxX < 0 or rawMinX >= widthI or rawMaxY < 0 or rawMinY >= heightI) {
+        return null;
+    }
+
+    const minX: usize = @intCast(@max(0, rawMinX));
+    const maxX: usize = @intCast(@min(widthI - 1, rawMaxX));
+    const minY: usize = @intCast(@max(0, rawMinY));
+    const maxY: usize = @intCast(@min(heightI - 1, rawMaxY));
+    var changed = false;
+    var dirtyMinX: i32 = widthI;
+    var dirtyMinY: i32 = heightI;
+    var dirtyMaxX: i32 = 0;
+    var dirtyMaxY: i32 = 0;
+
+    var y = minY;
+    while (y <= maxY) : (y += 1) {
+        var x = minX;
+        while (x <= maxX) : (x += 1) {
+            const pixelIndex = y * pitch + x * bytesPerPixel;
+            if (pixels[pixelIndex + 3] == 0) {
+                continue;
+            }
+            const xi: i32 = @intCast(x);
+            const yi: i32 = @intCast(y);
+            const px = @as(f32, @floatFromInt(xi)) - centerPixelF.x;
+            const py = @as(f32, @floatFromInt(yi)) - centerPixelF.y;
+            const textureNoise = pixelNoise(seed, xi, yi, 700);
+            const holeNoise = pixelNoise(seed, xi, yi, 911);
+            var strongest: f32 = 0.0;
+
+            for (spots[0..spotCount], 0..) |spot, spotIndex| {
+                const localX = px - spot.offsetX;
+                const localY = py - spot.offsetY;
+                const along = localX * impactDir.x + localY * impactDir.y;
+                const across = localX * sideDir.x + localY * sideDir.y;
+                const stretch = if (spotIndex == 0) mainStretch else 1.0;
+                const normalized = @sqrt((along / stretch) * (along / stretch) + across * across) / spot.radius;
+                const edgeNoise = pixelNoise(seed, xi, yi, 1000 + @as(u64, @intCast(spotIndex)) * 97);
+                const edge = 0.72 + edgeNoise * 0.34;
+                if (normalized > edge) {
+                    continue;
+                }
+
+                const fade = 1.0 - normalized / @max(edge, 0.001);
+                const strength = spot.strength * (0.25 + fade * 0.75) * (0.8 + textureNoise * 0.25);
+                strongest = @max(strongest, strength);
+            }
+
+            if (strongest <= 0.04) {
+                continue;
+            }
+            if (holeNoise > 0.985 and strongest < 0.55) {
+                continue;
+            }
+
+            blendBloodPixel(pixels, pixelIndex, color, strongest, textureNoise);
+            changed = true;
+            dirtyMinX = @min(dirtyMinX, xi);
+            dirtyMinY = @min(dirtyMinY, yi);
+            dirtyMaxX = @max(dirtyMaxX, xi + 1);
+            dirtyMaxY = @max(dirtyMaxY, yi + 1);
+        }
+    }
+
+    if (!changed) {
+        return null;
+    }
+
+    return .{
+        .minX = dirtyMinX,
+        .minY = dirtyMinY,
+        .maxX = dirtyMaxX,
+        .maxY = dirtyMaxY,
+    };
+}
+
 pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !?vec.IRect {
     const RemoveContext = struct {
         changed: bool = false,
@@ -931,6 +1192,37 @@ pub fn updateTextureVisualFromSurface(spriteUuid: u64) !void {
     };
 
     try uploadTextureFromSurface(s);
+}
+
+pub fn updateTextureVisualRegionFromSurface(spriteUuid: u64, dirtyRect: vec.IRect) !void {
+    const s = sprites.getPtrLocking(spriteUuid) orelse {
+        std.log.warn("updateTextureVisualRegionFromSurface: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+    const width = s.surface.w;
+    const height = s.surface.h;
+    const rect = vec.irectExpandedClamped(dirtyRect, 1, width, height);
+    if (rect.minX >= rect.maxX or rect.minY >= rect.maxY) {
+        return;
+    }
+
+    const movedToMutable = tex.isImmutableAtlasTexture(s.texture);
+    if (!surfaceMatchesTexture(s.surface, s.texture)) {
+        try uploadTextureFromSurface(s);
+        return;
+    }
+
+    try tex.ensureMutableTexture(s.texture, s.surface);
+    if (movedToMutable) {
+        return;
+    }
+
+    try tex.reuploadTextureRegion(s.texture, s.surface, .{
+        .x = rect.minX,
+        .y = rect.minY,
+        .w = rect.maxX - rect.minX,
+        .h = rect.maxY - rect.minY,
+    });
 }
 
 pub fn updateTextureGeometryFromSurface(spriteUuid: u64) !void {

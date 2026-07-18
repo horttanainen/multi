@@ -169,6 +169,11 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    const bloodParticleConfig = data.getParticleData("blood") orelse {
+        std.log.err("main: particles.json is missing required particle data 'blood'", .{});
+        return error.BloodParticleDataNotFound;
+    };
+    particle.setBloodParticleConfig(bloodParticleConfig);
     try settings.init();
     settings.applyMusic();
     try lut.init();
@@ -279,6 +284,8 @@ fn gameLoop() !void {
     rope.applyTension();
 
     try particle.checkContacts();
+    particle.processBloodStainTextureUpdates();
+    try gibbing.checkContacts();
     try projectile.checkContacts();
     try projectile.cleanupShrapnel();
     try particle.cleanupParticles();

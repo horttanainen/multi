@@ -1,0 +1,25 @@
+[
+    {
+        "key": "blood",
+        "spritePath": "particles/circle.png",
+        "particlesPerDamage": 2.4,
+        "maxParticles": 180,
+        "minSpeedVariation": 1.4,
+        "maxSpeedVariation": 9.5,
+        "minScale": 0.07,
+        "maxScale": 0.35,
+        "minStainRadius": 0.05,
+        "maxStainRadius": 0.35,
+        "lifetimeMs": 5000,
+        "colorR": 138,
+        "colorG": 3,
+        "colorB": 3,
+        "linearDamping": 0.25,
+        "gravityScale": 1.2,
+        "density": 1.0,
+        "friction": 1.0,
+        "restitution": 0.05,
+        "boxSize": 0.035,
+        "groupIndex": -3
+    }
+]

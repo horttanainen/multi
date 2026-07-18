@@ -980,7 +980,8 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
 
     // Generate blood if player took damage
     if (d > 0) {
-        try particle.createBloodParticles(playerPosM, d);
+        const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
+        try particle.createBloodParticles(playerPosM, d, playerVelocity);
     }
 
     if (p.health <= 0) {

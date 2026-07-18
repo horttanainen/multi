@@ -4,11 +4,12 @@ const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const entity = @import("entity.zig");
-const config = @import("config.zig");
 const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const runtime = @import("runtime.zig");
+const particle = @import("particle.zig");
+const time = @import("time.zig");
 
 const GibletSet = struct {
     heads: []u64,
@@ -16,12 +17,19 @@ const GibletSet = struct {
     meat: []u64,
 };
 
+const gibletBloodCooldownSeconds: f64 = 0.16;
+const gibletBloodMinImpactSpeed: f32 = 1.4;
+const gibletBloodMinDamage: f32 = 4.0;
+const gibletBloodMaxDamage: f32 = 18.0;
+const gibletBloodDamagePerSpeed: f32 = 3.0;
+
 // uncolored template giblets
 var templateHeadGiblets: []u64 = &[_]u64{};
 var templateLegGiblets: []u64 = &[_]u64{};
 var templateMeatGiblets: []u64 = &[_]u64{};
 
 var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
+var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
 
 pub fn init() !void {
     templateHeadGiblets = try fs.loadSpritesFromFolder(
@@ -134,8 +142,11 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
     shapeDef.density = 1.0;
     shapeDef.filter.categoryBits = collision.CATEGORY_GIBLET;
     shapeDef.filter.maskBits = collision.MASK_GIBLET;
+    shapeDef.enableHitEvents = true;
+    shapeDef.enableContactEvents = true;
 
     const gibEntity = try entity.createFromImg(spriteCopyUuid, shapeDef, bodyDef, "dynamic");
+    try gibletBloodCooldowns.put(allocator, gibEntity.bodyId, 0.0);
 
     // Apply random impulse to scatter giblets
     const angle = runtime.random().float(f32) * std.math.pi * 2.0;
@@ -151,7 +162,7 @@ fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
     const coloredSpriteUuid = try sprite.createMutableCopy(gibletSpriteUuid);
     errdefer sprite.cleanupLater(coloredSpriteUuid);
 
-    const bloodColor = sprite.Color{ .r = config.bloodParticle.colorR, .g = config.bloodParticle.colorG, .b = config.bloodParticle.colorB };
+    const bloodColor = try particle.currentBloodColor();
 
     try sprite.colorMatchingPixels(coloredSpriteUuid, bloodColor, sprite.isCyan);
     try sprite.colorMatchingPixels(coloredSpriteUuid, playerColor, sprite.isWhite);
@@ -159,7 +170,94 @@ fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
     return coloredSpriteUuid;
 }
 
+fn cleanupInvalidTrackedGiblets() void {
+    var index: usize = 0;
+    while (index < gibletBloodCooldowns.count()) {
+        const bodyId = gibletBloodCooldowns.keys()[index];
+        if (box2d.c.b2Body_IsValid(bodyId)) {
+            index += 1;
+            continue;
+        }
+
+        _ = gibletBloodCooldowns.swapRemove(bodyId);
+    }
+}
+
+fn shapeCanReceiveGibletBlood(shapeId: box2d.c.b2ShapeId) bool {
+    if (!box2d.c.b2Shape_IsValid(shapeId)) {
+        return false;
+    }
+
+    const filter = box2d.c.b2Shape_GetFilter(shapeId);
+    const mask = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_UNBREAKABLE;
+    return (filter.categoryBits & mask) != 0;
+}
+
+fn spatterFromGiblet(gibletBodyId: box2d.c.b2BodyId, targetShapeId: box2d.c.b2ShapeId) !void {
+    if (!box2d.c.b2Body_IsValid(gibletBodyId)) {
+        return;
+    }
+    if (!shapeCanReceiveGibletBlood(targetShapeId)) {
+        return;
+    }
+
+    const nextAllowed = gibletBloodCooldowns.getPtr(gibletBodyId) orelse {
+        return;
+    };
+
+    const now = time.now();
+    if (now < nextAllowed.*) {
+        return;
+    }
+
+    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(gibletBodyId));
+    const speed = vec.magnitude(velocity);
+    if (speed < gibletBloodMinImpactSpeed) {
+        return;
+    }
+
+    nextAllowed.* = now + gibletBloodCooldownSeconds;
+    const pos = vec.fromBox2d(box2d.c.b2Body_GetPosition(gibletBodyId));
+    const damage = std.math.clamp((speed - gibletBloodMinImpactSpeed) * gibletBloodDamagePerSpeed, gibletBloodMinDamage, gibletBloodMaxDamage);
+    try particle.createBloodParticlesFromImpact(pos, damage, velocity);
+}
+
+fn handleGibletContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {
+    if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) {
+        return;
+    }
+
+    const bodyIdA = box2d.c.b2Shape_GetBody(shapeIdA);
+    const bodyIdB = box2d.c.b2Shape_GetBody(shapeIdB);
+    const aIsGiblet = gibletBloodCooldowns.contains(bodyIdA);
+    const bIsGiblet = gibletBloodCooldowns.contains(bodyIdB);
+
+    if (aIsGiblet and !bIsGiblet) {
+        try spatterFromGiblet(bodyIdA, shapeIdB);
+    }
+    if (bIsGiblet and !aIsGiblet) {
+        try spatterFromGiblet(bodyIdB, shapeIdA);
+    }
+}
+
+pub fn checkContacts() !void {
+    cleanupInvalidTrackedGiblets();
+
+    const contactEvents = box2d.getContactEvents();
+    for (0..@intCast(contactEvents.beginCount)) |i| {
+        const event = contactEvents.beginEvents[i];
+        try handleGibletContact(event.shapeIdA, event.shapeIdB);
+    }
+
+    for (0..@intCast(contactEvents.hitCount)) |i| {
+        const event = contactEvents.hitEvents[i];
+        try handleGibletContact(event.shapeIdA, event.shapeIdB);
+    }
+}
+
 pub fn cleanup() void {
+    gibletBloodCooldowns.clearAndFree(allocator);
+
     // Clean up template giblets
     for (templateHeadGiblets) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);

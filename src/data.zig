@@ -84,15 +84,43 @@ pub const WeaponData = struct {
     directDamage: f32,
 };
 
+pub const ParticleData = struct {
+    spritePath: []const u8,
+    particlesPerDamage: f32,
+    maxParticles: u32,
+    minSpeedVariation: f32,
+    maxSpeedVariation: f32,
+    minScale: f32,
+    maxScale: f32,
+    minStainRadius: f32,
+    maxStainRadius: f32,
+
+    lifetimeMs: u32,
+    colorR: u8,
+    colorG: u8,
+    colorB: u8,
+
+    linearDamping: f32,
+    gravityScale: f32,
+    density: f32,
+    friction: f32,
+    restitution: f32,
+    boxSize: f32,
+    groupIndex: i32,
+};
+
+
 pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
 var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
 var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
 var projectileDataMap: std.StringHashMapUnmanaged(ProjectileData) = .{};
 var weaponDataMap: std.StringHashMapUnmanaged(WeaponData) = .{};
+var particleDataMap: std.StringHashMapUnmanaged(ParticleData) = .{};
 
 pub fn init() !void {
     try initSprites();
+    try initParticles();
     try initAnimations();
     try initSounds();
     try initExplosions();
@@ -150,6 +178,81 @@ fn runtimeAtlasProfileForSpriteEntry(key: []const u8, profileName: ?[]const u8) 
         return config.defaultRuntimeAtlasProfile;
     };
     return profile;
+}
+
+fn initParticles() !void {
+    var jsonBuf: [16384]u8 = undefined;
+    const jsonData = fs.readFile("particles.json", &jsonBuf) catch |err| {
+        std.debug.print("Warning: Could not read particles.json: {}\n", .{err});
+        return;
+    };
+
+    const Entry = struct {
+        key: []const u8,
+        spritePath: []const u8,
+        particlesPerDamage: f32,
+        maxParticles: u32,
+        minSpeedVariation: f32,
+        maxSpeedVariation: f32,
+        minScale: f32,
+        maxScale: f32,
+        minStainRadius: f32,
+        maxStainRadius: f32,
+        lifetimeMs: u32,
+        colorR: u8,
+        colorG: u8,
+        colorB: u8,
+        linearDamping: f32,
+        gravityScale: f32,
+        density: f32,
+        friction: f32,
+        restitution: f32,
+        boxSize: f32,
+        groupIndex: i32,
+    };
+
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+        std.debug.print("Warning: Failed to parse particles.json: {}\n", .{err});
+        return;
+    };
+    defer parsed.deinit();
+
+    for (parsed.value) |entry| {
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        const spritePath = allocator.dupe(u8, entry.spritePath) catch {
+            allocator.free(key);
+            continue;
+        };
+
+        particleDataMap.put(allocator, key, .{
+            .spritePath = spritePath,
+            .particlesPerDamage = entry.particlesPerDamage,
+            .maxParticles = entry.maxParticles,
+            .minSpeedVariation = entry.minSpeedVariation,
+            .maxSpeedVariation = entry.maxSpeedVariation,
+            .minScale = entry.minScale,
+            .maxScale = entry.maxScale,
+            .minStainRadius = entry.minStainRadius,
+            .maxStainRadius = entry.maxStainRadius,
+            .lifetimeMs = entry.lifetimeMs,
+            .colorR = entry.colorR,
+            .colorG = entry.colorG,
+            .colorB = entry.colorB,
+            .linearDamping = entry.linearDamping,
+            .gravityScale = entry.gravityScale,
+            .density = entry.density,
+            .friction = entry.friction,
+            .restitution = entry.restitution,
+            .boxSize = entry.boxSize,
+            .groupIndex = entry.groupIndex,
+        }) catch {
+            allocator.free(key);
+            allocator.free(spritePath);
+            continue;
+        };
+
+        std.debug.print("Parsed particle data '{s}'\n", .{key});
+    }
 }
 
 fn initAnimations() !void {
@@ -628,6 +731,10 @@ pub fn getSpriteData(key: []const u8) ?SpriteData {
     return spriteDataMap.get(key);
 }
 
+pub fn getParticleData(key: []const u8) ?ParticleData {
+    return particleDataMap.get(key);
+}
+
 pub fn cleanup() void {
     var spriteIter = spriteDataMap.iterator();
     while (spriteIter.next()) |entry| {
@@ -635,6 +742,13 @@ pub fn cleanup() void {
         allocator.free(entry.value_ptr.path);
     }
     spriteDataMap.deinit(allocator);
+
+    var particleIter = particleDataMap.iterator();
+    while (particleIter.next()) |entry| {
+        allocator.free(entry.key_ptr.*);
+        allocator.free(entry.value_ptr.spritePath);
+    }
+    particleDataMap.deinit(allocator);
 
     var animIter = animationDataMap.iterator();
     while (animIter.next()) |entry| {
