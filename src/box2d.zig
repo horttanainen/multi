@@ -192,6 +192,16 @@ pub fn castRayClosest(origin: c.b2Vec2, translation: c.b2Vec2, filter: c.b2Query
     return c.b2World_CastRayClosest(getWorldId(), origin, translation, filter);
 }
 
+pub fn castRay(
+    origin: c.b2Vec2,
+    translation: c.b2Vec2,
+    filter: c.b2QueryFilter,
+    callback: ?*const c.b2CastResultFcn,
+    context: ?*anyopaque,
+) void {
+    _ = c.b2World_CastRay(getWorldId(), origin, translation, filter, callback, context);
+}
+
 pub fn createWeldJoint(def: *const c.b2WeldJointDef) c.b2JointId {
     return c.b2CreateWeldJoint(getWorldId(), def);
 }

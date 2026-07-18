@@ -17,7 +17,6 @@ const runtime = @import("runtime.zig");
 
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
-const blood = @import("blood.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const rope = @import("rope.zig");
@@ -65,6 +64,21 @@ pub const Player = struct {
     leftHandSpriteUuid: u64,
     leftHandNoHookSpriteUuid: u64,
     sprayPaintSpriteUuid: ?u64,
+};
+
+pub const DamageResult = struct {
+    applied: bool = false,
+    fatal: bool = false,
+};
+
+pub const bodyColliderHalfWidth: f32 = 0.2;
+pub const bodyColliderHalfHeight: f32 = 0.6;
+pub const bodyColliderOffset: vec.Vec2 = .{ .x = 0, .y = -0.5 };
+pub const lowerBodyColliderRadius: f32 = 0.3;
+pub const centerOffset: vec.Vec2 = .{
+    .x = 0,
+    .y = ((bodyColliderOffset.y - bodyColliderHalfHeight) +
+        @max(bodyColliderOffset.y + bodyColliderHalfHeight, lowerBodyColliderRadius)) / 2.0,
 };
 
 pub var players: std.AutoArrayHashMapUnmanaged(usize, Player) = .empty;
@@ -151,7 +165,12 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     const playerId = players.values().len;
     const playerMaterialId: i32 = @intCast(playerId + config.player.materialOffset);
 
-    const dynamicBox = box2d.c.b2MakeOffsetBox(0.2, 0.6, .{ .x = 0, .y = -0.5 }, .{ .c = 1, .s = 0 });
+    const dynamicBox = box2d.c.b2MakeOffsetBox(
+        bodyColliderHalfWidth,
+        bodyColliderHalfHeight,
+        vec.toBox2d(bodyColliderOffset),
+        .{ .c = 1, .s = 0 },
+    );
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.density = 0.45;
     shapeDef.material.friction = config.player.movementFriction;
@@ -166,7 +185,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
             .x = 0,
             .y = 0,
         },
-        .radius = 0.3,
+        .radius = lowerBodyColliderRadius,
     };
     var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
     lowerBodyShapeDef.density = 0;
@@ -972,8 +991,12 @@ pub fn drawAllLeftHandsFront() !void {
     }
 }
 
-pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
-    if (p.isDead) return;
+pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
+    const p = players.getPtr(playerId) orelse {
+        std.log.err("damage: player {d} is missing", .{playerId});
+        return PlayerError.PlayerUnspawned;
+    };
+    if (p.isDead or d <= 0) return .{};
 
     p.health -= d;
 
@@ -984,18 +1007,6 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
     defer {
         if (profileDeath) {
             perf.recordPlayerDeathTriggerStage(.total, deathTriggerStart);
-        }
-    }
-
-    const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-
-    // Generate blood if player took damage
-    if (d > 0) {
-        const bloodSpawnStart = if (profileDeath) perf.begin(.player_death) else 0;
-        const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-        try blood.createParticles(playerPosM, d, playerVelocity);
-        if (profileDeath) {
-            perf.recordPlayerDeathTriggerStage(.blood_spawn, bloodSpawnStart);
         }
     }
 
@@ -1014,6 +1025,11 @@ pub fn damage(p: *Player, d: f32, attackerId: ?usize) !void {
             perf.recordPlayerDeathTriggerStage(.kill, killStart);
         }
     }
+
+    return .{
+        .applied = true,
+        .fatal = isFatal,
+    };
 }
 
 pub fn kill(p: *Player, killerId: ?usize) !void {
@@ -1085,16 +1101,20 @@ pub fn cleanup() void {
         for (p.weapons) |w| {
             if (w.projectile) |proj| {
                 animation.cleanupOne(proj.animation);
-                if (proj.explosion.animation) |expAnim| {
-                    animation.cleanupOne(expAnim);
+                if (proj.explosion) |explosion| {
+                    if (explosion.animation) |expAnim| {
+                        animation.cleanupOne(expAnim);
+                    }
                 }
                 if (proj.propulsionAnimation) |propAnim| {
                     animation.cleanupOne(propAnim);
                 }
             }
             if (w.pellet) |pel| {
-                if (pel.explosion.animation) |peAnim| {
-                    animation.cleanupOne(peAnim);
+                if (pel.explosion) |explosion| {
+                    if (explosion.animation) |peAnim| {
+                        animation.cleanupOne(peAnim);
+                    }
                 }
             }
             if (w.hitscanExplosion) |he| {

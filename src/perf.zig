@@ -298,6 +298,11 @@ pub inline fn beginPlayerDeathFrame() u64 {
     return sdl.getPerformanceCounter();
 }
 
+pub inline fn isCapturingPlayerDeath(victim_id: usize) bool {
+    if (comptime !configured(.player_death)) return false;
+    return playerDeathCapture.active and playerDeathCapture.victim_id == victim_id;
+}
+
 pub inline fn recordPlayerDeathFrameStage(comptime stage: PlayerDeathFrameStage, start: u64) void {
     if (comptime !configured(.player_death)) return;
     const elapsed_us = elapsedUs(start);

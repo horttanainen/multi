@@ -9,6 +9,18 @@ const vec = @import("vector.zig");
 
 var config: ?data.ParticleData = null;
 
+pub const Emission = struct {
+    position: vec.Vec2,
+    amount: f32,
+    direction: ?vec.Vec2 = null,
+    spread_radians: f32 = std.math.pi * 2.0,
+    inherited_velocity: vec.Vec2 = vec.zero,
+    inherited_velocity_scale: f32 = 0,
+    carried_velocity: ?vec.Vec2 = null,
+    carried_fraction: f32 = 0,
+    carried_spread_radians: f32 = 0,
+};
+
 pub fn init() !void {
     const loadedConfig = data.getParticleData("blood") orelse {
         std.log.err("blood.init: particles.json is missing required particle data 'blood'", .{});
@@ -68,30 +80,18 @@ fn randomBaseDirection() vec.Vec2 {
     };
 }
 
-fn randomDirection(directionBias: vec.Vec2, biasStrength: f32) vec.Vec2 {
-    const base = randomBaseDirection();
-    const biasLength = vec.magnitude(directionBias);
-    if (biasLength < 0.001 or biasStrength <= 0.0) {
-        return base;
-    }
+fn randomDirection(direction: ?vec.Vec2, spreadRadians: f32) vec.Vec2 {
+    if (direction == null) return randomBaseDirection();
 
-    const bias = vec.Vec2{
-        .x = directionBias.x / biasLength,
-        .y = directionBias.y / biasLength,
-    };
-    const mix = std.math.clamp(biasStrength, 0.0, 0.9) * (0.35 + runtime.random().float(f32) * 0.65);
-    const mixed = vec.Vec2{
-        .x = base.x * (1.0 - mix) + bias.x * mix,
-        .y = base.y * (1.0 - mix) + bias.y * mix,
-    };
-    const length = vec.magnitude(mixed);
-    if (length < 0.001) {
-        return base;
-    }
+    const requestedDirection = direction.?;
+    if (vec.magnitude(requestedDirection) < 0.001) return randomBaseDirection();
 
+    const centerAngle = std.math.atan2(requestedDirection.y, requestedDirection.x);
+    const spread = std.math.clamp(spreadRadians, 0.0, std.math.pi * 2.0);
+    const angle = centerAngle + randomRange(-spread * 0.5, spread * 0.5);
     return .{
-        .x = mixed.x / length,
-        .y = mixed.y / length,
+        .x = @cos(angle),
+        .y = @sin(angle),
     };
 }
 
@@ -104,28 +104,40 @@ fn randomSpawnPosition(position: vec.Vec2) vec.Vec2 {
     };
 }
 
-fn createBiased(position: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2, directionBiasStrength: f32, inheritedVelocityScale: f32) !void {
-    if (damage <= 0.0) {
+pub fn emit(emission: Emission) !void {
+    if (emission.amount <= 0.0) {
         return;
     }
 
-    const loadedConfig = try requireConfig("createBiased");
+    const loadedConfig = try requireConfig("emit");
     const stain = loadedConfig.stain orelse {
-        std.log.err("createBiased: blood stain behavior is missing", .{});
+        std.log.err("emit: blood stain behavior is missing", .{});
         return error.BloodStainBehaviorMissing;
     };
-    const scaledParticleCount = @ceil(damage * loadedConfig.particlesPerUnit);
+    const scaledParticleCount = @ceil(emission.amount * loadedConfig.particlesPerUnit);
     const particleCount: u32 = @min(loadedConfig.maxParticles, @max(1, @as(u32, @intFromFloat(scaledParticleCount))));
     const color = try currentColor();
+    const carriedFraction = std.math.clamp(emission.carried_fraction, 0.0, 1.0);
 
     for (0..particleCount) |_| {
-        const direction = randomDirection(inheritedVelocity, directionBiasStrength);
-        const speedRoll = runtime.random().float(f32);
-        const speed = loadedConfig.minSpeedVariation +
-            (loadedConfig.maxSpeedVariation - loadedConfig.minSpeedVariation) * speedRoll * speedRoll;
+        const useCarriedVelocity = emission.carried_velocity != null and
+            runtime.random().float(f32) < carriedFraction and
+            vec.magnitude(emission.carried_velocity.?) >= 0.001;
+        const direction = if (useCarriedVelocity)
+            randomDirection(emission.carried_velocity, emission.carried_spread_radians)
+        else
+            randomDirection(emission.direction, emission.spread_radians);
+        const speed = if (useCarriedVelocity) blk: {
+            const carriedSpeed = vec.magnitude(emission.carried_velocity.?);
+            break :blk carriedSpeed * randomRange(0.85, 1.05);
+        } else blk: {
+            const speedRoll = runtime.random().float(f32);
+            break :blk loadedConfig.minSpeedVariation +
+                (loadedConfig.maxSpeedVariation - loadedConfig.minSpeedVariation) * speedRoll * speedRoll;
+        };
         const velocity = vec.add(
             vec.mul(direction, speed),
-            vec.mul(inheritedVelocity, inheritedVelocityScale),
+            vec.mul(emission.inherited_velocity, emission.inherited_velocity_scale),
         );
         const visualScale = loadedConfig.minScale +
             runtime.random().float(f32) * (loadedConfig.maxScale - loadedConfig.minScale);
@@ -133,7 +145,7 @@ fn createBiased(position: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2, di
             runtime.random().float(f32) * (stain.maxRadius - stain.minRadius);
 
         _ = try particle.spawnCircle(.{
-            .position = randomSpawnPosition(position),
+            .position = randomSpawnPosition(emission.position),
             .velocity = velocity,
             .visual_scale = visualScale,
             .lifetime_ms = loadedConfig.lifetimeMs,
@@ -161,9 +173,21 @@ fn createBiased(position: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2, di
 }
 
 pub fn createParticles(position: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2) !void {
-    try createBiased(position, damage, inheritedVelocity, 0.25, 0.35);
+    try emit(.{
+        .position = position,
+        .amount = damage,
+        .inherited_velocity = inheritedVelocity,
+        .inherited_velocity_scale = 0.35,
+    });
 }
 
 pub fn createParticlesFromImpact(position: vec.Vec2, damage: f32, inheritedVelocity: vec.Vec2) !void {
-    try createBiased(position, damage, inheritedVelocity, 0.85, 0.55);
+    try emit(.{
+        .position = position,
+        .amount = damage,
+        .direction = inheritedVelocity,
+        .spread_radians = std.math.pi * 0.55,
+        .inherited_velocity = inheritedVelocity,
+        .inherited_velocity_scale = 0.55,
+    });
 }

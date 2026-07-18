@@ -21,7 +21,7 @@ pub const Projectile = struct {
     propulsion: f32,
     lateralDamping: f32,
     animation: animation.Animation,
-    explosion: projectile.Explosion,
+    explosion: ?projectile.Explosion = null,
     propulsionAnimation: ?animation.Animation = null,
 };
 
@@ -34,7 +34,7 @@ pub const Pellet = struct {
     count: u32 = 1,
     spreadAngle: f32 = 0,
     spawnRadius: f32 = 0.15,
-    explosion: projectile.Explosion,
+    explosion: ?projectile.Explosion = null,
     color: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
 };
 
@@ -51,6 +51,7 @@ pub const Weapon = struct {
     trailDurationMs: u32 = 0,
     trailColor: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
     directDamage: f32 = 0,
+    penetration: projectile.PenetrationMode = .non_penetrating,
 };
 
 const Trail = struct {
@@ -63,13 +64,62 @@ const Trail = struct {
 
 var activeTrails: std.ArrayListUnmanaged(Trail) = .empty;
 
+const maxHitscanPlayers: usize = 64;
+
+const HitscanPlayerHit = struct {
+    point: vec.Vec2,
+    fraction: f32,
+};
+
+const HitscanContext = struct {
+    player_hits: [maxHitscanPlayers]?HitscanPlayerHit = [_]?HitscanPlayerHit{null} ** maxHitscanPlayers,
+};
+
+fn collectHitscanPlayer(
+    shapeId: box2d.c.b2ShapeId,
+    point: box2d.c.b2Vec2,
+    _: box2d.c.b2Vec2,
+    fraction: f32,
+    context: ?*anyopaque,
+) callconv(.c) f32 {
+    if (context == null) {
+        std.log.err("collectHitscanPlayer: ray cast context is missing", .{});
+        return 0;
+    }
+
+    if (!box2d.c.b2Shape_IsValid(shapeId)) {
+        std.log.warn("collectHitscanPlayer: player shape is invalid", .{});
+        return 1;
+    }
+
+    const hitscanContext: *HitscanContext = @ptrCast(@alignCast(context.?));
+    const bodyId = box2d.c.b2Shape_GetBody(shapeId);
+    const hitPlayerId = projectile.playerIdForBody(bodyId) orelse {
+        std.log.warn("collectHitscanPlayer: ray cast player shape has no player", .{});
+        return 1;
+    };
+    if (hitPlayerId >= hitscanContext.player_hits.len) {
+        std.log.err("collectHitscanPlayer: player id {d} does not fit the hit array", .{hitPlayerId});
+        return 1;
+    }
+
+    const existingHit = hitscanContext.player_hits[hitPlayerId];
+    if (existingHit != null and existingHit.?.fraction <= fraction) return 1;
+
+    hitscanContext.player_hits[hitPlayerId] = .{
+        .point = vec.fromBox2d(point),
+        .fraction = fraction,
+    };
+    return 1;
+}
+
 pub fn shoot(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
-    if (w.hitscanExplosion != null) {
-        try shootHitscan(w, position, direction, playerId);
-    } else if (w.pellet) |_| {
-        try shootPellets(w, position, direction, initialVelocity, playerId);
-    } else if (w.projectile) |_| {
+    if (w.projectile != null) {
         try shootProjectile(w, position, direction, initialVelocity, playerId);
+    } else if (w.pellet != null) {
+        try shootPellets(w, position, direction, initialVelocity, playerId);
+    } else {
+        try shootHitscan(w, position, direction, playerId);
     }
     try audio.playFor(w.sound);
 }
@@ -83,7 +133,10 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     shapeDef.enableHitEvents = true;
     shapeDef.enableContactEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
-    shapeDef.filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
+    shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
+    if (w.penetration == .non_penetrating) {
+        shapeDef.filter.maskBits |= collision.otherPlayersMask(playerId);
+    }
 
     const animCopy = try animation.copyAnimationSharedFrames(proj.animation);
 
@@ -99,6 +152,23 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     const projectileEntity = try entity.createFromImg(firstFrameUuid, shapeDef, bodyDef, "projectile");
     entity.markSpriteUuidsShared(projectileEntity.bodyId);
 
+    if (w.penetration == .penetrating) {
+        var sensorShapeDef = box2d.c.b2DefaultShapeDef();
+        sensorShapeDef.isSensor = true;
+        sensorShapeDef.enableSensorEvents = true;
+        sensorShapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+        sensorShapeDef.filter.maskBits = collision.otherPlayersMask(playerId);
+
+        for (projectileEntity.shapeIds) |shapeId| {
+            if (!box2d.c.b2Shape_IsValid(shapeId)) {
+                std.log.warn("shootProjectile: projectile shape became invalid before sensor creation", .{});
+                continue;
+            }
+            const polygon = box2d.c.b2Shape_GetPolygon(shapeId);
+            _ = box2d.c.b2CreatePolygonShape(projectileEntity.bodyId, &sensorShapeDef, &polygon);
+        }
+    }
+
     const impulse = vec.mul(vec.normalize(.{
         .x = direction.x,
         .y = -direction.y,
@@ -112,9 +182,13 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
         .y = currentVel.y + initialVelocity.y,
     });
 
-    try projectile.create(projectileEntity.bodyId, proj.explosion);
+    try projectile.create(projectileEntity.bodyId, .{
+        .owner_id = playerId,
+        .direct_damage = w.directDamage,
+        .penetration = w.penetration,
+        .explosion = proj.explosion,
+    });
     try projectile.registerPropulsion(projectileEntity.bodyId, proj.propulsion, proj.lateralDamping);
-    try projectile.registerOwner(projectileEntity.bodyId, playerId);
 
     var animations = std.StringHashMap(animation.Animation).init(allocator);
     try animations.put("main", animCopy);
@@ -131,31 +205,22 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
 }
 
 fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: usize) !void {
-    const explosion = w.hitscanExplosion.?;
-
     const origin = conv.pixel2M(position);
     // direction uses screen coords (y-up for aim), box2d uses y-down
     const dir = vec.Vec2{ .x = direction.x, .y = -direction.y };
     const normDir = vec.normalize(dir);
     const translation = vec.mul(normDir, w.range);
 
-    var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = collision.CATEGORY_PROJECTILE;
-    filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
-
-    const result = box2d.castRayClosest(vec.toBox2d(origin), vec.toBox2d(translation), filter);
-
     var hitPoint = vec.add(origin, translation);
-    if (result.hit) {
-        hitPoint = vec.fromBox2d(result.point);
-        // Apply direct damage to hit player
-        if (w.directDamage > 0 and box2d.c.b2Shape_IsValid(result.shapeId)) {
-            const hitBodyId = box2d.c.b2Shape_GetBody(result.shapeId);
-            try projectile.damagePlayerDirect(hitBodyId, w.directDamage, playerId);
-        }
+    if (w.penetration == .penetrating) {
+        hitPoint = try shootPenetratingHitscan(w, origin, translation, normDir, playerId);
+    } else {
+        hitPoint = try shootNonPenetratingHitscan(w, origin, translation, normDir, playerId);
     }
 
-    try projectile.explodeAt(hitPoint, explosion, playerId);
+    if (w.hitscanExplosion) |explosion| {
+        try projectile.explodeAt(hitPoint, explosion, playerId);
+    }
 
     if (w.trailDurationMs > 0) {
         try activeTrails.append(allocator, .{
@@ -166,6 +231,83 @@ fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: u
             .durationMs = w.trailDurationMs,
         });
     }
+}
+
+fn shootNonPenetratingHitscan(
+    w: Weapon,
+    origin: vec.Vec2,
+    translation: vec.Vec2,
+    direction: vec.Vec2,
+    playerId: usize,
+) !vec.Vec2 {
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = collision.CATEGORY_PROJECTILE;
+    filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
+
+    const result = box2d.castRayClosest(vec.toBox2d(origin), vec.toBox2d(translation), filter);
+    if (!result.hit) return vec.add(origin, translation);
+
+    const hitPoint = vec.fromBox2d(result.point);
+    if (w.directDamage <= 0 or !box2d.c.b2Shape_IsValid(result.shapeId)) return hitPoint;
+
+    const hitBodyId = box2d.c.b2Shape_GetBody(result.shapeId);
+    const hitPlayerId = projectile.playerIdForBody(hitBodyId) orelse return hitPoint;
+    try projectile.damagePlayerFromHitscan(
+        hitPlayerId,
+        w.directDamage,
+        playerId,
+        hitPoint,
+        direction,
+        .non_penetrating,
+    );
+    return hitPoint;
+}
+
+fn shootPenetratingHitscan(
+    w: Weapon,
+    origin: vec.Vec2,
+    translation: vec.Vec2,
+    direction: vec.Vec2,
+    playerId: usize,
+) !vec.Vec2 {
+    var worldFilter = box2d.c.b2DefaultQueryFilter();
+    worldFilter.categoryBits = collision.CATEGORY_PROJECTILE;
+    worldFilter.maskBits = collision.MASK_PROJECTILE;
+
+    const worldHit = box2d.castRayClosest(vec.toBox2d(origin), vec.toBox2d(translation), worldFilter);
+    const visibleTranslation = if (worldHit.hit)
+        vec.subtract(vec.fromBox2d(worldHit.point), origin)
+    else
+        translation;
+    const endPoint = vec.add(origin, visibleTranslation);
+
+    var playerFilter = box2d.c.b2DefaultQueryFilter();
+    playerFilter.categoryBits = collision.CATEGORY_PROJECTILE;
+    playerFilter.maskBits = collision.otherPlayersMask(playerId);
+
+    var context = HitscanContext{};
+    box2d.castRay(
+        vec.toBox2d(origin),
+        vec.toBox2d(visibleTranslation),
+        playerFilter,
+        collectHitscanPlayer,
+        &context,
+    );
+
+    for (context.player_hits, 0..) |maybeHit, hitPlayerId| {
+        if (maybeHit == null) continue;
+        const hit = maybeHit.?;
+        try projectile.damagePlayerFromHitscan(
+            hitPlayerId,
+            w.directDamage,
+            playerId,
+            hit.point,
+            direction,
+            .penetrating,
+        );
+    }
+
+    return endPoint;
 }
 
 fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
@@ -207,13 +349,25 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
         shapeDef.enableHitEvents = true;
         shapeDef.enableContactEvents = true;
         shapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
-        shapeDef.filter.maskBits = collision.MASK_PROJECTILE | collision.otherPlayersMask(playerId);
+        shapeDef.filter.maskBits = collision.MASK_PROJECTILE;
+        if (w.penetration == .non_penetrating) {
+            shapeDef.filter.maskBits |= collision.otherPlayersMask(playerId);
+        }
 
         const circleShape = box2d.c.b2Circle{
             .center = .{ .x = 0, .y = 0 },
             .radius = pel.radius,
         };
         _ = box2d.c.b2CreateCircleShape(bodyId, &shapeDef, &circleShape);
+
+        if (w.penetration == .penetrating) {
+            var sensorShapeDef = box2d.c.b2DefaultShapeDef();
+            sensorShapeDef.isSensor = true;
+            sensorShapeDef.enableSensorEvents = true;
+            sensorShapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+            sensorShapeDef.filter.maskBits = collision.otherPlayersMask(playerId);
+            _ = box2d.c.b2CreateCircleShape(bodyId, &sensorShapeDef, &circleShape);
+        }
 
         const spriteUuid = try sprite.createFromImg(
             "particles/circle.png",
@@ -253,11 +407,12 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             .y = currentVel.y + initialVelocity.y,
         });
 
-        try projectile.create(bodyId, pel.explosion);
-        try projectile.registerOwner(bodyId, playerId);
-        if (w.directDamage > 0) {
-            try projectile.registerDirectDamage(bodyId, w.directDamage);
-        }
+        try projectile.create(bodyId, .{
+            .owner_id = playerId,
+            .direct_damage = w.directDamage,
+            .penetration = w.penetration,
+            .explosion = pel.explosion,
+        });
     }
 }
 

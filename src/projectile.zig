@@ -14,7 +14,7 @@ const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
 const runtime = @import("runtime.zig");
 const player = @import("player.zig");
-const particle = @import("particle.zig");
+const blood = @import("blood.zig");
 const perf = @import("perf.zig");
 
 pub const Explosion = struct {
@@ -32,15 +32,33 @@ pub const Explosion = struct {
     damagePlayers: bool = true,
 };
 
-pub var explosions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Explosion).empty;
+pub const PenetrationMode = enum {
+    non_penetrating,
+    penetrating,
+};
+
+pub const Spec = struct {
+    owner_id: usize,
+    direct_damage: f32 = 0,
+    penetration: PenetrationMode = .non_penetrating,
+    explosion: ?Explosion = null,
+};
+
+const ActiveProjectile = struct {
+    owner_id: usize,
+    direct_damage: f32,
+    penetration: PenetrationMode,
+    explosion: ?Explosion,
+    hit_player_bits: u64 = 0,
+};
+
+pub var activeProjectiles = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, ActiveProjectile).empty;
 const PropulsionData = struct {
     magnitude: f32,
     lateralDamping: f32,
 };
 
 pub var propulsions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, PropulsionData).empty;
-pub var owners = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, usize).empty;
-pub var directDamages = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f32).empty;
 
 pub var id: usize = 1;
 pub const Shrapnel = struct {
@@ -88,9 +106,15 @@ const TerrainEdit = struct {
     dirtyRect: vec.IRect,
 };
 
+const DirectHitDamage = struct {
+    player_id: usize,
+    applied_damage: f32,
+};
+
 const terrainTextureUpdatesPerFrame: usize = 2;
 const terrainColliderUpdatesPerFrame: usize = 1;
 const perfLogFramesAfterExplosion: u32 = 120;
+const hitscanBloodCarrySpeed: f32 = 24;
 
 var terrainEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
 var terrainTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
@@ -329,23 +353,81 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     }
 }
 
-fn damagePlayersInRadius(pos: vec.Vec2, radius: f32, attackerId: ?usize) !void {
+fn normalizedOrZero(value: vec.Vec2) vec.Vec2 {
+    const length = vec.magnitude(value);
+    if (length < 0.001) return vec.zero;
+    return .{
+        .x = value.x / length,
+        .y = value.y / length,
+    };
+}
+
+pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, emission: blood.Emission) !player.DamageResult {
+    const result = try player.damage(playerId, damage, attackerId);
+    if (!result.applied) return result;
+
+    const profileBlood = result.fatal and perf.isCapturingPlayerDeath(playerId);
+    const bloodStart = if (profileBlood) perf.begin(.player_death) else 0;
+    defer {
+        if (profileBlood) {
+            perf.recordPlayerDeathTriggerStage(.blood_spawn, bloodStart);
+        }
+    }
+    try blood.emit(emission);
+    return result;
+}
+
+fn damageAtExplosionDistance(explosion: Explosion, distance: f32) f32 {
+    if (explosion.blastRadius <= 0) {
+        std.log.err("damageAtExplosionDistance: explosion blast radius must be positive", .{});
+        return 0;
+    }
+    if (distance > explosion.blastRadius) return 0;
+    return 100.0 - (99.0 * distance / explosion.blastRadius);
+}
+
+fn damagePlayersInRadius(
+    pos: vec.Vec2,
+    explosion: Explosion,
+    attackerId: ?usize,
+    directHitDamage: ?DirectHitDamage,
+) !void {
     for (player.players.values()) |*p| {
         if (!box2d.c.b2Body_IsValid(p.bodyId)) {
             continue;
         }
 
-        const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+        const playerBodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
+        const playerPosM = vec.add(playerBodyPosition, player.centerOffset);
 
         const dx = playerPosM.x - pos.x;
         const dy = playerPosM.y - pos.y;
-        const distance = @sqrt(dx * dx + dy * dy);
+        const centerDistance = @sqrt(dx * dx + dy * dy);
+        const isDirectHit = directHitDamage != null and directHitDamage.?.player_id == p.id;
+        const distance = if (isDirectHit)
+            0
+        else
+            @max(0, centerDistance - player.lowerBodyColliderRadius);
+        const baseDamage = damageAtExplosionDistance(explosion, distance);
+        if (baseDamage <= 0) continue;
 
-        if (distance <= radius) {
-            const damage = 100.0 - (99.0 * distance / radius);
-
-            try player.damage(p, damage, attackerId);
+        var damage = baseDamage;
+        if (isDirectHit) {
+            damage = @max(0, damage - directHitDamage.?.applied_damage);
         }
+        if (damage <= 0) continue;
+
+        const radialDirection = normalizedOrZero(.{ .x = dx, .y = dy });
+        const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
+        const blastVelocity = vec.mul(radialDirection, explosion.blastPower * 0.08);
+        _ = try damagePlayerWithBlood(p.id, damage, attackerId, .{
+            .position = playerPosM,
+            .amount = damage,
+            .direction = if (vec.magnitude(radialDirection) < 0.001) null else radialDirection,
+            .spread_radians = std.math.pi * 0.9,
+            .inherited_velocity = vec.add(playerVelocity, blastVelocity),
+            .inherited_velocity_scale = 0.35,
+        });
     }
 }
 
@@ -390,30 +472,6 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
     }
 
     return try bodyIds.toOwnedSlice();
-}
-
-pub fn explode(bodyId: box2d.c.b2BodyId) !void {
-    const maybeExplosion = explosions.fetchSwapRemove(bodyId);
-    if (maybeExplosion == null) return;
-
-    _ = propulsions.swapRemove(bodyId);
-
-    const attackerId = owners.get(bodyId);
-    _ = owners.swapRemove(bodyId);
-    _ = directDamages.swapRemove(bodyId);
-
-    const explosion = maybeExplosion.?.value;
-    const maybeE = entity.entities.getLocking(bodyId);
-
-    var pos = vec.zero;
-    if (maybeE) |e| {
-        if (e.state) |state| {
-            pos = vec.fromBox2d(state.pos);
-        }
-        entity.cleanupLater(e);
-    }
-
-    try explodeAt(pos, explosion, attackerId);
 }
 
 fn markShrapnelForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
@@ -465,7 +523,12 @@ pub fn cleanupShrapnel() !void {
     }
 }
 
-pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
+fn explodeAtWithDirectHit(
+    pos: vec.Vec2,
+    explosion: Explosion,
+    attackerId: ?usize,
+    directHitDamage: ?DirectHitDamage,
+) !void {
     const perfId = beginExplosionPerfLog();
     const totalStart = perf.begin(.explosion);
 
@@ -503,30 +566,32 @@ pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void 
 
     const playerDamageStart = perf.begin(.explosion);
     if (explosion.damagePlayers) {
-        try damagePlayersInRadius(pos, explosion.blastRadius, attackerId);
+        try damagePlayersInRadius(pos, explosion, attackerId, directHitDamage);
     }
     logExplosionStage(perfId, "player_damage", playerDamageStart);
     logExplosionStage(perfId, "total", totalStart);
 }
 
-pub fn create(bodyId: box2d.c.b2BodyId, explosion: Explosion) !void {
-    try explosions.put(allocator, bodyId, explosion);
+pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
+    try explodeAtWithDirectHit(pos, explosion, attackerId, null);
 }
 
-pub fn registerDirectDamage(bodyId: box2d.c.b2BodyId, damage: f32) !void {
-    try directDamages.put(allocator, bodyId, damage);
+pub fn create(bodyId: box2d.c.b2BodyId, spec: Spec) !void {
+    try activeProjectiles.put(allocator, bodyId, .{
+        .owner_id = spec.owner_id,
+        .direct_damage = spec.direct_damage,
+        .penetration = spec.penetration,
+        .explosion = spec.explosion,
+    });
 }
 
 pub fn registerPropulsion(bodyId: box2d.c.b2BodyId, propulsionMagnitude: f32, lateralDamping: f32) !void {
     try propulsions.put(allocator, bodyId, .{ .magnitude = propulsionMagnitude, .lateralDamping = lateralDamping });
 }
 
-pub fn registerOwner(bodyId: box2d.c.b2BodyId, playerId: usize) !void {
-    try owners.put(allocator, bodyId, playerId);
-}
-
 pub fn getOwner(bodyId: box2d.c.b2BodyId) ?usize {
-    return owners.get(bodyId);
+    const active = activeProjectiles.get(bodyId) orelse return null;
+    return active.owner_id;
 }
 
 pub fn applyPropulsion() void {
@@ -559,49 +624,207 @@ pub fn applyPropulsion() void {
     }
 }
 
-pub fn damagePlayerDirect(hitBodyId: box2d.c.b2BodyId, damage: f32, attackerId: ?usize) !void {
-    if (!box2d.c.b2Body_IsValid(hitBodyId)) return;
-
-    for (player.players.values()) |*p| {
+pub fn playerIdForBody(bodyId: box2d.c.b2BodyId) ?usize {
+    for (player.players.values()) |p| {
         if (!box2d.c.b2Body_IsValid(p.bodyId)) continue;
-        if (box2d.c.B2_ID_EQUALS(p.bodyId, hitBodyId)) {
-            try player.damage(p, damage, attackerId);
-            return;
-        }
+        if (box2d.c.B2_ID_EQUALS(p.bodyId, bodyId)) return p.id;
     }
+    return null;
 }
 
-fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {
-    if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) {
+pub fn damagePlayerFromHitscan(
+    playerId: usize,
+    damage: f32,
+    attackerId: usize,
+    impactPoint: vec.Vec2,
+    travelDirection: vec.Vec2,
+    penetration: PenetrationMode,
+) !void {
+    if (damage <= 0) return;
+
+    const victim = player.players.get(playerId) orelse {
+        std.log.err("damagePlayerFromHitscan: player {d} is missing", .{playerId});
+        return error.PlayerUnspawned;
+    };
+    const normalizedDirection = normalizedOrZero(travelDirection);
+    const bloodDirection = if (penetration == .penetrating)
+        normalizedDirection
+    else
+        vec.mul(normalizedDirection, -1.0);
+    const spread: f32 = if (penetration == .penetrating)
+        std.math.pi * 0.3
+    else
+        std.math.pi * 0.65;
+    const carriedVelocity: ?vec.Vec2 = if (penetration == .penetrating)
+        vec.mul(normalizedDirection, hitscanBloodCarrySpeed)
+    else
+        null;
+    const victimVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(victim.bodyId));
+    _ = try damagePlayerWithBlood(playerId, damage, attackerId, .{
+        .position = impactPoint,
+        .amount = damage,
+        .direction = if (vec.magnitude(bloodDirection) < 0.001) null else bloodDirection,
+        .spread_radians = spread,
+        .inherited_velocity = victimVelocity,
+        .inherited_velocity_scale = 0.35,
+        .carried_velocity = carriedVelocity,
+        .carried_fraction = 0.35,
+        .carried_spread_radians = std.math.pi * 0.12,
+    });
+}
+
+fn markPlayerHit(bodyId: box2d.c.b2BodyId, playerId: usize) !bool {
+    const active = activeProjectiles.getPtr(bodyId) orelse return false;
+    if (playerId >= @bitSizeOf(u64)) {
+        std.log.err("markPlayerHit: player id {d} does not fit the projectile hit mask", .{playerId});
+        return error.PlayerIdOutOfRange;
+    }
+
+    const playerBit = @as(u64, 1) << @intCast(playerId);
+    if ((active.hit_player_bits & playerBit) != 0) return false;
+    active.hit_player_bits |= playerBit;
+    return true;
+}
+
+fn triggerProjectileExplosion(
+    explosion: ?Explosion,
+    pos: vec.Vec2,
+    ownerId: usize,
+    directHitDamage: ?DirectHitDamage,
+) !void {
+    if (explosion == null) return;
+    try explodeAtWithDirectHit(pos, explosion.?, ownerId, directHitDamage);
+}
+
+fn finishProjectile(
+    bodyId: box2d.c.b2BodyId,
+    impactPoint: vec.Vec2,
+    directHitDamage: ?DirectHitDamage,
+) !void {
+    const removed = activeProjectiles.fetchSwapRemove(bodyId) orelse return;
+    _ = propulsions.swapRemove(bodyId);
+
+    const active = removed.value;
+    const projectileEntity = entity.entities.getLocking(bodyId) orelse {
+        std.log.warn("finishProjectile: projectile body has no entity", .{});
+        try triggerProjectileExplosion(active.explosion, impactPoint, active.owner_id, directHitDamage);
+        return;
+    };
+    entity.cleanupLater(projectileEntity);
+    try triggerProjectileExplosion(active.explosion, impactPoint, active.owner_id, directHitDamage);
+}
+
+fn projectileImpactPoint(bodyId: box2d.c.b2BodyId, maybePoint: ?vec.Vec2) vec.Vec2 {
+    if (maybePoint != null) return maybePoint.?;
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("projectileImpactPoint: projectile body became invalid before contact handling", .{});
+        return vec.zero;
+    }
+    return vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
+}
+
+fn damagePlayerFromPhysicalImpact(bodyId: box2d.c.b2BodyId, playerId: usize, impactPoint: vec.Vec2, active: ActiveProjectile) !f32 {
+    if (active.direct_damage <= 0) return 0;
+
+    const victim = player.players.get(playerId) orelse {
+        std.log.err("damagePlayerFromPhysicalImpact: player {d} is missing", .{playerId});
+        return error.PlayerUnspawned;
+    };
+    const directDamage = if (active.explosion != null and active.explosion.?.damagePlayers)
+        @min(active.direct_damage, damageAtExplosionDistance(active.explosion.?, 0))
+    else
+        active.direct_damage;
+    if (directDamage <= 0) return 0;
+
+    const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+    const outwardDirection = vec.mul(normalizedOrZero(projectileVelocity), -1.0);
+    const victimVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(victim.bodyId));
+    const damageResult = try damagePlayerWithBlood(playerId, directDamage, active.owner_id, .{
+        .position = impactPoint,
+        .amount = directDamage,
+        .direction = if (vec.magnitude(outwardDirection) < 0.001) null else outwardDirection,
+        .spread_radians = std.math.pi * 0.65,
+        .inherited_velocity = victimVelocity,
+        .inherited_velocity_scale = 0.35,
+    });
+    if (!damageResult.applied) return 0;
+    return directDamage;
+}
+
+fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.c.b2ShapeId, maybePoint: ?vec.Vec2) !void {
+    const active = activeProjectiles.get(bodyId) orelse return;
+    const otherFilter = box2d.c.b2Shape_GetFilter(otherShapeId);
+    if ((otherFilter.categoryBits & collision.CATEGORY_HOOK) != 0) return;
+
+    const impactPoint = projectileImpactPoint(bodyId, maybePoint);
+    if ((otherFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) {
+        try finishProjectile(bodyId, impactPoint, null);
         return;
     }
 
-    const aFilter = box2d.c.b2Shape_GetFilter(shapeIdA);
-    const bFilter = box2d.c.b2Shape_GetFilter(shapeIdB);
+    if (active.penetration == .penetrating) return;
+
+    const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
+    const playerId = playerIdForBody(otherBodyId) orelse {
+        std.log.warn("handleProjectileContactForBody: contacted player shape has no player", .{});
+        try finishProjectile(bodyId, impactPoint, null);
+        return;
+    };
+    const directDamage = try damagePlayerFromPhysicalImpact(bodyId, playerId, impactPoint, active);
+    const directHitDamage: ?DirectHitDamage = if (active.explosion != null and active.explosion.?.damagePlayers)
+        .{ .player_id = playerId, .applied_damage = directDamage }
+    else
+        null;
+    try finishProjectile(bodyId, impactPoint, directHitDamage);
+}
+
+fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId, maybePoint: ?vec.Vec2) !void {
+    if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) return;
 
     const bodyIdA = box2d.c.b2Shape_GetBody(shapeIdA);
     const bodyIdB = box2d.c.b2Shape_GetBody(shapeIdB);
+    try handleProjectileContactForBody(bodyIdA, shapeIdB, maybePoint);
+    try handleProjectileContactForBody(bodyIdB, shapeIdA, maybePoint);
+}
 
-    // Check if shape A is a projectile
-    if ((aFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (bFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
-        if (explosions.contains(bodyIdA)) {
-            if (directDamages.get(bodyIdA)) |dmg| {
-                const attackerId = owners.get(bodyIdA);
-                try damagePlayerDirect(bodyIdB, dmg, attackerId);
-            }
-            try explode(bodyIdA);
-        }
-    }
-    // Check if shape B is a projectile
-    if ((bFilter.categoryBits & collision.CATEGORY_PROJECTILE) != 0 and (aFilter.categoryBits & collision.CATEGORY_HOOK) == 0) {
-        if (explosions.contains(bodyIdB)) {
-            if (directDamages.get(bodyIdB)) |dmg| {
-                const attackerId = owners.get(bodyIdB);
-                try damagePlayerDirect(bodyIdA, dmg, attackerId);
-            }
-            try explode(bodyIdB);
-        }
-    }
+fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShapeId: box2d.c.b2ShapeId) !void {
+    if (!box2d.c.b2Shape_IsValid(sensorShapeId) or !box2d.c.b2Shape_IsValid(visitorShapeId)) return;
+
+    const bodyId = box2d.c.b2Shape_GetBody(sensorShapeId);
+    const active = activeProjectiles.get(bodyId) orelse return;
+    if (active.penetration != .penetrating) return;
+
+    const visitorFilter = box2d.c.b2Shape_GetFilter(visitorShapeId);
+    if ((visitorFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) return;
+
+    const playerBodyId = box2d.c.b2Shape_GetBody(visitorShapeId);
+    const playerId = playerIdForBody(playerBodyId) orelse {
+        std.log.warn("handlePenetratingSensorContact: visitor player shape has no player", .{});
+        return;
+    };
+    if (!try markPlayerHit(bodyId, playerId)) return;
+    if (active.direct_damage <= 0) return;
+
+    const victim = player.players.get(playerId) orelse {
+        std.log.err("handlePenetratingSensorContact: player {d} is missing", .{playerId});
+        return error.PlayerUnspawned;
+    };
+    const projectilePosition = box2d.c.b2Body_GetPosition(bodyId);
+    const hitPoint = vec.fromBox2d(box2d.c.b2Shape_GetClosestPoint(visitorShapeId, projectilePosition));
+    const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+    const forwardDirection = normalizedOrZero(projectileVelocity);
+    const victimVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(victim.bodyId));
+    _ = try damagePlayerWithBlood(playerId, active.direct_damage, active.owner_id, .{
+        .position = hitPoint,
+        .amount = active.direct_damage,
+        .direction = if (vec.magnitude(forwardDirection) < 0.001) null else forwardDirection,
+        .spread_radians = std.math.pi * 0.3,
+        .inherited_velocity = vec.add(victimVelocity, vec.mul(projectileVelocity, 0.2)),
+        .inherited_velocity_scale = 0.4,
+        .carried_velocity = projectileVelocity,
+        .carried_fraction = 0.35,
+        .carried_spread_radians = std.math.pi * 0.12,
+    });
 }
 
 pub fn checkContacts() !void {
@@ -609,26 +832,30 @@ pub fn checkContacts() !void {
         std.log.err("checkContacts: failed to flush terrain edits: {}", .{err});
     };
 
-    const contactEvents = box2d.getContactEvents();
-
-    for (0..@intCast(contactEvents.beginCount)) |i| {
-        const event = contactEvents.beginEvents[i];
-        try handleProjectileContact(event.shapeIdA, event.shapeIdB);
+    const sensorEvents = box2d.getSensorEvents();
+    for (0..@intCast(sensorEvents.beginCount)) |i| {
+        const event = sensorEvents.beginEvents[i];
+        try handlePenetratingSensorContact(event.sensorShapeId, event.visitorShapeId);
     }
+
+    const contactEvents = box2d.getContactEvents();
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
-        try handleProjectileContact(event.shapeIdA, event.shapeIdB);
+        try handleProjectileContact(event.shapeIdA, event.shapeIdB, vec.fromBox2d(event.point));
+    }
+
+    for (0..@intCast(contactEvents.beginCount)) |i| {
+        const event = contactEvents.beginEvents[i];
+        try handleProjectileContact(event.shapeIdA, event.shapeIdB, null);
     }
 
     try flushTerrainEdits();
 }
 
 pub fn cleanup() void {
-    explosions.clearAndFree(allocator);
+    activeProjectiles.clearAndFree(allocator);
     propulsions.clearAndFree(allocator);
-    owners.clearAndFree(allocator);
-    directDamages.clearAndFree(allocator);
     terrainEdits.clearAndFree(allocator);
     terrainTextureUpdates.clearAndFree(allocator);
     terrainColliderUpdates.clearAndFree(allocator);

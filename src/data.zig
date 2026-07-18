@@ -54,7 +54,7 @@ pub const ProjectileData = struct {
     lateralDamping: f32,
     animation: []const u8,
     propulsionAnimation: ?[]const u8,
-    explosion: []const u8,
+    explosion: ?[]const u8,
 };
 
 pub const PelletData = struct {
@@ -66,7 +66,7 @@ pub const PelletData = struct {
     count: u32,
     spreadAngle: f32,
     spawnRadius: f32,
-    explosion: []const u8,
+    explosion: ?[]const u8,
     color: sprite.Color,
 };
 
@@ -82,6 +82,7 @@ pub const WeaponData = struct {
     trailDurationMs: u32,
     trailColor: sprite.Color,
     directDamage: f32,
+    penetration: projectile.PenetrationMode,
 };
 
 pub const ParticleStainData = struct {
@@ -418,7 +419,7 @@ fn initProjectiles() !void {
         lateralDamping: f32 = 10,
         animation: []const u8,
         propulsionAnimation: ?[]const u8 = null,
-        explosion: []const u8,
+        explosion: ?[]const u8 = null,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -433,16 +434,19 @@ fn initProjectiles() !void {
             allocator.free(key);
             continue;
         };
-        const explosionKey = allocator.dupe(u8, entry.explosion) catch {
-            allocator.free(key);
-            allocator.free(animKey);
-            continue;
-        };
+        const explosionKey = if (entry.explosion) |explosion|
+            allocator.dupe(u8, explosion) catch {
+                allocator.free(key);
+                allocator.free(animKey);
+                continue;
+            }
+        else
+            null;
         const propAnimKey = if (entry.propulsionAnimation) |pa|
             allocator.dupe(u8, pa) catch {
                 allocator.free(key);
                 allocator.free(animKey);
-                allocator.free(explosionKey);
+                if (explosionKey) |explosion| allocator.free(explosion);
                 continue;
             }
         else
@@ -459,7 +463,7 @@ fn initProjectiles() !void {
         }) catch {
             allocator.free(key);
             allocator.free(animKey);
-            allocator.free(explosionKey);
+            if (explosionKey) |explosion| allocator.free(explosion);
             if (propAnimKey) |pa| allocator.free(pa);
             continue;
         };
@@ -484,7 +488,7 @@ fn initWeapons() !void {
         count: u32 = 1,
         spreadAngle: f32 = 0,
         spawnRadius: f32 = 0.15,
-        explosion: []const u8,
+        explosion: ?[]const u8 = null,
         color: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
     };
 
@@ -501,6 +505,7 @@ fn initWeapons() !void {
         trailDurationMs: u32 = 0,
         trailColor: sprite.Color = .{ .r = 255, .g = 255, .b = 255 },
         directDamage: f32 = 0,
+        penetration: []const u8 = "non_penetrating",
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -510,6 +515,10 @@ fn initWeapons() !void {
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
+        const penetration = std.meta.stringToEnum(projectile.PenetrationMode, entry.penetration) orelse {
+            std.log.warn("initWeapons: weapon '{s}' has invalid penetration mode '{s}'", .{ entry.key, entry.penetration });
+            continue;
+        };
         const key = allocator.dupe(u8, entry.key) catch continue;
         const spriteKey = allocator.dupe(u8, entry.sprite) catch {
             allocator.free(key);
@@ -529,8 +538,18 @@ fn initWeapons() !void {
             }
         else
             null;
-        const pelletData: ?PelletData = if (entry.pellet) |pel|
-            .{
+        const pelletData: ?PelletData = if (entry.pellet) |pel| blk: {
+            const pelletExplosionKey = if (pel.explosion) |explosion|
+                allocator.dupe(u8, explosion) catch {
+                    allocator.free(key);
+                    allocator.free(spriteKey);
+                    allocator.free(soundKey);
+                    if (projKey) |pk| allocator.free(pk);
+                    continue;
+                }
+            else
+                null;
+            break :blk .{
                 .gravityScale = pel.gravityScale,
                 .density = pel.density,
                 .friction = pel.friction,
@@ -540,23 +559,18 @@ fn initWeapons() !void {
                 .spreadAngle = pel.spreadAngle,
                 .spawnRadius = pel.spawnRadius,
                 .color = pel.color,
-                .explosion = allocator.dupe(u8, pel.explosion) catch {
-                    allocator.free(key);
-                    allocator.free(spriteKey);
-                    allocator.free(soundKey);
-                    if (projKey) |pk| allocator.free(pk);
-                    continue;
-                },
-            }
-        else
-            null;
+                .explosion = pelletExplosionKey,
+            };
+        } else null;
         const explosionKey = if (entry.explosion) |e|
             allocator.dupe(u8, e) catch {
                 allocator.free(key);
                 allocator.free(spriteKey);
                 allocator.free(soundKey);
                 if (projKey) |pk| allocator.free(pk);
-                if (pelletData) |pd| allocator.free(pd.explosion);
+                if (pelletData) |pd| {
+                    if (pd.explosion) |explosion| allocator.free(explosion);
+                }
                 continue;
             }
         else
@@ -574,12 +588,15 @@ fn initWeapons() !void {
             .trailDurationMs = entry.trailDurationMs,
             .trailColor = entry.trailColor,
             .directDamage = entry.directDamage,
+            .penetration = penetration,
         }) catch {
             allocator.free(key);
             allocator.free(spriteKey);
             allocator.free(soundKey);
             if (projKey) |pk| allocator.free(pk);
-            if (pelletData) |pd| allocator.free(pd.explosion);
+            if (pelletData) |pd| {
+                if (pd.explosion) |explosion| allocator.free(explosion);
+            }
             if (explosionKey) |ek| allocator.free(ek);
             continue;
         };
@@ -645,7 +662,10 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
 pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
     const d = projectileDataMap.get(key) orelse return error.ProjectileDataNotFound;
     const anim = try createAnimationFrom(d.animation);
-    const explosion = try createExplosionFrom(d.explosion);
+    const explosion = if (d.explosion) |explosionKey|
+        try createExplosionFrom(explosionKey)
+    else
+        null;
     const propAnim = if (d.propulsionAnimation) |paKey|
         try createAnimationFrom(paKey)
     else
@@ -682,7 +702,10 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
             .count = pelData.count,
             .spreadAngle = pelData.spreadAngle,
             .spawnRadius = pelData.spawnRadius,
-            .explosion = try createExplosionFrom(pelData.explosion),
+            .explosion = if (pelData.explosion) |explosionKey|
+                try createExplosionFrom(explosionKey)
+            else
+                null,
             .color = pelData.color,
         }
     else
@@ -705,6 +728,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         .trailDurationMs = d.trailDurationMs,
         .trailColor = d.trailColor,
         .directDamage = d.directDamage,
+        .penetration = d.penetration,
     };
 }
 
@@ -760,7 +784,7 @@ pub fn cleanup() void {
     while (projIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         allocator.free(entry.value_ptr.animation);
-        allocator.free(entry.value_ptr.explosion);
+        if (entry.value_ptr.explosion) |explosion| allocator.free(explosion);
         if (entry.value_ptr.propulsionAnimation) |pa| allocator.free(pa);
     }
     projectileDataMap.deinit(allocator);
@@ -771,7 +795,9 @@ pub fn cleanup() void {
         allocator.free(entry.value_ptr.sprite);
         allocator.free(entry.value_ptr.sound);
         if (entry.value_ptr.projectile) |p| allocator.free(p);
-        if (entry.value_ptr.pellet) |pel| allocator.free(pel.explosion);
+        if (entry.value_ptr.pellet) |pel| {
+            if (pel.explosion) |explosion| allocator.free(explosion);
+        }
         if (entry.value_ptr.explosion) |e| allocator.free(e);
     }
     weaponDataMap.deinit(allocator);
