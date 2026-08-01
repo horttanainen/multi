@@ -4,7 +4,7 @@
         "sound": "cannon_hit",
         "maximumDamage": 100,
         "maximumPlayerVelocityChange": 8,
-        "maximumObjectImpulse": 2,
+        "maximumObjectImpulse": 10,
         "blastRadius": 2.0,
         "pressureRadius": 5.0
     },
