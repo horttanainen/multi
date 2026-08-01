@@ -24,7 +24,7 @@ const viewport = @import("viewport.zig");
 const friction = @import("friction.zig");
 
 const debug = @import("debug.zig");
-const blast_pressure_debug = @import("blast_pressure_debug.zig");
+const blast_pressure_visual = @import("blast_pressure_visual.zig");
 
 const player = @import("player.zig");
 const controller = @import("controller.zig");
@@ -208,7 +208,7 @@ pub fn main(init: std.process.Init) !void {
 
         const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         const playerDeathPhysicsStart = perf.begin(.player_death);
-        blast_pressure_debug.update();
+        blast_pressure_visual.update();
         const physicsStepCount = try physics.step();
         perf.recordPlayerDeathFrameStage(.physics, playerDeathPhysicsStart);
         const physicsUs = perf.elapsedUs(physicsStart);
@@ -227,7 +227,7 @@ pub fn main(init: std.process.Init) !void {
             levelEditorLoop();
         } else if (state.editingMusic) {
             musicConfigMenu.sync();
-        } else if (blast_pressure_debug.shouldRunSimulationUpdate(physicsStepCount)) {
+        } else if (blast_pressure_visual.shouldRunSimulationUpdate(physicsStepCount)) {
             try gameLoop();
         }
         perf.recordPlayerDeathFrameStage(.logic, playerDeathLogicStart);
@@ -264,7 +264,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
     particle.cleanup();
-    blast_pressure_debug.cleanup();
+    blast_pressure_visual.cleanup();
     particle_effect.cleanup();
     level.cleanup();
     gravestone.cleanup();

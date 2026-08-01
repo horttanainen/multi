@@ -13,7 +13,7 @@ const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const blood = @import("blood.zig");
 const blast_pressure = @import("blast_pressure.zig");
-const blast_pressure_debug = @import("blast_pressure_debug.zig");
+const blast_pressure_visual = @import("blast_pressure_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
 
@@ -443,7 +443,7 @@ fn explodeAtWithDirectHit(
     const pressureStart = perf.begin(.explosion);
     var pressureField = try blast_pressure.build(pos, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
-    blast_pressure_debug.capture(pressureField) catch |err| {
+    blast_pressure_visual.capture(pressureField) catch |err| {
         std.log.warn("explodeAtWithDirectHit: failed to capture blast pressure visualization: {}", .{err});
     };
     logExplosionStage(perfId, "pressure_field", pressureStart);
@@ -455,12 +455,6 @@ fn explodeAtWithDirectHit(
     const impulseStart = perf.begin(.explosion);
     applyExplosionPressureToBodies(pressureField, explosion);
     logExplosionStage(perfId, "body_pressure", impulseStart);
-
-    const animationStart = perf.begin(.explosion);
-    if (!blast_pressure_debug.enabled and explosion.animation != null) {
-        try createExplosionAnimation(pos, explosion.animation.?);
-    }
-    logExplosionStage(perfId, "animation", animationStart);
 
     const entityDamageStart = perf.begin(.explosion);
     try damageEntitiesInExplosion(pressureField, explosion, attackerId);
