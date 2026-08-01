@@ -72,6 +72,8 @@ const Sprite = entity.Sprite;
 //Small improvements
 //TODO: add health to gravestones and make it so that the gravestones react to physical stuff until they break into rubble. Investigate if we can have generic rubble system that makes rubble out of the sprite
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
+//TODO: add exploding oil barrels to the level
+//TODO: investigate if we can have non animated explosision using visual particles and other effects
 //TODO: explosion holes should be uneven not perfect circles
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
