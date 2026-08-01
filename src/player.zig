@@ -275,7 +275,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .animated = false,
         .flipEntityHorizontally = false,
         .categoryBits = collision.CATEGORY_PLAYER,
-        .maskBits = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_PROJECTILE | collision.CATEGORY_BLOOD,
+        .maskBits = collision.CATEGORY_TERRAIN | collision.CATEGORY_DYNAMIC | collision.CATEGORY_PROJECTILE | collision.CATEGORY_PARTICLE,
         .enabled = true,
     };
 

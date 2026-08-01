@@ -39,6 +39,7 @@ const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const particle_effect = @import("particle_effect.zig");
 const pool = @import("pool.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
@@ -171,6 +172,7 @@ pub fn main(init: std.process.Init) !void {
     try data.init();
     try gravestone.init();
     try particle.init("particles/circle.png");
+    try particle_effect.init();
     try blood.init();
     try settings.init();
     settings.applyMusic();
@@ -252,6 +254,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Error cleaning up created level folders: {}\n", .{err});
     };
     particle.cleanup();
+    particle_effect.cleanup();
     level.cleanup();
     gravestone.cleanup();
     gibbing.cleanup();

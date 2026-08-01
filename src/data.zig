@@ -91,6 +91,11 @@ pub const ParticleStainData = struct {
     color: sprite.Color,
 };
 
+pub const ParticleDirection = enum {
+    radial,
+    upward_bias,
+};
+
 pub const ParticleData = struct {
     particlesPerUnit: f32,
     maxParticles: u32,
@@ -98,6 +103,7 @@ pub const ParticleData = struct {
     maxSpeedVariation: f32,
     minScale: f32,
     maxScale: f32,
+    defaultDirection: ParticleDirection,
 
     lifetimeMs: u32,
     color: sprite.Color,
@@ -117,7 +123,7 @@ var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
 var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
 var projectileDataMap: std.StringHashMapUnmanaged(ProjectileData) = .{};
 var weaponDataMap: std.StringHashMapUnmanaged(WeaponData) = .{};
-var particleDataMap: std.StringHashMapUnmanaged(ParticleData) = .{};
+pub var particleDataMap: std.StringHashMapUnmanaged(ParticleData) = .{};
 
 pub fn init() !void {
     try initSprites();
@@ -196,6 +202,7 @@ fn initParticles() !void {
         maxSpeedVariation: f32,
         minScale: f32,
         maxScale: f32,
+        defaultDirection: ParticleDirection = .radial,
         lifetimeMs: u32,
         color: sprite.Color,
         stain: ?ParticleStainData = null,
@@ -223,6 +230,7 @@ fn initParticles() !void {
             .maxSpeedVariation = entry.maxSpeedVariation,
             .minScale = entry.minScale,
             .maxScale = entry.maxScale,
+            .defaultDirection = entry.defaultDirection,
             .lifetimeMs = entry.lifetimeMs,
             .color = entry.color,
             .stain = entry.stain,

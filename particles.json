@@ -7,6 +7,7 @@
         "maxSpeedVariation": 9.5,
         "minScale": 0.07,
         "maxScale": 0.35,
+        "defaultDirection": "upward_bias",
         "lifetimeMs": 5000,
         "color": {
             "r": 138,
