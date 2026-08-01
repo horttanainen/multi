@@ -121,6 +121,7 @@ fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, effect: damage.Destruc
         std.log.warn("destruction.destroy: body has no entity", .{});
         return;
     };
+    const bodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
     const inheritedVelocity = if (box2d.c.b2Body_GetType(bodyId) == box2d.c.b2_dynamicBody)
         vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId))
     else
@@ -128,7 +129,7 @@ fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, effect: damage.Destruc
 
     _ = pool.discardBody(bodyId);
     entity.cleanupLater(ent);
-    emitDestructionEffect(effect, event.position, event.direction, inheritedVelocity);
+    emitDestructionEffect(effect, bodyPosition, event.direction, inheritedVelocity);
 }
 
 fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: damage.SurfaceCutout) !void {

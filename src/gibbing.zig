@@ -3,11 +3,13 @@ const std = @import("std");
 const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
+const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const pool = @import("pool.zig");
+const particle_effect = @import("particle_effect.zig");
 const runtime = @import("runtime.zig");
 const blood = @import("blood.zig");
 const time = @import("time.zig");
@@ -31,6 +33,9 @@ const maxLegGibletsPerDeath: u32 = 2;
 const maxMeatGibletsPerDeath: u32 = 3;
 const gibletColliderHalfExtentScale: f32 = 0.35;
 const gibletColliderMinimumHalfExtent: f32 = 0.08;
+const gibletHealth: f32 = 1.0;
+const gibletDestructionParticleAmount: f32 = 18.0;
+const gibletDestructionParticleSpreadRadians: f32 = std.math.pi * 0.55;
 
 // uncolored template giblets
 var templateHeadGiblets: []u64 = &[_]u64{};
@@ -39,7 +44,7 @@ var templateMeatGiblets: []u64 = &[_]u64{};
 
 var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
 var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
-var gibletTemplateSprites = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, u64).empty;
+var bloodParticleEffectId: ?particle_effect.Id = null;
 
 pub fn init() !void {
     templateHeadGiblets = try fs.loadSpritesFromFolder(
@@ -59,6 +64,7 @@ pub fn init() !void {
     );
 
     playerGiblets = std.AutoHashMap(usize, GibletSet).init(allocator);
+    bloodParticleEffectId = try blood.particleEffectId();
 
     std.debug.print("Loaded giblet templates - heads: {}, legs: {}, meat: {}\n", .{ templateHeadGiblets.len, templateLegGiblets.len, templateMeatGiblets.len });
 }
@@ -112,7 +118,6 @@ fn gibletBatchSize(spriteTemplates: []const u64, maximumPerDeath: u32) usize {
 fn destroyGibletBodies(bodyIds: []const box2d.c.b2BodyId) void {
     for (bodyIds) |bodyId| {
         _ = gibletBloodCooldowns.swapRemove(bodyId);
-        _ = gibletTemplateSprites.swapRemove(bodyId);
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
         if (entity.remove(bodyId)) continue;
         std.log.warn("destroyGibletBodies: pooled body has no entity", .{});
@@ -129,6 +134,10 @@ fn destroyGibletPool(poolId: pool.Id) void {
 }
 
 fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
+    const destructionParticleEffectId = bloodParticleEffectId orelse {
+        std.log.err("createPooledGibletBody: blood particle effect is not initialized", .{});
+        return error.BloodParticleEffectNotInitialized;
+    };
     const collider = try gibletCollider(templateSpriteUuid);
     const bodySpriteUuid = try sprite.createMutableCopy(templateSpriteUuid);
 
@@ -139,6 +148,18 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
     };
     errdefer _ = entity.remove(gibletEntity.bodyId);
 
+    try damage.register(gibletEntity.bodyId, .{
+        .model = .{ .health = .{
+            .current = gibletHealth,
+            .maximum = gibletHealth,
+        } },
+        .onDestroyed = .{ .particle_burst = .{
+            .effectId = destructionParticleEffectId,
+            .amount = gibletDestructionParticleAmount,
+            .spreadRadians = gibletDestructionParticleSpreadRadians,
+        } },
+    });
+
     const pooledEntity = entity.entities.getPtrLocking(gibletEntity.bodyId) orelse {
         std.log.err("createPooledGibletBody: new pooled entity is missing", .{});
         return error.EntityNotFound;
@@ -148,7 +169,6 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
 
     try gibletBloodCooldowns.put(allocator, gibletEntity.bodyId, 0.0);
     errdefer _ = gibletBloodCooldowns.swapRemove(gibletEntity.bodyId);
-    try gibletTemplateSprites.put(allocator, gibletEntity.bodyId, templateSpriteUuid);
 
     return gibletEntity.bodyId;
 }
@@ -303,22 +323,12 @@ fn activateGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usiz
         std.log.err("activateGiblet: pooled body has no entity", .{});
         return error.EntityNotFound;
     };
-    if (pooledEntity.spriteUuids.len != 1) {
-        std.log.err("activateGiblet: pooled entity has invalid sprite count", .{});
-        return error.InvalidGibletEntity;
-    }
-    const templateSpriteUuid = gibletTemplateSprites.get(bodyId) orelse {
-        std.log.err("activateGiblet: pooled body has no sprite template", .{});
-        return error.MissingGibletTemplate;
-    };
     const nextBloodSpatterAt = gibletBloodCooldowns.getPtr(bodyId) orelse {
         std.log.err("activateGiblet: pooled body has no blood cooldown", .{});
         return error.MissingGibletCooldown;
     };
 
-    try sprite.restoreMutableCopy(pooledEntity.spriteUuids[0], templateSpriteUuid);
-    const collider = try gibletCollider(templateSpriteUuid);
-    try entity.replaceColliderWithPolygon(bodyId, collider, gibletShapeDef());
+    try damage.reset(bodyId);
     pooledEntity.state = null;
     pooledEntity.enabled = true;
     nextBloodSpatterAt.* = 0.0;
@@ -397,7 +407,7 @@ fn cleanupInvalidTrackedGiblets() void {
         }
 
         _ = gibletBloodCooldowns.swapRemove(bodyId);
-        _ = gibletTemplateSprites.swapRemove(bodyId);
+        _ = damage.unregister(bodyId);
         _ = pool.discardBody(bodyId);
     }
 }
@@ -437,8 +447,8 @@ fn spatterFromGiblet(gibletBodyId: box2d.c.b2BodyId, targetShapeId: box2d.c.b2Sh
 
     nextAllowed.* = now + gibletBloodCooldownSeconds;
     const pos = vec.fromBox2d(box2d.c.b2Body_GetPosition(gibletBodyId));
-    const damage = std.math.clamp((speed - gibletBloodMinImpactSpeed) * gibletBloodDamagePerSpeed, gibletBloodMinDamage, gibletBloodMaxDamage);
-    try blood.createParticlesFromImpact(pos, damage, velocity);
+    const impactAmount = std.math.clamp((speed - gibletBloodMinImpactSpeed) * gibletBloodDamagePerSpeed, gibletBloodMinDamage, gibletBloodMaxDamage);
+    try blood.createParticlesFromImpact(pos, impactAmount, velocity);
 }
 
 fn handleGibletContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId) !void {
@@ -499,5 +509,5 @@ pub fn cleanup() void {
 
     playerGiblets.deinit();
     gibletBloodCooldowns.clearAndFree(allocator);
-    gibletTemplateSprites.clearAndFree(allocator);
+    bloodParticleEffectId = null;
 }
