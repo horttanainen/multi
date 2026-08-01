@@ -11,7 +11,7 @@ const time = @import("time.zig");
 const vec = @import("vector.zig");
 
 const propagationSeconds: f64 = 0.2;
-const fadeSeconds: f64 = 0.45;
+const fadeSeconds: f64 = 0.25;
 
 const Cell = struct {
     position: vec.Vec2,
@@ -117,11 +117,13 @@ fn fadeForWave(elapsed: f64) f32 {
 
 fn cellColor(strength: f32, fade: f32) sdl.Color {
     const clampedStrength = std.math.clamp(strength, 0, 1);
+    const redToYellow = std.math.clamp(clampedStrength * 2, 0, 1);
+    const yellowToWhite = std.math.clamp((clampedStrength - 0.5) * 2, 0, 1);
     const alpha = (80.0 + clampedStrength * 175.0) * fade;
     return .{
         .r = 255,
-        .g = @intFromFloat(55.0 + clampedStrength * 190.0),
-        .b = @intFromFloat(10.0 + clampedStrength * 45.0),
+        .g = @intFromFloat(redToYellow * 255),
+        .b = @intFromFloat(yellowToWhite * 255),
         .a = @intFromFloat(std.math.clamp(alpha, 0, 255)),
     };
 }
