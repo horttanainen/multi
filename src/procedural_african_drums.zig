@@ -31,7 +31,7 @@ pub var slap_mix: f32 = 0.5;
 pub var selected_cue: CuePreset = .kuku;
 
 const DrumReverb = StereoReverb(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 });
-var reverb: DrumReverb = dsp.stereoReverbInit(.{1327, 1451, 1559, 1613}, .{181, 487}, .{ 0.82, 0.83, 0.81, 0.84 });
+var reverb: DrumReverb = dsp.stereoReverbInit(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 }, .{ 0.82, 0.83, 0.81, 0.84 });
 var rng: dsp.Rng = dsp.rngInit(0xAF10_2000);
 
 var engine: composition.CompositionEngine = .{};
@@ -280,7 +280,6 @@ var lead_memory: composition.PhraseMemory = .{};
 fn hashLeadPattern() u32 {
     return pattern_history.hashEnumPattern(LeadHit, lead_pattern[0..]);
 }
-
 
 fn randomLeadHit(is_strong: bool) LeadHit {
     const r = dsp.rngFloat(&rng);
@@ -597,9 +596,10 @@ fn cueBellBias(cue: CuePreset) f32 {
 pub fn reset() void {
     rng = dsp.rngInit(entropy.nextSeed(0xAF10_2000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
-    reverb = dsp.stereoReverbInit(.{1327, 1451, 1559, 1613}, .{181, 487}, .{ 0.82, 0.83, 0.81, 0.84 });
+    reverb = dsp.stereoReverbInit(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 }, .{ 0.82, 0.83, 0.81, 0.84 });
 
-    composition.compositionEngineReset(&engine, 
+    composition.compositionEngineReset(
+        &engine,
         .{ .root = 38, .scale_type = .dorian },
         initHarmony(),
         AFRICAN_ARCS,
@@ -756,7 +756,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         // Reverb
         const wet = reverb_mix + spec.reverb_boost + tick.meso * 0.03;
         const dry = 1.0 - wet;
-        const rev = dsp.stereoReverbProcess(.{1327, 1451, 1559, 1613}, .{181, 487}, &reverb, .{ left, right });
+        const rev = dsp.stereoReverbProcess(.{ 1327, 1451, 1559, 1613 }, .{ 181, 487 }, &reverb, .{ left, right });
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
 

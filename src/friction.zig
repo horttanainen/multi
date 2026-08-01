@@ -6,7 +6,6 @@ pub fn callback(frictionA: f32, materialA: c_int, frictionB: f32, materialB: c_i
     var fA = frictionA;
     var fB = frictionB;
 
-
     if (materialA >= config.player.materialOffset) {
         const maybePlayerA = player.players.getPtr(@intCast(materialA - config.player.materialOffset));
         if (maybePlayerA) |p| {

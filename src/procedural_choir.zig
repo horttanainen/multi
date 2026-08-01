@@ -30,7 +30,7 @@ pub var chant_mix: f32 = 0.58;
 pub var selected_cue: CuePreset = .cathedral;
 
 const ChoirReverb = StereoReverb(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 });
-var reverb: ChoirReverb = dsp.stereoReverbInit(.{2039, 1877, 1733, 1601}, .{307, 709}, .{ 0.93, 0.94, 0.93, 0.92 });
+var reverb: ChoirReverb = dsp.stereoReverbInit(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 }, .{ 0.93, 0.94, 0.93, 0.92 });
 var rng: dsp.Rng = dsp.rngInit(0x4300_9000);
 
 var engine: composition.CompositionEngine = .{};
@@ -256,7 +256,7 @@ fn blendedRuntimeCue() ChoirRuntimeCue {
 }
 
 pub fn reset() void {
-    reverb = dsp.stereoReverbInit(.{2039, 1877, 1733, 1601}, .{307, 709}, .{ 0.93, 0.94, 0.93, 0.92 });
+    reverb = dsp.stereoReverbInit(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 }, .{ 0.93, 0.94, 0.93, 0.92 });
     rng = dsp.rngInit(entropy.nextSeed(0x4300_9000, @intFromEnum(selected_cue)));
     cue_morph.reset(CuePreset, &cue_state, selected_cue);
     composition.compositionEngineReset(&engine, .{ .root = 38, .scale_type = .natural_minor }, initHarmony(), CHOIR_ARCS, 16.0, .none);
@@ -342,7 +342,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
 
         const wet = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * composition.slowLfoModulate(&lfo_reverb), 0.0, 0.99);
         const dry = 1.0 - wet;
-        const rev = dsp.stereoReverbProcess(.{2039, 1877, 1733, 1601}, .{307, 709}, &reverb, .{ left, right });
+        const rev = dsp.stereoReverbProcess(.{ 2039, 1877, 1733, 1601 }, .{ 307, 709 }, &reverb, .{ left, right });
         left = left * dry + rev[0] * wet;
         right = right * dry + rev[1] * wet;
 

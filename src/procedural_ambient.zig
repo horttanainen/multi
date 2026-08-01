@@ -39,7 +39,7 @@ pub var selected_cue: CuePreset = .dawn;
 // ============================================================
 
 const AmbientReverb = StereoReverb(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 });
-var reverb: AmbientReverb = dsp.stereoReverbInit(.{1759, 1693, 1623, 1548}, .{245, 605}, .{ 0.87, 0.88, 0.89, 0.86 });
+var reverb: AmbientReverb = dsp.stereoReverbInit(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 }, .{ 0.87, 0.88, 0.89, 0.86 });
 
 // ============================================================
 // Composition engine & harmony
@@ -453,7 +453,7 @@ pub fn fillBuffer(buf: [*]f32, frames: usize) void {
         // === Reverb ===
         const rev_mix = std.math.clamp((reverb_mix + cue.reverb_boost + director_mod * 0.05) * composition.slowLfoModulate(&lfo_reverb), 0.0, 0.98);
         const dry = 1.0 - rev_mix;
-        const rev = dsp.stereoReverbProcess(.{1759, 1693, 1623, 1548}, .{245, 605}, &reverb, .{ left, right });
+        const rev = dsp.stereoReverbProcess(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 }, &reverb, .{ left, right });
         left = left * dry + rev[0] * rev_mix;
         right = right * dry + rev[1] * rev_mix;
 
@@ -520,7 +520,7 @@ pub fn reset() void {
     melody_level = 0.0;
     arp_level = 0.0;
 
-    reverb = dsp.stereoReverbInit(.{1759, 1693, 1623, 1548}, .{245, 605}, .{ 0.87, 0.88, 0.89, 0.86 });
+    reverb = dsp.stereoReverbInit(.{ 1759, 1693, 1623, 1548 }, .{ 245, 605 }, .{ 0.87, 0.88, 0.89, 0.86 });
     applyCueParams();
     advanceChord();
 }

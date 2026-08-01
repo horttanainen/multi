@@ -48,8 +48,8 @@ pub fn findConnectedComponents(pixels: [*]const u8, width: usize, height: usize,
                     // Check 4-connected neighbors (N, E, S, W)
                     const directions = [4]IVec2{
                         .{ .x = 0, .y = -1 }, // N
-                        .{ .x = 1, .y = 0 },  // E
-                        .{ .x = 0, .y = 1 },  // S
+                        .{ .x = 1, .y = 0 }, // E
+                        .{ .x = 0, .y = 1 }, // S
                         .{ .x = -1, .y = 0 }, // W
                     };
 
@@ -117,13 +117,13 @@ pub fn findLargestComponentStart(pixels: [*]const u8, width: usize, height: usiz
 
     // The 8 neighbors for boundary checking
     const neighbors = [8]IVec2{
-        .{ .x = 0, .y = -1 },  // N
-        .{ .x = 1, .y = -1 },  // NE
-        .{ .x = 1, .y = 0 },   // E
-        .{ .x = 1, .y = 1 },   // SE
-        .{ .x = 0, .y = 1 },   // S
-        .{ .x = -1, .y = 1 },  // SW
-        .{ .x = -1, .y = 0 },  // W
+        .{ .x = 0, .y = -1 }, // N
+        .{ .x = 1, .y = -1 }, // NE
+        .{ .x = 1, .y = 0 }, // E
+        .{ .x = 1, .y = 1 }, // SE
+        .{ .x = 0, .y = 1 }, // S
+        .{ .x = -1, .y = 1 }, // SW
+        .{ .x = -1, .y = 0 }, // W
         .{ .x = -1, .y = -1 }, // NW
     };
 
