@@ -51,16 +51,6 @@
         "spriteIndex": 0
     },
     {
-        "key": "missile_explosion",
-        "path": "weapons/rocket_launcher/explosion",
-        "fps": 10,
-        "scale": 1.0,
-        "offsetX": 0,
-        "offsetY": 0,
-        "loop": false,
-        "spriteIndex": 0
-    },
-    {
         "key": "missile_propulsion",
         "path": "weapons/rocket_launcher/propulsion_flame",
         "fps": 2,

@@ -2,7 +2,6 @@
     {
         "key": "missile_explosion",
         "sound": "cannon_hit",
-        "animation": "missile_explosion",
         "blastVelocity": 8,
         "blastImpulse": 2,
         "blastRadius": 2.0,
@@ -16,7 +15,6 @@
     {
         "key": "railgun_impact",
         "sound": "cannon_hit",
-        "animation": "missile_explosion",
         "blastRadius": 0.8,
         "damagePlayers": false
     }

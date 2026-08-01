@@ -1113,25 +1113,8 @@ pub fn cleanup() void {
         for (p.weapons) |w| {
             if (w.projectile) |proj| {
                 animation.cleanupOne(proj.animation);
-                if (proj.explosion) |explosion| {
-                    if (explosion.animation) |expAnim| {
-                        animation.cleanupOne(expAnim);
-                    }
-                }
                 if (proj.propulsionAnimation) |propAnim| {
                     animation.cleanupOne(propAnim);
-                }
-            }
-            if (w.pellet) |pel| {
-                if (pel.explosion) |explosion| {
-                    if (explosion.animation) |peAnim| {
-                        animation.cleanupOne(peAnim);
-                    }
-                }
-            }
-            if (w.hitscanExplosion) |he| {
-                if (he.animation) |heAnim| {
-                    animation.cleanupOne(heAnim);
                 }
             }
             if (w.spriteUuid != 0) {

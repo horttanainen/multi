@@ -34,7 +34,6 @@ pub const SoundData = struct {
 
 pub const ExplosionData = struct {
     sound: ?[]const u8,
-    animation: ?[]const u8,
     blastVelocity: f32,
     blastImpulse: f32,
     blastRadius: f32,
@@ -346,7 +345,6 @@ fn initExplosions() !void {
     const Entry = struct {
         key: []const u8,
         sound: ?[]const u8 = null,
-        animation: ?[]const u8 = null,
         blastVelocity: f32 = 0,
         blastImpulse: f32 = 0,
         blastRadius: f32 = 2.0,
@@ -369,18 +367,8 @@ fn initExplosions() !void {
             }
         else
             null;
-        const animKey = if (entry.animation) |a|
-            allocator.dupe(u8, a) catch {
-                allocator.free(key);
-                if (soundKey) |sk| allocator.free(sk);
-                continue;
-            }
-        else
-            null;
-
         explosionDataMap.put(allocator, key, .{
             .sound = soundKey,
-            .animation = animKey,
             .blastVelocity = entry.blastVelocity,
             .blastImpulse = entry.blastImpulse,
             .blastRadius = entry.blastRadius,
@@ -389,7 +377,6 @@ fn initExplosions() !void {
         }) catch {
             allocator.free(key);
             if (soundKey) |sk| allocator.free(sk);
-            if (animKey) |ak| allocator.free(ak);
             continue;
         };
 
@@ -635,10 +622,8 @@ pub fn createAudioFrom(key: []const u8) ?audio.Audio {
 pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
     const d = explosionDataMap.get(key) orelse return error.ExplosionDataNotFound;
     const sound = if (d.sound) |sk| createAudioFrom(sk) else null;
-    const anim = if (d.animation) |ak| try createAnimationFrom(ak) else null;
     return projectile.Explosion{
         .sound = sound,
-        .animation = anim,
         .blastVelocity = d.blastVelocity,
         .blastImpulse = d.blastImpulse,
         .blastRadius = d.blastRadius,
@@ -764,7 +749,6 @@ pub fn cleanup() void {
     while (explosionIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         if (entry.value_ptr.sound) |s| allocator.free(s);
-        if (entry.value_ptr.animation) |a| allocator.free(a);
     }
     explosionDataMap.deinit(allocator);
 

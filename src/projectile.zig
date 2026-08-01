@@ -7,9 +7,7 @@ const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
 const collision = @import("collision.zig");
-const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
-const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const blood = @import("blood.zig");
 const blast_pressure = @import("blast_pressure.zig");
@@ -19,7 +17,6 @@ const destruction = @import("destruction.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
-    animation: ?animation.Animation = null,
     blastVelocity: f32,
     blastImpulse: f32,
     blastRadius: f32,
@@ -54,30 +51,6 @@ const PropulsionData = struct {
 };
 
 pub var propulsions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, PropulsionData).empty;
-
-fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
-    const animCopy = try animation.copyAnimationSharedFrames(anim);
-
-    var bodyDef = box2d.createStaticBodyDef(pos);
-
-    const randomAngle = runtime.random().float(f32) * 2.0 * std.math.pi;
-    bodyDef.rotation = box2d.c.b2MakeRot(randomAngle);
-
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.isSensor = true;
-    shapeDef.filter.categoryBits = 0; // Don't collide with anything
-    shapeDef.filter.maskBits = 0;
-
-    // Use first frame as the sprite
-    const firstFrame = animCopy.frames[0];
-
-    // Create a simple box shape for the explosion entity
-    const boxShape = box2d.c.b2MakeBox(0.5, 0.5);
-    const explosionEntity = try entity.createFromShape(firstFrame, boxShape, shapeDef, bodyDef, "explosion");
-    entity.markSpriteUuidsShared(explosionEntity.bodyId);
-
-    try animation.register(explosionEntity.bodyId, animCopy);
-}
 
 const OverlapContext = struct {
     bodies: [100]box2d.c.b2BodyId,
