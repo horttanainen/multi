@@ -70,8 +70,8 @@ const Sprite = entity.Sprite;
 //TODO: allow for connecting dynamic objects with a joint (e.g a fellable tree that is connected to ground with a joint)
 
 //Small improvements
+//TODO: add health to gravestones and make it so that the gravestones react to physical stuff until they break into rubble. Investigate if we can have generic rubble system that makes rubble out of the sprite
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
-//TODO: breakable terrain should have "shadow background" that gets revealed when terrain is destroyed
 //TODO: explosion holes should be uneven not perfect circles
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
