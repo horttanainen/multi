@@ -153,7 +153,12 @@ fn sortOverlapBodies(context: *OverlapContext) void {
     }
 }
 
-fn damageEntitiesInExplosion(field: blast_pressure.Field, explosion: Explosion, attackerId: ?usize) !void {
+fn damageEntitiesInExplosion(
+    field: blast_pressure.Field,
+    impactPosition: vec.Vec2,
+    explosion: Explosion,
+    attackerId: ?usize,
+) !void {
     var context = OverlapContext{
         .bodies = undefined,
         .count = 0,
@@ -165,7 +170,7 @@ fn damageEntitiesInExplosion(field: blast_pressure.Field, explosion: Explosion, 
     };
 
     const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(field.origin),
+        .p = vec.toBox2d(impactPosition),
         .q = box2d.c.b2Rot_identity,
     };
 
@@ -196,7 +201,7 @@ fn damageEntitiesInExplosion(field: blast_pressure.Field, explosion: Explosion, 
         try destruction.apply(bodyId, .{
             .source = .explosion,
             .amount = amount,
-            .position = field.origin,
+            .position = impactPosition,
             .direction = direction,
             .radius = explosion.blastRadius,
             .attackerId = attackerId,
@@ -397,7 +402,8 @@ fn playExplosionSound(explosion: Explosion) !void {
 }
 
 fn explodeAtWithDirectHit(
-    pos: vec.Vec2,
+    impactPosition: vec.Vec2,
+    pressureSourcePosition: vec.Vec2,
     explosion: Explosion,
     attackerId: ?usize,
     directHitDamage: ?DirectHitDamage,
@@ -406,7 +412,7 @@ fn explodeAtWithDirectHit(
     const totalStart = perf.begin(.explosion);
 
     const pressureStart = perf.begin(.explosion);
-    var pressureField = try blast_pressure.build(pos, explosion.pressureRadius);
+    var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
     blast_pressure_visual.capture(pressureField) catch |err| {
         std.log.warn("explodeAtWithDirectHit: failed to capture blast pressure visualization: {}", .{err});
@@ -422,7 +428,7 @@ fn explodeAtWithDirectHit(
     logExplosionStage(perfId, "body_pressure", impulseStart);
 
     const entityDamageStart = perf.begin(.explosion);
-    try damageEntitiesInExplosion(pressureField, explosion, attackerId);
+    try damageEntitiesInExplosion(pressureField, impactPosition, explosion, attackerId);
     logExplosionStage(perfId, "entity_damage", entityDamageStart);
 
     const playerPressureStart = perf.begin(.explosion);
@@ -432,7 +438,7 @@ fn explodeAtWithDirectHit(
 }
 
 pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
-    try explodeAtWithDirectHit(pos, explosion, attackerId, null);
+    try explodeAtWithDirectHit(pos, pos, explosion, attackerId, null);
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, spec: Spec) !void {
@@ -547,17 +553,19 @@ fn markPlayerHit(bodyId: box2d.c.b2BodyId, playerId: usize) !bool {
 
 fn triggerProjectileExplosion(
     explosion: ?Explosion,
-    pos: vec.Vec2,
+    impactPosition: vec.Vec2,
+    pressureSourcePosition: vec.Vec2,
     ownerId: usize,
     directHitDamage: ?DirectHitDamage,
 ) !void {
     if (explosion == null) return;
-    try explodeAtWithDirectHit(pos, explosion.?, ownerId, directHitDamage);
+    try explodeAtWithDirectHit(impactPosition, pressureSourcePosition, explosion.?, ownerId, directHitDamage);
 }
 
 fn finishProjectile(
     bodyId: box2d.c.b2BodyId,
     impactPoint: vec.Vec2,
+    pressureSourcePosition: vec.Vec2,
     directHitDamage: ?DirectHitDamage,
 ) !void {
     const removed = activeProjectiles.fetchSwapRemove(bodyId) orelse return;
@@ -566,11 +574,11 @@ fn finishProjectile(
     const active = removed.value;
     const projectileEntity = entity.entities.getLocking(bodyId) orelse {
         std.log.warn("finishProjectile: projectile body has no entity", .{});
-        try triggerProjectileExplosion(active.explosion, impactPoint, active.owner_id, directHitDamage);
+        try triggerProjectileExplosion(active.explosion, impactPoint, pressureSourcePosition, active.owner_id, directHitDamage);
         return;
     };
     entity.cleanupLater(projectileEntity);
-    try triggerProjectileExplosion(active.explosion, impactPoint, active.owner_id, directHitDamage);
+    try triggerProjectileExplosion(active.explosion, impactPoint, pressureSourcePosition, active.owner_id, directHitDamage);
 }
 
 fn projectileImpactPoint(bodyId: box2d.c.b2BodyId, maybePoint: ?vec.Vec2) vec.Vec2 {
@@ -615,7 +623,35 @@ fn damagePlayerFromPhysicalImpact(bodyId: box2d.c.b2BodyId, playerId: usize, imp
     return directDamage;
 }
 
-fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.c.b2ShapeId, maybePoint: ?vec.Vec2) !void {
+fn pressureSourceForImpact(
+    bodyId: box2d.c.b2BodyId,
+    impactPoint: vec.Vec2,
+    otherCategoryBits: u64,
+    maybeOutwardNormal: ?vec.Vec2,
+) vec.Vec2 {
+    if ((otherCategoryBits & collision.MASK_EXPLOSION_PRESSURE_BLOCKER) == 0) return impactPoint;
+
+    var outwardNormal = if (maybeOutwardNormal != null)
+        normalizedOrZero(maybeOutwardNormal.?)
+    else
+        vec.zero;
+    if (vec.magnitude(outwardNormal) < 0.001) {
+        const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+        outwardNormal = vec.mul(normalizedOrZero(projectileVelocity), -1);
+    }
+    if (vec.magnitude(outwardNormal) < 0.001) {
+        std.log.warn("pressureSourceForImpact: pressure-blocking impact has no usable normal", .{});
+        return impactPoint;
+    }
+    return blast_pressure.sourceOutsideSurface(impactPoint, outwardNormal);
+}
+
+fn handleProjectileContactForBody(
+    bodyId: box2d.c.b2BodyId,
+    otherShapeId: box2d.c.b2ShapeId,
+    maybePoint: ?vec.Vec2,
+    maybeOutwardNormal: ?vec.Vec2,
+) !void {
     const active = activeProjectiles.get(bodyId) orelse return;
     const otherFilter = box2d.c.b2Shape_GetFilter(otherShapeId);
     if ((otherFilter.categoryBits & collision.CATEGORY_HOOK) != 0) return;
@@ -624,6 +660,12 @@ fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.
     if ((otherFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) {
         const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
         const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+        const pressureSourcePosition = pressureSourceForImpact(
+            bodyId,
+            impactPoint,
+            otherFilter.categoryBits,
+            maybeOutwardNormal,
+        );
         try destruction.apply(otherBodyId, .{
             .source = .projectile,
             .amount = active.direct_damage,
@@ -631,7 +673,7 @@ fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.
             .direction = normalizedOrZero(projectileVelocity),
             .attackerId = active.owner_id,
         });
-        try finishProjectile(bodyId, impactPoint, null);
+        try finishProjectile(bodyId, impactPoint, pressureSourcePosition, null);
         return;
     }
 
@@ -640,7 +682,7 @@ fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.
     const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
     const playerId = playerIdForBody(otherBodyId) orelse {
         std.log.warn("handleProjectileContactForBody: contacted player shape has no player", .{});
-        try finishProjectile(bodyId, impactPoint, null);
+        try finishProjectile(bodyId, impactPoint, impactPoint, null);
         return;
     };
     const directDamage = try damagePlayerFromPhysicalImpact(bodyId, playerId, impactPoint, active);
@@ -648,16 +690,22 @@ fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.
         .{ .player_id = playerId, .applied_damage = directDamage }
     else
         null;
-    try finishProjectile(bodyId, impactPoint, directHitDamage);
+    try finishProjectile(bodyId, impactPoint, impactPoint, directHitDamage);
 }
 
-fn handleProjectileContact(shapeIdA: box2d.c.b2ShapeId, shapeIdB: box2d.c.b2ShapeId, maybePoint: ?vec.Vec2) !void {
+fn handleProjectileContact(
+    shapeIdA: box2d.c.b2ShapeId,
+    shapeIdB: box2d.c.b2ShapeId,
+    maybePoint: ?vec.Vec2,
+    outwardNormalForA: ?vec.Vec2,
+    outwardNormalForB: ?vec.Vec2,
+) !void {
     if (!box2d.c.b2Shape_IsValid(shapeIdA) or !box2d.c.b2Shape_IsValid(shapeIdB)) return;
 
     const bodyIdA = box2d.c.b2Shape_GetBody(shapeIdA);
     const bodyIdB = box2d.c.b2Shape_GetBody(shapeIdB);
-    try handleProjectileContactForBody(bodyIdA, shapeIdB, maybePoint);
-    try handleProjectileContactForBody(bodyIdB, shapeIdA, maybePoint);
+    try handleProjectileContactForBody(bodyIdA, shapeIdB, maybePoint, outwardNormalForA);
+    try handleProjectileContactForBody(bodyIdB, shapeIdA, maybePoint, outwardNormalForB);
 }
 
 fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShapeId: box2d.c.b2ShapeId) !void {
@@ -715,12 +763,19 @@ pub fn checkContacts() !void {
 
     for (0..@intCast(contactEvents.hitCount)) |i| {
         const event = contactEvents.hitEvents[i];
-        try handleProjectileContact(event.shapeIdA, event.shapeIdB, vec.fromBox2d(event.point));
+        const normalFromAToB = vec.fromBox2d(event.normal);
+        try handleProjectileContact(
+            event.shapeIdA,
+            event.shapeIdB,
+            vec.fromBox2d(event.point),
+            vec.mul(normalFromAToB, -1),
+            normalFromAToB,
+        );
     }
 
     for (0..@intCast(contactEvents.beginCount)) |i| {
         const event = contactEvents.beginEvents[i];
-        try handleProjectileContact(event.shapeIdA, event.shapeIdB, null);
+        try handleProjectileContact(event.shapeIdA, event.shapeIdB, null, null, null);
     }
 
     try destruction.flushSurfaceEdits();

@@ -48,6 +48,7 @@ const Neighbor = struct {
 };
 
 const gridCellSize: f32 = 0.2;
+const surfaceSourceClearance: f32 = gridCellSize * 0.5;
 const maximumGridCells: usize = 65536;
 const diffractionTransmission: f32 = 0.45;
 const diagonalDistance: f32 = 1.41421356237;
@@ -75,6 +76,15 @@ fn normalizedOrUp(value: vec.Vec2) vec.Vec2 {
     const normalized = normalizedOrZero(value);
     if (vec.magnitude(normalized) >= 0.001) return normalized;
     return .{ .x = 0, .y = -1 };
+}
+
+pub fn sourceOutsideSurface(impactPosition: vec.Vec2, outwardNormal: vec.Vec2) vec.Vec2 {
+    const normalizedNormal = normalizedOrZero(outwardNormal);
+    if (vec.magnitude(normalizedNormal) <= 0.001) {
+        std.log.warn("blast_pressure.sourceOutsideSurface: surface normal has no direction", .{});
+        return impactPosition;
+    }
+    return vec.add(impactPosition, vec.mul(normalizedNormal, surfaceSourceClearance));
 }
 
 fn falloff(distance: f32, radius: f32) f32 {
