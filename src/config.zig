@@ -17,6 +17,14 @@ pub const perf = .{
 
 pub const debugAutoMissileExplosionDelayMs: ?u32 = null;
 
+// Local diagnostic: reveal the pressure grid while affected physics runs in slow motion.
+pub const debugBlastPressure = .{
+    .enabled = false,
+    .propagationSeconds = 1.5,
+    .slowMotionSeconds = 4.0,
+    .slowMotionScale = 0.1,
+};
+
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 

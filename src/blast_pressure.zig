@@ -38,6 +38,7 @@ const QueueEntry = struct {
 pub const Sample = struct {
     direction: vec.Vec2,
     strength: f32,
+    travel_distance: f32,
 };
 
 const Neighbor = struct {
@@ -374,5 +375,6 @@ pub fn sample(field: Field, point: vec.Vec2) ?Sample {
     return .{
         .direction = direction,
         .strength = cell.strength,
+        .travel_distance = cell.travel_distance,
     };
 }

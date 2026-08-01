@@ -16,6 +16,8 @@ pub var accumulator: f64 = 0;
 var frameTime: f64 = 0;
 
 pub var passedTime: f64 = 0;
+var simulationTime: f64 = 0;
+var simulationScale: f64 = 1;
 
 pub fn init() void {
     freqMs = sdl.getPerformanceFrequency();
@@ -27,11 +29,12 @@ pub fn frameBegin() void {
     frameTime = (@as(f64, @floatFromInt(currentTime - lastTime))) / @as(f64, @floatFromInt(freqMs));
 
     passedTime += frameTime;
+    simulationTime += frameTime * simulationScale;
 
     if (frameTime > 0.25) {
         frameTime = 0.25;
     }
-    accumulator += frameTime;
+    accumulator += frameTime * simulationScale;
 }
 
 pub fn frameEnd() void {
@@ -49,5 +52,17 @@ pub fn calculateFps() u64 {
 }
 
 pub fn now() f64 {
+    return simulationTime;
+}
+
+pub fn realNow() f64 {
     return passedTime;
+}
+
+pub fn setSimulationScale(scale: f64) void {
+    if (!std.math.isFinite(scale) or scale < 0) {
+        std.log.err("setSimulationScale: scale must be finite and non-negative, got {d}", .{scale});
+        return;
+    }
+    simulationScale = scale;
 }
