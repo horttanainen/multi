@@ -5,26 +5,11 @@
         "animation": "missile_explosion",
         "blastVelocity": 8,
         "blastImpulse": 2,
-        "blastRadius": 2.0,
-        "particleCount": 100,
-        "particleSpeed": 100,
-        "particleRadius": 0.05,
-        "particleLifetimeMs": 500,
-        "particleDensity": 1.5,
-        "particleFriction": 0,
-        "particleRestitution": 0.99,
-        "particleLinearDamping": 10,
-        "particleGravityScale": 0,
-        "particleColor": {
-            "r": 255,
-            "g": 145,
-            "b": 35
-        }
+        "blastRadius": 2.0
     },
     {
         "key": "pellet_impact",
         "blastRadius": 0.3,
-        "particleCount": 0,
         "damagePlayers": false
     },
     {
@@ -32,20 +17,6 @@
         "sound": "cannon_hit",
         "animation": "missile_explosion",
         "blastRadius": 0.8,
-        "particleCount": 20,
-        "particleSpeed": 50,
-        "particleRadius": 0.04,
-        "particleLifetimeMs": 500,
-        "particleDensity": 1.0,
-        "particleFriction": 0,
-        "particleRestitution": 0.5,
-        "particleLinearDamping": 10,
-        "particleGravityScale": 0,
-        "particleColor": {
-            "r": 70,
-            "g": 150,
-            "b": 255
-        },
         "damagePlayers": false
     }
 ]

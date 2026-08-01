@@ -3,7 +3,6 @@ const std = @import("std");
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
-const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
@@ -22,16 +21,6 @@ pub const Explosion = struct {
     blastVelocity: f32,
     blastImpulse: f32,
     blastRadius: f32,
-    particleCount: u32,
-    particleSpeed: f32,
-    particleRadius: f32,
-    particleLifetimeMs: u32,
-    particleDensity: f32,
-    particleFriction: f32,
-    particleRestitution: f32,
-    particleLinearDamping: f32,
-    particleGravityScale: f32,
-    particleColor: sprite.Color,
     damagePlayers: bool = true,
 };
 
