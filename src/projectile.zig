@@ -4,7 +4,6 @@ const sdl = @import("sdl.zig");
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
-const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
@@ -16,6 +15,7 @@ const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
+const destruction = @import("destruction.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
@@ -101,26 +101,17 @@ const OverlapContext = struct {
     count: usize,
 };
 
-const TerrainEdit = struct {
-    spriteUuid: u64,
-    dirtyRect: vec.IRect,
-};
-
 const DirectHitDamage = struct {
     player_id: usize,
     applied_damage: f32,
 };
 
-const terrainTextureUpdatesPerFrame: usize = 2;
-const terrainColliderUpdatesPerFrame: usize = 1;
 const perfLogFramesAfterExplosion: u32 = 120;
 const hitscanBloodCarrySpeed: f32 = 45;
 const hitscanBloodCarryFraction: f32 = 0.75;
 const hitscanBloodCarrySpreadRadians: f32 = std.math.degreesToRadians(16);
+pub const maximumExplosionDamage: f32 = 100;
 
-var terrainEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
-var terrainTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, TerrainEdit).empty;
-var terrainColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, vec.IRect).empty;
 var perfExplosionId: u64 = 0;
 var perfLogFramesRemaining: u32 = 0;
 
@@ -158,14 +149,6 @@ pub inline fn consumePerfFrameLog() bool {
     return true;
 }
 
-pub fn pendingTerrainTextureUpdateCount() usize {
-    return terrainTextureUpdates.count();
-}
-
-pub fn pendingTerrainColliderUpdateCount() usize {
-    return terrainColliderUpdates.count();
-}
-
 fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
     const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
 
@@ -188,117 +171,6 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     }
 
     return true; // Continue the query
-}
-
-fn queueTerrainEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IRect) !void {
-    const maybeEdit = terrainEdits.getPtr(bodyId);
-    if (maybeEdit == null) {
-        try terrainEdits.put(allocator, bodyId, .{
-            .spriteUuid = spriteUuid,
-            .dirtyRect = dirtyRect,
-        });
-        return;
-    }
-
-    const edit = maybeEdit.?;
-    edit.dirtyRect = vec.irectUnion(edit.dirtyRect, dirtyRect);
-}
-
-fn queueTerrainColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !void {
-    const maybeDirtyRect = terrainColliderUpdates.getPtr(bodyId);
-    if (maybeDirtyRect == null) {
-        try terrainColliderUpdates.put(allocator, bodyId, dirtyRect);
-        return;
-    }
-
-    const dirtyRectPtr = maybeDirtyRect.?;
-    dirtyRectPtr.* = vec.irectUnion(dirtyRectPtr.*, dirtyRect);
-}
-
-fn queueTerrainTextureUpdate(bodyId: box2d.c.b2BodyId, edit: TerrainEdit) !void {
-    const maybeEdit = terrainTextureUpdates.getPtr(bodyId);
-    if (maybeEdit == null) {
-        try terrainTextureUpdates.put(allocator, bodyId, edit);
-        return;
-    }
-
-    const pendingEdit = maybeEdit.?;
-    pendingEdit.dirtyRect = vec.irectUnion(pendingEdit.dirtyRect, edit.dirtyRect);
-}
-
-fn flushTerrainEdits() !void {
-    if (terrainEdits.count() == 0) {
-        return;
-    }
-    defer terrainEdits.clearRetainingCapacity();
-
-    for (terrainEdits.keys(), terrainEdits.values()) |bodyId, edit| {
-        if (!box2d.c.b2Body_IsValid(bodyId)) {
-            std.log.warn("flushTerrainEdits: terrain body became invalid before flush", .{});
-            continue;
-        }
-
-        const ent = entity.entities.getPtrLocking(bodyId) orelse {
-            std.log.warn("flushTerrainEdits: terrain entity missing before flush", .{});
-            continue;
-        };
-
-        if (ent.spriteUuids.len == 0) {
-            std.log.warn("flushTerrainEdits: terrain entity has no sprites", .{});
-            continue;
-        }
-
-        try queueTerrainTextureUpdate(bodyId, edit);
-    }
-}
-
-pub fn processTerrainTextureUpdates() void {
-    var processed: usize = 0;
-    while (processed < terrainTextureUpdatesPerFrame and terrainTextureUpdates.count() > 0) : (processed += 1) {
-        const bodyId = terrainTextureUpdates.keys()[0];
-        const edit = terrainTextureUpdates.values()[0];
-        _ = terrainTextureUpdates.swapRemove(bodyId);
-
-        if (!box2d.c.b2Body_IsValid(bodyId)) {
-            std.log.warn("processTerrainTextureUpdates: terrain body became invalid before texture update", .{});
-            continue;
-        }
-
-        sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
-            std.log.warn("processTerrainTextureUpdates: terrain texture update failed with {}", .{err});
-        };
-
-        queueTerrainColliderUpdate(bodyId, edit.dirtyRect) catch |err| {
-            std.log.warn("processTerrainTextureUpdates: failed to queue terrain collider update with {}", .{err});
-        };
-    }
-}
-
-pub fn processTerrainColliderUpdates() void {
-    var processed: usize = 0;
-    while (processed < terrainColliderUpdatesPerFrame and terrainColliderUpdates.count() > 0) : (processed += 1) {
-        const bodyId = terrainColliderUpdates.keys()[0];
-        const dirtyRect = terrainColliderUpdates.values()[0];
-        _ = terrainColliderUpdates.swapRemove(bodyId);
-
-        if (!box2d.c.b2Body_IsValid(bodyId)) {
-            std.log.warn("processTerrainColliderUpdates: terrain body became invalid before collider rebuild", .{});
-            continue;
-        }
-
-        const ent = entity.entities.getPtrLocking(bodyId) orelse {
-            std.log.warn("processTerrainColliderUpdates: terrain entity missing before collider rebuild", .{});
-            continue;
-        };
-
-        const stillExists = entity.regenerateCollidersInPixelRect(ent, dirtyRect) catch |err| {
-            std.log.warn("processTerrainColliderUpdates: terrain collider rebuild failed with {}", .{err});
-            continue;
-        };
-        if (!stillExists) {
-            entity.cleanupLater(ent.*);
-        }
-    }
 }
 
 fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
@@ -328,30 +200,12 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
 
-        const ent = entity.entities.getPtrLocking(bodyId) orelse {
-            std.log.warn("damageTerrainInRadius: terrain body has no entity", .{});
-            continue;
-        };
-
-        // Get entity position and rotation
-        const state = box2d.getState(bodyId);
-        const entityPos = vec.fromBox2d(state.pos);
-        const rotation = state.rotAngle;
-
-        if (ent.spriteUuids.len == 0) {
-            std.log.warn("damageTerrainInRadius: terrain entity has no sprites", .{});
-            continue;
-        }
-        const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse {
-            std.log.warn("damageTerrainInRadius: terrain sprite {d} not found", .{ent.spriteUuids[0]});
-            continue;
-        };
-
-        const dirtyRect = try sprite.removeCircleFromSurface(firstSprite, pos, radius, entityPos, rotation);
-        if (dirtyRect == null) continue;
-
-        const rect = dirtyRect.?;
-        try queueTerrainEdit(bodyId, ent.spriteUuids[0], rect);
+        try destruction.apply(bodyId, .{
+            .source = .explosion,
+            .amount = maximumExplosionDamage,
+            .position = pos,
+            .radius = radius,
+        });
     }
 }
 
@@ -830,8 +684,8 @@ fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShape
 }
 
 pub fn checkContacts() !void {
-    errdefer flushTerrainEdits() catch |err| {
-        std.log.err("checkContacts: failed to flush terrain edits: {}", .{err});
+    errdefer destruction.flushSurfaceEdits() catch |err| {
+        std.log.err("checkContacts: failed to flush surface edits: {}", .{err});
     };
 
     const sensorEvents = box2d.getSensorEvents();
@@ -852,15 +706,12 @@ pub fn checkContacts() !void {
         try handleProjectileContact(event.shapeIdA, event.shapeIdB, null);
     }
 
-    try flushTerrainEdits();
+    try destruction.flushSurfaceEdits();
 }
 
 pub fn cleanup() void {
     activeProjectiles.clearAndFree(allocator);
     propulsions.clearAndFree(allocator);
-    terrainEdits.clearAndFree(allocator);
-    terrainTextureUpdates.clearAndFree(allocator);
-    terrainColliderUpdates.clearAndFree(allocator);
 
     shrapnel.mutex.lockUncancelable(runtime.io());
     for (shrapnel.list.items) |item| {

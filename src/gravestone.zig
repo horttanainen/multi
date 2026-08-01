@@ -4,6 +4,7 @@ const box2d = @import("box2d.zig");
 const collision = @import("collision.zig");
 const config = @import("config.zig");
 const data = @import("data.zig");
+const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const polygon = @import("polygon.zig");
 const runtime = @import("runtime.zig");
@@ -117,7 +118,13 @@ fn spawn(position: vec.Vec2) !void {
     shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
 
     const bodyDef = box2d.createDynamicBodyDef(position);
-    _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+    const gravestone = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+    damage.register(gravestone.bodyId, .{
+        .model = .{ .surface_cutout = .{} },
+    }) catch |err| {
+        _ = entity.remove(gravestone.bodyId);
+        return err;
+    };
 }
 
 pub fn cleanup() void {

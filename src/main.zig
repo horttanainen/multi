@@ -42,6 +42,7 @@ const particle = @import("particle.zig");
 const particle_effect = @import("particle_effect.zig");
 const pool = @import("pool.zig");
 const damage = @import("damage.zig");
+const destruction = @import("destruction.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
 const background_paint = @import("background_paint.zig");
@@ -242,8 +243,8 @@ pub fn main(init: std.process.Init) !void {
                     inputUs,
                     logicUs,
                     renderUs,
-                    projectile.pendingTerrainTextureUpdateCount(),
-                    projectile.pendingTerrainColliderUpdateCount(),
+                    destruction.pendingSurfaceTextureUpdateCount(),
+                    destruction.pendingSurfaceColliderUpdateCount(),
                 },
             );
         }
@@ -296,8 +297,8 @@ fn gameLoop() !void {
     projectile.applyPropulsion();
 
     const terrainUpdatesStart = perf.begin(.player_death);
-    projectile.processTerrainTextureUpdates();
-    projectile.processTerrainColliderUpdates();
+    destruction.processSurfaceTextureUpdates();
+    destruction.processSurfaceColliderUpdates();
     perf.recordPlayerDeathGameLoopStage(.terrain_updates, terrainUpdatesStart);
 
     const ropeStart = perf.begin(.player_death);

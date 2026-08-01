@@ -26,6 +26,8 @@ const fs = @import("fs.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
+const damage = @import("damage.zig");
+const destruction = @import("destruction.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
@@ -207,6 +209,15 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
         return err;
     };
 
+    if (e.breakable) {
+        damage.register(spawnedEntity.bodyId, .{
+            .model = .{ .surface_cutout = .{} },
+        }) catch |err| {
+            _ = entity.remove(spawnedEntity.bodyId);
+            return err;
+        };
+    }
+
     try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
     return bodyIds.toOwnedSlice();
 }
@@ -239,6 +250,12 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
         shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
         const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+        damage.register(spawnedEntity.bodyId, .{
+            .model = .{ .surface_cutout = .{} },
+        }) catch |err| {
+            _ = entity.remove(spawnedEntity.bodyId);
+            return err;
+        };
         try appendSpawnedEntityBody(&bodyIds, spawnedEntity);
         return bodyIds.toOwnedSlice();
     }
@@ -352,6 +369,7 @@ pub fn cleanup() void {
     gravestone.clearScheduledSpawns();
     sensor.cleanup();
     projectile.cleanup();
+    destruction.cleanup();
     weapon.cleanupTrails();
     entity.cleanup();
     background.cleanup();
