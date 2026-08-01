@@ -2,19 +2,22 @@
     {
         "key": "missile_explosion",
         "sound": "cannon_hit",
-        "blastVelocity": 8,
-        "blastImpulse": 2,
+        "maximumDamage": 100,
+        "maximumPlayerVelocityChange": 8,
+        "maximumObjectImpulse": 2,
         "blastRadius": 2.0,
         "pressureRadius": 5.0
     },
     {
         "key": "pellet_impact",
+        "maximumDamage": 15,
         "blastRadius": 0.3,
         "damagePlayers": false
     },
     {
         "key": "railgun_impact",
         "sound": "cannon_hit",
+        "maximumDamage": 80,
         "blastRadius": 0.8,
         "damagePlayers": false
     }

@@ -34,8 +34,9 @@ pub const SoundData = struct {
 
 pub const ExplosionData = struct {
     sound: ?[]const u8,
-    blastVelocity: f32,
-    blastImpulse: f32,
+    maximumDamage: f32,
+    maximumPlayerVelocityChange: f32,
+    maximumObjectImpulse: f32,
     blastRadius: f32,
     pressureRadius: f32,
     damagePlayers: bool,
@@ -345,8 +346,9 @@ fn initExplosions() !void {
     const Entry = struct {
         key: []const u8,
         sound: ?[]const u8 = null,
-        blastVelocity: f32 = 0,
-        blastImpulse: f32 = 0,
+        maximumDamage: f32 = 0,
+        maximumPlayerVelocityChange: f32 = 0,
+        maximumObjectImpulse: f32 = 0,
         blastRadius: f32 = 2.0,
         pressureRadius: ?f32 = null,
         damagePlayers: bool = true,
@@ -369,8 +371,9 @@ fn initExplosions() !void {
             null;
         explosionDataMap.put(allocator, key, .{
             .sound = soundKey,
-            .blastVelocity = entry.blastVelocity,
-            .blastImpulse = entry.blastImpulse,
+            .maximumDamage = entry.maximumDamage,
+            .maximumPlayerVelocityChange = entry.maximumPlayerVelocityChange,
+            .maximumObjectImpulse = entry.maximumObjectImpulse,
             .blastRadius = entry.blastRadius,
             .pressureRadius = entry.pressureRadius orelse entry.blastRadius,
             .damagePlayers = entry.damagePlayers,
@@ -624,8 +627,9 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
     const sound = if (d.sound) |sk| createAudioFrom(sk) else null;
     return projectile.Explosion{
         .sound = sound,
-        .blastVelocity = d.blastVelocity,
-        .blastImpulse = d.blastImpulse,
+        .maximumDamage = d.maximumDamage,
+        .maximumPlayerVelocityChange = d.maximumPlayerVelocityChange,
+        .maximumObjectImpulse = d.maximumObjectImpulse,
         .blastRadius = d.blastRadius,
         .pressureRadius = d.pressureRadius,
         .damagePlayers = d.damagePlayers,

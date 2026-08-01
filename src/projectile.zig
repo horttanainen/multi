@@ -17,8 +17,9 @@ const destruction = @import("destruction.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
-    blastVelocity: f32,
-    blastImpulse: f32,
+    maximumDamage: f32,
+    maximumPlayerVelocityChange: f32,
+    maximumObjectImpulse: f32,
     blastRadius: f32,
     pressureRadius: f32,
     damagePlayers: bool = true,
@@ -72,7 +73,6 @@ const perfLogFramesAfterExplosion: u32 = 120;
 const hitscanBloodCarrySpeed: f32 = 45;
 const hitscanBloodCarryFraction: f32 = 0.75;
 const hitscanBloodCarrySpreadRadians: f32 = std.math.degreesToRadians(16);
-pub const maximumExplosionDamage: f32 = 100;
 
 var perfExplosionId: u64 = 0;
 var perfLogFramesRemaining: u32 = 0;
@@ -191,7 +191,7 @@ fn damageEntitiesInExplosion(field: blast_pressure.Field, explosion: Explosion, 
             sample.?.direction
         else
             normalizedOrUp(vec.subtract(bodyPosition, field.origin));
-        const amount = if (sample != null) damageFromPressureStrength(sample.?.strength) else 0;
+        const amount = if (sample != null) damageFromPressureStrength(explosion, sample.?.strength) else 0;
 
         try destruction.apply(bodyId, .{
             .source = .explosion,
@@ -286,7 +286,7 @@ fn applyPhysicalImpulse(bodyId: box2d.c.b2BodyId, impulse: vec.Vec2) void {
 }
 
 fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explosion) void {
-    if (explosion.blastImpulse <= 0) return;
+    if (explosion.maximumObjectImpulse <= 0) return;
 
     var context = OverlapContext{
         .bodies = undefined,
@@ -313,7 +313,7 @@ fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explos
 
         const bodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
         const sample = blast_pressure.sample(field, bodyPosition) orelse continue;
-        applyPhysicalImpulse(bodyId, vec.mul(sample.direction, explosion.blastImpulse * sample.strength));
+        applyPhysicalImpulse(bodyId, vec.mul(sample.direction, explosion.maximumObjectImpulse * sample.strength));
     }
 }
 
@@ -332,19 +332,11 @@ pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, e
     return result;
 }
 
-fn damageAtExplosionDistance(explosion: Explosion, distance: f32) f32 {
-    if (explosion.blastRadius <= 0) {
-        std.log.err("damageAtExplosionDistance: explosion blast radius must be positive", .{});
-        return 0;
-    }
-    if (distance > explosion.blastRadius) return 0;
-    return maximumExplosionDamage - ((maximumExplosionDamage - 1.0) * distance / explosion.blastRadius);
-}
-
-fn damageFromPressureStrength(strength: f32) f32 {
+fn damageFromPressureStrength(explosion: Explosion, strength: f32) f32 {
+    if (explosion.maximumDamage <= 0) return 0;
     if (strength <= 0) return 0;
     const clampedStrength = std.math.clamp(strength, 0, 1);
-    return 1.0 + (maximumExplosionDamage - 1.0) * clampedStrength;
+    return explosion.maximumDamage * clampedStrength * clampedStrength;
 }
 
 fn applyExplosionPressureToPlayers(
@@ -371,17 +363,17 @@ fn applyExplosionPressureToPlayers(
         );
         if (response.strength <= 0) continue;
 
-        const blastVelocity = vec.mul(
+        const playerVelocityChange = vec.mul(
             response.direction,
-            explosion.blastVelocity * response.strength,
+            explosion.maximumPlayerVelocityChange * response.strength,
         );
-        if (explosion.blastVelocity > 0) {
-            applyVelocityChange(p.bodyId, blastVelocity);
+        if (explosion.maximumPlayerVelocityChange > 0) {
+            applyVelocityChange(p.bodyId, playerVelocityChange);
         }
 
         if (!explosion.damagePlayers) continue;
 
-        var damage = damageFromPressureStrength(response.strength);
+        var damage = damageFromPressureStrength(explosion, response.strength);
         if (isDirectHit) {
             damage = @max(0, damage - directHitDamage.?.applied_damage);
         }
@@ -393,7 +385,7 @@ fn applyExplosionPressureToPlayers(
             .amount = damage,
             .direction = response.direction,
             .spread_radians = std.math.pi * 0.9,
-            .inherited_velocity = vec.add(playerVelocity, blastVelocity),
+            .inherited_velocity = vec.add(playerVelocity, playerVelocityChange),
             .inherited_velocity_scale = 0.35,
         });
     }
@@ -590,6 +582,14 @@ fn projectileImpactPoint(bodyId: box2d.c.b2BodyId, maybePoint: ?vec.Vec2) vec.Ve
     return vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
 }
 
+fn directHitDamageAmount(active: ActiveProjectile) f32 {
+    if (active.explosion == null) return active.direct_damage;
+    const explosion = active.explosion.?;
+    if (!explosion.damagePlayers) return active.direct_damage;
+    if (explosion.maximumDamage <= 0) return active.direct_damage;
+    return @min(active.direct_damage, explosion.maximumDamage);
+}
+
 fn damagePlayerFromPhysicalImpact(bodyId: box2d.c.b2BodyId, playerId: usize, impactPoint: vec.Vec2, active: ActiveProjectile) !f32 {
     if (active.direct_damage <= 0) return 0;
 
@@ -597,10 +597,7 @@ fn damagePlayerFromPhysicalImpact(bodyId: box2d.c.b2BodyId, playerId: usize, imp
         std.log.err("damagePlayerFromPhysicalImpact: player {d} is missing", .{playerId});
         return error.PlayerUnspawned;
     };
-    const directDamage = if (active.explosion != null and active.explosion.?.damagePlayers)
-        @min(active.direct_damage, damageAtExplosionDistance(active.explosion.?, 0))
-    else
-        active.direct_damage;
+    const directDamage = directHitDamageAmount(active);
     if (directDamage <= 0) return 0;
 
     const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
