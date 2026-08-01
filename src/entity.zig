@@ -22,6 +22,7 @@ const Sprite = sprite.Sprite;
 const conv = @import("conversion.zig");
 const animation = @import("animation.zig");
 const collision = @import("collision.zig");
+const pool = @import("pool.zig");
 
 pub const terrainColliderChunkSizeP: i32 = 64;
 
@@ -370,6 +371,7 @@ pub fn cleanupEntities() void {
 }
 
 pub fn cleanupOne(entity: Entity) void {
+    _ = pool.discardBody(entity.bodyId);
     box2d.c.b2DestroyBody(entity.bodyId);
     allocator.free(entity.shapeIds);
     freeColliderChunks(entity.colliderChunks);
