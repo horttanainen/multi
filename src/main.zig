@@ -324,7 +324,6 @@ fn gameLoop() !void {
     perf.recordPlayerDeathGameLoopStage(.projectile_contacts, projectileContactsStart);
 
     const cleanupStart = perf.begin(.player_death);
-    try projectile.cleanupShrapnel();
     try particle.cleanupParticles();
     perf.recordPlayerDeathGameLoopStage(.cleanup, cleanupStart);
 

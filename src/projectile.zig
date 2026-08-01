@@ -1,5 +1,4 @@
 const std = @import("std");
-const sdl = @import("sdl.zig");
 
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
@@ -9,7 +8,6 @@ const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
 const collision = @import("collision.zig");
-const thread_safe = @import("thread_safe_array_list.zig");
 const animation = @import("animation.zig");
 const conv = @import("conversion.zig");
 const runtime = @import("runtime.zig");
@@ -64,18 +62,6 @@ const PropulsionData = struct {
 };
 
 pub var propulsions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, PropulsionData).empty;
-
-pub var id: usize = 1;
-pub const Shrapnel = struct {
-    id: usize,
-    cleaned: bool,
-    bodies: []box2d.c.b2BodyId,
-    timerId: sdl.TimerID,
-};
-
-pub var shrapnel = thread_safe.ThreadSafeArrayList(Shrapnel).init(allocator);
-
-var shrapnelToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
 
 fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
     const animCopy = try animation.copyAnimationSharedFrames(anim);
@@ -292,96 +278,9 @@ fn damagePlayersInRadius(
     }
 }
 
-fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
-    if (explosion.sound) |snd| {
-        try audio.playFor(snd);
-    }
-
-    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
-
-    for (0..explosion.particleCount) |i| {
-        const angle = std.math.degreesToRadians(@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(explosion.particleCount)) * 360);
-        const dir = box2d.c.b2Vec2{ .x = std.math.sin(angle), .y = std.math.cos(angle) };
-
-        var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
-        bodyDef.isBullet = true;
-        bodyDef.linearDamping = explosion.particleLinearDamping;
-        bodyDef.gravityScale = explosion.particleGravityScale;
-        bodyDef.linearVelocity = box2d.mul(dir, explosion.particleSpeed);
-
-        const bodyId = try box2d.createBody(bodyDef);
-
-        var circleShapeDef = box2d.c.b2DefaultShapeDef();
-        circleShapeDef.density = explosion.particleDensity;
-        circleShapeDef.material.friction = explosion.particleFriction;
-        circleShapeDef.material.restitution = explosion.particleRestitution;
-        circleShapeDef.filter.groupIndex = -1; // Don't collide with each other
-        circleShapeDef.filter.categoryBits = collision.CATEGORY_PROJECTILE;
-        circleShapeDef.filter.maskBits = collision.MASK_EXPLOSION_SHRAPNEL;
-
-        const circleShape: box2d.c.b2Circle = .{
-            .center = .{
-                .x = 0,
-                .y = 0,
-            },
-            .radius = explosion.particleRadius,
-        };
-
-        _ = box2d.c.b2CreateCircleShape(bodyId, &circleShapeDef, &circleShape);
-
-        try bodyIds.append(bodyId);
-    }
-
-    return try bodyIds.toOwnedSlice();
-}
-
-fn markShrapnelForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-    const shrapnelId: usize = @intFromPtr(param.?);
-
-    shrapnel.mutex.lockUncancelable(runtime.io());
-    defer shrapnel.mutex.unlock(runtime.io());
-
-    for (shrapnel.list.items) |*item| {
-        if (item.id == shrapnelId) {
-            shrapnelToCleanup.appendSliceLocking(item.bodies) catch {};
-            item.cleaned = true;
-            break;
-        }
-    }
-
-    return 0;
-}
-
-pub fn cleanupShrapnel() !void {
-    var shrapnelToKeep = std.array_list.Managed(Shrapnel).init(allocator);
-    var shrapnelToDiscard = std.array_list.Managed(Shrapnel).init(allocator);
-    defer shrapnelToDiscard.deinit();
-
-    shrapnel.mutex.lockUncancelable(runtime.io());
-    for (shrapnel.list.items) |item| {
-        if (item.cleaned) {
-            try shrapnelToDiscard.append(item);
-            continue;
-        }
-        try shrapnelToKeep.append(item);
-    }
-    shrapnel.mutex.unlock(runtime.io());
-
-    shrapnel.replaceLocking(shrapnelToKeep);
-
-    shrapnelToCleanup.mutex.lockUncancelable(runtime.io());
-    for (shrapnelToCleanup.list.items) |toClean| {
-        box2d.c.b2DestroyBody(toClean);
-    }
-    shrapnelToCleanup.mutex.unlock(runtime.io());
-
-    shrapnelToCleanup.replaceLocking(std.array_list.Managed(box2d.c.b2BodyId).init(allocator));
-
-    for (shrapnelToDiscard.items) |item| {
-        if (item.cleaned) {
-            allocator.free(item.bodies);
-        }
-    }
+fn playExplosionSound(explosion: Explosion) !void {
+    if (explosion.sound == null) return;
+    try audio.playFor(explosion.sound.?);
 }
 
 fn explodeAtWithDirectHit(
@@ -393,27 +292,9 @@ fn explodeAtWithDirectHit(
     const perfId = beginExplosionPerfLog();
     const totalStart = perf.begin(.explosion);
 
-    const createExplosionStart = perf.begin(.explosion);
-    const explosionBodies = try createExplosion(pos, explosion);
-    logExplosionStage(perfId, "create_shrapnel", createExplosionStart);
-    if (comptime perf.configured(.explosion)) {
-        perf.log(.explosion, "perf.explosion id={d} shrapnel_bodies={d}", .{ perfId, explosionBodies.len });
-    }
-
-    const registerShrapnelStart = perf.begin(.explosion);
-    if (explosionBodies.len > 0) {
-        const timerId = sdl.addTimer(500, markShrapnelForCleanup, @ptrFromInt(id));
-        try shrapnel.appendLocking(.{
-            .id = id,
-            .cleaned = false,
-            .bodies = explosionBodies,
-            .timerId = timerId,
-        });
-        id = id + 1;
-    } else {
-        allocator.free(explosionBodies);
-    }
-    logExplosionStage(perfId, "register_shrapnel", registerShrapnelStart);
+    const soundStart = perf.begin(.explosion);
+    try playExplosionSound(explosion);
+    logExplosionStage(perfId, "sound", soundStart);
 
     const animationStart = perf.begin(.explosion);
     if (explosion.animation) |anim| {
@@ -717,23 +598,4 @@ pub fn checkContacts() !void {
 pub fn cleanup() void {
     activeProjectiles.clearAndFree(allocator);
     propulsions.clearAndFree(allocator);
-
-    shrapnel.mutex.lockUncancelable(runtime.io());
-    for (shrapnel.list.items) |item| {
-        _ = sdl.removeTimer(item.timerId);
-        for (item.bodies) |toClean| {
-            box2d.c.b2DestroyBody(toClean);
-        }
-        allocator.free(item.bodies);
-    }
-    shrapnel.mutex.unlock(runtime.io());
-
-    shrapnel.replaceLocking(std.array_list.Managed(Shrapnel).init(allocator));
-
-    shrapnelToCleanup.mutex.lockUncancelable(runtime.io());
-    defer shrapnelToCleanup.mutex.unlock(runtime.io());
-    for (shrapnelToCleanup.list.items) |toClean| {
-        box2d.c.b2DestroyBody(toClean);
-    }
-    shrapnelToCleanup.list.deinit();
 }
