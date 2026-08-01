@@ -4,6 +4,7 @@ const sdl = @import("sdl.zig");
 const audio = @import("audio.zig");
 const vec = @import("vector.zig");
 const entity = @import("entity.zig");
+const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 
@@ -20,15 +21,19 @@ const destruction = @import("destruction.zig");
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
     animation: ?animation.Animation = null,
-    blastPower: f32,
+    blastVelocity: f32,
+    blastImpulse: f32,
     blastRadius: f32,
     particleCount: u32,
+    particleSpeed: f32,
+    particleRadius: f32,
+    particleLifetimeMs: u32,
     particleDensity: f32,
     particleFriction: f32,
     particleRestitution: f32,
-    particleRadius: f32,
     particleLinearDamping: f32,
     particleGravityScale: f32,
+    particleColor: sprite.Color,
     damagePlayers: bool = true,
 };
 
@@ -275,7 +280,7 @@ fn damagePlayersInRadius(
 
         const radialDirection = normalizedOrZero(.{ .x = dx, .y = dy });
         const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-        const blastVelocity = vec.mul(radialDirection, explosion.blastPower * 0.08);
+        const blastVelocity = vec.mul(radialDirection, explosion.blastVelocity);
         _ = try damagePlayerWithBlood(p.id, damage, attackerId, .{
             .position = playerPosM,
             .amount = damage,
@@ -302,7 +307,7 @@ fn createExplosion(pos: vec.Vec2, explosion: Explosion) ![]box2d.c.b2BodyId {
         bodyDef.isBullet = true;
         bodyDef.linearDamping = explosion.particleLinearDamping;
         bodyDef.gravityScale = explosion.particleGravityScale;
-        bodyDef.linearVelocity = box2d.mul(dir, explosion.blastPower);
+        bodyDef.linearVelocity = box2d.mul(dir, explosion.particleSpeed);
 
         const bodyId = try box2d.createBody(bodyDef);
 

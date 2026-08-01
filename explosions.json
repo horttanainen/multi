@@ -3,15 +3,23 @@
         "key": "missile_explosion",
         "sound": "cannon_hit",
         "animation": "missile_explosion",
-        "blastPower": 100,
+        "blastVelocity": 8,
+        "blastImpulse": 2,
         "blastRadius": 2.0,
         "particleCount": 100,
+        "particleSpeed": 100,
+        "particleRadius": 0.05,
+        "particleLifetimeMs": 500,
         "particleDensity": 1.5,
         "particleFriction": 0,
         "particleRestitution": 0.99,
-        "particleRadius": 0.05,
         "particleLinearDamping": 10,
-        "particleGravityScale": 0
+        "particleGravityScale": 0,
+        "particleColor": {
+            "r": 255,
+            "g": 145,
+            "b": 35
+        }
     },
     {
         "key": "pellet_impact",
@@ -23,15 +31,21 @@
         "key": "railgun_impact",
         "sound": "cannon_hit",
         "animation": "missile_explosion",
-        "blastPower": 50,
         "blastRadius": 0.8,
         "particleCount": 20,
-        "particleDensity": 1.0,
+        "particleSpeed": 50,
         "particleRadius": 0.04,
-        "particleLinearDamping": 10,
+        "particleLifetimeMs": 500,
+        "particleDensity": 1.0,
         "particleFriction": 0,
         "particleRestitution": 0.5,
+        "particleLinearDamping": 10,
         "particleGravityScale": 0,
+        "particleColor": {
+            "r": 70,
+            "g": 150,
+            "b": 255
+        },
         "damagePlayers": false
     }
 ]
