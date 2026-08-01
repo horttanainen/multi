@@ -39,6 +39,7 @@ const cursor = @import("cursor.zig");
 const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const particle = @import("particle.zig");
+const pool = @import("pool.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
 const background_paint = @import("background_paint.zig");
@@ -254,6 +255,7 @@ pub fn main(init: std.process.Init) !void {
     level.cleanup();
     gravestone.cleanup();
     gibbing.cleanup();
+    pool.cleanup();
     gamepad.cleanup();
     keyboard.cleanup();
     controller.cleanup();
