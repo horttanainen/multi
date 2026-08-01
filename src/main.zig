@@ -74,6 +74,7 @@ const Sprite = entity.Sprite;
 //TODO: breakable terrain should have "shadow background" that gets revealed when terrain is destroyed
 //TODO: explosion holes should be uneven not perfect circles
 //TODO: explosions should char the hole and terrain surface around them
+//TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
 //TODO: add bones sticking out of giblets
 //TODO: make settings.zig use data.zig to read the json
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
