@@ -12,6 +12,7 @@ const conv = @import("conversion.zig");
 const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const blood = @import("blood.zig");
+const blast_pressure = @import("blast_pressure.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
 
@@ -84,6 +85,11 @@ const OverlapContext = struct {
 const DirectHitDamage = struct {
     player_id: usize,
     applied_damage: f32,
+};
+
+const PressureResponse = struct {
+    direction: vec.Vec2 = vec.zero,
+    strength: f32 = 0,
 };
 
 const perfLogFramesAfterExplosion: u32 = 120;
@@ -198,6 +204,63 @@ fn normalizedOrZero(value: vec.Vec2) vec.Vec2 {
     };
 }
 
+fn normalizedOrUp(value: vec.Vec2) vec.Vec2 {
+    const normalized = normalizedOrZero(value);
+    if (vec.magnitude(normalized) >= 0.001) return normalized;
+    return .{ .x = 0, .y = -1 };
+}
+
+fn pressureResponseForPlayer(
+    field: blast_pressure.Field,
+    playerPosition: vec.Vec2,
+    playerRadius: f32,
+    isDirectHit: bool,
+) PressureResponse {
+    if (isDirectHit) {
+        return .{
+            .direction = normalizedOrUp(vec.subtract(playerPosition, field.origin)),
+            .strength = 1,
+        };
+    }
+
+    const sampleRadius = @max(playerRadius, field.cell_size);
+    const sampleOffsets = [_]vec.Vec2{
+        vec.zero,
+        .{ .x = -sampleRadius, .y = 0 },
+        .{ .x = sampleRadius, .y = 0 },
+        .{ .x = 0, .y = -sampleRadius },
+        .{ .x = 0, .y = sampleRadius },
+    };
+    var totalStrength: f32 = 0;
+    var weightedDirection = vec.zero;
+    for (sampleOffsets) |offset| {
+        const pressureSample = blast_pressure.sample(field, vec.add(playerPosition, offset)) orelse continue;
+        totalStrength += pressureSample.strength;
+        weightedDirection = vec.add(weightedDirection, vec.mul(pressureSample.direction, pressureSample.strength));
+    }
+    if (totalStrength <= 0) return .{};
+
+    return .{
+        .direction = normalizedOrUp(weightedDirection),
+        .strength = totalStrength / @as(f32, @floatFromInt(sampleOffsets.len)),
+    };
+}
+
+fn applyVelocityChange(bodyId: box2d.c.b2BodyId, velocity: vec.Vec2) void {
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("applyVelocityChange: body is invalid", .{});
+        return;
+    }
+    if (box2d.c.b2Body_GetType(bodyId) != box2d.c.b2_dynamicBody) return;
+
+    const mass = box2d.c.b2Body_GetMass(bodyId);
+    if (mass <= 0) {
+        std.log.warn("applyVelocityChange: dynamic body has no mass", .{});
+        return;
+    }
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, vec.toBox2d(vec.mul(velocity, mass)), true);
+}
+
 pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, emission: blood.Emission) !player.DamageResult {
     const result = try player.damage(playerId, damage, attackerId);
     if (!result.applied) return result;
@@ -219,47 +282,60 @@ fn damageAtExplosionDistance(explosion: Explosion, distance: f32) f32 {
         return 0;
     }
     if (distance > explosion.blastRadius) return 0;
-    return 100.0 - (99.0 * distance / explosion.blastRadius);
+    return maximumExplosionDamage - ((maximumExplosionDamage - 1.0) * distance / explosion.blastRadius);
 }
 
-fn damagePlayersInRadius(
-    pos: vec.Vec2,
+fn damageFromPressureStrength(strength: f32) f32 {
+    if (strength <= 0) return 0;
+    const clampedStrength = std.math.clamp(strength, 0, 1);
+    return 1.0 + (maximumExplosionDamage - 1.0) * clampedStrength;
+}
+
+fn applyExplosionPressureToPlayers(
+    field: blast_pressure.Field,
     explosion: Explosion,
     attackerId: ?usize,
     directHitDamage: ?DirectHitDamage,
 ) !void {
     for (player.players.values()) |*p| {
+        if (p.isDead) continue;
         if (!box2d.c.b2Body_IsValid(p.bodyId)) {
+            std.log.warn("applyExplosionPressureToPlayers: player {d} body is invalid", .{p.id});
             continue;
         }
 
         const playerBodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
         const playerPosM = vec.add(playerBodyPosition, player.centerOffset);
-
-        const dx = playerPosM.x - pos.x;
-        const dy = playerPosM.y - pos.y;
-        const centerDistance = @sqrt(dx * dx + dy * dy);
         const isDirectHit = directHitDamage != null and directHitDamage.?.player_id == p.id;
-        const distance = if (isDirectHit)
-            0
-        else
-            @max(0, centerDistance - player.lowerBodyColliderRadius);
-        const baseDamage = damageAtExplosionDistance(explosion, distance);
-        if (baseDamage <= 0) continue;
+        const response = pressureResponseForPlayer(
+            field,
+            playerPosM,
+            player.lowerBodyColliderRadius,
+            isDirectHit,
+        );
+        if (response.strength <= 0) continue;
 
-        var damage = baseDamage;
+        const blastVelocity = vec.mul(
+            response.direction,
+            explosion.blastVelocity * response.strength,
+        );
+        if (explosion.blastVelocity > 0) {
+            applyVelocityChange(p.bodyId, blastVelocity);
+        }
+
+        if (!explosion.damagePlayers) continue;
+
+        var damage = damageFromPressureStrength(response.strength);
         if (isDirectHit) {
             damage = @max(0, damage - directHitDamage.?.applied_damage);
         }
         if (damage <= 0) continue;
 
-        const radialDirection = normalizedOrZero(.{ .x = dx, .y = dy });
         const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-        const blastVelocity = vec.mul(radialDirection, explosion.blastVelocity);
         _ = try damagePlayerWithBlood(p.id, damage, attackerId, .{
             .position = playerPosM,
             .amount = damage,
-            .direction = if (vec.magnitude(radialDirection) < 0.001) null else radialDirection,
+            .direction = response.direction,
             .spread_radians = std.math.pi * 0.9,
             .inherited_velocity = vec.add(playerVelocity, blastVelocity),
             .inherited_velocity_scale = 0.35,
@@ -281,25 +357,26 @@ fn explodeAtWithDirectHit(
     const perfId = beginExplosionPerfLog();
     const totalStart = perf.begin(.explosion);
 
+    const pressureStart = perf.begin(.explosion);
+    var pressureField = try blast_pressure.build(pos, explosion.blastRadius);
+    defer blast_pressure.deinit(&pressureField);
+    logExplosionStage(perfId, "pressure_field", pressureStart);
+
     const soundStart = perf.begin(.explosion);
     try playExplosionSound(explosion);
     logExplosionStage(perfId, "sound", soundStart);
 
     const animationStart = perf.begin(.explosion);
-    if (explosion.animation) |anim| {
-        try createExplosionAnimation(pos, anim);
-    }
+    if (explosion.animation != null) try createExplosionAnimation(pos, explosion.animation.?);
     logExplosionStage(perfId, "animation", animationStart);
 
     const terrainStart = perf.begin(.explosion);
     try damageTerrainInRadius(pos, explosion.blastRadius);
     logExplosionStage(perfId, "terrain_damage", terrainStart);
 
-    const playerDamageStart = perf.begin(.explosion);
-    if (explosion.damagePlayers) {
-        try damagePlayersInRadius(pos, explosion, attackerId, directHitDamage);
-    }
-    logExplosionStage(perfId, "player_damage", playerDamageStart);
+    const playerPressureStart = perf.begin(.explosion);
+    try applyExplosionPressureToPlayers(pressureField, explosion, attackerId, directHitDamage);
+    logExplosionStage(perfId, "player_pressure", playerPressureStart);
     logExplosionStage(perfId, "total", totalStart);
 }
 
