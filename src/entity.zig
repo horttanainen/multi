@@ -326,6 +326,26 @@ pub fn markSpriteUuidsShared(bodyId: box2d.c.b2BodyId) void {
     ent.ownsSpriteUuids = false;
 }
 
+pub fn replaceColliderWithPolygon(bodyId: box2d.c.b2BodyId, collider: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef) !void {
+    const ent = entities.getPtrLocking(bodyId) orelse {
+        std.log.err("replaceColliderWithPolygon: entity is missing for body", .{});
+        return error.EntityNotFound;
+    };
+
+    const newShapeIds = try allocator.alloc(box2d.c.b2ShapeId, 1);
+    errdefer allocator.free(newShapeIds);
+    const newColliderChunks = try allocator.alloc(ColliderChunk, 0);
+    errdefer allocator.free(newColliderChunks);
+
+    destroyShapeIds(ent.shapeIds);
+    allocator.free(ent.shapeIds);
+    freeColliderChunks(ent.colliderChunks);
+
+    newShapeIds[0] = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &collider);
+    ent.shapeIds = newShapeIds;
+    ent.colliderChunks = newColliderChunks;
+}
+
 fn markEntityForCleanup(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     const id_int: usize = @intFromPtr(param.?);
     const bodyId: box2d.c.b2BodyId = @bitCast(id_int);

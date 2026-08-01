@@ -16,6 +16,7 @@ const runtime = @import("runtime.zig");
 const player = @import("player.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
+const pool = @import("pool.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
@@ -296,6 +297,7 @@ pub fn processTerrainColliderUpdates() void {
             continue;
         };
         if (!stillExists) {
+            _ = pool.discardBody(ent.bodyId);
             entity.cleanupLater(ent.*);
         }
     }

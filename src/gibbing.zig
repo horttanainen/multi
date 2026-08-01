@@ -7,6 +7,7 @@ const entity = @import("entity.zig");
 const collision = @import("collision.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
+const pool = @import("pool.zig");
 const runtime = @import("runtime.zig");
 const blood = @import("blood.zig");
 const time = @import("time.zig");
@@ -15,6 +16,9 @@ const GibletSet = struct {
     heads: []u64,
     legs: []u64,
     meat: []u64,
+    headPoolId: pool.Id,
+    legPoolId: pool.Id,
+    meatPoolId: pool.Id,
 };
 
 const gibletBloodCooldownSeconds: f64 = 0.16;
@@ -22,6 +26,11 @@ const gibletBloodMinImpactSpeed: f32 = 1.4;
 const gibletBloodMinDamage: f32 = 4.0;
 const gibletBloodMaxDamage: f32 = 18.0;
 const gibletBloodDamagePerSpeed: f32 = 3.0;
+const maxHeadGibletsPerDeath: u32 = 1;
+const maxLegGibletsPerDeath: u32 = 2;
+const maxMeatGibletsPerDeath: u32 = 3;
+const gibletColliderHalfExtentScale: f32 = 0.35;
+const gibletColliderMinimumHalfExtent: f32 = 0.08;
 
 // uncolored template giblets
 var templateHeadGiblets: []u64 = &[_]u64{};
@@ -30,6 +39,7 @@ var templateMeatGiblets: []u64 = &[_]u64{};
 
 var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
 var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
+var gibletTemplateSprites = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, u64).empty;
 
 pub fn init() !void {
     templateHeadGiblets = try fs.loadSpritesFromFolder(
@@ -53,90 +63,38 @@ pub fn init() !void {
     std.debug.print("Loaded giblet templates - heads: {}, legs: {}, meat: {}\n", .{ templateHeadGiblets.len, templateLegGiblets.len, templateMeatGiblets.len });
 }
 
-pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void {
-    var coloredHeads = std.array_list.Managed(u64).init(allocator);
-    for (templateHeadGiblets) |templateGiblet| {
-        const colored = try createColoredSprite(templateGiblet, playerColor);
-        try coloredHeads.append(colored);
-    }
-
-    var coloredLegs = std.array_list.Managed(u64).init(allocator);
-    for (templateLegGiblets) |templateGiblet| {
-        const colored = try createColoredSprite(templateGiblet, playerColor);
-        try coloredLegs.append(colored);
-    }
-
-    var coloredMeat = std.array_list.Managed(u64).init(allocator);
-    for (templateMeatGiblets) |templateGiblet| {
-        const colored = try createColoredSprite(templateGiblet, playerColor);
-        try coloredMeat.append(colored);
-    }
-
-    const gibletSet = GibletSet{
-        .heads = try coloredHeads.toOwnedSlice(),
-        .legs = try coloredLegs.toOwnedSlice(),
-        .meat = try coloredMeat.toOwnedSlice(),
-    };
-
-    if (playerGiblets.get(playerId)) |old| {
-        for (old.heads) |s| sprite.cleanupLater(s);
-        allocator.free(old.heads);
-        for (old.legs) |s| sprite.cleanupLater(s);
-        allocator.free(old.legs);
-        for (old.meat) |s| sprite.cleanupLater(s);
-        allocator.free(old.meat);
-    }
-    try playerGiblets.put(playerId, gibletSet);
-
-    std.debug.print("Pre-colored giblets for player {}: {} heads, {} legs, {} meat\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len });
-}
-
-pub fn gib(posM: vec.Vec2, playerId: usize) void {
-    const gibletSet = playerGiblets.get(playerId) orelse {
-        std.debug.print("Warning: No pre-colored giblets found for player {}\n", .{playerId});
-        return;
-    };
-
-    if (gibletSet.heads.len > 0) {
-        const headCount = runtime.random().intRangeAtMost(u32, 0, 1);
-        for (0..headCount) |_| {
-            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.heads.len - 1);
-            spawnGiblet(gibletSet.heads[randomIndex], posM) catch |err| {
-                std.debug.print("Failed to spawnGiblet: {}\n", .{err});
-            };
-        }
-    }
-
-    if (gibletSet.legs.len > 0) {
-        const legCount = runtime.random().intRangeAtMost(u32, 0, 2);
-        for (0..legCount) |_| {
-            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.legs.len - 1);
-            spawnGiblet(gibletSet.legs[randomIndex], posM) catch |err| {
-                std.debug.print("Failed to spawnGiblet: {}\n", .{err});
-            };
-        }
-    }
-
-    if (gibletSet.meat.len > 0) {
-        const meatCount = runtime.random().intRangeAtMost(u32, 0, 3);
-        for (0..meatCount) |_| {
-            const randomIndex = runtime.random().intRangeAtMost(usize, 0, gibletSet.meat.len - 1);
-            spawnGiblet(gibletSet.meat[randomIndex], posM) catch |err| {
-                std.debug.print("Failed to spawnGiblet: {}\n", .{err});
-            };
-        }
+fn cleanupSpriteUuids(spriteUuids: []const u64) void {
+    for (spriteUuids) |spriteUuid| {
+        sprite.cleanupLater(spriteUuid);
     }
 }
 
-fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
-    const spriteCopyUuid = try sprite.createCopy(gibletSpriteUuid);
+fn createColoredSprites(templateGiblets: []const u64, playerColor: sprite.Color) ![]u64 {
+    var coloredSprites = std.array_list.Managed(u64).init(allocator);
+    errdefer {
+        cleanupSpriteUuids(coloredSprites.items);
+        coloredSprites.deinit();
+    }
 
-    const variedPosM: vec.Vec2 = .{
-        .x = posM.x + runtime.random().float(f32) * 2 - 1,
-        .y = posM.y - runtime.random().float(f32) * 2,
+    for (templateGiblets) |templateGiblet| {
+        const colored = try createColoredSprite(templateGiblet, playerColor);
+        try coloredSprites.append(colored);
+    }
+
+    return coloredSprites.toOwnedSlice();
+}
+
+fn gibletCollider(spriteUuid: u64) !box2d.c.b2Polygon {
+    const gibletSprite = sprite.getSprite(spriteUuid) orelse {
+        std.log.err("gibletCollider: sprite {d} is missing", .{spriteUuid});
+        return error.SpriteNotFound;
     };
+    const halfWidth = @max(gibletColliderMinimumHalfExtent, gibletSprite.sizeM.x * gibletColliderHalfExtentScale);
+    const halfHeight = @max(gibletColliderMinimumHalfExtent, gibletSprite.sizeM.y * gibletColliderHalfExtentScale);
+    return box2d.c.b2MakeBox(halfWidth, halfHeight);
+}
 
-    const bodyDef = box2d.createDynamicBodyDef(variedPosM);
+fn gibletShapeDef() box2d.c.b2ShapeDef {
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.material.friction = 0.5;
     shapeDef.density = 1.0;
@@ -144,9 +102,236 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
     shapeDef.filter.maskBits = collision.MASK_GIBLET;
     shapeDef.enableHitEvents = true;
     shapeDef.enableContactEvents = true;
+    return shapeDef;
+}
 
-    const gibEntity = try entity.createFromImg(spriteCopyUuid, shapeDef, bodyDef, "dynamic");
-    try gibletBloodCooldowns.put(allocator, gibEntity.bodyId, 0.0);
+fn gibletBatchSize(spriteTemplates: []const u64, maximumPerDeath: u32) usize {
+    return @max(spriteTemplates.len, @as(usize, @intCast(maximumPerDeath)));
+}
+
+fn destroyGibletBodies(bodyIds: []const box2d.c.b2BodyId) void {
+    for (bodyIds) |bodyId| {
+        _ = gibletBloodCooldowns.swapRemove(bodyId);
+        _ = gibletTemplateSprites.swapRemove(bodyId);
+        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+        if (entity.remove(bodyId)) continue;
+        std.log.warn("destroyGibletBodies: pooled body has no entity", .{});
+    }
+}
+
+fn destroyGibletPool(poolId: pool.Id) void {
+    const bodyIds = pool.takeBodyIds(poolId) catch |err| {
+        std.log.err("destroyGibletPool: could not take bodies from pool {d}: {}", .{ poolId, err });
+        return;
+    };
+    defer allocator.free(bodyIds);
+    destroyGibletBodies(bodyIds);
+}
+
+fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
+    const collider = try gibletCollider(templateSpriteUuid);
+    const bodySpriteUuid = try sprite.createMutableCopy(templateSpriteUuid);
+
+    const bodyDef = box2d.createDynamicBodyDef(vec.zero);
+    const gibletEntity = entity.createFromShape(bodySpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic") catch |err| {
+        sprite.cleanupLater(bodySpriteUuid);
+        return err;
+    };
+    errdefer _ = entity.remove(gibletEntity.bodyId);
+
+    const pooledEntity = entity.entities.getPtrLocking(gibletEntity.bodyId) orelse {
+        std.log.err("createPooledGibletBody: new pooled entity is missing", .{});
+        return error.EntityNotFound;
+    };
+    pooledEntity.enabled = false;
+    box2d.c.b2Body_Disable(gibletEntity.bodyId);
+
+    try gibletBloodCooldowns.put(allocator, gibletEntity.bodyId, 0.0);
+    errdefer _ = gibletBloodCooldowns.swapRemove(gibletEntity.bodyId);
+    try gibletTemplateSprites.put(allocator, gibletEntity.bodyId, templateSpriteUuid);
+
+    return gibletEntity.bodyId;
+}
+
+fn createGibletBodies(spriteTemplates: []const u64, batchSize: usize) ![]box2d.c.b2BodyId {
+    if (spriteTemplates.len == 0) {
+        std.log.err("createGibletBodies: cannot create bodies without sprite templates", .{});
+        return error.NoGibletSprites;
+    }
+    if (batchSize == 0) {
+        std.log.err("createGibletBodies: cannot create an empty batch", .{});
+        return error.EmptyGibletBatch;
+    }
+
+    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
+    defer bodyIds.deinit();
+    errdefer destroyGibletBodies(bodyIds.items);
+
+    for (0..batchSize) |index| {
+        const bodyId = try createPooledGibletBody(spriteTemplates[index % spriteTemplates.len]);
+        bodyIds.append(bodyId) catch |err| {
+            destroyGibletBodies(&.{bodyId});
+            return err;
+        };
+    }
+
+    return bodyIds.toOwnedSlice();
+}
+
+fn createGibletPool(spriteTemplates: []const u64, batchSize: usize) !pool.Id {
+    const bodyIds = try createGibletBodies(spriteTemplates, batchSize);
+    defer allocator.free(bodyIds);
+    errdefer destroyGibletBodies(bodyIds);
+    return pool.create(bodyIds);
+}
+
+fn replenishGibletPool(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize) !void {
+    const bodyIds = try createGibletBodies(spriteTemplates, batchSize);
+    defer allocator.free(bodyIds);
+    errdefer destroyGibletBodies(bodyIds);
+    try pool.addBodies(poolId, bodyIds);
+}
+
+fn cleanupGibletSet(gibletSet: GibletSet) void {
+    destroyGibletPool(gibletSet.headPoolId);
+    destroyGibletPool(gibletSet.legPoolId);
+    destroyGibletPool(gibletSet.meatPoolId);
+
+    cleanupSpriteUuids(gibletSet.heads);
+    allocator.free(gibletSet.heads);
+    cleanupSpriteUuids(gibletSet.legs);
+    allocator.free(gibletSet.legs);
+    cleanupSpriteUuids(gibletSet.meat);
+    allocator.free(gibletSet.meat);
+}
+
+pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void {
+    const coloredHeads = try createColoredSprites(templateHeadGiblets, playerColor);
+    errdefer {
+        cleanupSpriteUuids(coloredHeads);
+        allocator.free(coloredHeads);
+    }
+
+    const coloredLegs = try createColoredSprites(templateLegGiblets, playerColor);
+    errdefer {
+        cleanupSpriteUuids(coloredLegs);
+        allocator.free(coloredLegs);
+    }
+
+    const coloredMeat = try createColoredSprites(templateMeatGiblets, playerColor);
+    errdefer {
+        cleanupSpriteUuids(coloredMeat);
+        allocator.free(coloredMeat);
+    }
+
+    if (coloredHeads.len == 0 or coloredLegs.len == 0 or coloredMeat.len == 0) {
+        std.log.err("prepareGibletsForPlayer: one or more giblet categories are empty for player {d}", .{playerId});
+        return error.NoGibletSprites;
+    }
+
+    const headBatchSize = gibletBatchSize(coloredHeads, maxHeadGibletsPerDeath);
+    const legBatchSize = gibletBatchSize(coloredLegs, maxLegGibletsPerDeath);
+    const meatBatchSize = gibletBatchSize(coloredMeat, maxMeatGibletsPerDeath);
+    const headPoolId = try createGibletPool(coloredHeads, headBatchSize);
+    errdefer destroyGibletPool(headPoolId);
+    const legPoolId = try createGibletPool(coloredLegs, legBatchSize);
+    errdefer destroyGibletPool(legPoolId);
+    const meatPoolId = try createGibletPool(coloredMeat, meatBatchSize);
+    errdefer destroyGibletPool(meatPoolId);
+
+    const gibletSet = GibletSet{
+        .heads = coloredHeads,
+        .legs = coloredLegs,
+        .meat = coloredMeat,
+        .headPoolId = headPoolId,
+        .legPoolId = legPoolId,
+        .meatPoolId = meatPoolId,
+    };
+
+    const oldGibletSet = playerGiblets.get(playerId);
+    try playerGiblets.put(playerId, gibletSet);
+    if (oldGibletSet != null) {
+        cleanupGibletSet(oldGibletSet.?);
+    }
+
+    std.debug.print("Prepared giblet pools for player {}: {} heads, {} legs, {} meat, {} bodies\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len, headBatchSize + legBatchSize + meatBatchSize });
+}
+
+fn acquireGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize) !pool.Acquisition {
+    const available = try pool.acquire(poolId, .return_null);
+    if (available != null) return available.?;
+
+    const currentBodyCount = try pool.bodyCount(poolId);
+    if (currentBodyCount < batchSize) {
+        try replenishGibletPool(poolId, spriteTemplates, batchSize);
+        const replenished = try pool.acquire(poolId, .return_null);
+        if (replenished == null) {
+            std.log.err("acquireGiblet: replenished pool {d} has no available body", .{poolId});
+            return error.EmptyGibletPool;
+        }
+        return replenished.?;
+    }
+
+    const recycled = try pool.acquire(poolId, .recycle_oldest);
+    if (recycled == null) {
+        std.log.err("acquireGiblet: pool {d} has no body to recycle", .{poolId});
+        return error.EmptyGibletPool;
+    }
+    return recycled.?;
+}
+
+fn activateGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize, posM: vec.Vec2) !void {
+    const acquisition = try acquireGiblet(poolId, spriteTemplates, batchSize);
+    const bodyId = acquisition.bodyId;
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.err("activateGiblet: pooled body is invalid", .{});
+        _ = pool.discardBody(bodyId);
+        return error.InvalidGibletBody;
+    }
+    box2d.c.b2Body_Disable(bodyId);
+    errdefer {
+        const failedEntity = entity.entities.getPtrLocking(bodyId);
+        if (failedEntity != null) {
+            failedEntity.?.enabled = false;
+        }
+        pool.release(poolId, bodyId) catch |err| {
+            std.log.err("activateGiblet: could not return failed acquisition to pool {d}: {}", .{ poolId, err });
+        };
+    }
+
+    const pooledEntity = entity.entities.getPtrLocking(bodyId) orelse {
+        std.log.err("activateGiblet: pooled body has no entity", .{});
+        return error.EntityNotFound;
+    };
+    if (pooledEntity.spriteUuids.len != 1) {
+        std.log.err("activateGiblet: pooled entity has invalid sprite count", .{});
+        return error.InvalidGibletEntity;
+    }
+    const templateSpriteUuid = gibletTemplateSprites.get(bodyId) orelse {
+        std.log.err("activateGiblet: pooled body has no sprite template", .{});
+        return error.MissingGibletTemplate;
+    };
+    const nextBloodSpatterAt = gibletBloodCooldowns.getPtr(bodyId) orelse {
+        std.log.err("activateGiblet: pooled body has no blood cooldown", .{});
+        return error.MissingGibletCooldown;
+    };
+
+    try sprite.restoreMutableCopy(pooledEntity.spriteUuids[0], templateSpriteUuid);
+    const collider = try gibletCollider(templateSpriteUuid);
+    try entity.replaceColliderWithPolygon(bodyId, collider, gibletShapeDef());
+    pooledEntity.state = null;
+    pooledEntity.enabled = true;
+    nextBloodSpatterAt.* = 0.0;
+
+    const variedPosM: vec.Vec2 = .{
+        .x = posM.x + runtime.random().float(f32) * 2 - 1,
+        .y = posM.y - runtime.random().float(f32) * 2,
+    };
+    const rotationAngle = runtime.random().float(f32) * std.math.pi * 2.0;
+    box2d.c.b2Body_SetTransform(bodyId, vec.toBox2d(variedPosM), box2d.c.b2MakeRot(rotationAngle));
+    box2d.c.b2Body_SetLinearVelocity(bodyId, box2d.c.b2Vec2_zero);
+    box2d.c.b2Body_SetAngularVelocity(bodyId, 0);
+    box2d.c.b2Body_Enable(bodyId);
 
     // Apply random impulse to scatter giblets
     const angle = runtime.random().float(f32) * std.math.pi * 2.0;
@@ -155,7 +340,39 @@ fn spawnGiblet(gibletSpriteUuid: u64, posM: vec.Vec2) !void {
         .x = std.math.cos(angle) * force,
         .y = std.math.sin(angle) * force,
     };
-    box2d.c.b2Body_ApplyLinearImpulseToCenter(gibEntity.bodyId, impulse, true);
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, impulse, true);
+}
+
+fn activateRandomGiblets(poolId: pool.Id, spriteUuids: []const u64, maximumPerDeath: u32, count: u32, posM: vec.Vec2) void {
+    if (count == 0) return;
+    if (spriteUuids.len == 0) {
+        std.log.err("activateRandomGiblets: requested {d} giblets without sprites", .{count});
+        return;
+    }
+
+    const batchSize = gibletBatchSize(spriteUuids, maximumPerDeath);
+    for (0..count) |_| {
+        activateGiblet(poolId, spriteUuids, batchSize, posM) catch |err| {
+            std.log.err("activateRandomGiblets: failed to activate pooled giblet with {}", .{err});
+        };
+    }
+}
+
+pub fn gib(posM: vec.Vec2, playerId: usize) void {
+    if (playerGiblets.getPtr(playerId) == null) {
+        std.log.err("gib: no prepared giblets found for player {d}", .{playerId});
+        return;
+    }
+    const gibletSet = playerGiblets.getPtr(playerId).?;
+
+    const headCount = runtime.random().intRangeAtMost(u32, 0, maxHeadGibletsPerDeath);
+    activateRandomGiblets(gibletSet.headPoolId, gibletSet.heads, maxHeadGibletsPerDeath, headCount, posM);
+
+    const legCount = runtime.random().intRangeAtMost(u32, 0, maxLegGibletsPerDeath);
+    activateRandomGiblets(gibletSet.legPoolId, gibletSet.legs, maxLegGibletsPerDeath, legCount, posM);
+
+    const meatCount = runtime.random().intRangeAtMost(u32, 1, maxMeatGibletsPerDeath);
+    activateRandomGiblets(gibletSet.meatPoolId, gibletSet.meat, maxMeatGibletsPerDeath, meatCount, posM);
 }
 
 fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
@@ -180,6 +397,8 @@ fn cleanupInvalidTrackedGiblets() void {
         }
 
         _ = gibletBloodCooldowns.swapRemove(bodyId);
+        _ = gibletTemplateSprites.swapRemove(bodyId);
+        _ = pool.discardBody(bodyId);
     }
 }
 
@@ -256,8 +475,6 @@ pub fn checkContacts() !void {
 }
 
 pub fn cleanup() void {
-    gibletBloodCooldowns.clearAndFree(allocator);
-
     // Clean up template giblets
     for (templateHeadGiblets) |spriteUuid| {
         sprite.cleanupLater(spriteUuid);
@@ -277,21 +494,10 @@ pub fn cleanup() void {
     // Clean up all player-specific colored giblets
     var iter = playerGiblets.valueIterator();
     while (iter.next()) |gibletSet| {
-        for (gibletSet.heads) |spriteUuid| {
-            sprite.cleanupLater(spriteUuid);
-        }
-        allocator.free(gibletSet.heads);
-
-        for (gibletSet.legs) |spriteUuid| {
-            sprite.cleanupLater(spriteUuid);
-        }
-        allocator.free(gibletSet.legs);
-
-        for (gibletSet.meat) |spriteUuid| {
-            sprite.cleanupLater(spriteUuid);
-        }
-        allocator.free(gibletSet.meat);
+        cleanupGibletSet(gibletSet.*);
     }
 
     playerGiblets.deinit();
+    gibletBloodCooldowns.clearAndFree(allocator);
+    gibletTemplateSprites.clearAndFree(allocator);
 }

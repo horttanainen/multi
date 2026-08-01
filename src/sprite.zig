@@ -591,6 +591,41 @@ pub fn createMutableCopy(spriteUuid: u64) !u64 {
     return createCopyWithBacking(spriteUuid, .mutable);
 }
 
+pub fn restoreMutableCopy(targetUuid: u64, sourceUuid: u64) !void {
+    const sourceSprite = sprites.getLocking(sourceUuid) orelse {
+        std.log.err("restoreMutableCopy: source sprite {d} is missing", .{sourceUuid});
+        return error.SpriteNotFound;
+    };
+    const targetSprite = sprites.getPtrLocking(targetUuid) orelse {
+        std.log.err("restoreMutableCopy: target sprite {d} is missing", .{targetUuid});
+        return error.SpriteNotFound;
+    };
+    if (sourceSprite.surface.w != targetSprite.surface.w or
+        sourceSprite.surface.h != targetSprite.surface.h or
+        sourceSprite.surface.format != targetSprite.surface.format or
+        sourceSprite.surface.pitch != targetSprite.surface.pitch)
+    {
+        std.log.err("restoreMutableCopy: source {d} and target {d} surfaces are incompatible", .{ sourceUuid, targetUuid });
+        return error.IncompatibleSpriteSurfaces;
+    }
+
+    {
+        try sdl.lockSurface(sourceSprite.surface);
+        defer sdl.unlockSurface(sourceSprite.surface);
+        try sdl.lockSurface(targetSprite.surface);
+        defer sdl.unlockSurface(targetSprite.surface);
+
+        const pitch: usize = @intCast(sourceSprite.surface.pitch);
+        const height: usize = @intCast(sourceSprite.surface.h);
+        const byteCount = try std.math.mul(usize, pitch, height);
+        const sourcePixels: [*]const u8 = @ptrCast(sourceSprite.surface.pixels);
+        const targetPixels: [*]u8 = @ptrCast(targetSprite.surface.pixels);
+        @memcpy(targetPixels[0..byteCount], sourcePixels[0..byteCount]);
+    }
+
+    try updateTextureGeometryFromSurface(targetUuid);
+}
+
 pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
     const originalSprite = sprites.getLocking(spriteUuid) orelse {
         std.log.warn("createCopyWithBacking: sprite {d} not found", .{spriteUuid});
