@@ -264,6 +264,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     const playerEntity = entity.Entity{
         .type = try allocator.dupe(u8, "dynamic"),
         .friction = config.player.movementFriction,
+        .colliderShapeDef = shapeDef,
         .bodyId = bodyId,
         .spriteUuids = playerSpriteUuids,
         .shapeIds = try shapeIds.toOwnedSlice(),

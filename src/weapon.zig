@@ -382,6 +382,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
         try entity.entities.putLocking(bodyId, entity.Entity{
             .type = try allocator.dupe(u8, "projectile"),
             .friction = shapeDef.material.friction,
+            .colliderShapeDef = shapeDef,
             .bodyId = bodyId,
             .spriteUuids = spriteUuids,
             .shapeIds = shapeIds,

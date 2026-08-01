@@ -34,6 +34,7 @@ pub const ColliderChunk = struct {
 pub const Entity = struct {
     type: []const u8,
     friction: f32,
+    colliderShapeDef: box2d.c.b2ShapeDef,
     bodyId: box2d.c.b2BodyId,
     state: ?box2d.State,
     spriteUuids: []u64,
@@ -134,6 +135,7 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
     const entity = Entity{
         .type = entityType,
         .friction = shapeDef.material.friction,
+        .colliderShapeDef = shapeDef,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -170,12 +172,7 @@ fn isStaticTerrainType(eType: []const u8) bool {
 }
 
 fn createShapeDefForEntity(entity: Entity) box2d.c.b2ShapeDef {
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.material.friction = entity.friction;
-    shapeDef.enableSensorEvents = true;
-    shapeDef.filter.categoryBits = entity.categoryBits;
-    shapeDef.filter.maskBits = entity.maskBits;
-    return shapeDef;
+    return entity.colliderShapeDef;
 }
 
 fn destroyShapeIds(shapeIds: []const box2d.c.b2ShapeId) void {
@@ -280,6 +277,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
     const entity = Entity{
         .type = entityType,
         .friction = shapeDef.material.friction,
+        .colliderShapeDef = shapeDef,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -343,6 +341,7 @@ pub fn replaceColliderWithPolygon(bodyId: box2d.c.b2BodyId, collider: box2d.c.b2
     freeColliderChunks(ent.colliderChunks);
 
     newShapeIds[0] = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &collider);
+    ent.colliderShapeDef = shapeDef;
     ent.shapeIds = newShapeIds;
     ent.colliderChunks = newColliderChunks;
 }
