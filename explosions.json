@@ -3,7 +3,7 @@
         "key": "missile_explosion",
         "sound": "cannon_hit",
         "maximumDamage": 100,
-        "maximumPlayerVelocityChange": 8,
+        "maximumPlayerVelocityChange": 16,
         "maximumObjectImpulse": 10,
         "blastRadius": 2.0,
         "pressureRadius": 5.0
