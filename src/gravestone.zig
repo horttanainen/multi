@@ -112,6 +112,7 @@ fn spawn(position: vec.Vec2) !void {
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.material.friction = 0.5;
+    shapeDef.density = 10;
     shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
     shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
 
