@@ -67,12 +67,11 @@ const Sprite = entity.Sprite;
 //TODO: allow for connecting dynamic objects with a joint (e.g a fellable tree that is connected to ground with a joint)
 
 //Small improvements
-//TODO: make blood droplets much smaller and realistic.
-//TODO: blood stains should be uneven not perfect circles
+//TODO: gravestone should be in the "shadow background" but still react stuff like explosions
+//TODO: breakable terrain should have "shadow background" that gets revealed when terrain is destroyed
 //TODO: explosion holes should be uneven not perfect circles
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: add bones sticking out of giblets
-//TODO: find out which giblets can not be made into box2d objects and fix them
 //TODO: make settings.zig use data.zig to read the json
 //TODO: getptrlocking and getlocking do not make sense. The locking needs to happen on the outside and release after mutations
 //TODO: instead of all the silly playerId indexing start using real uids for players and a map.
