@@ -93,13 +93,13 @@ pub fn reset(bodyId: box2d.c.b2BodyId) !void {
 }
 
 pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
-    if (!std.math.isFinite(event.amount) or event.amount <= 0) return .ignored;
-
     const component = components.getPtr(bodyId) orelse return .ignored;
     if (component.pendingDestruction) return .ignored;
 
     switch (component.model) {
         .health => |*health| {
+            if (!std.math.isFinite(event.amount) or event.amount <= 0) return .ignored;
+
             health.current -= event.amount;
             if (health.current > 0) return .damaged;
 
@@ -107,7 +107,10 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
             component.pendingDestruction = true;
             return .{ .destroyed = component.onDestroyed };
         },
-        .surface_cutout => |surfaceCutout| return .{ .surface_cutout = surfaceCutout },
+        .surface_cutout => |surfaceCutout| {
+            if (!std.math.isFinite(event.radius) or event.radius <= 0) return .ignored;
+            return .{ .surface_cutout = surfaceCutout };
+        },
     }
 }
 

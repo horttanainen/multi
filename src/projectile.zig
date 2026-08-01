@@ -82,6 +82,7 @@ fn createExplosionAnimation(pos: vec.Vec2, anim: animation.Animation) !void {
 const OverlapContext = struct {
     bodies: [100]box2d.c.b2BodyId,
     count: usize,
+    truncated: bool = false,
 };
 
 const DirectHitDamage = struct {
@@ -153,16 +154,33 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     }
 
     // Add body if we have space
-    if (ctx.count < 100) {
+    if (ctx.count < ctx.bodies.len) {
         ctx.bodies[ctx.count] = bodyId;
         ctx.count += 1;
+    } else {
+        ctx.truncated = true;
     }
 
     return true; // Continue the query
 }
 
-fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
-    // Setup overlap query
+fn sortOverlapBodies(context: *OverlapContext) void {
+    var index: usize = 1;
+    while (index < context.count) : (index += 1) {
+        const bodyId = context.bodies[index];
+        const bodyKey: usize = @bitCast(bodyId);
+        var insertionIndex = index;
+        while (insertionIndex > 0) {
+            const previousKey: usize = @bitCast(context.bodies[insertionIndex - 1]);
+            if (previousKey <= bodyKey) break;
+            context.bodies[insertionIndex] = context.bodies[insertionIndex - 1];
+            insertionIndex -= 1;
+        }
+        context.bodies[insertionIndex] = bodyId;
+    }
+}
+
+fn damageEntitiesInExplosion(field: blast_pressure.Field, explosion: Explosion, attackerId: ?usize) !void {
     var context = OverlapContext{
         .bodies = undefined,
         .count = 0,
@@ -170,11 +188,11 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
 
     const circle = box2d.c.b2Circle{
         .center = box2d.c.b2Vec2_zero,
-        .radius = radius,
+        .radius = explosion.blastRadius,
     };
 
     const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(pos),
+        .p = vec.toBox2d(field.origin),
         .q = box2d.c.b2Rot_identity,
     };
 
@@ -182,17 +200,33 @@ fn damageTerrainInRadius(pos: vec.Vec2, radius: f32) !void {
     filter.categoryBits = collision.MASK_EXPLOSION_QUERY;
     filter.maskBits = collision.MASK_EXPLOSION_QUERY;
 
-    // Query for overlapping bodies
     box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
+    if (context.truncated) {
+        std.log.warn("damageEntitiesInExplosion: explosion damage query exceeded {d} bodies", .{context.bodies.len});
+    }
+    sortOverlapBodies(&context);
 
     for (context.bodies[0..context.count]) |bodyId| {
-        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("damageEntitiesInExplosion: body became invalid during damage query", .{});
+            continue;
+        }
+
+        const bodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
+        const sample = blast_pressure.sample(field, bodyPosition);
+        const direction = if (sample != null)
+            sample.?.direction
+        else
+            normalizedOrUp(vec.subtract(bodyPosition, field.origin));
+        const amount = if (sample != null) damageFromPressureStrength(sample.?.strength) else 0;
 
         try destruction.apply(bodyId, .{
             .source = .explosion,
-            .amount = maximumExplosionDamage,
-            .position = pos,
-            .radius = radius,
+            .amount = amount,
+            .position = field.origin,
+            .direction = direction,
+            .radius = explosion.blastRadius,
+            .attackerId = attackerId,
         });
     }
 }
@@ -428,9 +462,9 @@ fn explodeAtWithDirectHit(
     }
     logExplosionStage(perfId, "animation", animationStart);
 
-    const terrainStart = perf.begin(.explosion);
-    try damageTerrainInRadius(pos, explosion.blastRadius);
-    logExplosionStage(perfId, "terrain_damage", terrainStart);
+    const entityDamageStart = perf.begin(.explosion);
+    try damageEntitiesInExplosion(pressureField, explosion, attackerId);
+    logExplosionStage(perfId, "entity_damage", entityDamageStart);
 
     const playerPressureStart = perf.begin(.explosion);
     try applyExplosionPressureToPlayers(pressureField, explosion, attackerId, directHitDamage);
@@ -624,6 +658,15 @@ fn handleProjectileContactForBody(bodyId: box2d.c.b2BodyId, otherShapeId: box2d.
 
     const impactPoint = projectileImpactPoint(bodyId, maybePoint);
     if ((otherFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) {
+        const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
+        const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+        try destruction.apply(otherBodyId, .{
+            .source = .projectile,
+            .amount = active.direct_damage,
+            .position = impactPoint,
+            .direction = normalizedOrZero(projectileVelocity),
+            .attackerId = active.owner_id,
+        });
         try finishProjectile(bodyId, impactPoint, null);
         return;
     }

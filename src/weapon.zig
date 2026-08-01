@@ -6,6 +6,7 @@ const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
+const destruction = @import("destruction.zig");
 const projectile = @import("projectile.zig");
 const runtime = @import("runtime.zig");
 const collision = @import("collision.zig");
@@ -251,15 +252,26 @@ fn shootNonPenetratingHitscan(
     if (w.directDamage <= 0 or !box2d.c.b2Shape_IsValid(result.shapeId)) return hitPoint;
 
     const hitBodyId = box2d.c.b2Shape_GetBody(result.shapeId);
-    const hitPlayerId = projectile.playerIdForBody(hitBodyId) orelse return hitPoint;
-    try projectile.damagePlayerFromHitscan(
-        hitPlayerId,
-        w.directDamage,
-        playerId,
-        hitPoint,
-        direction,
-        .non_penetrating,
-    );
+    const hitPlayerId = projectile.playerIdForBody(hitBodyId);
+    if (hitPlayerId != null) {
+        try projectile.damagePlayerFromHitscan(
+            hitPlayerId.?,
+            w.directDamage,
+            playerId,
+            hitPoint,
+            direction,
+            .non_penetrating,
+        );
+        return hitPoint;
+    }
+
+    try destruction.apply(hitBodyId, .{
+        .source = .hitscan,
+        .amount = w.directDamage,
+        .position = hitPoint,
+        .direction = direction,
+        .attackerId = playerId,
+    });
     return hitPoint;
 }
 
@@ -305,6 +317,17 @@ fn shootPenetratingHitscan(
             direction,
             .penetrating,
         );
+    }
+
+    if (w.directDamage > 0 and worldHit.hit and box2d.c.b2Shape_IsValid(worldHit.shapeId)) {
+        const hitBodyId = box2d.c.b2Shape_GetBody(worldHit.shapeId);
+        try destruction.apply(hitBodyId, .{
+            .source = .hitscan,
+            .amount = w.directDamage,
+            .position = endPoint,
+            .direction = direction,
+            .attackerId = playerId,
+        });
     }
 
     return endPoint;
