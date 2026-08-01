@@ -74,7 +74,9 @@ const Sprite = entity.Sprite;
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
 //TODO: add exploding oil barrels to the level
 //TODO: investigate if we can have non animated explosision using visual particles and other effects
+//TODO: configure the maximum entity damage separately for each explosion instead of using a hard-coded value
 //TODO: explosion holes should be uneven not perfect circles
+//TODO: investigate using wall-aware explosion pressure, material resistance, and deterministic noise to erode exposed terrain into irregular craters
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
 //TODO: add bones sticking out of giblets
