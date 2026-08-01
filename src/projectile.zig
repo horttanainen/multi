@@ -23,6 +23,7 @@ pub const Explosion = struct {
     blastVelocity: f32,
     blastImpulse: f32,
     blastRadius: f32,
+    pressureRadius: f32,
     damagePlayers: bool = true,
 };
 
@@ -286,7 +287,7 @@ fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explos
     };
     const circle = box2d.c.b2Circle{
         .center = box2d.c.b2Vec2_zero,
-        .radius = explosion.blastRadius,
+        .radius = explosion.pressureRadius,
     };
     const transform = box2d.c.b2Transform{
         .p = vec.toBox2d(field.origin),
@@ -406,7 +407,7 @@ fn explodeAtWithDirectHit(
     const totalStart = perf.begin(.explosion);
 
     const pressureStart = perf.begin(.explosion);
-    var pressureField = try blast_pressure.build(pos, explosion.blastRadius);
+    var pressureField = try blast_pressure.build(pos, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
     blast_pressure_debug.capture(pressureField) catch |err| {
         std.log.warn("explodeAtWithDirectHit: failed to capture blast pressure visualization: {}", .{err});

@@ -38,6 +38,7 @@ pub const ExplosionData = struct {
     blastVelocity: f32,
     blastImpulse: f32,
     blastRadius: f32,
+    pressureRadius: f32,
     damagePlayers: bool,
 };
 
@@ -349,6 +350,7 @@ fn initExplosions() !void {
         blastVelocity: f32 = 0,
         blastImpulse: f32 = 0,
         blastRadius: f32 = 2.0,
+        pressureRadius: ?f32 = null,
         damagePlayers: bool = true,
     };
 
@@ -382,6 +384,7 @@ fn initExplosions() !void {
             .blastVelocity = entry.blastVelocity,
             .blastImpulse = entry.blastImpulse,
             .blastRadius = entry.blastRadius,
+            .pressureRadius = entry.pressureRadius orelse entry.blastRadius,
             .damagePlayers = entry.damagePlayers,
         }) catch {
             allocator.free(key);
@@ -639,6 +642,7 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
         .blastVelocity = d.blastVelocity,
         .blastImpulse = d.blastImpulse,
         .blastRadius = d.blastRadius,
+        .pressureRadius = d.pressureRadius,
         .damagePlayers = d.damagePlayers,
     };
 }

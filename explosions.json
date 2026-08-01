@@ -5,7 +5,8 @@
         "animation": "missile_explosion",
         "blastVelocity": 8,
         "blastImpulse": 2,
-        "blastRadius": 2.0
+        "blastRadius": 2.0,
+        "pressureRadius": 5.0
     },
     {
         "key": "pellet_impact",
