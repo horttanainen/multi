@@ -261,6 +261,53 @@ fn applyVelocityChange(bodyId: box2d.c.b2BodyId, velocity: vec.Vec2) void {
     box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, vec.toBox2d(vec.mul(velocity, mass)), true);
 }
 
+fn applyPhysicalImpulse(bodyId: box2d.c.b2BodyId, impulse: vec.Vec2) void {
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("applyPhysicalImpulse: body is invalid", .{});
+        return;
+    }
+    if (box2d.c.b2Body_GetType(bodyId) != box2d.c.b2_dynamicBody) return;
+
+    const mass = box2d.c.b2Body_GetMass(bodyId);
+    if (mass <= 0) {
+        std.log.warn("applyPhysicalImpulse: dynamic body has no mass", .{});
+        return;
+    }
+    box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, vec.toBox2d(impulse), true);
+}
+
+fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explosion) void {
+    if (explosion.blastImpulse <= 0) return;
+
+    var context = OverlapContext{
+        .bodies = undefined,
+        .count = 0,
+    };
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = explosion.blastRadius,
+    };
+    const transform = box2d.c.b2Transform{
+        .p = vec.toBox2d(field.origin),
+        .q = box2d.c.b2Rot_identity,
+    };
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = collision.MASK_EXPLOSION_IMPULSE;
+    filter.maskBits = collision.MASK_EXPLOSION_IMPULSE;
+    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
+
+    for (context.bodies[0..context.count]) |bodyId| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("applyExplosionPressureToBodies: body became invalid during pressure query", .{});
+            continue;
+        }
+
+        const bodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId));
+        const sample = blast_pressure.sample(field, bodyPosition) orelse continue;
+        applyPhysicalImpulse(bodyId, vec.mul(sample.direction, explosion.blastImpulse * sample.strength));
+    }
+}
+
 pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, emission: blood.Emission) !player.DamageResult {
     const result = try player.damage(playerId, damage, attackerId);
     if (!result.applied) return result;
@@ -365,6 +412,10 @@ fn explodeAtWithDirectHit(
     const soundStart = perf.begin(.explosion);
     try playExplosionSound(explosion);
     logExplosionStage(perfId, "sound", soundStart);
+
+    const impulseStart = perf.begin(.explosion);
+    applyExplosionPressureToBodies(pressureField, explosion);
+    logExplosionStage(perfId, "body_pressure", impulseStart);
 
     const animationStart = perf.begin(.explosion);
     if (explosion.animation != null) try createExplosionAnimation(pos, explosion.animation.?);
