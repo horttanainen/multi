@@ -74,6 +74,7 @@ pub var presets = std.AutoArrayHashMapUnmanaged(Id, Preset).empty;
 pub var events = std.ArrayListUnmanaged(Event).empty;
 var presetNames = std.AutoArrayHashMapUnmanaged(Id, []const u8).empty;
 var circleSpriteUuid: ?u64 = null;
+var flashSpriteUuid: ?u64 = null;
 var smokeSpriteUuid: ?u64 = null;
 
 const Random = struct {
@@ -196,6 +197,7 @@ pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
     }
 
     circleSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.izero);
+    flashSpriteUuid = try sprite.createFromImg("particles/explosion-flash.png", .{ .x = 1, .y = 1 }, vec.izero);
     smokeSpriteUuid = try sprite.createFromImg("particles/smoke-puff.png", .{ .x = 1, .y = 1 }, vec.izero);
 
     var iterator = sourcePresets.iterator();
@@ -441,7 +443,7 @@ fn drawFlash(flashSprite: sprite.Sprite, event: Event, preset: Preset, now: f64)
 
 pub fn draw() !void {
     if (events.items.len == 0) return;
-    const spriteUuid = circleSpriteUuid orelse {
+    const spriteUuid = flashSpriteUuid orelse {
         std.log.err("explosion_visual.draw: flash sprite is not initialized", .{});
         return error.ExplosionVisualNotInitialized;
     };
@@ -481,5 +483,6 @@ pub fn cleanup() void {
     presetNames.clearAndFree(allocator);
     visualRandom.state = 1;
     circleSpriteUuid = null;
+    flashSpriteUuid = null;
     smokeSpriteUuid = null;
 }
