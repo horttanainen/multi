@@ -11,7 +11,7 @@ const time = @import("time.zig");
 const vec = @import("vector.zig");
 
 const propagationSeconds: f64 = 0.2;
-const fadeSeconds: f64 = 0.25;
+const cellFadeSeconds: f64 = 0.12;
 
 const Cell = struct {
     position: vec.Vec2,
@@ -39,7 +39,7 @@ fn activeFadeSeconds() f64 {
     if (comptime config.debugBlastPressure.enabled) {
         return config.debugBlastPressure.slowMotionSeconds;
     }
-    return fadeSeconds;
+    return cellFadeSeconds;
 }
 
 fn freeWave(wave: Wave) void {
@@ -108,45 +108,46 @@ pub fn shouldRunSimulationUpdate(physicsStepCount: usize) bool {
     return physicsStepCount > 0;
 }
 
-fn fadeForWave(elapsed: f64) f32 {
-    const fadeAge = elapsed - activePropagationSeconds();
-    if (fadeAge <= 0) return 1;
-    const remaining = 1.0 - fadeAge / activeFadeSeconds();
+fn fadeForCell(elapsed: f64, arrivalFraction: f64) f32 {
+    const arrivalTime = arrivalFraction * activePropagationSeconds();
+    const cellAge = elapsed - arrivalTime;
+    if (cellAge <= 0) return 1;
+    const remaining = 1.0 - cellAge / activeFadeSeconds();
     return @floatCast(std.math.clamp(remaining, 0, 1));
 }
 
 fn cellColor(strength: f32, fade: f32) sdl.Color {
     const clampedStrength = std.math.clamp(strength, 0, 1);
-    const redToYellow = std.math.clamp(clampedStrength * 2, 0, 1);
-    const yellowToWhite = std.math.clamp((clampedStrength - 0.5) * 2, 0, 1);
-    const alpha = (80.0 + clampedStrength * 175.0) * fade;
+    const clampedFade = std.math.clamp(fade, 0, 1);
+    const lifecycle = 1.0 - clampedFade;
+    const yellowToRed = std.math.clamp(lifecycle / 0.65, 0, 1);
+    const red = 255.0 + (139.0 - 255.0) * yellowToRed;
+    const alpha = (80.0 + clampedStrength * 175.0) * clampedFade;
     return .{
-        .r = 255,
-        .g = @intFromFloat(redToYellow * 255),
-        .b = @intFromFloat(yellowToWhite * 255),
+        .r = @intFromFloat(red),
+        .g = @intFromFloat((1.0 - yellowToRed) * 255),
+        .b = 0,
         .a = @intFromFloat(std.math.clamp(alpha, 0, 255)),
     };
 }
 
 fn drawWave(wave: Wave, now: f64) !void {
     const elapsed = now - wave.started_at;
-    const fade = fadeForWave(elapsed);
-    if (fade <= 0) return;
-
     const revealFraction = std.math.clamp(elapsed / activePropagationSeconds(), 0, 1);
     const cellPixels = @max(1, @as(i32, @intFromFloat(@round(wave.cell_size * conv.met2pix))));
-    const drawSize = @max(1, cellPixels - 1);
 
     for (wave.cells[0..wave.cell_count]) |cell| {
         if (cell.arrival_fraction > revealFraction) continue;
+        const fade = fadeForCell(elapsed, cell.arrival_fraction);
+        if (fade <= 0) continue;
 
         const center = camera.relativePosition(conv.m2Pixel(vec.toBox2d(cell.position)));
         try gpu.setRenderDrawColor(cellColor(cell.strength, fade));
         try gpu.renderFillRect(.{
-            .x = center.x - @divFloor(drawSize, 2),
-            .y = center.y - @divFloor(drawSize, 2),
-            .w = drawSize,
-            .h = drawSize,
+            .x = center.x - @divFloor(cellPixels, 2),
+            .y = center.y - @divFloor(cellPixels, 2),
+            .w = cellPixels,
+            .h = cellPixels,
         });
     }
 }

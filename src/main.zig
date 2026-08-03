@@ -72,7 +72,6 @@ const Sprite = entity.Sprite;
 //Small improvements
 //TODO: we should get rid of crosshair and instead make it so that the bullet truly leaves from the barrel of the gun to the direction the gun is pointing
 //TODO: we should visualise the amnount of ammo and health on the players. E.g. health could be a cauge on the chest and clip could be on the barrel: the idea is everything would be visible for everybody
-
 //TODO: MAKE AI player to play against!!
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
 //TODO: add exploding oil barrels to the level
