@@ -29,5 +29,27 @@
         "friction": 1.0,
         "restitution": 0.05,
         "groupIndex": -3
+    },
+    {
+        "key": "rubble",
+        "particlesPerUnit": 1.8,
+        "maxParticles": 40,
+        "minSpeedVariation": 0.8,
+        "maxSpeedVariation": 5.5,
+        "minScale": 0.05,
+        "maxScale": 0.22,
+        "defaultDirection": "radial",
+        "lifetimeMs": 1800,
+        "color": {
+            "r": 110,
+            "g": 100,
+            "b": 90
+        },
+        "linearDamping": 0.35,
+        "gravityScale": 1.3,
+        "density": 0.8,
+        "friction": 0.8,
+        "restitution": 0.08,
+        "groupIndex": -4
     }
 ]
