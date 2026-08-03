@@ -3,6 +3,7 @@ const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
+const runtime = @import("runtime.zig");
 const sprite = @import("sprite.zig");
 const tex = @import("texture.zig");
 const time = @import("time.zig");
@@ -52,7 +53,6 @@ pub const Event = struct {
 pub var presets = std.AutoArrayHashMapUnmanaged(Id, Preset).empty;
 pub var events = std.ArrayListUnmanaged(Event).empty;
 var presetNames = std.AutoArrayHashMapUnmanaged(Id, []const u8).empty;
-var nextSeed: u64 = 1;
 var flashSpriteUuid: ?u64 = null;
 
 const Random = struct {
@@ -144,6 +144,14 @@ pub fn idForName(name: []const u8) ?Id {
 
 fn positionIsFinite(position: vec.Vec2) bool {
     return std.math.isFinite(position.x) and std.math.isFinite(position.y);
+}
+
+fn randomVisualSeed() u64 {
+    const seed = runtime.random().int(u64);
+    if (seed != 0) return seed;
+
+    std.log.warn("explosion_visual.randomVisualSeed: random source returned zero, using fallback", .{});
+    return 0x9e3779b97f4a7c15;
 }
 
 fn randomNext(random: *Random) u64 {
@@ -238,11 +246,9 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         .blast_radius = captureData.blast_radius,
         .pressure_radius = captureData.pressure_radius,
         .started_at = time.realNow(),
-        .seed = nextSeed,
+        .seed = randomVisualSeed(),
     };
     try events.append(allocator, event);
-    nextSeed +%= 1;
-    if (nextSeed == 0) nextSeed = 1;
 
     emitEmbers(event, preset) catch |err| {
         std.log.warn("explosion_visual.capture: failed to emit embers for preset {d}: {}", .{ presetId, err });
@@ -334,6 +340,5 @@ pub fn cleanup() void {
     events.clearAndFree(allocator);
     presets.clearAndFree(allocator);
     presetNames.clearAndFree(allocator);
-    nextSeed = 1;
     flashSpriteUuid = null;
 }
