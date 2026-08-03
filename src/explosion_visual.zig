@@ -59,6 +59,8 @@ const Random = struct {
     state: u64,
 };
 
+var visualRandom = Random{ .state = 1 };
+
 fn idFromName(name: []const u8) Id {
     return std.hash.Wyhash.hash(0, name);
 }
@@ -108,6 +110,12 @@ fn validatePreset(name: []const u8, preset: Preset) !void {
 pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
     errdefer cleanup();
 
+    visualRandom.state = runtime.random().int(u64);
+    if (visualRandom.state == 0) {
+        std.log.warn("explosion_visual.init: random source returned zero, using fallback visual seed", .{});
+        visualRandom.state = 0x9e3779b97f4a7c15;
+    }
+
     flashSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.izero);
 
     var iterator = sourcePresets.iterator();
@@ -144,14 +152,6 @@ pub fn idForName(name: []const u8) ?Id {
 
 fn positionIsFinite(position: vec.Vec2) bool {
     return std.math.isFinite(position.x) and std.math.isFinite(position.y);
-}
-
-fn randomVisualSeed() u64 {
-    const seed = runtime.random().int(u64);
-    if (seed != 0) return seed;
-
-    std.log.warn("explosion_visual.randomVisualSeed: random source returned zero, using fallback", .{});
-    return 0x9e3779b97f4a7c15;
 }
 
 fn randomNext(random: *Random) u64 {
@@ -246,7 +246,7 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         .blast_radius = captureData.blast_radius,
         .pressure_radius = captureData.pressure_radius,
         .started_at = time.realNow(),
-        .seed = randomVisualSeed(),
+        .seed = randomNext(&visualRandom),
     };
     try events.append(allocator, event);
 
@@ -340,5 +340,6 @@ pub fn cleanup() void {
     events.clearAndFree(allocator);
     presets.clearAndFree(allocator);
     presetNames.clearAndFree(allocator);
+    visualRandom.state = 1;
     flashSpriteUuid = null;
 }
