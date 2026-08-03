@@ -25,6 +25,7 @@ const friction = @import("friction.zig");
 
 const debug = @import("debug.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
+const explosion_visual = @import("explosion_visual.zig");
 
 const player = @import("player.zig");
 const controller = @import("controller.zig");
@@ -181,6 +182,7 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    try explosion_visual.init(data.explosionVisualDataMap);
     try gravestone.init();
     try particle.init("particles/circle.png");
     try particle_effect.init();
@@ -211,6 +213,7 @@ pub fn main(init: std.process.Init) !void {
         const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         const playerDeathPhysicsStart = perf.begin(.player_death);
         blast_pressure_visual.update();
+        explosion_visual.update();
         const physicsStepCount = try physics.step();
         perf.recordPlayerDeathFrameStage(.physics, playerDeathPhysicsStart);
         const physicsUs = perf.elapsedUs(physicsStart);
@@ -267,6 +270,7 @@ pub fn main(init: std.process.Init) !void {
     };
     particle.cleanup();
     blast_pressure_visual.cleanup();
+    explosion_visual.cleanup();
     particle_effect.cleanup();
     level.cleanup();
     gravestone.cleanup();

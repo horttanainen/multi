@@ -1,0 +1,221 @@
+const std = @import("std");
+
+const allocator = @import("allocator.zig").allocator;
+const camera = @import("camera.zig");
+const conv = @import("conversion.zig");
+const sprite = @import("sprite.zig");
+const tex = @import("texture.zig");
+const time = @import("time.zig");
+const vec = @import("vector.zig");
+
+pub const Id = u64;
+
+pub const Preset = struct {
+    flash_duration_ms: u32,
+    flash_start_radius: f32,
+    flash_end_radius: f32,
+    flash_max_alpha: u8,
+    flash_color: sprite.Color,
+};
+
+pub const Capture = struct {
+    impact_position: vec.Vec2,
+    pressure_source_position: vec.Vec2,
+    blast_radius: f32,
+    pressure_radius: f32,
+};
+
+pub const Event = struct {
+    preset_id: Id,
+    impact_position: vec.Vec2,
+    pressure_source_position: vec.Vec2,
+    blast_radius: f32,
+    pressure_radius: f32,
+    started_at: f64,
+    seed: u64,
+};
+
+pub var presets = std.AutoArrayHashMapUnmanaged(Id, Preset).empty;
+pub var events = std.ArrayListUnmanaged(Event).empty;
+var presetNames = std.AutoArrayHashMapUnmanaged(Id, []const u8).empty;
+var nextSeed: u64 = 1;
+var flashSpriteUuid: ?u64 = null;
+
+fn idFromName(name: []const u8) Id {
+    return std.hash.Wyhash.hash(0, name);
+}
+
+fn validatePreset(name: []const u8, preset: Preset) !void {
+    if (preset.flash_duration_ms == 0) {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has no flash duration", .{name});
+        return error.InvalidExplosionVisualDuration;
+    }
+    if (!std.math.isFinite(preset.flash_start_radius) or !std.math.isFinite(preset.flash_end_radius) or
+        preset.flash_start_radius <= 0 or preset.flash_end_radius < preset.flash_start_radius)
+    {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid flash radii", .{name});
+        return error.InvalidExplosionVisualRadius;
+    }
+    if (preset.flash_max_alpha > 0) return;
+    std.log.err("explosion_visual.validatePreset: preset '{s}' has no flash opacity", .{name});
+    return error.InvalidExplosionVisualOpacity;
+}
+
+pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
+    errdefer cleanup();
+
+    flashSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.izero);
+
+    var iterator = sourcePresets.iterator();
+    while (iterator.next()) |entry| {
+        const name = entry.key_ptr.*;
+        const preset = entry.value_ptr.*;
+        try validatePreset(name, preset);
+
+        const id = idFromName(name);
+        if (presets.contains(id)) {
+            const existingName = presetNames.get(id) orelse "unknown";
+            std.log.err("explosion_visual.init: preset ID collision between '{s}' and '{s}'", .{ existingName, name });
+            return error.ExplosionVisualPresetIdCollision;
+        }
+
+        try presets.put(allocator, id, preset);
+        try presetNames.put(allocator, id, name);
+    }
+}
+
+pub fn idForName(name: []const u8) ?Id {
+    const id = idFromName(name);
+    if (!presets.contains(id)) return null;
+
+    const registeredName = presetNames.get(id) orelse {
+        std.log.err("explosion_visual.idForName: preset {d} has no registered name", .{id});
+        return null;
+    };
+    if (std.mem.eql(u8, registeredName, name)) return id;
+
+    std.log.err("explosion_visual.idForName: preset ID collision for '{s}'", .{name});
+    return null;
+}
+
+fn positionIsFinite(position: vec.Vec2) bool {
+    return std.math.isFinite(position.x) and std.math.isFinite(position.y);
+}
+
+pub fn capture(presetId: Id, captureData: Capture) !void {
+    if (!presets.contains(presetId)) {
+        std.log.err("explosion_visual.capture: preset {d} is missing", .{presetId});
+        return error.ExplosionVisualPresetNotFound;
+    }
+    if (!positionIsFinite(captureData.impact_position) or !positionIsFinite(captureData.pressure_source_position)) {
+        std.log.err("explosion_visual.capture: explosion positions must be finite", .{});
+        return error.InvalidExplosionVisualPosition;
+    }
+    if (!std.math.isFinite(captureData.blast_radius) or captureData.blast_radius < 0 or
+        !std.math.isFinite(captureData.pressure_radius) or captureData.pressure_radius <= 0)
+    {
+        std.log.err("explosion_visual.capture: explosion radii are invalid", .{});
+        return error.InvalidExplosionVisualRadius;
+    }
+
+    try events.append(allocator, .{
+        .preset_id = presetId,
+        .impact_position = captureData.impact_position,
+        .pressure_source_position = captureData.pressure_source_position,
+        .blast_radius = captureData.blast_radius,
+        .pressure_radius = captureData.pressure_radius,
+        .started_at = time.realNow(),
+        .seed = nextSeed,
+    });
+    nextSeed +%= 1;
+    if (nextSeed == 0) nextSeed = 1;
+}
+
+pub fn update() void {
+    const now = time.realNow();
+    var index: usize = 0;
+    while (index < events.items.len) {
+        const event = events.items[index];
+        const preset = presets.get(event.preset_id) orelse {
+            std.log.err("explosion_visual.update: preset {d} is missing", .{event.preset_id});
+            _ = events.swapRemove(index);
+            continue;
+        };
+        const lifetimeSeconds = @as(f64, @floatFromInt(preset.flash_duration_ms)) / 1000.0;
+        if (now - event.started_at < lifetimeSeconds) {
+            index += 1;
+            continue;
+        }
+        _ = events.swapRemove(index);
+    }
+}
+
+fn flashProgress(event: Event, preset: Preset, now: f64) f32 {
+    const durationSeconds = @as(f64, @floatFromInt(preset.flash_duration_ms)) / 1000.0;
+    const elapsed = now - event.started_at;
+    return @floatCast(std.math.clamp(elapsed / durationSeconds, 0, 1));
+}
+
+fn drawFlash(flashSprite: sprite.Sprite, event: Event, preset: Preset, now: f64) !void {
+    const progress = flashProgress(event, preset, now);
+    if (progress >= 1) return;
+
+    const remaining = 1.0 - progress;
+    const easedProgress = 1.0 - remaining * remaining;
+    const radius = preset.flash_start_radius +
+        (preset.flash_end_radius - preset.flash_start_radius) * easedProgress;
+    const diameterPixels = radius * 2.0 * conv.met2pix;
+    const spriteScale = diameterPixels / @as(f32, @floatFromInt(flashSprite.surface.w));
+    const fadeProgress = std.math.clamp((progress - 0.3) / 0.7, 0, 1);
+    const alpha: u8 = @intFromFloat(@as(f32, @floatFromInt(preset.flash_max_alpha)) * (1.0 - fadeProgress));
+    if (alpha == 0) return;
+
+    try tex.setTextureAlphaMod(flashSprite.texture, alpha);
+    const center = camera.relativePosition(conv.m2Pixel(vec.toBox2d(event.impact_position)));
+    const scale = vec.Vec2{ .x = spriteScale, .y = spriteScale };
+    try sprite.drawWithScale(flashSprite, center, 0, scale, preset.flash_color);
+}
+
+pub fn draw() !void {
+    if (events.items.len == 0) return;
+    const spriteUuid = flashSpriteUuid orelse {
+        std.log.err("explosion_visual.draw: flash sprite is not initialized", .{});
+        return error.ExplosionVisualNotInitialized;
+    };
+    const flashSprite = sprite.getSprite(spriteUuid) orelse {
+        std.log.err("explosion_visual.draw: flash sprite {d} is missing", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
+    const previousBlendMode = flashSprite.texture.blend_mode;
+    const previousColor = flashSprite.texture.color_mod;
+    try tex.setTextureBlendMode(flashSprite.texture, .add);
+    defer {
+        tex.setTextureBlendMode(flashSprite.texture, previousBlendMode) catch |err| {
+            std.log.err("explosion_visual.draw: failed to restore flash blend mode: {}", .{err});
+        };
+        tex.setTextureColorMod(flashSprite.texture, previousColor.r, previousColor.g, previousColor.b) catch |err| {
+            std.log.err("explosion_visual.draw: failed to restore flash color: {}", .{err});
+        };
+        tex.setTextureAlphaMod(flashSprite.texture, previousColor.a) catch |err| {
+            std.log.err("explosion_visual.draw: failed to restore flash opacity: {}", .{err});
+        };
+    }
+
+    const now = time.realNow();
+    for (events.items) |event| {
+        const preset = presets.get(event.preset_id) orelse {
+            std.log.err("explosion_visual.draw: preset {d} is missing", .{event.preset_id});
+            continue;
+        };
+        try drawFlash(flashSprite, event, preset, now);
+    }
+}
+
+pub fn cleanup() void {
+    events.clearAndFree(allocator);
+    presets.clearAndFree(allocator);
+    presetNames.clearAndFree(allocator);
+    nextSeed = 1;
+    flashSpriteUuid = null;
+}

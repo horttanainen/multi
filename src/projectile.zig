@@ -12,11 +12,13 @@ const player = @import("player.zig");
 const blood = @import("blood.zig");
 const blast_pressure = @import("blast_pressure.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
+const explosion_visual = @import("explosion_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
+    visual: ?explosion_visual.Id = null,
     maximumDamage: f32,
     maximumPlayerVelocityChange: f32,
     maximumObjectImpulse: f32,
@@ -406,6 +408,18 @@ fn playExplosionSound(explosion: Explosion) !void {
     try audio.playFor(explosion.sound.?);
 }
 
+fn captureExplosionVisual(impactPosition: vec.Vec2, pressureSourcePosition: vec.Vec2, explosion: Explosion) void {
+    if (explosion.visual == null) return;
+    explosion_visual.capture(explosion.visual.?, .{
+        .impact_position = impactPosition,
+        .pressure_source_position = pressureSourcePosition,
+        .blast_radius = explosion.blastRadius,
+        .pressure_radius = explosion.pressureRadius,
+    }) catch |err| {
+        std.log.warn("captureExplosionVisual: failed to capture explosion visual: {}", .{err});
+    };
+}
+
 fn explodeAtWithDirectHit(
     impactPosition: vec.Vec2,
     pressureSourcePosition: vec.Vec2,
@@ -422,6 +436,7 @@ fn explodeAtWithDirectHit(
     blast_pressure_visual.capture(pressureField) catch |err| {
         std.log.warn("explodeAtWithDirectHit: failed to capture blast pressure visualization: {}", .{err});
     };
+    captureExplosionVisual(impactPosition, pressureSourcePosition, explosion);
     logExplosionStage(perfId, "pressure_field", pressureStart);
 
     const soundStart = perf.begin(.explosion);

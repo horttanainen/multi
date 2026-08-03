@@ -25,6 +25,7 @@ const weapon = @import("weapon.zig");
 
 const background_paint = @import("background_paint.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
+const explosion_visual = @import("explosion_visual.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -88,6 +89,7 @@ fn renderCamera(cameraId: usize) !void {
     try rope.drawRopes();
     try weapon.drawTrails();
     try blast_pressure_visual.draw();
+    try explosion_visual.draw();
     try player.drawAllCrosshairs();
 
     if (config.debug) {

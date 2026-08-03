@@ -5,6 +5,7 @@ const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const audio = @import("audio.zig");
+const explosion_visual = @import("explosion_visual.zig");
 const projectile = @import("projectile.zig");
 const weapon = @import("weapon.zig");
 const config = @import("config.zig");
@@ -34,6 +35,7 @@ pub const SoundData = struct {
 
 pub const ExplosionData = struct {
     sound: ?[]const u8,
+    visual: ?[]const u8,
     maximumDamage: f32,
     maximumPlayerVelocityChange: f32,
     maximumObjectImpulse: f32,
@@ -119,15 +121,55 @@ var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
 var projectileDataMap: std.StringHashMapUnmanaged(ProjectileData) = .{};
 var weaponDataMap: std.StringHashMapUnmanaged(WeaponData) = .{};
 pub var particleDataMap: std.StringHashMapUnmanaged(ParticleData) = .{};
+pub var explosionVisualDataMap: std.StringHashMapUnmanaged(explosion_visual.Preset) = .{};
 
 pub fn init() !void {
     try initSprites();
     try initParticles();
     try initAnimations();
     try initSounds();
+    try initExplosionVisuals();
     try initExplosions();
     try initProjectiles();
     try initWeapons();
+}
+
+fn initExplosionVisuals() !void {
+    var jsonBuf: [16384]u8 = undefined;
+    const jsonData = fs.readFile("explosion_visuals.json", &jsonBuf) catch |err| {
+        std.debug.print("Warning: Could not read explosion_visuals.json: {}\n", .{err});
+        return;
+    };
+
+    const Entry = struct {
+        key: []const u8,
+        flashDurationMs: u32,
+        flashStartRadius: f32,
+        flashEndRadius: f32,
+        flashMaxAlpha: u8,
+        flashColor: sprite.Color,
+    };
+
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+        std.debug.print("Warning: Failed to parse explosion_visuals.json: {}\n", .{err});
+        return;
+    };
+    defer parsed.deinit();
+
+    for (parsed.value) |entry| {
+        const key = allocator.dupe(u8, entry.key) catch continue;
+        explosionVisualDataMap.put(allocator, key, .{
+            .flash_duration_ms = entry.flashDurationMs,
+            .flash_start_radius = entry.flashStartRadius,
+            .flash_end_radius = entry.flashEndRadius,
+            .flash_max_alpha = entry.flashMaxAlpha,
+            .flash_color = entry.flashColor,
+        }) catch {
+            allocator.free(key);
+            continue;
+        };
+        std.debug.print("Parsed explosion visual data '{s}'\n", .{key});
+    }
 }
 
 fn initSprites() !void {
@@ -346,6 +388,7 @@ fn initExplosions() !void {
     const Entry = struct {
         key: []const u8,
         sound: ?[]const u8 = null,
+        visual: ?[]const u8 = null,
         maximumDamage: f32 = 0,
         maximumPlayerVelocityChange: f32 = 0,
         maximumObjectImpulse: f32 = 0,
@@ -369,8 +412,17 @@ fn initExplosions() !void {
             }
         else
             null;
+        const visualKey = if (entry.visual) |visual|
+            allocator.dupe(u8, visual) catch {
+                allocator.free(key);
+                if (soundKey) |sound| allocator.free(sound);
+                continue;
+            }
+        else
+            null;
         explosionDataMap.put(allocator, key, .{
             .sound = soundKey,
+            .visual = visualKey,
             .maximumDamage = entry.maximumDamage,
             .maximumPlayerVelocityChange = entry.maximumPlayerVelocityChange,
             .maximumObjectImpulse = entry.maximumObjectImpulse,
@@ -380,6 +432,7 @@ fn initExplosions() !void {
         }) catch {
             allocator.free(key);
             if (soundKey) |sk| allocator.free(sk);
+            if (visualKey) |visual| allocator.free(visual);
             continue;
         };
 
@@ -622,11 +675,23 @@ pub fn createAudioFrom(key: []const u8) ?audio.Audio {
     };
 }
 
+fn explosionVisualIdForName(name: ?[]const u8) !?explosion_visual.Id {
+    if (name == null) return null;
+    const visualName = name.?;
+    const visualId = explosion_visual.idForName(visualName) orelse {
+        std.log.err("explosionVisualIdForName: explosion visual preset '{s}' is missing", .{visualName});
+        return error.ExplosionVisualPresetNotFound;
+    };
+    return visualId;
+}
+
 pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
     const d = explosionDataMap.get(key) orelse return error.ExplosionDataNotFound;
     const sound = if (d.sound) |sk| createAudioFrom(sk) else null;
+    const visual = try explosionVisualIdForName(d.visual);
     return projectile.Explosion{
         .sound = sound,
+        .visual = visual,
         .maximumDamage = d.maximumDamage,
         .maximumPlayerVelocityChange = d.maximumPlayerVelocityChange,
         .maximumObjectImpulse = d.maximumObjectImpulse,
@@ -753,8 +818,15 @@ pub fn cleanup() void {
     while (explosionIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         if (entry.value_ptr.sound) |s| allocator.free(s);
+        if (entry.value_ptr.visual) |visual| allocator.free(visual);
     }
     explosionDataMap.deinit(allocator);
+
+    var explosionVisualIter = explosionVisualDataMap.iterator();
+    while (explosionVisualIter.next()) |entry| {
+        allocator.free(entry.key_ptr.*);
+    }
+    explosionVisualDataMap.deinit(allocator);
 
     var projIter = projectileDataMap.iterator();
     while (projIter.next()) |entry| {

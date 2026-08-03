@@ -1,0 +1,26 @@
+[
+    {
+        "key": "missile_explosion",
+        "flashDurationMs": 140,
+        "flashStartRadius": 0.12,
+        "flashEndRadius": 1.0,
+        "flashMaxAlpha": 255,
+        "flashColor": { "r": 255, "g": 200, "b": 90 }
+    },
+    {
+        "key": "pellet_impact",
+        "flashDurationMs": 60,
+        "flashStartRadius": 0.02,
+        "flashEndRadius": 0.14,
+        "flashMaxAlpha": 220,
+        "flashColor": { "r": 255, "g": 220, "b": 110 }
+    },
+    {
+        "key": "railgun_impact",
+        "flashDurationMs": 90,
+        "flashStartRadius": 0.04,
+        "flashEndRadius": 0.4,
+        "flashMaxAlpha": 255,
+        "flashColor": { "r": 70, "g": 150, "b": 255 }
+    }
+]
