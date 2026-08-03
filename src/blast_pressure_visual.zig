@@ -119,14 +119,11 @@ fn fadeForCell(elapsed: f64, arrivalFraction: f64) f32 {
 fn cellColor(strength: f32, fade: f32) sdl.Color {
     const clampedStrength = std.math.clamp(strength, 0, 1);
     const clampedFade = std.math.clamp(fade, 0, 1);
-    const lifecycle = 1.0 - clampedFade;
-    const yellowToRed = std.math.clamp(lifecycle / 0.65, 0, 1);
-    const red = 255.0 + (139.0 - 255.0) * yellowToRed;
-    const alpha = (80.0 + clampedStrength * 175.0) * clampedFade;
+    const alpha = clampedStrength * 255.0 * clampedFade;
     return .{
-        .r = @intFromFloat(red),
-        .g = @intFromFloat((1.0 - yellowToRed) * 255),
-        .b = 0,
+        .r = 210,
+        .g = 125,
+        .b = 70,
         .a = @intFromFloat(std.math.clamp(alpha, 0, 255)),
     };
 }
