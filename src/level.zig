@@ -28,6 +28,7 @@ const entity = @import("entity.zig");
 const projectile = @import("projectile.zig");
 const damage = @import("damage.zig");
 const destruction = @import("destruction.zig");
+const rubble = @import("rubble.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
@@ -74,6 +75,7 @@ pub const defaultPixelsPerMeter: i32 = 80;
 pub const defaultLevelHeightMeters: f32 = 12.0;
 pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
+const defaultDynamicHealth: f32 = 100;
 
 pub var splitscreen: bool = false;
 pub var cameraZoomMeters: f32 = defaultCameraZoomMeters;
@@ -246,12 +248,26 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
     const pos = conv.pixel2M(e.pos);
 
     if (std.mem.eql(u8, e.type, "dynamic")) {
+        const maximumHealth = e.health orelse defaultDynamicHealth;
+        if (!std.math.isFinite(maximumHealth) or maximumHealth <= 0) {
+            std.log.err("spawnSerializableEntity: dynamic entity {d} has invalid health {d}", .{ e.id, maximumHealth });
+            return error.InvalidDynamicHealth;
+        }
+
         const bodyDef = box2d.createDynamicBodyDef(pos);
         shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
         shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
         const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+        const rubbleTemplateId = rubble.prepare(spriteUuid, e.id) catch |err| {
+            _ = entity.remove(spawnedEntity.bodyId);
+            return err;
+        };
         damage.register(spawnedEntity.bodyId, .{
-            .model = .{ .surface_cutout = .{} },
+            .model = .{ .health = .{
+                .current = maximumHealth,
+                .maximum = maximumHealth,
+            } },
+            .onDestroyed = .{ .spawn_rubble = rubbleTemplateId },
         }) catch |err| {
             _ = entity.remove(spawnedEntity.bodyId);
             return err;
@@ -369,6 +385,7 @@ pub fn cleanup() void {
     gravestone.clearScheduledSpawns();
     sensor.cleanup();
     projectile.cleanup();
+    rubble.cleanup();
     destruction.cleanup();
     weapon.cleanupTrails();
     entity.cleanup();

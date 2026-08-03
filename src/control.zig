@@ -18,13 +18,17 @@ const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const data = @import("data.zig");
+const damage = @import("damage.zig");
 const gameMenu = @import("gameMenu.zig");
+const rubble = @import("rubble.zig");
 const cursor = @import("cursor.zig");
 const spritePicker = @import("spritePicker.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
 const rightButtonMask: u32 = 1 << 2;
+const spawnedBoxHealth: f32 = 100;
+const spawnedBoxRubbleSeed: u64 = 0xB07B07;
 
 pub fn handleGameMouseInput() !void {
     var x: i32 = 0;
@@ -44,7 +48,21 @@ pub fn handleGameMouseInput() !void {
             const spriteUuid = data.createSpriteFrom("box") orelse return;
             const pos = conv.pixel2M(position);
             const bodyDef = box2d.createDynamicBodyDef(pos);
-            _ = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+            const spawnedBox = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+            const rubbleTemplateId = rubble.prepare(spriteUuid, spawnedBoxRubbleSeed) catch |err| {
+                _ = entity.remove(spawnedBox.bodyId);
+                return err;
+            };
+            damage.register(spawnedBox.bodyId, .{
+                .model = .{ .health = .{
+                    .current = spawnedBoxHealth,
+                    .maximum = spawnedBoxHealth,
+                } },
+                .onDestroyed = .{ .spawn_rubble = rubbleTemplateId },
+            }) catch |err| {
+                _ = entity.remove(spawnedBox.bodyId);
+                return err;
+            };
 
             delay.action("boxcreate", config.boxCreateDelayMs);
         }

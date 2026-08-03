@@ -8,6 +8,7 @@ const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const polygon = @import("polygon.zig");
 const runtime = @import("runtime.zig");
+const rubble = @import("rubble.zig");
 const sdl = @import("sdl.zig");
 const sprite = @import("sprite.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
@@ -23,6 +24,8 @@ const ScheduledSpawn = struct {
 var templateSpriteUuid: ?u64 = null;
 var scheduledSpawns = std.AutoHashMapUnmanaged(usize, ScheduledSpawn).empty;
 var gravestonesToSpawn = thread_safe.ThreadSafeArrayList(usize).init(allocator);
+const gravestoneHealth: f32 = 100;
+const gravestoneRubbleSeed: u64 = 0x6A617665;
 
 fn markForSpawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     if (param == null) {
@@ -119,8 +122,16 @@ fn spawn(position: vec.Vec2) !void {
 
     const bodyDef = box2d.createDynamicBodyDef(position);
     const gravestone = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+    const rubbleTemplateId = rubble.prepare(spriteUuid, gravestoneRubbleSeed) catch |err| {
+        _ = entity.remove(gravestone.bodyId);
+        return err;
+    };
     damage.register(gravestone.bodyId, .{
-        .model = .{ .surface_cutout = .{} },
+        .model = .{ .health = .{
+            .current = gravestoneHealth,
+            .maximum = gravestoneHealth,
+        } },
+        .onDestroyed = .{ .spawn_rubble = rubbleTemplateId },
     }) catch |err| {
         _ = entity.remove(gravestone.bodyId);
         return err;

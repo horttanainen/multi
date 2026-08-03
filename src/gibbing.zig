@@ -139,14 +139,10 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
         return error.BloodParticleEffectNotInitialized;
     };
     const collider = try gibletCollider(templateSpriteUuid);
-    const bodySpriteUuid = try sprite.createMutableCopy(templateSpriteUuid);
-
     const bodyDef = box2d.createDynamicBodyDef(vec.zero);
-    const gibletEntity = entity.createFromShape(bodySpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic") catch |err| {
-        sprite.cleanupLater(bodySpriteUuid);
-        return err;
-    };
+    const gibletEntity = try entity.createFromShape(templateSpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic");
     errdefer _ = entity.remove(gibletEntity.bodyId);
+    entity.markSpriteUuidsShared(gibletEntity.bodyId);
 
     try damage.register(gibletEntity.bodyId, .{
         .model = .{ .health = .{
@@ -158,6 +154,7 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
             .amount = gibletDestructionParticleAmount,
             .spreadRadians = gibletDestructionParticleSpreadRadians,
         } },
+        .destructionLifecycle = .return_to_pool,
     });
 
     const pooledEntity = entity.entities.getPtrLocking(gibletEntity.bodyId) orelse {
@@ -281,23 +278,13 @@ fn acquireGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize
     const available = try pool.acquire(poolId, .return_null);
     if (available != null) return available.?;
 
-    const currentBodyCount = try pool.bodyCount(poolId);
-    if (currentBodyCount < batchSize) {
-        try replenishGibletPool(poolId, spriteTemplates, batchSize);
-        const replenished = try pool.acquire(poolId, .return_null);
-        if (replenished == null) {
-            std.log.err("acquireGiblet: replenished pool {d} has no available body", .{poolId});
-            return error.EmptyGibletPool;
-        }
-        return replenished.?;
-    }
-
-    const recycled = try pool.acquire(poolId, .recycle_oldest);
-    if (recycled == null) {
-        std.log.err("acquireGiblet: pool {d} has no body to recycle", .{poolId});
+    try replenishGibletPool(poolId, spriteTemplates, batchSize);
+    const replenished = try pool.acquire(poolId, .return_null);
+    if (replenished == null) {
+        std.log.err("acquireGiblet: replenished pool {d} has no available body", .{poolId});
         return error.EmptyGibletPool;
     }
-    return recycled.?;
+    return replenished.?;
 }
 
 fn activateGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize, posM: vec.Vec2) !void {

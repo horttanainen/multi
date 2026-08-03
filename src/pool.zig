@@ -24,6 +24,7 @@ const BodyPool = struct {
 
 var bodyPools = std.AutoArrayHashMapUnmanaged(Id, BodyPool).empty;
 var bodyToPool = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Id).empty;
+var bodiesToRelease = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, void).empty;
 var nextPoolId: Id = 1;
 
 fn validateBodyIds(bodyIds: []const box2d.c.b2BodyId) !void {
@@ -216,6 +217,44 @@ pub fn release(poolId: Id, bodyId: box2d.c.b2BodyId) !void {
     bodyPool.availableIndices.appendAssumeCapacity(bodyIndex.?);
 }
 
+pub fn releaseBody(bodyId: box2d.c.b2BodyId) !void {
+    const poolId = bodyToPool.get(bodyId) orelse {
+        std.log.err("pool.releaseBody: body is not registered with a pool", .{});
+        return error.BodyNotInPool;
+    };
+    try release(poolId, bodyId);
+}
+
+pub fn queueRelease(bodyId: box2d.c.b2BodyId) void {
+    if (!bodyToPool.contains(bodyId)) {
+        std.log.err("pool.queueRelease: body is not registered with a pool", .{});
+        return;
+    }
+
+    bodiesToRelease.put(allocator, bodyId, {}) catch |err| {
+        std.log.err("pool.queueRelease: could not queue body for release: {}", .{err});
+        releaseBody(bodyId) catch |releaseErr| {
+            std.log.err("pool.queueRelease: could not immediately release body after queue failure: {}", .{releaseErr});
+        };
+    };
+}
+
+pub fn processQueuedReleases() void {
+    if (bodiesToRelease.count() == 0) return;
+    defer bodiesToRelease.clearRetainingCapacity();
+
+    for (bodiesToRelease.keys()) |bodyId| {
+        if (!box2d.c.b2Body_IsValid(bodyId)) {
+            std.log.warn("pool.processQueuedReleases: queued body became invalid", .{});
+            _ = discardBody(bodyId);
+            continue;
+        }
+        releaseBody(bodyId) catch |err| {
+            std.log.err("pool.processQueuedReleases: could not release pooled body: {}", .{err});
+        };
+    }
+}
+
 // Removes a body before its owner destroys it. Returns false for non-pooled bodies.
 pub fn discardBody(bodyId: box2d.c.b2BodyId) bool {
     const removedMembership = bodyToPool.fetchSwapRemove(bodyId) orelse return false;
@@ -286,7 +325,9 @@ pub fn cleanup() void {
     }
     bodyPools.deinit(allocator);
     bodyToPool.deinit(allocator);
+    bodiesToRelease.deinit(allocator);
     bodyPools = .empty;
     bodyToPool = .empty;
+    bodiesToRelease = .empty;
     nextPoolId = 1;
 }

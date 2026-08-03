@@ -70,12 +70,13 @@ const Sprite = entity.Sprite;
 //TODO: allow for connecting dynamic objects with a joint (e.g a fellable tree that is connected to ground with a joint)
 
 //Small improvements
+//TODO: we should get rid of crosshair and instead make it so that the bullet truly leaves from the barrel of the gun to the direction the gun is pointing
+//TODO: we should visualise the amnount of ammo and health on the players. E.g. health could be a cauge on the chest and clip could be on the barrel: the idea is everything would be visible for everybody
+
 //TODO: MAKE AI player to play against!!
-//TODO: add health to gravestones and make it so that the gravestones react to physical stuff until they break into rubble. Investigate if we can have generic rubble system that makes rubble out of the sprite
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
 //TODO: add exploding oil barrels to the level
 //TODO: investigate if we can have non animated explosision using visual particles and other effects
-//TODO: explosion holes should be uneven not perfect circles
 //TODO: investigate using wall-aware explosion pressure, material resistance, and deterministic noise to erode exposed terrain into irregular craters
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
@@ -86,6 +87,9 @@ const Sprite = entity.Sprite;
 //TODO: damagePlayersInRadius should use box2d circle collider to check if players are in the radius. It is basically the same as damageTerrainInRadius.
 
 //Gun ideas
+//TODO: gravity gun
+//TODO: minigun
+//TODO: light saber to deflect flying objects that eventually will do damage to players on impact. Saber would cut the flying object in half and make it so that the pieces fly away from player
 //TODO: add rounds pistol with the glow and spark effect and heavy drop
 //TODO: enable ricochets for some slugs
 //TODO: make slug glow configurable
@@ -329,6 +333,7 @@ fn gameLoop() !void {
     const projectileContactsStart = perf.begin(.player_death);
     try debug.update();
     try projectile.checkContacts();
+    pool.processQueuedReleases();
     perf.recordPlayerDeathGameLoopStage(.projectile_contacts, projectileContactsStart);
 
     const cleanupStart = perf.begin(.player_death);

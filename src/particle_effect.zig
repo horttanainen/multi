@@ -20,6 +20,7 @@ pub const Emission = struct {
     carried_velocity: ?vec.Vec2 = null,
     carried_fraction: f32 = 0,
     carried_spread_radians: f32 = 0,
+    color: ?sprite.Color = null,
 };
 
 pub var presets = std.AutoArrayHashMapUnmanaged(Id, data.ParticleData).empty;
@@ -223,7 +224,7 @@ pub fn emit(effectId: Id, emission: Emission) !void {
             .velocity = velocity,
             .visual_scale = visualScale,
             .lifetime_ms = preset.lifetimeMs,
-            .color = preset.color,
+            .color = emission.color orelse preset.color,
             .linear_damping = preset.linearDamping,
             .gravity_scale = preset.gravityScale,
             .density = preset.density,

@@ -61,6 +61,7 @@ pub const SerializableEntity = struct {
     scale: vec.Vec2,
     pos: vec.IVec2,
     breakable: bool = true,
+    health: ?f32 = null,
 };
 
 var entitiesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
@@ -376,6 +377,14 @@ pub fn remove(bodyId: box2d.c.b2BodyId) bool {
     return true;
 }
 
+fn maximumHealth(bodyId: box2d.c.b2BodyId) ?f32 {
+    const component = damage.components.get(bodyId) orelse return null;
+    return switch (component.model) {
+        .health => |health| health.maximum,
+        .surface_cutout => null,
+    };
+}
+
 pub fn cleanup() void {
     entities.mutex.lockUncancelable(runtime.io());
     for (entities.map.values()) |entity| {
@@ -401,6 +410,7 @@ pub fn serialize(entity: Entity, pos: vec.IVec2, id: u64) ?SerializableEntity {
         .friction = entity.friction,
         .imgPath = firstSprite.imgPath,
         .breakable = breakable,
+        .health = maximumHealth(entity.bodyId),
     };
 }
 

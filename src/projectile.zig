@@ -197,12 +197,17 @@ fn damageEntitiesInExplosion(
         else
             normalizedOrUp(vec.subtract(bodyPosition, field.origin));
         const amount = if (sample != null) damageFromPressureStrength(explosion, sample.?.strength) else 0;
+        const debrisVelocity = if (sample != null)
+            vec.mul(sample.?.direction, explosion.maximumObjectImpulse * sample.?.strength)
+        else
+            vec.zero;
 
         try destruction.apply(bodyId, .{
             .source = .explosion,
             .amount = amount,
             .position = impactPosition,
             .direction = direction,
+            .debrisVelocity = debrisVelocity,
             .radius = explosion.blastRadius,
             .attackerId = attackerId,
         });

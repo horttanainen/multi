@@ -6,6 +6,7 @@ const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
+const rubble = @import("rubble.zig");
 const sprite = @import("sprite.zig");
 const vec = @import("vector.zig");
 
@@ -90,9 +91,11 @@ pub fn flushSurfaceEdits() !void {
 
 fn emitDestructionEffect(
     effect: damage.DestructionEffect,
+    bodyId: box2d.c.b2BodyId,
     position: vec.Vec2,
     direction: vec.Vec2,
     inheritedVelocity: vec.Vec2,
+    debrisVelocity: vec.Vec2,
 ) void {
     switch (effect) {
         .none => {},
@@ -104,14 +107,32 @@ fn emitDestructionEffect(
                 .spread_radians = particleBurst.spreadRadians,
                 .inherited_velocity = inheritedVelocity,
                 .inherited_velocity_scale = particleBurst.inheritedVelocityScale,
+                .color = particleBurst.color,
             }) catch |err| {
                 std.log.err("destruction.emitDestructionEffect: could not emit particle burst: {}", .{err});
             };
         },
+        .spawn_rubble => |templateId| rubble.activate(templateId, bodyId, direction, debrisVelocity) catch |err| {
+            std.log.err("destruction.emitDestructionEffect: could not activate rubble template {d}: {}", .{ templateId, err });
+        },
     }
 }
 
-fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, effect: damage.DestructionEffect) void {
+fn deactivatePooledBody(bodyId: box2d.c.b2BodyId) void {
+    const ent = entity.entities.getPtrLocking(bodyId) orelse {
+        std.log.err("destruction.deactivatePooledBody: pooled body has no entity", .{});
+        _ = damage.unregister(bodyId);
+        _ = pool.discardBody(bodyId);
+        box2d.c.b2DestroyBody(bodyId);
+        return;
+    };
+
+    box2d.c.b2Body_Disable(bodyId);
+    ent.enabled = false;
+    pool.queueRelease(bodyId);
+}
+
+fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, response: damage.DestructionResponse) void {
     if (!box2d.c.b2Body_IsValid(bodyId)) {
         std.log.warn("destruction.destroy: body became invalid before destruction", .{});
         return;
@@ -127,9 +148,15 @@ fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, effect: damage.Destruc
     else
         vec.zero;
 
+    emitDestructionEffect(response.effect, bodyId, bodyPosition, event.direction, inheritedVelocity, event.debrisVelocity);
+
+    if (response.lifecycle == .return_to_pool) {
+        deactivatePooledBody(bodyId);
+        return;
+    }
+
     _ = pool.discardBody(bodyId);
     entity.cleanupLater(ent);
-    emitDestructionEffect(effect, bodyPosition, event.direction, inheritedVelocity);
 }
 
 fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: damage.SurfaceCutout) !void {
@@ -169,7 +196,7 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: damage.Event) !void {
     switch (damage.apply(bodyId, event)) {
         .ignored, .damaged => {},
         .surface_cutout => |surfaceCutout| try cutSurface(bodyId, event, surfaceCutout),
-        .destroyed => |effect| destroy(bodyId, event, effect),
+        .destroyed => |response| destroy(bodyId, event, response),
     }
 }
 
@@ -216,12 +243,12 @@ pub fn processSurfaceColliderUpdates() void {
         };
         if (stillExists) continue;
 
-        const effect = damage.markDestroyed(bodyId) orelse continue;
+        const response = damage.markDestroyed(bodyId) orelse continue;
         destroy(bodyId, .{
             .source = .explosion,
             .amount = 0,
             .position = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId)),
-        }, effect);
+        }, response);
     }
 }
 

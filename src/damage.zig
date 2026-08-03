@@ -3,6 +3,7 @@ const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const particle_effect = @import("particle_effect.zig");
+const sprite = @import("sprite.zig");
 const vec = @import("vector.zig");
 
 pub const Source = enum {
@@ -16,6 +17,7 @@ pub const Event = struct {
     amount: f32,
     position: vec.Vec2,
     direction: vec.Vec2 = vec.zero,
+    debrisVelocity: vec.Vec2 = vec.zero,
     radius: f32 = 0,
     attackerId: ?usize = null,
 };
@@ -40,16 +42,29 @@ pub const ParticleBurst = struct {
     amount: f32,
     spreadRadians: f32,
     inheritedVelocityScale: f32 = 0.55,
+    color: ?sprite.Color = null,
 };
 
 pub const DestructionEffect = union(enum) {
     none,
     particle_burst: ParticleBurst,
+    spawn_rubble: u64,
+};
+
+pub const DestructionLifecycle = enum {
+    remove,
+    return_to_pool,
+};
+
+pub const DestructionResponse = struct {
+    effect: DestructionEffect,
+    lifecycle: DestructionLifecycle,
 };
 
 pub const Component = struct {
     model: Model,
     onDestroyed: DestructionEffect = .none,
+    destructionLifecycle: DestructionLifecycle = .remove,
     pendingDestruction: bool = false,
 };
 
@@ -57,7 +72,7 @@ pub const Outcome = union(enum) {
     ignored,
     damaged,
     surface_cutout: SurfaceCutout,
-    destroyed: DestructionEffect,
+    destroyed: DestructionResponse,
 };
 
 pub var components = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Component).empty;
@@ -105,7 +120,10 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
 
             health.current = 0;
             component.pendingDestruction = true;
-            return .{ .destroyed = component.onDestroyed };
+            return .{ .destroyed = .{
+                .effect = component.onDestroyed,
+                .lifecycle = component.destructionLifecycle,
+            } };
         },
         .surface_cutout => |surfaceCutout| {
             if (!std.math.isFinite(event.radius) or event.radius <= 0) return .ignored;
@@ -114,12 +132,15 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
     }
 }
 
-pub fn markDestroyed(bodyId: box2d.c.b2BodyId) ?DestructionEffect {
+pub fn markDestroyed(bodyId: box2d.c.b2BodyId) ?DestructionResponse {
     const component = components.getPtr(bodyId) orelse return null;
     if (component.pendingDestruction) return null;
 
     component.pendingDestruction = true;
-    return component.onDestroyed;
+    return .{
+        .effect = component.onDestroyed,
+        .lifecycle = component.destructionLifecycle,
+    };
 }
 
 pub fn cleanup() void {

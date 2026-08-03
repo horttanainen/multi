@@ -163,6 +163,7 @@ fn cloneSerializableEntity(e: entity.SerializableEntity) !entity.SerializableEnt
         .scale = e.scale,
         .pos = e.pos,
         .breakable = e.breakable,
+        .health = e.health,
     };
 }
 
@@ -1248,6 +1249,7 @@ pub fn placeSprite(imgPath: []const u8, scale: vec.Vec2, position: vec.IVec2) !v
         .scale = scale,
         .pos = position,
         .breakable = false,
+        .health = null,
     };
 
     try addEntity(serializedE, true);
