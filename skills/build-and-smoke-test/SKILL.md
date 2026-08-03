@@ -5,13 +5,21 @@ description: Run this skill automatically after finishing any task that introduc
 
 # Build and Smoke Test
 
-After making code changes, always build the project and do a 5-second smoke test run to catch crashes, panics, or unexpected log output.
+After making code changes, always format through the project script, build the project, and do a 5-second smoke test run to catch crashes, panics, or unexpected log output.
 
-**IMPORTANT:** Always use `bash scripts/smoke_test.sh` for the run step — never try to launch the game binary directly or write your own run-and-kill logic. The script handles process management correctly.
+**IMPORTANT:** Always use `bash scripts/format.sh` for formatting and `bash scripts/smoke_test.sh` for the run step. Never invoke `zig fmt` directly, launch the game binary directly, or write custom run-and-kill logic. The project scripts define the correct file set and process management.
 
 ## Steps
 
-### 1. Build
+### 1. Format
+
+```bash
+bash scripts/format.sh
+```
+
+Run this as its own command. Do not combine direct `zig fmt` calls with the build command.
+
+### 2. Build
 
 ```bash
 zig build 2>&1
@@ -19,7 +27,7 @@ zig build 2>&1
 
 If the build fails, report the errors and stop — do not proceed to the run step.
 
-### 2. Run and collect logs
+### 3. Run and collect logs
 
 Run the game using the project's smoke test script:
 
@@ -31,7 +39,7 @@ Do **not** run `zig build run` directly, use subshells, or write inline process 
 
 The game emits `info: Ran successfully for 5 seconds` via an SDL timer 5 seconds after startup. If the sentinel line never appears within 15 seconds, the game likely crashed. The script kills it anyway and the log will contain the output.
 
-### 3. Report
+### 4. Report
 
 Summarize the log output to the user:
 - Any `error:` or `warn:` lines
