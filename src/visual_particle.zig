@@ -27,6 +27,8 @@ pub const Spawn = struct {
     end_color: sprite.Color,
     start_alpha: u8 = 255,
     end_alpha: u8 = 0,
+    delay_ms: u32 = 0,
+    fade_in_ms: u32 = 0,
     lifetime_ms: u32,
     angle: f32 = 0,
     angular_velocity: f32 = 0,
@@ -44,7 +46,7 @@ pub fn spawn(spawnData: Spawn) !void {
     if (particles.items.len >= maxParticles) return;
     try particles.append(allocator, .{
         .spawn = spawnData,
-        .started_at = time.realNow(),
+        .started_at = time.realNow() + @as(f64, @floatFromInt(spawnData.delay_ms)) / 1000.0,
     });
 }
 
@@ -85,16 +87,34 @@ fn positionAtAge(particle: Particle, age: f32) vec.Vec2 {
     );
 }
 
+fn alphaAtAge(particle: Particle, ageSeconds: f64, progress: f32) u8 {
+    if (particle.spawn.fade_in_ms == 0) {
+        return lerpChannel(particle.spawn.start_alpha, particle.spawn.end_alpha, progress);
+    }
+
+    const fadeInSeconds = @as(f64, @floatFromInt(particle.spawn.fade_in_ms)) / 1000.0;
+    if (ageSeconds < fadeInSeconds) {
+        const fadeInProgress: f32 = @floatCast(std.math.clamp(ageSeconds / fadeInSeconds, 0, 1));
+        return lerpChannel(0, particle.spawn.start_alpha, fadeInProgress);
+    }
+
+    const fadeOutDuration = @max(lifetimeSeconds(particle) - fadeInSeconds, 0.001);
+    const fadeOutProgress: f32 = @floatCast(std.math.clamp((ageSeconds - fadeInSeconds) / fadeOutDuration, 0, 1));
+    return lerpChannel(particle.spawn.start_alpha, particle.spawn.end_alpha, fadeOutProgress);
+}
+
 fn drawParticle(particle: Particle, now: f64) !void {
     const particleSprite = sprite.getSprite(particle.spawn.sprite_uuid) orelse {
         std.log.err("visual_particle.drawParticle: sprite {d} is missing", .{particle.spawn.sprite_uuid});
         return error.VisualParticleSpriteNotFound;
     };
 
+    if (now < particle.started_at) return;
+
     const ageSeconds = std.math.clamp(now - particle.started_at, 0, lifetimeSeconds(particle));
     const progress: f32 = @floatCast(ageSeconds / lifetimeSeconds(particle));
     const diameter = lerp(particle.spawn.start_diameter, particle.spawn.end_diameter, progress);
-    const alpha = lerpChannel(particle.spawn.start_alpha, particle.spawn.end_alpha, progress);
+    const alpha = alphaAtAge(particle, ageSeconds, progress);
     if (alpha == 0) return;
 
     const color = sprite.Color{

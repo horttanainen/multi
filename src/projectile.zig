@@ -408,7 +408,11 @@ fn playExplosionSound(explosion: Explosion) !void {
     try audio.playFor(explosion.sound.?);
 }
 
-fn captureExplosionVisual(impactPosition: vec.Vec2, pressureSourcePosition: vec.Vec2, explosion: Explosion) void {
+fn captureExplosionVisual(
+    impactPosition: vec.Vec2,
+    pressureSourcePosition: vec.Vec2,
+    explosion: Explosion,
+) void {
     if (explosion.visual == null) return;
     explosion_visual.capture(explosion.visual.?, .{
         .impact_position = impactPosition,

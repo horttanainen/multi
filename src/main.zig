@@ -58,6 +58,10 @@ const window = @import("window.zig");
 const Entity = entity.Entity;
 const Sprite = entity.Sprite;
 
+//Minigames
+//TODO: space pirate battle around a whirpool
+//TODO: whaling pirate fight
+
 //Level editor
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
 //TODO: add option to draw a rectangle which becames an entity in the game with some magenta prefill
@@ -77,7 +81,6 @@ const Sprite = entity.Sprite;
 //TODO: MAKE AI player to play against!!
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
 //TODO: add exploding oil barrels to the level
-//TODO: investigate if we can have non animated explosision using visual particles and other effects
 //TODO: investigate using wall-aware explosion pressure, material resistance, and deterministic noise to erode exposed terrain into irregular craters
 //TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
