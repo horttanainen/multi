@@ -7,6 +7,7 @@ const sprite = @import("sprite.zig");
 const tex = @import("texture.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
+const visual_particle = @import("visual_particle.zig");
 
 pub const Id = u64;
 
@@ -16,6 +17,19 @@ pub const Preset = struct {
     flash_end_radius: f32,
     flash_max_alpha: u8,
     flash_color: sprite.Color,
+    ember_count: u32,
+    ember_min_speed: f32,
+    ember_max_speed: f32,
+    ember_min_lifetime_ms: u32,
+    ember_max_lifetime_ms: u32,
+    ember_min_diameter: f32,
+    ember_max_diameter: f32,
+    ember_end_diameter_scale: f32,
+    ember_drag: f32,
+    ember_gravity: f32,
+    ember_surface_bias: f32,
+    ember_start_color: sprite.Color,
+    ember_end_color: sprite.Color,
 };
 
 pub const Capture = struct {
@@ -41,6 +55,10 @@ var presetNames = std.AutoArrayHashMapUnmanaged(Id, []const u8).empty;
 var nextSeed: u64 = 1;
 var flashSpriteUuid: ?u64 = null;
 
+const Random = struct {
+    state: u64,
+};
+
 fn idFromName(name: []const u8) Id {
     return std.hash.Wyhash.hash(0, name);
 }
@@ -56,9 +74,35 @@ fn validatePreset(name: []const u8, preset: Preset) !void {
         std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid flash radii", .{name});
         return error.InvalidExplosionVisualRadius;
     }
-    if (preset.flash_max_alpha > 0) return;
-    std.log.err("explosion_visual.validatePreset: preset '{s}' has no flash opacity", .{name});
-    return error.InvalidExplosionVisualOpacity;
+    if (preset.flash_max_alpha == 0) {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has no flash opacity", .{name});
+        return error.InvalidExplosionVisualOpacity;
+    }
+    if (preset.ember_count == 0) return;
+    if (!std.math.isFinite(preset.ember_min_speed) or !std.math.isFinite(preset.ember_max_speed) or
+        preset.ember_min_speed < 0 or preset.ember_max_speed < preset.ember_min_speed)
+    {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid ember speeds", .{name});
+        return error.InvalidExplosionVisualEmberSpeed;
+    }
+    if (preset.ember_min_lifetime_ms == 0 or preset.ember_max_lifetime_ms < preset.ember_min_lifetime_ms) {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid ember lifetimes", .{name});
+        return error.InvalidExplosionVisualEmberLifetime;
+    }
+    if (!std.math.isFinite(preset.ember_min_diameter) or !std.math.isFinite(preset.ember_max_diameter) or
+        preset.ember_min_diameter <= 0 or preset.ember_max_diameter < preset.ember_min_diameter or
+        !std.math.isFinite(preset.ember_end_diameter_scale) or preset.ember_end_diameter_scale <= 0)
+    {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid ember diameters", .{name});
+        return error.InvalidExplosionVisualEmberDiameter;
+    }
+    if (!std.math.isFinite(preset.ember_drag) or preset.ember_drag < 0 or
+        !std.math.isFinite(preset.ember_gravity) or
+        !std.math.isFinite(preset.ember_surface_bias) or preset.ember_surface_bias < 0)
+    {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid ember motion", .{name});
+        return error.InvalidExplosionVisualEmberMotion;
+    }
 }
 
 pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
@@ -102,11 +146,80 @@ fn positionIsFinite(position: vec.Vec2) bool {
     return std.math.isFinite(position.x) and std.math.isFinite(position.y);
 }
 
+fn randomNext(random: *Random) u64 {
+    var value = random.state;
+    value ^= value << 13;
+    value ^= value >> 7;
+    value ^= value << 17;
+    random.state = value;
+    return value;
+}
+
+fn randomFloat(random: *Random) f32 {
+    const bits: u24 = @truncate(randomNext(random) >> 40);
+    return @as(f32, @floatFromInt(bits)) / @as(f32, @floatFromInt(std.math.maxInt(u24)));
+}
+
+fn randomRange(random: *Random, minimum: f32, maximum: f32) f32 {
+    return minimum + (maximum - minimum) * randomFloat(random);
+}
+
+fn randomRangeU32(random: *Random, minimum: u32, maximum: u32) u32 {
+    if (minimum == maximum) return minimum;
+    const range: u64 = @as(u64, maximum) - minimum + 1;
+    return minimum + @as(u32, @intCast(randomNext(random) % range));
+}
+
+fn normalizedOrZero(value: vec.Vec2) vec.Vec2 {
+    const magnitude = vec.magnitude(value);
+    if (magnitude <= 0.0001) return vec.zero;
+    return vec.mul(value, 1.0 / magnitude);
+}
+
+fn emitEmbers(event: Event, preset: Preset) !void {
+    if (preset.ember_count == 0) return;
+    const spriteUuid = flashSpriteUuid orelse {
+        std.log.err("explosion_visual.emitEmbers: flash sprite is not initialized", .{});
+        return error.ExplosionVisualNotInitialized;
+    };
+
+    var random = Random{ .state = event.seed ^ event.preset_id ^ 0x9e3779b97f4a7c15 };
+    if (random.state == 0) random.state = 1;
+
+    const surfaceDirection = normalizedOrZero(vec.subtract(event.pressure_source_position, event.impact_position));
+    var index: u32 = 0;
+    while (index < preset.ember_count) : (index += 1) {
+        const angle = randomRange(&random, 0, std.math.tau);
+        const radialDirection = vec.Vec2{ .x = @cos(angle), .y = @sin(angle) };
+        var direction = normalizedOrZero(vec.add(radialDirection, vec.mul(surfaceDirection, preset.ember_surface_bias)));
+        if (vec.equals(direction, vec.zero)) direction = radialDirection;
+
+        const speed = randomRange(&random, preset.ember_min_speed, preset.ember_max_speed);
+        const diameter = randomRange(&random, preset.ember_min_diameter, preset.ember_max_diameter);
+        const positionOffset = randomRange(&random, 0, @min(event.blast_radius, 0.08));
+        try visual_particle.spawn(.{
+            .sprite_uuid = spriteUuid,
+            .position = vec.add(event.impact_position, vec.mul(direction, positionOffset)),
+            .velocity = vec.mul(direction, speed),
+            .gravity = .{ .x = 0, .y = preset.ember_gravity },
+            .drag = preset.ember_drag,
+            .start_diameter = diameter,
+            .end_diameter = diameter * preset.ember_end_diameter_scale,
+            .start_color = preset.ember_start_color,
+            .end_color = preset.ember_end_color,
+            .start_alpha = 255,
+            .end_alpha = 0,
+            .lifetime_ms = randomRangeU32(&random, preset.ember_min_lifetime_ms, preset.ember_max_lifetime_ms),
+            .blend_mode = .additive,
+        });
+    }
+}
+
 pub fn capture(presetId: Id, captureData: Capture) !void {
-    if (!presets.contains(presetId)) {
+    const preset = presets.get(presetId) orelse {
         std.log.err("explosion_visual.capture: preset {d} is missing", .{presetId});
         return error.ExplosionVisualPresetNotFound;
-    }
+    };
     if (!positionIsFinite(captureData.impact_position) or !positionIsFinite(captureData.pressure_source_position)) {
         std.log.err("explosion_visual.capture: explosion positions must be finite", .{});
         return error.InvalidExplosionVisualPosition;
@@ -118,7 +231,7 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         return error.InvalidExplosionVisualRadius;
     }
 
-    try events.append(allocator, .{
+    const event = Event{
         .preset_id = presetId,
         .impact_position = captureData.impact_position,
         .pressure_source_position = captureData.pressure_source_position,
@@ -126,9 +239,14 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         .pressure_radius = captureData.pressure_radius,
         .started_at = time.realNow(),
         .seed = nextSeed,
-    });
+    };
+    try events.append(allocator, event);
     nextSeed +%= 1;
     if (nextSeed == 0) nextSeed = 1;
+
+    emitEmbers(event, preset) catch |err| {
+        std.log.warn("explosion_visual.capture: failed to emit embers for preset {d}: {}", .{ presetId, err });
+    };
 }
 
 pub fn update() void {

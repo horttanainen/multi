@@ -148,6 +148,19 @@ fn initExplosionVisuals() !void {
         flashEndRadius: f32,
         flashMaxAlpha: u8,
         flashColor: sprite.Color,
+        emberCount: u32,
+        emberMinSpeed: f32,
+        emberMaxSpeed: f32,
+        emberMinLifetimeMs: u32,
+        emberMaxLifetimeMs: u32,
+        emberMinDiameter: f32,
+        emberMaxDiameter: f32,
+        emberEndDiameterScale: f32,
+        emberDrag: f32,
+        emberGravity: f32,
+        emberSurfaceBias: f32,
+        emberStartColor: sprite.Color,
+        emberEndColor: sprite.Color,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -164,6 +177,19 @@ fn initExplosionVisuals() !void {
             .flash_end_radius = entry.flashEndRadius,
             .flash_max_alpha = entry.flashMaxAlpha,
             .flash_color = entry.flashColor,
+            .ember_count = entry.emberCount,
+            .ember_min_speed = entry.emberMinSpeed,
+            .ember_max_speed = entry.emberMaxSpeed,
+            .ember_min_lifetime_ms = entry.emberMinLifetimeMs,
+            .ember_max_lifetime_ms = entry.emberMaxLifetimeMs,
+            .ember_min_diameter = entry.emberMinDiameter,
+            .ember_max_diameter = entry.emberMaxDiameter,
+            .ember_end_diameter_scale = entry.emberEndDiameterScale,
+            .ember_drag = entry.emberDrag,
+            .ember_gravity = entry.emberGravity,
+            .ember_surface_bias = entry.emberSurfaceBias,
+            .ember_start_color = entry.emberStartColor,
+            .ember_end_color = entry.emberEndColor,
         }) catch {
             allocator.free(key);
             continue;

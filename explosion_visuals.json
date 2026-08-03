@@ -1,11 +1,24 @@
 [
     {
         "key": "missile_explosion",
-        "flashDurationMs": 140,
+        "flashDurationMs": 90,
         "flashStartRadius": 0.12,
         "flashEndRadius": 1.0,
         "flashMaxAlpha": 255,
-        "flashColor": { "r": 255, "g": 200, "b": 90 }
+        "flashColor": { "r": 255, "g": 200, "b": 90 },
+        "emberCount": 24,
+        "emberMinSpeed": 4.0,
+        "emberMaxSpeed": 20.0,
+        "emberMinLifetimeMs": 180,
+        "emberMaxLifetimeMs": 360,
+        "emberMinDiameter": 0.08,
+        "emberMaxDiameter": 0.22,
+        "emberEndDiameterScale": 0.3,
+        "emberDrag": 5.0,
+        "emberGravity": 6.0,
+        "emberSurfaceBias": 0.65,
+        "emberStartColor": { "r": 255, "g": 210, "b": 90 },
+        "emberEndColor": { "r": 180, "g": 55, "b": 15 }
     },
     {
         "key": "pellet_impact",
@@ -13,7 +26,20 @@
         "flashStartRadius": 0.02,
         "flashEndRadius": 0.14,
         "flashMaxAlpha": 220,
-        "flashColor": { "r": 255, "g": 220, "b": 110 }
+        "flashColor": { "r": 255, "g": 220, "b": 110 },
+        "emberCount": 1,
+        "emberMinSpeed": 2.0,
+        "emberMaxSpeed": 5.0,
+        "emberMinLifetimeMs": 100,
+        "emberMaxLifetimeMs": 180,
+        "emberMinDiameter": 0.025,
+        "emberMaxDiameter": 0.055,
+        "emberEndDiameterScale": 0.25,
+        "emberDrag": 6.0,
+        "emberGravity": 4.0,
+        "emberSurfaceBias": 0.8,
+        "emberStartColor": { "r": 255, "g": 225, "b": 120 },
+        "emberEndColor": { "r": 190, "g": 65, "b": 15 }
     },
     {
         "key": "railgun_impact",
@@ -21,6 +47,19 @@
         "flashStartRadius": 0.04,
         "flashEndRadius": 0.4,
         "flashMaxAlpha": 255,
-        "flashColor": { "r": 70, "g": 150, "b": 255 }
+        "flashColor": { "r": 70, "g": 150, "b": 255 },
+        "emberCount": 6,
+        "emberMinSpeed": 5.0,
+        "emberMaxSpeed": 13.0,
+        "emberMinLifetimeMs": 140,
+        "emberMaxLifetimeMs": 280,
+        "emberMinDiameter": 0.025,
+        "emberMaxDiameter": 0.17,
+        "emberEndDiameterScale": 0.2,
+        "emberDrag": 4.0,
+        "emberGravity": 1.0,
+        "emberSurfaceBias": 0.3,
+        "emberStartColor": { "r": 150, "g": 210, "b": 255 },
+        "emberEndColor": { "r": 30, "g": 80, "b": 255 }
     }
 ]
