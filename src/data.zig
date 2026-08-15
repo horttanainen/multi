@@ -41,6 +41,7 @@ pub const ExplosionData = struct {
     maximumObjectImpulse: f32,
     blastRadius: f32,
     pressureRadius: f32,
+    cutoutIrregularity: f32,
     damagePlayers: bool,
 };
 
@@ -460,6 +461,7 @@ fn initExplosions() !void {
         maximumObjectImpulse: f32 = 0,
         blastRadius: f32 = 2.0,
         pressureRadius: ?f32 = null,
+        cutoutIrregularity: f32 = 0.16,
         damagePlayers: bool = true,
     };
 
@@ -470,6 +472,17 @@ fn initExplosions() !void {
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
+        if (!std.math.isFinite(entry.cutoutIrregularity) or
+            entry.cutoutIrregularity < 0 or
+            entry.cutoutIrregularity > sprite.maximumCutoutIrregularity)
+        {
+            std.log.err(
+                "initExplosions: explosion '{s}' has invalid cutout irregularity {d}; expected 0 to {d}",
+                .{ entry.key, entry.cutoutIrregularity, sprite.maximumCutoutIrregularity },
+            );
+            continue;
+        }
+
         const key = allocator.dupe(u8, entry.key) catch continue;
         const soundKey = if (entry.sound) |s|
             allocator.dupe(u8, s) catch {
@@ -494,6 +507,7 @@ fn initExplosions() !void {
             .maximumObjectImpulse = entry.maximumObjectImpulse,
             .blastRadius = entry.blastRadius,
             .pressureRadius = entry.pressureRadius orelse entry.blastRadius,
+            .cutoutIrregularity = entry.cutoutIrregularity,
             .damagePlayers = entry.damagePlayers,
         }) catch {
             allocator.free(key);
@@ -763,6 +777,8 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
         .maximumObjectImpulse = d.maximumObjectImpulse,
         .blastRadius = d.blastRadius,
         .pressureRadius = d.pressureRadius,
+        .cutoutIrregularity = d.cutoutIrregularity,
+        .cutoutSeedSalt = std.hash.Wyhash.hash(0, key),
         .damagePlayers = d.damagePlayers,
     };
 }

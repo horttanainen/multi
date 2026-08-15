@@ -180,12 +180,14 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
     };
     const state = box2d.getState(bodyId);
     const radius = @max(surfaceCutout.minimumRadius, event.radius * surfaceCutout.radiusScale);
-    const dirtyRect = try sprite.removeCircleFromSurface(
+    const dirtyRect = sprite.removeFracturedCutoutFromSurface(
         firstSprite,
         event.position,
         radius,
         vec.fromBox2d(state.pos),
         state.rotAngle,
+        event.cutoutSeed,
+        event.cutoutIrregularity,
     );
     if (dirtyRect == null) return;
 

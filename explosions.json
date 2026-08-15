@@ -7,13 +7,15 @@
         "maximumPlayerVelocityChange": 16,
         "maximumObjectImpulse": 10,
         "blastRadius": 2.0,
-        "pressureRadius": 5.0
+        "pressureRadius": 5.0,
+        "cutoutIrregularity": 0.16
     },
     {
         "key": "pellet_impact",
         "visual": "pellet_impact",
         "maximumDamage": 15,
         "blastRadius": 0.3,
+        "cutoutIrregularity": 0.1,
         "damagePlayers": false
     },
     {
@@ -22,6 +24,7 @@
         "visual": "railgun_impact",
         "maximumDamage": 80,
         "blastRadius": 0.8,
+        "cutoutIrregularity": 0.14,
         "damagePlayers": false
     }
 ]

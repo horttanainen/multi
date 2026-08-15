@@ -19,6 +19,8 @@ pub const Event = struct {
     direction: vec.Vec2 = vec.zero,
     debrisVelocity: vec.Vec2 = vec.zero,
     radius: f32 = 0,
+    cutoutIrregularity: f32 = 0,
+    cutoutSeed: u64 = 0,
     attackerId: ?usize = null,
 };
 

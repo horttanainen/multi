@@ -24,6 +24,8 @@ pub const Explosion = struct {
     maximumObjectImpulse: f32,
     blastRadius: f32,
     pressureRadius: f32,
+    cutoutIrregularity: f32,
+    cutoutSeedSalt: u64,
     damagePlayers: bool = true,
 };
 
@@ -160,6 +162,7 @@ fn damageEntitiesInExplosion(
     impactPosition: vec.Vec2,
     explosion: Explosion,
     attackerId: ?usize,
+    cutoutSeed: u64,
 ) !void {
     var context = OverlapContext{
         .bodies = undefined,
@@ -211,6 +214,8 @@ fn damageEntitiesInExplosion(
             .direction = direction,
             .debrisVelocity = debrisVelocity,
             .radius = explosion.blastRadius,
+            .cutoutIrregularity = explosion.cutoutIrregularity,
+            .cutoutSeed = cutoutSeed,
             .attackerId = attackerId,
         });
     }
@@ -351,6 +356,31 @@ fn damageFromPressureStrength(explosion: Explosion, strength: f32) f32 {
     return explosion.maximumDamage * clampedStrength * clampedStrength;
 }
 
+fn hashCutoutSeed(value: u64) u64 {
+    var result = value;
+    result ^= result >> 30;
+    result *%= 0xbf58476d1ce4e5b9;
+    result ^= result >> 27;
+    result *%= 0x94d049bb133111eb;
+    result ^= result >> 31;
+    return result;
+}
+
+fn cutoutSeedForExplosion(impactPosition: vec.Vec2, pressureSourcePosition: vec.Vec2, explosion: Explosion) u64 {
+    const impactPixel = conv.m2Pixel(vec.toBox2d(impactPosition));
+    const pressureSourcePixel = conv.m2Pixel(vec.toBox2d(pressureSourcePosition));
+    const impactX: u64 = @bitCast(@as(i64, impactPixel.x));
+    const impactY: u64 = @bitCast(@as(i64, impactPixel.y));
+    const sourceX: u64 = @bitCast(@as(i64, pressureSourcePixel.x));
+    const sourceY: u64 = @bitCast(@as(i64, pressureSourcePixel.y));
+
+    var seed = hashCutoutSeed(explosion.cutoutSeedSalt ^ impactX);
+    seed = hashCutoutSeed(seed ^ std.math.rotl(u64, impactY, 17));
+    seed = hashCutoutSeed(seed ^ std.math.rotl(u64, sourceX, 31));
+    seed = hashCutoutSeed(seed ^ std.math.rotl(u64, sourceY, 47));
+    return seed;
+}
+
 fn applyExplosionPressureToPlayers(
     field: blast_pressure.Field,
     explosion: Explosion,
@@ -433,6 +463,7 @@ fn explodeAtWithDirectHit(
 ) !void {
     const perfId = beginExplosionPerfLog();
     const totalStart = perf.begin(.explosion);
+    const cutoutSeed = cutoutSeedForExplosion(impactPosition, pressureSourcePosition, explosion);
 
     const pressureStart = perf.begin(.explosion);
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
@@ -452,7 +483,7 @@ fn explodeAtWithDirectHit(
     logExplosionStage(perfId, "body_pressure", impulseStart);
 
     const entityDamageStart = perf.begin(.explosion);
-    try damageEntitiesInExplosion(pressureField, impactPosition, explosion, attackerId);
+    try damageEntitiesInExplosion(pressureField, impactPosition, explosion, attackerId, cutoutSeed);
     logExplosionStage(perfId, "entity_damage", entityDamageStart);
 
     const playerPressureStart = perf.begin(.explosion);

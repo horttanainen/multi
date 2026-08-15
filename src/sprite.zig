@@ -80,6 +80,32 @@ const StainSpot = struct {
     strength: f32,
 };
 
+const CutoutVertex = struct {
+    x: i32,
+    y: i32,
+};
+
+const FracturedCutout = struct {
+    vertices: [maximumFractureVertexCount]CutoutVertex,
+    vertexCount: usize,
+};
+
+const CutoutEdit = struct {
+    changed: bool = false,
+    minimumX: i32,
+    minimumY: i32,
+    maximumX: i32 = 0,
+    maximumY: i32 = 0,
+};
+
+const cutoutFixedPointScale: i32 = 256;
+const cutoutRadiusFactorScale: i32 = 32768;
+const minimumFractureVertexCount: usize = 9;
+const maximumFractureVertexCount: usize = 16;
+const fractureFacetLengthPixels: f32 = 42;
+const maximumFractureAngleJitter: f32 = 0.28;
+pub const maximumCutoutIrregularity: f32 = 0.35;
+
 // Texture cache: maps image path → atlas region + dimensions.
 // Sprites with the same image share the same atlas region for draw call batching.
 const CachedTexInfo = struct {
@@ -1072,33 +1098,184 @@ pub fn stainSplatOnSurface(
     };
 }
 
-pub fn removeCircleFromSurface(sprite: Sprite, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32) !?vec.IRect {
-    const RemoveContext = struct {
-        changed: bool = false,
-    };
+fn cutoutSignedRandom(seed: u64, index: usize, salt: u64) i32 {
+    const vertexIndex: u64 = @intCast(index);
+    const hashed = hash64(seed ^ salt ^ (vertexIndex *% 0x9e3779b97f4a7c15));
+    const randomValue: u16 = @truncate(hashed >> 48);
+    return @as(i32, @intCast(randomValue)) - 32768;
+}
 
-    const removePixel = struct {
-        fn op(context: *RemoveContext, pixels: [*]u8, pixelIndex: usize, bytesPerPixel: usize) void {
-            if (bytesPerPixel != 4) {
-                return;
-            }
-            if (pixels[pixelIndex + 3] == 0) {
-                return;
-            }
+fn fractureVertexCount(radiusPixels: f32, seed: u64) usize {
+    const circumference = radiusPixels * std.math.tau;
+    const estimated: i32 = @intFromFloat(@round(circumference / fractureFacetLengthPixels));
+    const countVariation = @as(i32, @intCast(hash64(seed ^ 0xa0761d6478bd642f) % 3)) - 1;
+    return @intCast(std.math.clamp(
+        estimated + countVariation,
+        @as(i32, @intCast(minimumFractureVertexCount)),
+        @as(i32, @intCast(maximumFractureVertexCount)),
+    ));
+}
+
+fn buildFracturedCutout(
+    s: Sprite,
+    radiusPixels: f32,
+    rotation: f32,
+    seed: u64,
+    irregularity: f32,
+) FracturedCutout {
+    var cutout: FracturedCutout = undefined;
+    cutout.vertexCount = fractureVertexCount(radiusPixels, seed);
+    const vertexCountFloat: f32 = @floatFromInt(cutout.vertexCount);
+    const angleStep = std.math.tau / vertexCountFloat;
+    const phase = randomUnitFromSeed(seed, 0xe7037ed1a0b428db) * angleStep;
+    const cosA = @cos(-rotation);
+    const sinA = @sin(-rotation);
+
+    for (cutout.vertices[0..cutout.vertexCount], 0..) |*vertex, index| {
+        const angleRandom = @as(f32, @floatFromInt(cutoutSignedRandom(seed, index, 0x8ebc6af09c88c6e3))) /
+            cutoutRadiusFactorScale;
+        const radiusRandom = @as(f32, @floatFromInt(cutoutSignedRandom(seed, index, 0x589965cc75374cc3))) /
+            cutoutRadiusFactorScale;
+        const baseAngle = @as(f32, @floatFromInt(index)) * angleStep;
+        const angle = phase + baseAngle + angleRandom * angleStep * maximumFractureAngleJitter;
+        const vertexRadius = radiusPixels * (1.0 + radiusRandom * irregularity);
+        const worldX = @cos(angle) * vertexRadius;
+        const worldY = @sin(angle) * vertexRadius;
+        const localX = worldX * cosA - worldY * sinA;
+        const localY = worldX * sinA + worldY * cosA;
+        vertex.* = .{
+            .x = @intFromFloat(@round(localX / s.scale.x * cutoutFixedPointScale)),
+            .y = @intFromFloat(@round(localY / s.scale.y * cutoutFixedPointScale)),
+        };
+    }
+    return cutout;
+}
+
+fn crossCutoutVectors(a: CutoutVertex, b: CutoutVertex) i64 {
+    return @as(i64, a.x) * b.y - @as(i64, a.y) * b.x;
+}
+
+fn pointInsideCutoutTriangle(point: CutoutVertex, a: CutoutVertex, b: CutoutVertex) bool {
+    const orientation = crossCutoutVectors(a, b);
+    const crossStart = crossCutoutVectors(a, point);
+    const crossEnd = crossCutoutVectors(point, b);
+    const edge = CutoutVertex{ .x = b.x - a.x, .y = b.y - a.y };
+    const relativePoint = CutoutVertex{ .x = point.x - a.x, .y = point.y - a.y };
+    const crossOuter = crossCutoutVectors(edge, relativePoint);
+
+    if (orientation >= 0) return crossStart >= 0 and crossEnd >= 0 and crossOuter >= 0;
+    return crossStart <= 0 and crossEnd <= 0 and crossOuter <= 0;
+}
+
+fn pointInsideFracturedCutout(point: CutoutVertex, cutout: *const FracturedCutout) bool {
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    for (vertices, 0..) |vertex, index| {
+        const nextVertex = vertices[(index + 1) % vertices.len];
+        if (pointInsideCutoutTriangle(point, vertex, nextVertex)) return true;
+    }
+    return false;
+}
+
+fn floorCutoutFixed(value: i32) i32 {
+    return @divFloor(value, cutoutFixedPointScale);
+}
+
+fn ceilCutoutFixed(value: i32) i32 {
+    return -@divFloor(-value, cutoutFixedPointScale);
+}
+
+fn removeFracturedCutoutPixels(
+    pixels: [*]u8,
+    pitch: usize,
+    width: i32,
+    height: i32,
+    centerXFixed: i32,
+    centerYFixed: i32,
+    cutout: *const FracturedCutout,
+) ?vec.IRect {
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    var minimumOffsetX = vertices[0].x;
+    var maximumOffsetX = vertices[0].x;
+    var minimumOffsetY = vertices[0].y;
+    var maximumOffsetY = vertices[0].y;
+    for (vertices[1..]) |vertex| {
+        minimumOffsetX = @min(minimumOffsetX, vertex.x);
+        maximumOffsetX = @max(maximumOffsetX, vertex.x);
+        minimumOffsetY = @min(minimumOffsetY, vertex.y);
+        maximumOffsetY = @max(maximumOffsetY, vertex.y);
+    }
+
+    const rawMinimumX = floorCutoutFixed(centerXFixed + minimumOffsetX);
+    const rawMaximumX = ceilCutoutFixed(centerXFixed + maximumOffsetX);
+    const rawMinimumY = floorCutoutFixed(centerYFixed + minimumOffsetY);
+    const rawMaximumY = ceilCutoutFixed(centerYFixed + maximumOffsetY);
+    if (rawMaximumX < 0 or rawMinimumX >= width or rawMaximumY < 0 or rawMinimumY >= height) return null;
+
+    const minimumX = @max(0, rawMinimumX);
+    const maximumX = @min(width - 1, rawMaximumX);
+    const minimumY = @max(0, rawMinimumY);
+    const maximumY = @min(height - 1, rawMaximumY);
+    const bytesPerPixel: usize = 4;
+    var edit = CutoutEdit{ .minimumX = width, .minimumY = height };
+    var y = minimumY;
+    while (y <= maximumY) : (y += 1) {
+        var x = minimumX;
+        while (x <= maximumX) : (x += 1) {
+            const point = CutoutVertex{
+                .x = x * cutoutFixedPointScale - centerXFixed,
+                .y = y * cutoutFixedPointScale - centerYFixed,
+            };
+            if (!pointInsideFracturedCutout(point, cutout)) continue;
+
+            const pixelIndex = @as(usize, @intCast(y)) * pitch + @as(usize, @intCast(x)) * bytesPerPixel;
+            if (pixels[pixelIndex + 3] == 0) continue;
+
             pixels[pixelIndex + 3] = 0;
-            context.changed = true;
+            edit.changed = true;
+            edit.minimumX = @min(edit.minimumX, x);
+            edit.minimumY = @min(edit.minimumY, y);
+            edit.maximumX = @max(edit.maximumX, x + 1);
+            edit.maximumY = @max(edit.maximumY, y + 1);
         }
-    }.op;
+    }
 
-    var context = RemoveContext{};
-    const dirtyRect = iterateCircleOnSurface(sprite, centerWorld, radiusWorld, entityPos, rotation, *RemoveContext, &context, removePixel);
-    if (dirtyRect == null) {
-        return null;
-    }
-    if (!context.changed) {
-        return null;
-    }
-    return dirtyRect;
+    if (!edit.changed) return null;
+    return .{
+        .minX = edit.minimumX,
+        .minY = edit.minimumY,
+        .maxX = edit.maximumX,
+        .maxY = edit.maximumY,
+    };
+}
+
+pub fn removeFracturedCutoutFromSurface(
+    s: Sprite,
+    centerWorld: vec.Vec2,
+    radiusWorld: f32,
+    entityPos: vec.Vec2,
+    rotation: f32,
+    seed: u64,
+    irregularity: f32,
+) ?vec.IRect {
+    const radiusPixels = radiusWorld * conv.met2pix;
+    const centerPixel = worldToSpritePixel(s, centerWorld, entityPos, rotation, @intCast(s.surface.w), @intCast(s.surface.h));
+    const centerXFixed: i32 = @intFromFloat(@round(centerPixel.x * cutoutFixedPointScale));
+    const centerYFixed: i32 = @intFromFloat(@round(centerPixel.y * cutoutFixedPointScale));
+    const cutout = buildFracturedCutout(s, radiusPixels, rotation, seed, irregularity);
+
+    const width: i32 = s.surface.w;
+    const height: i32 = s.surface.h;
+    const pixels: [*]u8 = @ptrCast(s.surface.pixels);
+    const pitch: usize = @intCast(s.surface.pitch);
+    return removeFracturedCutoutPixels(
+        pixels,
+        pitch,
+        width,
+        height,
+        centerXFixed,
+        centerYFixed,
+        &cutout,
+    );
 }
 
 pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {
