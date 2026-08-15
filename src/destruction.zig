@@ -9,6 +9,7 @@ const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
 const rubble = @import("rubble.zig");
 const sprite = @import("sprite.zig");
+const surface_cutout = @import("surface_cutout.zig");
 const vec = @import("vector.zig");
 
 const SurfaceEdit = struct {
@@ -41,7 +42,7 @@ fn mergeColliderDirtyRect(target: *?vec.IRect, incoming: ?vec.IRect) void {
     target.* = vec.irectUnion(target.*.?, incoming.?);
 }
 
-fn queueSurfaceEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, cutoutEdit: sprite.SurfaceCutoutEdit) !void {
+fn queueSurfaceEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, cutoutEdit: surface_cutout.Edit) !void {
     const maybeEdit = surfaceEdits.getPtr(bodyId);
     if (maybeEdit == null) {
         try surfaceEdits.put(allocator, bodyId, .{
@@ -195,7 +196,7 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
     const state = box2d.getState(bodyId);
     const radius = @max(surfaceCutout.minimumRadius, event.radius * surfaceCutout.radiusScale);
     const hotRimWidth = if (event.cutoutHotRimDurationMs > 0) event.cutoutHotRimWidth else 0;
-    const cutoutResult = sprite.removeFracturedCutoutFromSurface(
+    const cutoutResult = surface_cutout.apply(
         firstSprite,
         event.position,
         radius,

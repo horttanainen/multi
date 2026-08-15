@@ -1,5 +1,6 @@
 const std = @import("std");
 const sprite = @import("sprite.zig");
+const surface_cutout = @import("surface_cutout.zig");
 const animation = @import("animation.zig");
 const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
@@ -482,11 +483,11 @@ fn initExplosions() !void {
     for (parsed.value) |entry| {
         if (!std.math.isFinite(entry.cutoutIrregularity) or
             entry.cutoutIrregularity < 0 or
-            entry.cutoutIrregularity > sprite.maximumCutoutIrregularity)
+            entry.cutoutIrregularity > surface_cutout.maximumIrregularity)
         {
             std.log.err(
                 "initExplosions: explosion '{s}' has invalid cutout irregularity {d}; expected 0 to {d}",
-                .{ entry.key, entry.cutoutIrregularity, sprite.maximumCutoutIrregularity },
+                .{ entry.key, entry.cutoutIrregularity, surface_cutout.maximumIrregularity },
             );
             continue;
         }

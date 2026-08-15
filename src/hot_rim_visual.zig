@@ -6,13 +6,13 @@ const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
 const gpu = @import("gpu.zig");
 const sdl = @import("sdl.zig");
-const sprite = @import("sprite.zig");
+const surface_cutout = @import("surface_cutout.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
 
 const Event = struct {
     bodyId: box2d.c.b2BodyId,
-    quads: []sprite.SurfaceHotRimQuad,
+    quads: []surface_cutout.HotRimQuad,
     startedAt: f64,
     durationSeconds: f64,
 };
@@ -22,7 +22,7 @@ const glowAlphaScale: f32 = 0.1;
 
 var events: std.ArrayListUnmanaged(Event) = .empty;
 
-pub fn capture(bodyId: box2d.c.b2BodyId, quads: []sprite.SurfaceHotRimQuad, durationMs: u32) !void {
+pub fn capture(bodyId: box2d.c.b2BodyId, quads: []surface_cutout.HotRimQuad, durationMs: u32) !void {
     try events.append(allocator, .{
         .bodyId = bodyId,
         .quads = quads,
@@ -84,7 +84,7 @@ fn rimColor(progress: f32) sdl.Color {
     return lerpColor(red, charredBlack, smoothedCooling);
 }
 
-fn expandedQuad(quad: sprite.SurfaceHotRimQuad, expansion: f32) sprite.SurfaceHotRimQuad {
+fn expandedQuad(quad: surface_cutout.HotRimQuad, expansion: f32) surface_cutout.HotRimQuad {
     const horizontal = vec.subtract(quad.corners[1], quad.corners[0]);
     const vertical = vec.subtract(quad.corners[3], quad.corners[0]);
     const horizontalDirection = vec.mul(horizontal, 1.0 / vec.magnitude(horizontal));
@@ -99,7 +99,7 @@ fn expandedQuad(quad: sprite.SurfaceHotRimQuad, expansion: f32) sprite.SurfaceHo
     } };
 }
 
-fn screenQuad(quad: sprite.SurfaceHotRimQuad) [4][2]f32 {
+fn screenQuad(quad: surface_cutout.HotRimQuad) [4][2]f32 {
     var points: [4][2]f32 = undefined;
     for (quad.corners, 0..) |corner, index| {
         const screen = camera.relativePosition(conv.m2Pixel(vec.toBox2d(corner)));
@@ -108,7 +108,7 @@ fn screenQuad(quad: sprite.SurfaceHotRimQuad) [4][2]f32 {
     return points;
 }
 
-fn drawQuads(quads: []const sprite.SurfaceHotRimQuad, color: sdl.Color, expansion: f32) !void {
+fn drawQuads(quads: []const surface_cutout.HotRimQuad, color: sdl.Color, expansion: f32) !void {
     if (color.a == 0) return;
     try gpu.setRenderDrawColor(color);
     for (quads) |quad| {
