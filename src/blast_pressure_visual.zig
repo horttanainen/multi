@@ -10,11 +10,18 @@ const sdl = @import("sdl.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
 
-const propagationSeconds: f64 = 0.2;
-const cellFadeSeconds: f64 = 0.12;
+pub const Capture = struct {
+    propagation_duration_ms: u32,
+    cell_lifetime_ms: u32,
+    distortion_pixels: f32,
+};
+
+const cellRiseSeconds: f64 = 0.012;
+const softCellRadiusScale: f32 = 0.9;
 
 const Cell = struct {
     position: vec.Vec2,
+    direction: vec.Vec2,
     strength: f32,
     arrival_fraction: f64,
 };
@@ -24,29 +31,32 @@ const Wave = struct {
     cell_count: usize,
     cell_size: f32,
     started_at: f64,
+    propagation_seconds: f64,
+    cell_lifetime_seconds: f64,
+    distortion_pixels: f32,
 };
 
 var waves: std.ArrayListUnmanaged(Wave) = .empty;
 
-fn activePropagationSeconds() f64 {
+fn activePropagationSeconds(wave: Wave) f64 {
     if (comptime config.debugBlastPressure.enabled) {
         return config.debugBlastPressure.propagationSeconds;
     }
-    return propagationSeconds;
+    return wave.propagation_seconds;
 }
 
-fn activeFadeSeconds() f64 {
+fn activeCellLifetimeSeconds(wave: Wave) f64 {
     if (comptime config.debugBlastPressure.enabled) {
         return config.debugBlastPressure.slowMotionSeconds;
     }
-    return cellFadeSeconds;
+    return wave.cell_lifetime_seconds;
 }
 
 fn freeWave(wave: Wave) void {
     allocator.free(wave.cells);
 }
 
-pub fn capture(field: blast_pressure.Field) !void {
+pub fn capture(field: blast_pressure.Field, captureData: Capture) !void {
     const maximumCellCount = try std.math.mul(usize, field.dimension, field.dimension);
     const cells = try allocator.alloc(Cell, maximumCellCount);
     errdefer allocator.free(cells);
@@ -63,6 +73,7 @@ pub fn capture(field: blast_pressure.Field) !void {
             const pressureSample = blast_pressure.sample(field, position) orelse continue;
             cells[cellCount] = .{
                 .position = position,
+                .direction = if (pressureSample.travel_distance > 0) pressureSample.direction else vec.zero,
                 .strength = pressureSample.strength,
                 .arrival_fraction = pressureSample.travel_distance / field.radius,
             };
@@ -75,6 +86,9 @@ pub fn capture(field: blast_pressure.Field) !void {
         .cell_count = cellCount,
         .cell_size = field.cell_size,
         .started_at = time.realNow(),
+        .propagation_seconds = @as(f64, @floatFromInt(captureData.propagation_duration_ms)) / 1000.0,
+        .cell_lifetime_seconds = @as(f64, @floatFromInt(captureData.cell_lifetime_ms)) / 1000.0,
+        .distortion_pixels = captureData.distortion_pixels,
     });
 
     if (comptime config.debugBlastPressure.enabled) {
@@ -84,9 +98,9 @@ pub fn capture(field: blast_pressure.Field) !void {
 
 pub fn update() void {
     const now = time.realNow();
-    const lifetime = activePropagationSeconds() + activeFadeSeconds();
     var index: usize = 0;
     while (index < waves.items.len) {
+        const lifetime = activePropagationSeconds(waves.items[index]) + activeCellLifetimeSeconds(waves.items[index]);
         if (now - waves.items[index].started_at < lifetime) {
             index += 1;
             continue;
@@ -108,12 +122,21 @@ pub fn shouldRunSimulationUpdate(physicsStepCount: usize) bool {
     return physicsStepCount > 0;
 }
 
-fn fadeForCell(elapsed: f64, arrivalFraction: f64) f32 {
-    const arrivalTime = arrivalFraction * activePropagationSeconds();
+fn smoothStep(progress: f64) f64 {
+    const clamped = std.math.clamp(progress, 0, 1);
+    return clamped * clamped * (3.0 - 2.0 * clamped);
+}
+
+fn fadeForCell(wave: Wave, elapsed: f64, arrivalFraction: f64) f32 {
+    const arrivalTime = arrivalFraction * activePropagationSeconds(wave);
     const cellAge = elapsed - arrivalTime;
-    if (cellAge <= 0) return 1;
-    const remaining = 1.0 - cellAge / activeFadeSeconds();
-    return @floatCast(std.math.clamp(remaining, 0, 1));
+    if (cellAge <= 0) return 0;
+
+    const lifetime = activeCellLifetimeSeconds(wave);
+    const riseDuration = @min(cellRiseSeconds, lifetime * 0.25);
+    const attack = smoothStep(cellAge / riseDuration);
+    const decay = 1.0 - smoothStep((cellAge - riseDuration) / (lifetime - riseDuration));
+    return @floatCast(attack * decay);
 }
 
 fn cellColor(strength: f32, fade: f32) sdl.Color {
@@ -130,22 +153,33 @@ fn cellColor(strength: f32, fade: f32) sdl.Color {
 
 fn drawWave(wave: Wave, now: f64) !void {
     const elapsed = now - wave.started_at;
-    const revealFraction = std.math.clamp(elapsed / activePropagationSeconds(), 0, 1);
+    const revealFraction = std.math.clamp(elapsed / activePropagationSeconds(wave), 0, 1);
     const cellPixels = @max(1, @as(i32, @intFromFloat(@round(wave.cell_size * conv.met2pix))));
+    const softCellRadiusPixels = wave.cell_size * conv.met2pix * softCellRadiusScale;
 
     for (wave.cells[0..wave.cell_count]) |cell| {
         if (cell.arrival_fraction > revealFraction) continue;
-        const fade = fadeForCell(elapsed, cell.arrival_fraction);
+        const fade = fadeForCell(wave, elapsed, cell.arrival_fraction);
         if (fade <= 0) continue;
 
         const center = camera.relativePosition(conv.m2Pixel(vec.toBox2d(cell.position)));
-        try gpu.setRenderDrawColor(cellColor(cell.strength, fade));
-        try gpu.renderFillRect(.{
-            .x = center.x - @divFloor(cellPixels, 2),
-            .y = center.y - @divFloor(cellPixels, 2),
-            .w = cellPixels,
-            .h = cellPixels,
-        });
+        if (comptime config.debugBlastPressure.enabled) {
+            try gpu.setRenderDrawColor(cellColor(cell.strength, fade));
+            try gpu.renderFillRect(.{
+                .x = center.x - @divFloor(cellPixels, 2),
+                .y = center.y - @divFloor(cellPixels, 2),
+                .w = cellPixels,
+                .h = cellPixels,
+            });
+            continue;
+        }
+
+        try gpu.renderPressureSoftCircle(
+            .{ @floatFromInt(center.x), @floatFromInt(center.y) },
+            softCellRadiusPixels,
+            .{ cell.direction.x, cell.direction.y },
+            cell.strength * fade * wave.distortion_pixels,
+        );
     }
 }
 

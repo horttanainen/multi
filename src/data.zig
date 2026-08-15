@@ -149,6 +149,9 @@ fn initExplosionVisuals() !void {
 
     const Entry = struct {
         key: []const u8,
+        pressureWaveDurationMs: u32,
+        pressureWaveCellLifetimeMs: u32,
+        pressureWaveDistortionPixels: f32,
         flashDurationMs: u32,
         flashStartRadius: f32,
         flashEndRadius: f32,
@@ -198,6 +201,9 @@ fn initExplosionVisuals() !void {
     for (parsed.value) |entry| {
         const key = allocator.dupe(u8, entry.key) catch continue;
         explosionVisualDataMap.put(allocator, key, .{
+            .pressure_wave_duration_ms = entry.pressureWaveDurationMs,
+            .pressure_wave_cell_lifetime_ms = entry.pressureWaveCellLifetimeMs,
+            .pressure_wave_distortion_pixels = entry.pressureWaveDistortionPixels,
             .flash_duration_ms = entry.flashDurationMs,
             .flash_start_radius = entry.flashStartRadius,
             .flash_end_radius = entry.flashEndRadius,

@@ -462,6 +462,21 @@ fn captureExplosionVisual(
     };
 }
 
+fn captureBlastPressureVisual(field: blast_pressure.Field, visualId: ?explosion_visual.Id) void {
+    if (visualId == null) return;
+    const preset = explosion_visual.presets.get(visualId.?) orelse {
+        std.log.warn("captureBlastPressureVisual: explosion visual preset {d} is missing", .{visualId.?});
+        return;
+    };
+    blast_pressure_visual.capture(field, .{
+        .propagation_duration_ms = preset.pressure_wave_duration_ms,
+        .cell_lifetime_ms = preset.pressure_wave_cell_lifetime_ms,
+        .distortion_pixels = preset.pressure_wave_distortion_pixels,
+    }) catch |err| {
+        std.log.warn("captureBlastPressureVisual: failed to capture blast pressure visualization: {}", .{err});
+    };
+}
+
 fn explodeAtWithDirectHit(
     impactPosition: vec.Vec2,
     pressureSourcePosition: vec.Vec2,
@@ -476,9 +491,7 @@ fn explodeAtWithDirectHit(
     const pressureStart = perf.begin(.explosion);
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
-    blast_pressure_visual.capture(pressureField) catch |err| {
-        std.log.warn("explodeAtWithDirectHit: failed to capture blast pressure visualization: {}", .{err});
-    };
+    captureBlastPressureVisual(pressureField, explosion.visual);
     captureExplosionVisual(impactPosition, pressureSourcePosition, explosion);
     logExplosionStage(perfId, "pressure_field", pressureStart);
 

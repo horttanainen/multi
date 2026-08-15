@@ -92,6 +92,12 @@ const LutUniforms = extern struct {
     strength: f32,
 };
 
+const PressureDistortionUniforms = extern struct {
+    resolution: [2]f32,
+    maximum_displacement_pixels: f32,
+    padding: f32 = 0,
+};
+
 const SelectionOutlineUniforms = extern struct {
     resolution: [2]f32,
     radius: f32,
@@ -162,6 +168,8 @@ const INITIAL_COLOR_VERTEX_CAPACITY = 64 * 1024;
 const MAX_BATCH_RECORDS = 8192;
 const MAX_PENDING_DESTROYS = 256;
 const SELECTION_OUTLINE_RADIUS_PIXELS = 4.0;
+const PRESSURE_SOFT_CIRCLE_SEGMENTS: usize = 8;
+const PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS: f32 = 160.0;
 
 const PipelineType = enum {
     sprite_alpha,
@@ -169,6 +177,7 @@ const PipelineType = enum {
     selection_mask,
     colored_triangles,
     colored_lines,
+    pressure_mask,
 };
 
 const BatchMode = enum { none, sprite, color };
@@ -219,6 +228,9 @@ const GpuState = struct {
     selection_outline_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_triangles_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_lines_pipeline: *c.SDL_GPUGraphicsPipeline,
+    pressure_mask_pipeline: *c.SDL_GPUGraphicsPipeline,
+    pressure_distortion_pipeline: *c.SDL_GPUGraphicsPipeline,
+    pressure_mask_texture: *c.SDL_GPUTexture,
 
     // CRT post-processing
     crt_enabled: bool = true,
@@ -351,6 +363,7 @@ const colored_vert_msl = @embedFile("shaders/colored.metal");
 const colored_frag_msl = @embedFile("shaders/colored.metal");
 const crt_msl = @embedFile("shaders/crt.metal");
 const lut_msl = @embedFile("shaders/lut.metal");
+const pressure_distortion_msl = @embedFile("shaders/pressure_distortion.metal");
 const paint_msl = @embedFile("shaders/background_paint.metal");
 const selection_msl = @embedFile("shaders/selection.metal");
 
@@ -685,7 +698,21 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .padding2 = 0,
     };
 
-    // Create 4 pipelines
+    const pressure_mask_blend = c.SDL_GPUColorTargetBlendState{
+        .enable_blend = true,
+        .src_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .dst_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .color_blend_op = c.SDL_GPU_BLENDOP_ADD,
+        .src_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .dst_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE,
+        .alpha_blend_op = c.SDL_GPU_BLENDOP_ADD,
+        .color_write_mask = 0xF,
+        .enable_color_write_mask = true,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+
+    // Create draw pipelines
     const sprite_alpha = try createPipeline(device, swapchain_format, .{
         .shader_code = sprite_vert_msl,
         .vert_entry = "sprite_vert",
@@ -738,6 +765,22 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .vertex_layout = color_vertex_layout,
         .primitive_type = c.SDL_GPU_PRIMITIVETYPE_LINELIST,
         .blend_state = alpha_blend,
+    });
+    const pressure_mask = try createPipeline(device, swapchain_format, .{
+        .shader_code = colored_vert_msl,
+        .vert_entry = "colored_vert",
+        .frag_entry = "colored_frag",
+        .vert_uniforms = 1,
+        .vertex_layout = color_vertex_layout,
+        .blend_state = pressure_mask_blend,
+    });
+    const pressure_distortion = try createPipeline(device, swapchain_format, .{
+        .shader_code = pressure_distortion_msl,
+        .vert_entry = "pressure_distortion_vert",
+        .frag_entry = "pressure_distortion_frag",
+        .frag_samplers = 2,
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
     });
 
     // Create sampler (nearest-neighbor for pixel art)
@@ -837,6 +880,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
     const offscreen_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
     const offscreen_tex_b = try createOffscreenTexture(device, ow, oh, swapchain_format);
     const selection_mask_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
+    const pressure_mask_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
 
     // Generate and upload identity LUT (32x32x32 stored as 1024x32 RGBA)
     const lut_tex = try createIdentityLut(device);
@@ -865,6 +909,9 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .selection_outline_pipeline = selection_outline,
         .colored_triangles_pipeline = colored_triangles,
         .colored_lines_pipeline = colored_lines,
+        .pressure_mask_pipeline = pressure_mask,
+        .pressure_distortion_pipeline = pressure_distortion,
+        .pressure_mask_texture = pressure_mask_tex,
         .offscreen_texture = offscreen_tex,
         .offscreen_w = ow,
         .offscreen_h = oh,
@@ -897,6 +944,7 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
         c.SDL_ReleaseGPUTexture(g.device, g.selection_mask_texture);
+        c.SDL_ReleaseGPUTexture(g.device, g.pressure_mask_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.lut_texture);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.paint_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.crt_pipeline);
@@ -918,6 +966,8 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.selection_outline_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_triangles_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_lines_pipeline);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.pressure_mask_pipeline);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.pressure_distortion_pipeline);
         c.SDL_ReleaseWindowFromGPUDevice(g.device, g.window);
         c.SDL_DestroyGPUDevice(g.device);
         gpu = null;
@@ -1118,13 +1168,22 @@ pub fn renderClear() !void {
             c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture_b);
             return error.AcquireSwapchainFailed;
         };
+        const new_pressure_mask_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch |err| {
+            std.log.warn("renderClear: failed to resize pressure mask texture: {}", .{err});
+            c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture);
+            c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture_b);
+            c.SDL_ReleaseGPUTexture(g.device, new_selection_mask_texture);
+            return error.AcquireSwapchainFailed;
+        };
 
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture);
         c.SDL_ReleaseGPUTexture(g.device, g.offscreen_texture_b);
         c.SDL_ReleaseGPUTexture(g.device, g.selection_mask_texture);
+        c.SDL_ReleaseGPUTexture(g.device, g.pressure_mask_texture);
         g.offscreen_texture = new_offscreen_texture;
         g.offscreen_texture_b = new_offscreen_texture_b;
         g.selection_mask_texture = new_selection_mask_texture;
+        g.pressure_mask_texture = new_pressure_mask_texture;
         g.offscreen_w = sw_w;
         g.offscreen_h = sw_h;
     }
@@ -1155,7 +1214,26 @@ pub fn renderPresent() void {
 
     uploadVertexData(g, cmd);
 
-    if (g.lut_enabled and g.crt_enabled) {
+    if (hasPressureMaskRecords(g)) {
+        renderScene(g, cmd, g.offscreen_texture);
+        renderSelectionOverlay(g, cmd, g.offscreen_texture);
+        renderPressureMask(g, cmd);
+
+        if (g.lut_enabled or g.crt_enabled) {
+            applyPressureDistortion(g, cmd, g.offscreen_texture, g.offscreen_texture_b);
+        } else {
+            applyPressureDistortion(g, cmd, g.offscreen_texture, swapchain_tex);
+        }
+
+        if (g.lut_enabled and g.crt_enabled) {
+            applyLutEffect(g, cmd, g.offscreen_texture_b, g.offscreen_texture);
+            applyCrtEffect(g, cmd, g.offscreen_texture, swapchain_tex);
+        } else if (g.lut_enabled) {
+            applyLutEffect(g, cmd, g.offscreen_texture_b, swapchain_tex);
+        } else if (g.crt_enabled) {
+            applyCrtEffect(g, cmd, g.offscreen_texture_b, swapchain_tex);
+        }
+    } else if (g.lut_enabled and g.crt_enabled) {
         renderScene(g, cmd, g.offscreen_texture);
         renderSelectionOverlay(g, cmd, g.offscreen_texture);
         applyLutEffect(g, cmd, g.offscreen_texture, g.offscreen_texture_b);
@@ -1323,6 +1401,7 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 uniforms_dirty = true;
             },
             .draw_colored => |batch| {
+                if (batch.pipeline == .pressure_mask) continue;
                 if (last_pipeline != batch.pipeline) {
                     const pipeline = switch (batch.pipeline) {
                         .colored_triangles => g.colored_triangles_pipeline,
@@ -1365,6 +1444,79 @@ fn hasSelectionMaskRecords(g: *GpuState) bool {
         }
     }
     return false;
+}
+
+fn hasPressureMaskRecords(g: *GpuState) bool {
+    var index: u32 = 0;
+    while (index < g.batch_count) : (index += 1) {
+        switch (g.batch_records[index]) {
+            .draw_colored => |batch| if (batch.pipeline == .pressure_mask) return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn renderPressureMask(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
+    const colorTarget = c.SDL_GPUColorTargetInfo{
+        .texture = g.pressure_mask_texture,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        .load_op = c.SDL_GPU_LOADOP_CLEAR,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const renderPass = c.SDL_BeginGPURenderPass(cmd, &colorTarget, 1, null) orelse {
+        std.log.warn("renderPressureMask: failed to begin render pass", .{});
+        return;
+    };
+    defer c.SDL_EndGPURenderPass(renderPass);
+
+    setGpuViewport(renderPass, 0, 0, g.swapchain_w, g.swapchain_h);
+    c.SDL_BindGPUGraphicsPipeline(renderPass, g.pressure_mask_pipeline);
+
+    var viewportWidth = g.swapchain_w;
+    var viewportHeight = g.swapchain_h;
+    var zoom: f32 = 1;
+    var uniformsDirty = true;
+    var index: u32 = 0;
+    while (index < g.batch_count) : (index += 1) {
+        switch (g.batch_records[index]) {
+            .set_viewport => |viewport| {
+                setGpuViewport(renderPass, viewport.x, viewport.y, viewport.w, viewport.h);
+                viewportWidth = viewport.w;
+                viewportHeight = viewport.h;
+                uniformsDirty = true;
+            },
+            .set_zoom => |zoomRecord| {
+                zoom = zoomRecord.zoom;
+                uniformsDirty = true;
+            },
+            .draw_colored => |batch| {
+                if (batch.pipeline != .pressure_mask) continue;
+                if (uniformsDirty) {
+                    const uniforms = ViewportUniforms{ .viewport_size = .{ viewportWidth / zoom, viewportHeight / zoom } };
+                    c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(ViewportUniforms));
+                    uniformsDirty = false;
+                }
+
+                const binding = c.SDL_GPUBufferBinding{
+                    .buffer = g.color_gpu_buffer,
+                    .offset = batch.vertex_offset * @sizeOf(ColorVertex),
+                };
+                c.SDL_BindGPUVertexBuffers(renderPass, 0, &binding, 1);
+                c.SDL_DrawGPUPrimitives(renderPass, batch.vertex_count, 1, 0, 0);
+            },
+            else => {},
+        }
+    }
 }
 
 fn renderSelectionOverlay(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SDL_GPUTexture) void {
@@ -1504,6 +1656,49 @@ fn compositeSelectionOutline(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_
 
     c.SDL_DrawGPUPrimitives(render_pass, 6, 1, 0, 0);
     c.SDL_EndGPURenderPass(render_pass);
+}
+
+fn applyPressureDistortion(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, inputTexture: *c.SDL_GPUTexture, outputTexture: *c.SDL_GPUTexture) void {
+    const colorTarget = c.SDL_GPUColorTargetInfo{
+        .texture = outputTexture,
+        .mip_level = 0,
+        .layer_or_depth_plane = 0,
+        .clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 1 },
+        .load_op = c.SDL_GPU_LOADOP_DONT_CARE,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+        .resolve_texture = null,
+        .resolve_mip_level = 0,
+        .resolve_layer = 0,
+        .cycle = false,
+        .cycle_resolve_texture = false,
+        .padding1 = 0,
+        .padding2 = 0,
+    };
+    const renderPass = c.SDL_BeginGPURenderPass(cmd, &colorTarget, 1, null) orelse {
+        std.log.warn("applyPressureDistortion: failed to begin render pass", .{});
+        return;
+    };
+    defer c.SDL_EndGPURenderPass(renderPass);
+
+    c.SDL_BindGPUGraphicsPipeline(renderPass, g.pressure_distortion_pipeline);
+    const quadBinding = c.SDL_GPUBufferBinding{
+        .buffer = g.fullscreen_quad_buffer,
+        .offset = 0,
+    };
+    c.SDL_BindGPUVertexBuffers(renderPass, 0, &quadBinding, 1);
+
+    const samplerBindings = [2]c.SDL_GPUTextureSamplerBinding{
+        .{ .texture = inputTexture, .sampler = g.crt_sampler },
+        .{ .texture = g.pressure_mask_texture, .sampler = g.crt_sampler },
+    };
+    c.SDL_BindGPUFragmentSamplers(renderPass, 0, &samplerBindings, 2);
+
+    const uniforms = PressureDistortionUniforms{
+        .resolution = .{ g.swapchain_w, g.swapchain_h },
+        .maximum_displacement_pixels = PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS,
+    };
+    c.SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, @sizeOf(PressureDistortionUniforms));
+    c.SDL_DrawGPUPrimitives(renderPass, 6, 1, 0, 0);
 }
 
 fn applyCrtEffect(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, input_texture: *c.SDL_GPUTexture, output_texture: *c.SDL_GPUTexture) void {
@@ -2067,6 +2262,49 @@ pub fn renderFillQuad(points: [4][2]f32) !void {
         };
     }
     g.color_vertex_count += 6;
+}
+
+fn pressureMaskByte(value: f32) u8 {
+    return @intFromFloat(@round(std.math.clamp(value, 0, 1) * 255));
+}
+
+pub fn renderPressureSoftCircle(center: [2]f32, radius: f32, direction: [2]f32, displacementPixels: f32) !void {
+    const g = getGpu();
+    ensureColorPipeline(g, .pressure_mask);
+
+    const vertexCount: u32 = PRESSURE_SOFT_CIRCLE_SEGMENTS * 3;
+    growColorVertexCapacity(g, g.color_vertex_count + vertexCount) catch |err| {
+        std.log.warn("renderPressureSoftCircle: failed to grow color vertex buffer: {}", .{err});
+        return;
+    };
+
+    const intensity = displacementPixels / PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS;
+    const centerColor = PackedColor{
+        .r = pressureMaskByte(@max(direction[0], 0) * intensity),
+        .g = pressureMaskByte(@max(-direction[0], 0) * intensity),
+        .b = pressureMaskByte(@max(direction[1], 0) * intensity),
+        .a = pressureMaskByte(@max(-direction[1], 0) * intensity),
+    };
+    const outerColor = PackedColor{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    const segmentCount: f32 = @floatFromInt(PRESSURE_SOFT_CIRCLE_SEGMENTS);
+    var segment: usize = 0;
+    while (segment < PRESSURE_SOFT_CIRCLE_SEGMENTS) : (segment += 1) {
+        const startAngle = @as(f32, @floatFromInt(segment)) / segmentCount * std.math.tau;
+        const endAngle = @as(f32, @floatFromInt(segment + 1)) / segmentCount * std.math.tau;
+        const vertexIndex = g.color_vertex_count;
+        g.color_vertices[vertexIndex] = .{ .x = center[0], .y = center[1], .color = centerColor };
+        g.color_vertices[vertexIndex + 1] = .{
+            .x = center[0] + @cos(startAngle) * radius,
+            .y = center[1] + @sin(startAngle) * radius,
+            .color = outerColor,
+        };
+        g.color_vertices[vertexIndex + 2] = .{
+            .x = center[0] + @cos(endAngle) * radius,
+            .y = center[1] + @sin(endAngle) * radius,
+            .color = outerColor,
+        };
+        g.color_vertex_count += 3;
+    }
 }
 
 pub fn renderDrawRect(rect: sdl.Rect) !void {
