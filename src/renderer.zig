@@ -26,6 +26,7 @@ const weapon = @import("weapon.zig");
 const background_paint = @import("background_paint.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
 const explosion_visual = @import("explosion_visual.zig");
+const hot_rim_visual = @import("hot_rim_visual.zig");
 const visual_particle = @import("visual_particle.zig");
 
 const RendererError = error{RendererUninitialized};
@@ -84,6 +85,7 @@ fn renderCamera(cameraId: usize) !void {
     try player.drawAllWeaponsBehind();
     try player.drawAllLeftHandsBehind();
     try entity.drawAll();
+    try hot_rim_visual.draw();
     try player.drawAllWeaponsFront();
     try player.drawAllLeftHandsFront();
     try particle.drawAll();

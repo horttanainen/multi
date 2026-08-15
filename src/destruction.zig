@@ -4,6 +4,7 @@ const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const damage = @import("damage.zig");
 const entity = @import("entity.zig");
+const hot_rim_visual = @import("hot_rim_visual.zig");
 const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
 const rubble = @import("rubble.zig");
@@ -193,7 +194,8 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
     };
     const state = box2d.getState(bodyId);
     const radius = @max(surfaceCutout.minimumRadius, event.radius * surfaceCutout.radiusScale);
-    const cutoutEdit = sprite.removeFracturedCutoutFromSurface(
+    const hotRimWidth = if (event.cutoutHotRimDurationMs > 0) event.cutoutHotRimWidth else 0;
+    const cutoutResult = sprite.removeFracturedCutoutFromSurface(
         firstSprite,
         event.position,
         radius,
@@ -203,10 +205,20 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
         event.cutoutIrregularity,
         event.cutoutCharWidth,
         event.cutoutCharStrength,
+        hotRimWidth,
     );
-    if (cutoutEdit == null) return;
+    if (cutoutResult == null) return;
+    const result = cutoutResult.?;
 
-    try queueSurfaceEdit(bodyId, ent.spriteUuids[0], cutoutEdit.?);
+    if (result.hotRimQuads != null) {
+        const quads = result.hotRimQuads.?;
+        hot_rim_visual.capture(bodyId, quads, event.cutoutHotRimDurationMs) catch |err| {
+            std.log.warn("destruction.cutSurface: could not capture hot-rim visual: {}", .{err});
+            allocator.free(quads);
+        };
+    }
+
+    try queueSurfaceEdit(bodyId, ent.spriteUuids[0], result.edit);
 }
 
 pub fn apply(bodyId: box2d.c.b2BodyId, event: damage.Event) !void {

@@ -22,6 +22,8 @@ pub const Event = struct {
     cutoutIrregularity: f32 = 0,
     cutoutCharWidth: f32 = 0,
     cutoutCharStrength: f32 = 0,
+    cutoutHotRimWidth: f32 = 0,
+    cutoutHotRimDurationMs: u32 = 0,
     cutoutSeed: u64 = 0,
     attackerId: ?usize = null,
 };

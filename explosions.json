@@ -10,7 +10,9 @@
         "pressureRadius": 5.0,
         "cutoutIrregularity": 0.16,
         "cutoutCharWidth": 0.16,
-        "cutoutCharStrength": 0.82
+        "cutoutCharStrength": 0.82,
+        "cutoutHotRimWidth": 0.08,
+        "cutoutHotRimDurationMs": 900
     },
     {
         "key": "pellet_impact",
@@ -20,6 +22,8 @@
         "cutoutIrregularity": 0.1,
         "cutoutCharWidth": 0.04,
         "cutoutCharStrength": 0.62,
+        "cutoutHotRimWidth": 0.04,
+        "cutoutHotRimDurationMs": 250,
         "damagePlayers": false
     },
     {
@@ -31,6 +35,8 @@
         "cutoutIrregularity": 0.14,
         "cutoutCharWidth": 0.08,
         "cutoutCharStrength": 0.72,
+        "cutoutHotRimWidth": 0.05,
+        "cutoutHotRimDurationMs": 500,
         "damagePlayers": false
     }
 ]

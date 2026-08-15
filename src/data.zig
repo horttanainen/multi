@@ -44,6 +44,8 @@ pub const ExplosionData = struct {
     cutoutIrregularity: f32,
     cutoutCharWidth: f32,
     cutoutCharStrength: f32,
+    cutoutHotRimWidth: f32,
+    cutoutHotRimDurationMs: u32,
     damagePlayers: bool,
 };
 
@@ -466,6 +468,8 @@ fn initExplosions() !void {
         cutoutIrregularity: f32 = 0.16,
         cutoutCharWidth: f32 = 0.12,
         cutoutCharStrength: f32 = 0.75,
+        cutoutHotRimWidth: f32 = 0.06,
+        cutoutHotRimDurationMs: u32 = 600,
         damagePlayers: bool = true,
     };
 
@@ -491,6 +495,10 @@ fn initExplosions() !void {
             entry.cutoutCharStrength < 0 or entry.cutoutCharStrength > 1)
         {
             std.log.err("initExplosions: explosion '{s}' has invalid cutout charring", .{entry.key});
+            continue;
+        }
+        if (!std.math.isFinite(entry.cutoutHotRimWidth) or entry.cutoutHotRimWidth < 0) {
+            std.log.err("initExplosions: explosion '{s}' has invalid hot-rim width", .{entry.key});
             continue;
         }
 
@@ -521,6 +529,8 @@ fn initExplosions() !void {
             .cutoutIrregularity = entry.cutoutIrregularity,
             .cutoutCharWidth = entry.cutoutCharWidth,
             .cutoutCharStrength = entry.cutoutCharStrength,
+            .cutoutHotRimWidth = entry.cutoutHotRimWidth,
+            .cutoutHotRimDurationMs = entry.cutoutHotRimDurationMs,
             .damagePlayers = entry.damagePlayers,
         }) catch {
             allocator.free(key);
@@ -793,6 +803,8 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
         .cutoutIrregularity = d.cutoutIrregularity,
         .cutoutCharWidth = d.cutoutCharWidth,
         .cutoutCharStrength = d.cutoutCharStrength,
+        .cutoutHotRimWidth = d.cutoutHotRimWidth,
+        .cutoutHotRimDurationMs = d.cutoutHotRimDurationMs,
         .cutoutSeedSalt = std.hash.Wyhash.hash(0, key),
         .damagePlayers = d.damagePlayers,
     };

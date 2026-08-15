@@ -2046,6 +2046,29 @@ pub fn renderFillRect(rect: sdl.Rect) !void {
     g.color_vertex_count += 6;
 }
 
+pub fn renderFillQuad(points: [4][2]f32) !void {
+    const g = getGpu();
+    ensureColorPipeline(g, .colored_triangles);
+
+    growColorVertexCapacity(g, g.color_vertex_count + 6) catch |err| {
+        std.log.warn("renderFillQuad: failed to grow color vertex buffer: {}", .{err});
+        return;
+    };
+
+    const dc = g.draw_color;
+    const color = PackedColor{ .r = dc.r, .g = dc.g, .b = dc.b, .a = dc.a };
+    const indices = [6]usize{ 0, 1, 2, 0, 2, 3 };
+    const start = g.color_vertex_count;
+    for (indices, 0..) |pointIndex, vertexIndex| {
+        g.color_vertices[start + vertexIndex] = .{
+            .x = points[pointIndex][0],
+            .y = points[pointIndex][1],
+            .color = color,
+        };
+    }
+    g.color_vertex_count += 6;
+}
+
 pub fn renderDrawRect(rect: sdl.Rect) !void {
     const x0 = rect.x;
     const y0 = rect.y;

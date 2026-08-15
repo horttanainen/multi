@@ -29,6 +29,15 @@ pub const SurfaceCutoutEdit = struct {
     colliderDirtyRect: ?vec.IRect,
 };
 
+pub const SurfaceHotRimQuad = struct {
+    corners: [4]vec.Vec2,
+};
+
+pub const SurfaceCutoutResult = struct {
+    edit: SurfaceCutoutEdit,
+    hotRimQuads: ?[]SurfaceHotRimQuad,
+};
+
 pub const Sprite = struct {
     texture: *tex.Texture,
     surface: *sdl.Surface,
@@ -110,6 +119,7 @@ const maximumFractureVertexCount: usize = 16;
 const fractureFacetLengthPixels: f32 = 42;
 const maximumFractureAngleJitter: f32 = 0.28;
 const maximumCharWidthScale: f32 = 4.4;
+const hotRimMinimumSurfaceAlpha: u8 = 150;
 pub const maximumCutoutIrregularity: f32 = 0.35;
 
 // Texture cache: maps image path → atlas region + dimensions.
@@ -895,6 +905,21 @@ fn worldToSpritePixel(s: Sprite, centerWorld: vec.Vec2, entityPos: vec.Vec2, rot
     };
 }
 
+fn spritePixelToWorld(s: Sprite, pixel: vec.Vec2, entityPos: vec.Vec2, rotation: f32, width: i32, height: i32) vec.Vec2 {
+    const widthFloat: f32 = @floatFromInt(width);
+    const heightFloat: f32 = @floatFromInt(height);
+    const localMeters = vec.Vec2{
+        .x = (pixel.x - widthFloat / 2.0) * s.scale.x / conv.met2pix,
+        .y = (pixel.y - heightFloat / 2.0) * s.scale.y / conv.met2pix,
+    };
+    const cosA = @cos(rotation);
+    const sinA = @sin(rotation);
+    return .{
+        .x = entityPos.x + localMeters.x * cosA - localMeters.y * sinA,
+        .y = entityPos.y + localMeters.x * sinA + localMeters.y * cosA,
+    };
+}
+
 fn worldDirectionToSpritePixelDirection(directionWorld: vec.Vec2, rotation: f32, scale: vec.Vec2) vec.Vec2 {
     const cosA = @cos(-rotation);
     const sinA = @sin(-rotation);
@@ -1376,6 +1401,127 @@ fn applyFracturedSurfacePixels(
     };
 }
 
+fn hotRimPixel(
+    pixels: [*]u8,
+    pitch: usize,
+    x: i32,
+    y: i32,
+    centerXFixed: i32,
+    centerYFixed: i32,
+    cutout: *const FracturedCutout,
+    scale: vec.Vec2,
+    widthPixels: f32,
+) bool {
+    const bytesPerPixel: usize = 4;
+    const pixelIndex = @as(usize, @intCast(y)) * pitch + @as(usize, @intCast(x)) * bytesPerPixel;
+    if (pixels[pixelIndex + 3] < hotRimMinimumSurfaceAlpha) return false;
+
+    const point = CutoutVertex{
+        .x = x * cutoutFixedPointScale - centerXFixed,
+        .y = y * cutoutFixedPointScale - centerYFixed,
+    };
+    if (pointInsideFracturedCutout(point, cutout)) return false;
+    return distanceToFracturedCutout(point, cutout, scale) < widthPixels;
+}
+
+fn hotRimQuadForRun(
+    s: Sprite,
+    startX: i32,
+    endX: i32,
+    y: i32,
+    entityPos: vec.Vec2,
+    rotation: f32,
+    width: i32,
+    height: i32,
+) SurfaceHotRimQuad {
+    const startFloat: f32 = @floatFromInt(startX);
+    const endFloat: f32 = @floatFromInt(endX);
+    const yFloat: f32 = @floatFromInt(y);
+    return .{ .corners = .{
+        spritePixelToWorld(s, .{ .x = startFloat, .y = yFloat }, entityPos, rotation, width, height),
+        spritePixelToWorld(s, .{ .x = endFloat, .y = yFloat }, entityPos, rotation, width, height),
+        spritePixelToWorld(s, .{ .x = endFloat, .y = yFloat + 1 }, entityPos, rotation, width, height),
+        spritePixelToWorld(s, .{ .x = startFloat, .y = yFloat + 1 }, entityPos, rotation, width, height),
+    } };
+}
+
+fn buildHotRimQuads(
+    s: Sprite,
+    pixels: [*]u8,
+    pitch: usize,
+    width: i32,
+    height: i32,
+    centerXFixed: i32,
+    centerYFixed: i32,
+    cutout: *const FracturedCutout,
+    entityPos: vec.Vec2,
+    rotation: f32,
+    hotRimWidthWorld: f32,
+) !?[]SurfaceHotRimQuad {
+    if (hotRimWidthWorld <= 0) return null;
+
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    var minimumOffsetX = vertices[0].x;
+    var maximumOffsetX = vertices[0].x;
+    var minimumOffsetY = vertices[0].y;
+    var maximumOffsetY = vertices[0].y;
+    for (vertices[1..]) |vertex| {
+        minimumOffsetX = @min(minimumOffsetX, vertex.x);
+        maximumOffsetX = @max(maximumOffsetX, vertex.x);
+        minimumOffsetY = @min(minimumOffsetY, vertex.y);
+        maximumOffsetY = @max(maximumOffsetY, vertex.y);
+    }
+
+    const widthPixels = hotRimWidthWorld * conv.met2pix;
+    const expansionX: i32 = @intFromFloat(@ceil(widthPixels / s.scale.x));
+    const expansionY: i32 = @intFromFloat(@ceil(widthPixels / s.scale.y));
+    const rawMinimumX = floorCutoutFixed(centerXFixed + minimumOffsetX) - expansionX;
+    const rawMaximumX = ceilCutoutFixed(centerXFixed + maximumOffsetX) + expansionX;
+    const rawMinimumY = floorCutoutFixed(centerYFixed + minimumOffsetY) - expansionY;
+    const rawMaximumY = ceilCutoutFixed(centerYFixed + maximumOffsetY) + expansionY;
+    if (rawMaximumX < 0 or rawMinimumX >= width or rawMaximumY < 0 or rawMinimumY >= height) return null;
+
+    const minimumX = @max(0, rawMinimumX);
+    const maximumX = @min(width - 1, rawMaximumX);
+    const minimumY = @max(0, rawMinimumY);
+    const maximumY = @min(height - 1, rawMaximumY);
+    var quads = std.array_list.Managed(SurfaceHotRimQuad).init(allocator);
+    errdefer quads.deinit();
+
+    var y = minimumY;
+    while (y <= maximumY) : (y += 1) {
+        var runStart: i32 = -1;
+        var x = minimumX;
+        while (x <= maximumX + 1) : (x += 1) {
+            const belongsToRim = x <= maximumX and hotRimPixel(
+                pixels,
+                pitch,
+                x,
+                y,
+                centerXFixed,
+                centerYFixed,
+                cutout,
+                s.scale,
+                widthPixels,
+            );
+            if (belongsToRim) {
+                if (runStart < 0) runStart = x;
+                continue;
+            }
+            if (runStart < 0) continue;
+
+            try quads.append(hotRimQuadForRun(s, runStart, x, y, entityPos, rotation, width, height));
+            runStart = -1;
+        }
+    }
+
+    if (quads.items.len == 0) {
+        quads.deinit();
+        return null;
+    }
+    return try quads.toOwnedSlice();
+}
+
 pub fn removeFracturedCutoutFromSurface(
     s: Sprite,
     centerWorld: vec.Vec2,
@@ -1386,7 +1532,8 @@ pub fn removeFracturedCutoutFromSurface(
     irregularity: f32,
     charWidthWorld: f32,
     charStrength: f32,
-) ?SurfaceCutoutEdit {
+    hotRimWidthWorld: f32,
+) ?SurfaceCutoutResult {
     const radiusPixels = radiusWorld * conv.met2pix;
     const centerPixel = worldToSpritePixel(s, centerWorld, entityPos, rotation, @intCast(s.surface.w), @intCast(s.surface.h));
     const centerXFixed: i32 = @intFromFloat(@round(centerPixel.x * cutoutFixedPointScale));
@@ -1398,7 +1545,7 @@ pub fn removeFracturedCutoutFromSurface(
     const pixels: [*]u8 = @ptrCast(s.surface.pixels);
     const pitch: usize = @intCast(s.surface.pitch);
     const charSeed = hash64(seed ^ @as(u64, @bitCast(time.realNow())));
-    return applyFracturedSurfacePixels(
+    const edit = applyFracturedSurfacePixels(
         pixels,
         pitch,
         width,
@@ -1410,7 +1557,24 @@ pub fn removeFracturedCutoutFromSurface(
         charWidthWorld,
         charStrength,
         charSeed,
-    );
+    ) orelse return null;
+    const hotRimQuads = buildHotRimQuads(
+        s,
+        pixels,
+        pitch,
+        width,
+        height,
+        centerXFixed,
+        centerYFixed,
+        &cutout,
+        entityPos,
+        rotation,
+        hotRimWidthWorld,
+    ) catch |err| {
+        std.log.warn("removeFracturedCutoutFromSurface: could not capture hot-rim geometry: {}", .{err});
+        return .{ .edit = edit, .hotRimQuads = null };
+    };
+    return .{ .edit = edit, .hotRimQuads = hotRimQuads };
 }
 
 pub fn colorCircleOnSurface(spriteUuid: u64, centerWorld: vec.Vec2, radiusWorld: f32, entityPos: vec.Vec2, rotation: f32, color: Color) !void {

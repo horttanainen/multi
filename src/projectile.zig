@@ -27,6 +27,8 @@ pub const Explosion = struct {
     cutoutIrregularity: f32,
     cutoutCharWidth: f32,
     cutoutCharStrength: f32,
+    cutoutHotRimWidth: f32,
+    cutoutHotRimDurationMs: u32,
     cutoutSeedSalt: u64,
     damagePlayers: bool = true,
 };
@@ -219,6 +221,8 @@ fn damageEntitiesInExplosion(
             .cutoutIrregularity = explosion.cutoutIrregularity,
             .cutoutCharWidth = explosion.cutoutCharWidth,
             .cutoutCharStrength = explosion.cutoutCharStrength,
+            .cutoutHotRimWidth = explosion.cutoutHotRimWidth,
+            .cutoutHotRimDurationMs = explosion.cutoutHotRimDurationMs,
             .cutoutSeed = cutoutSeed,
             .attackerId = attackerId,
         });
