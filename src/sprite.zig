@@ -24,6 +24,11 @@ pub const Color = struct {
     b: u8,
 };
 
+pub const SurfaceCutoutEdit = struct {
+    textureDirtyRect: vec.IRect,
+    colliderDirtyRect: ?vec.IRect,
+};
+
 pub const Sprite = struct {
     texture: *tex.Texture,
     surface: *sdl.Surface,
@@ -104,6 +109,7 @@ const minimumFractureVertexCount: usize = 9;
 const maximumFractureVertexCount: usize = 16;
 const fractureFacetLengthPixels: f32 = 42;
 const maximumFractureAngleJitter: f32 = 0.28;
+const maximumCharWidthScale: f32 = 4.4;
 pub const maximumCutoutIrregularity: f32 = 0.35;
 
 // Texture cache: maps image path → atlas region + dimensions.
@@ -1184,7 +1190,103 @@ fn ceilCutoutFixed(value: i32) i32 {
     return -@divFloor(-value, cutoutFixedPointScale);
 }
 
-fn removeFracturedCutoutPixels(
+fn includeCutoutEditPixel(edit: *CutoutEdit, x: i32, y: i32) void {
+    edit.changed = true;
+    edit.minimumX = @min(edit.minimumX, x);
+    edit.minimumY = @min(edit.minimumY, y);
+    edit.maximumX = @max(edit.maximumX, x + 1);
+    edit.maximumY = @max(edit.maximumY, y + 1);
+}
+
+fn cutoutEditRect(edit: CutoutEdit) vec.IRect {
+    return .{
+        .minX = edit.minimumX,
+        .minY = edit.minimumY,
+        .maxX = edit.maximumX,
+        .maxY = edit.maximumY,
+    };
+}
+
+fn cutoutPointInWorldPixels(point: CutoutVertex, scale: vec.Vec2) vec.Vec2 {
+    const fixedPointScale: f32 = @floatFromInt(cutoutFixedPointScale);
+    return .{
+        .x = @as(f32, @floatFromInt(point.x)) / fixedPointScale * scale.x,
+        .y = @as(f32, @floatFromInt(point.y)) / fixedPointScale * scale.y,
+    };
+}
+
+fn distanceSquaredToCutoutSegment(point: vec.Vec2, start: vec.Vec2, end: vec.Vec2) f32 {
+    const segment = vec.subtract(end, start);
+    const pointOffset = vec.subtract(point, start);
+    const lengthSquared = vec.dot(segment, segment);
+    if (lengthSquared <= 0.001) return vec.dot(pointOffset, pointOffset);
+
+    const projection = std.math.clamp(vec.dot(pointOffset, segment) / lengthSquared, 0, 1);
+    const closest = vec.add(start, vec.mul(segment, projection));
+    const distance = vec.subtract(point, closest);
+    return vec.dot(distance, distance);
+}
+
+fn distanceToFracturedCutout(point: CutoutVertex, cutout: *const FracturedCutout, scale: vec.Vec2) f32 {
+    const pointPixels = cutoutPointInWorldPixels(point, scale);
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    var minimumDistanceSquared = std.math.inf(f32);
+    var previousVertex = cutoutPointInWorldPixels(vertices[vertices.len - 1], scale);
+    for (vertices) |vertex| {
+        const currentVertex = cutoutPointInWorldPixels(vertex, scale);
+        minimumDistanceSquared = @min(minimumDistanceSquared, distanceSquaredToCutoutSegment(pointPixels, previousVertex, currentVertex));
+        previousVertex = currentVertex;
+    }
+    return @sqrt(minimumDistanceSquared);
+}
+
+fn charWidthAtPoint(
+    point: CutoutVertex,
+    cutout: *const FracturedCutout,
+    scale: vec.Vec2,
+    baseWidth: f32,
+    seed: u64,
+    x: i32,
+    y: i32,
+) f32 {
+    const pointPixels = cutoutPointInWorldPixels(point, scale);
+    var angle = std.math.atan2(pointPixels.y, pointPixels.x);
+    if (angle < 0) angle += std.math.tau;
+
+    const sectorCount = cutout.vertexCount * 2;
+    const sectorCountFloat: f32 = @floatFromInt(sectorCount);
+    const phase = randomUnitFromSeed(seed, 0xa4093822299f31d0) * std.math.tau;
+    const sectorCoordinate = @mod(angle + phase, std.math.tau) / std.math.tau * sectorCountFloat;
+    const sectorIndex: usize = @intFromFloat(@floor(sectorCoordinate));
+    const sectorPosition = sectorCoordinate - @floor(sectorCoordinate);
+    const triangle = 1.0 - @abs(sectorPosition * 2.0 - 1.0);
+    const triangleSquared = triangle * triangle;
+    const spikeShape = triangleSquared * triangleSquared;
+    const spikeRoll = randomUnitFromSeed(seed, 0x082efa98ec4e6c89 ^ @as(u64, @intCast(sectorIndex)));
+    const spikeAmplitude = spikeRoll * spikeRoll * spikeRoll;
+    const spikeScale = 0.32 + spikeShape * (0.55 + spikeAmplitude * 3.0);
+    const edgeBreakup = 0.88 + pixelNoise(seed, x, y, 0x452821e638d01377) * 0.24;
+    return baseWidth * spikeScale * edgeBreakup;
+}
+
+fn darkenCharredPixel(pixels: [*]u8, pixelIndex: usize, intensity: f32) bool {
+    const clampedIntensity = std.math.clamp(intensity, 0, 0.95);
+    const remaining = 1.0 - clampedIntensity;
+    const oldB = pixels[pixelIndex + 0];
+    const oldG = pixels[pixelIndex + 1];
+    const oldR = pixels[pixelIndex + 2];
+    const newB = clampByte(@as(f32, @floatFromInt(oldB)) * remaining * (1.0 - clampedIntensity * 0.18));
+    const newG = clampByte(@as(f32, @floatFromInt(oldG)) * remaining * (1.0 - clampedIntensity * 0.1));
+    const newR = clampByte(@as(f32, @floatFromInt(oldR)) * remaining);
+    if (newB == oldB and newG == oldG and newR == oldR) return false;
+
+    pixels[pixelIndex + 0] = newB;
+    pixels[pixelIndex + 1] = newG;
+    pixels[pixelIndex + 2] = newR;
+    return true;
+}
+
+fn applyFracturedSurfacePixels(
     pixels: [*]u8,
     pitch: usize,
     width: i32,
@@ -1192,7 +1294,11 @@ fn removeFracturedCutoutPixels(
     centerXFixed: i32,
     centerYFixed: i32,
     cutout: *const FracturedCutout,
-) ?vec.IRect {
+    scale: vec.Vec2,
+    charWidthWorld: f32,
+    charStrength: f32,
+    charSeed: u64,
+) ?SurfaceCutoutEdit {
     const vertices = cutout.vertices[0..cutout.vertexCount];
     var minimumOffsetX = vertices[0].x;
     var maximumOffsetX = vertices[0].x;
@@ -1205,10 +1311,23 @@ fn removeFracturedCutoutPixels(
         maximumOffsetY = @max(maximumOffsetY, vertex.y);
     }
 
-    const rawMinimumX = floorCutoutFixed(centerXFixed + minimumOffsetX);
-    const rawMaximumX = ceilCutoutFixed(centerXFixed + maximumOffsetX);
-    const rawMinimumY = floorCutoutFixed(centerYFixed + minimumOffsetY);
-    const rawMaximumY = ceilCutoutFixed(centerYFixed + maximumOffsetY);
+    const charWidthPixels = charWidthWorld * conv.met2pix;
+    const shouldChar = charWidthPixels > 0 and charStrength > 0;
+    const widthFloat: f32 = @floatFromInt(width);
+    const heightFloat: f32 = @floatFromInt(height);
+    const charExpansionX: i32 = if (shouldChar)
+        @intFromFloat(@ceil(@min(charWidthPixels * maximumCharWidthScale / scale.x, widthFloat)))
+    else
+        0;
+    const charExpansionY: i32 = if (shouldChar)
+        @intFromFloat(@ceil(@min(charWidthPixels * maximumCharWidthScale / scale.y, heightFloat)))
+    else
+        0;
+
+    const rawMinimumX = floorCutoutFixed(centerXFixed + minimumOffsetX) - charExpansionX;
+    const rawMaximumX = ceilCutoutFixed(centerXFixed + maximumOffsetX) + charExpansionX;
+    const rawMinimumY = floorCutoutFixed(centerYFixed + minimumOffsetY) - charExpansionY;
+    const rawMaximumY = ceilCutoutFixed(centerYFixed + maximumOffsetY) + charExpansionY;
     if (rawMaximumX < 0 or rawMinimumX >= width or rawMaximumY < 0 or rawMinimumY >= height) return null;
 
     const minimumX = @max(0, rawMinimumX);
@@ -1216,7 +1335,8 @@ fn removeFracturedCutoutPixels(
     const minimumY = @max(0, rawMinimumY);
     const maximumY = @min(height - 1, rawMaximumY);
     const bytesPerPixel: usize = 4;
-    var edit = CutoutEdit{ .minimumX = width, .minimumY = height };
+    var textureEdit = CutoutEdit{ .minimumX = width, .minimumY = height };
+    var colliderEdit = CutoutEdit{ .minimumX = width, .minimumY = height };
     var y = minimumY;
     while (y <= maximumY) : (y += 1) {
         var x = minimumX;
@@ -1225,26 +1345,34 @@ fn removeFracturedCutoutPixels(
                 .x = x * cutoutFixedPointScale - centerXFixed,
                 .y = y * cutoutFixedPointScale - centerYFixed,
             };
-            if (!pointInsideFracturedCutout(point, cutout)) continue;
-
             const pixelIndex = @as(usize, @intCast(y)) * pitch + @as(usize, @intCast(x)) * bytesPerPixel;
-            if (pixels[pixelIndex + 3] == 0) continue;
+            if (pointInsideFracturedCutout(point, cutout)) {
+                if (pixels[pixelIndex + 3] == 0) continue;
 
-            pixels[pixelIndex + 3] = 0;
-            edit.changed = true;
-            edit.minimumX = @min(edit.minimumX, x);
-            edit.minimumY = @min(edit.minimumY, y);
-            edit.maximumX = @max(edit.maximumX, x + 1);
-            edit.maximumY = @max(edit.maximumY, y + 1);
+                pixels[pixelIndex + 3] = 0;
+                includeCutoutEditPixel(&textureEdit, x, y);
+                includeCutoutEditPixel(&colliderEdit, x, y);
+                continue;
+            }
+
+            if (!shouldChar or pixels[pixelIndex + 3] == 0) continue;
+
+            const distance = distanceToFracturedCutout(point, cutout, scale);
+            const noisyWidth = charWidthAtPoint(point, cutout, scale, charWidthPixels, charSeed, x, y);
+            if (distance >= noisyWidth) continue;
+
+            const distanceFalloff = 1.0 - distance / noisyWidth;
+            const strengthNoise = pixelNoise(charSeed, x, y, 0x13198a2e03707344);
+            const intensity = charStrength * @sqrt(distanceFalloff) * (0.82 + strengthNoise * 0.28);
+            if (!darkenCharredPixel(pixels, pixelIndex, intensity)) continue;
+            includeCutoutEditPixel(&textureEdit, x, y);
         }
     }
 
-    if (!edit.changed) return null;
+    if (!textureEdit.changed) return null;
     return .{
-        .minX = edit.minimumX,
-        .minY = edit.minimumY,
-        .maxX = edit.maximumX,
-        .maxY = edit.maximumY,
+        .textureDirtyRect = cutoutEditRect(textureEdit),
+        .colliderDirtyRect = if (colliderEdit.changed) cutoutEditRect(colliderEdit) else null,
     };
 }
 
@@ -1256,7 +1384,9 @@ pub fn removeFracturedCutoutFromSurface(
     rotation: f32,
     seed: u64,
     irregularity: f32,
-) ?vec.IRect {
+    charWidthWorld: f32,
+    charStrength: f32,
+) ?SurfaceCutoutEdit {
     const radiusPixels = radiusWorld * conv.met2pix;
     const centerPixel = worldToSpritePixel(s, centerWorld, entityPos, rotation, @intCast(s.surface.w), @intCast(s.surface.h));
     const centerXFixed: i32 = @intFromFloat(@round(centerPixel.x * cutoutFixedPointScale));
@@ -1267,7 +1397,8 @@ pub fn removeFracturedCutoutFromSurface(
     const height: i32 = s.surface.h;
     const pixels: [*]u8 = @ptrCast(s.surface.pixels);
     const pitch: usize = @intCast(s.surface.pitch);
-    return removeFracturedCutoutPixels(
+    const charSeed = hash64(seed ^ @as(u64, @bitCast(time.realNow())));
+    return applyFracturedSurfacePixels(
         pixels,
         pitch,
         width,
@@ -1275,6 +1406,10 @@ pub fn removeFracturedCutoutFromSurface(
         centerXFixed,
         centerYFixed,
         &cutout,
+        s.scale,
+        charWidthWorld,
+        charStrength,
+        charSeed,
     );
 }
 

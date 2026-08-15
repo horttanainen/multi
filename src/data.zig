@@ -42,6 +42,8 @@ pub const ExplosionData = struct {
     blastRadius: f32,
     pressureRadius: f32,
     cutoutIrregularity: f32,
+    cutoutCharWidth: f32,
+    cutoutCharStrength: f32,
     damagePlayers: bool,
 };
 
@@ -462,6 +464,8 @@ fn initExplosions() !void {
         blastRadius: f32 = 2.0,
         pressureRadius: ?f32 = null,
         cutoutIrregularity: f32 = 0.16,
+        cutoutCharWidth: f32 = 0.12,
+        cutoutCharStrength: f32 = 0.75,
         damagePlayers: bool = true,
     };
 
@@ -480,6 +484,13 @@ fn initExplosions() !void {
                 "initExplosions: explosion '{s}' has invalid cutout irregularity {d}; expected 0 to {d}",
                 .{ entry.key, entry.cutoutIrregularity, sprite.maximumCutoutIrregularity },
             );
+            continue;
+        }
+        if (!std.math.isFinite(entry.cutoutCharWidth) or entry.cutoutCharWidth < 0 or
+            !std.math.isFinite(entry.cutoutCharStrength) or
+            entry.cutoutCharStrength < 0 or entry.cutoutCharStrength > 1)
+        {
+            std.log.err("initExplosions: explosion '{s}' has invalid cutout charring", .{entry.key});
             continue;
         }
 
@@ -508,6 +519,8 @@ fn initExplosions() !void {
             .blastRadius = entry.blastRadius,
             .pressureRadius = entry.pressureRadius orelse entry.blastRadius,
             .cutoutIrregularity = entry.cutoutIrregularity,
+            .cutoutCharWidth = entry.cutoutCharWidth,
+            .cutoutCharStrength = entry.cutoutCharStrength,
             .damagePlayers = entry.damagePlayers,
         }) catch {
             allocator.free(key);
@@ -778,6 +791,8 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
         .blastRadius = d.blastRadius,
         .pressureRadius = d.pressureRadius,
         .cutoutIrregularity = d.cutoutIrregularity,
+        .cutoutCharWidth = d.cutoutCharWidth,
+        .cutoutCharStrength = d.cutoutCharStrength,
         .cutoutSeedSalt = std.hash.Wyhash.hash(0, key),
         .damagePlayers = d.damagePlayers,
     };

@@ -82,7 +82,6 @@ const Sprite = entity.Sprite;
 //TODO: gravestone should be in the "shadow background" but still react stuff like explosions
 //TODO: add exploding oil barrels to the level
 //TODO: investigate using wall-aware explosion pressure, material resistance, and deterministic noise to erode exposed terrain into irregular craters
-//TODO: explosions should char the hole and terrain surface around them
 //TODO: investigate a time or pixel budget for surface updates that keeps visual and collider changes synchronized
 //TODO: add bones sticking out of giblets
 //TODO: make settings.zig use data.zig to read the json

@@ -12,7 +12,8 @@ const vec = @import("vector.zig");
 
 const SurfaceEdit = struct {
     spriteUuid: u64,
-    dirtyRect: vec.IRect,
+    textureDirtyRect: vec.IRect,
+    colliderDirtyRect: ?vec.IRect,
 };
 
 const surfaceTextureUpdatesPerFrame: usize = 2;
@@ -30,18 +31,29 @@ pub fn pendingSurfaceColliderUpdateCount() usize {
     return surfaceColliderUpdates.count();
 }
 
-fn queueSurfaceEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, dirtyRect: vec.IRect) !void {
+fn mergeColliderDirtyRect(target: *?vec.IRect, incoming: ?vec.IRect) void {
+    if (incoming == null) return;
+    if (target.* == null) {
+        target.* = incoming.?;
+        return;
+    }
+    target.* = vec.irectUnion(target.*.?, incoming.?);
+}
+
+fn queueSurfaceEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, cutoutEdit: sprite.SurfaceCutoutEdit) !void {
     const maybeEdit = surfaceEdits.getPtr(bodyId);
     if (maybeEdit == null) {
         try surfaceEdits.put(allocator, bodyId, .{
             .spriteUuid = spriteUuid,
-            .dirtyRect = dirtyRect,
+            .textureDirtyRect = cutoutEdit.textureDirtyRect,
+            .colliderDirtyRect = cutoutEdit.colliderDirtyRect,
         });
         return;
     }
 
     const edit = maybeEdit.?;
-    edit.dirtyRect = vec.irectUnion(edit.dirtyRect, dirtyRect);
+    edit.textureDirtyRect = vec.irectUnion(edit.textureDirtyRect, cutoutEdit.textureDirtyRect);
+    mergeColliderDirtyRect(&edit.colliderDirtyRect, cutoutEdit.colliderDirtyRect);
 }
 
 fn queueSurfaceColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !void {
@@ -63,7 +75,8 @@ fn queueSurfaceTextureUpdate(bodyId: box2d.c.b2BodyId, edit: SurfaceEdit) !void 
     }
 
     const pendingEdit = maybeEdit.?;
-    pendingEdit.dirtyRect = vec.irectUnion(pendingEdit.dirtyRect, edit.dirtyRect);
+    pendingEdit.textureDirtyRect = vec.irectUnion(pendingEdit.textureDirtyRect, edit.textureDirtyRect);
+    mergeColliderDirtyRect(&pendingEdit.colliderDirtyRect, edit.colliderDirtyRect);
 }
 
 pub fn flushSurfaceEdits() !void {
@@ -180,7 +193,7 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
     };
     const state = box2d.getState(bodyId);
     const radius = @max(surfaceCutout.minimumRadius, event.radius * surfaceCutout.radiusScale);
-    const dirtyRect = sprite.removeFracturedCutoutFromSurface(
+    const cutoutEdit = sprite.removeFracturedCutoutFromSurface(
         firstSprite,
         event.position,
         radius,
@@ -188,10 +201,12 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
         state.rotAngle,
         event.cutoutSeed,
         event.cutoutIrregularity,
+        event.cutoutCharWidth,
+        event.cutoutCharStrength,
     );
-    if (dirtyRect == null) return;
+    if (cutoutEdit == null) return;
 
-    try queueSurfaceEdit(bodyId, ent.spriteUuids[0], dirtyRect.?);
+    try queueSurfaceEdit(bodyId, ent.spriteUuids[0], cutoutEdit.?);
 }
 
 pub fn apply(bodyId: box2d.c.b2BodyId, event: damage.Event) !void {
@@ -214,10 +229,12 @@ pub fn processSurfaceTextureUpdates() void {
             continue;
         }
 
-        sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.dirtyRect) catch |err| {
+        sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.textureDirtyRect) catch |err| {
             std.log.warn("destruction.processSurfaceTextureUpdates: texture update failed with {}", .{err});
         };
-        queueSurfaceColliderUpdate(bodyId, edit.dirtyRect) catch |err| {
+        if (edit.colliderDirtyRect == null) continue;
+
+        queueSurfaceColliderUpdate(bodyId, edit.colliderDirtyRect.?) catch |err| {
             std.log.warn("destruction.processSurfaceTextureUpdates: failed to queue collider update with {}", .{err});
         };
     }
