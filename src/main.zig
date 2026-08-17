@@ -63,6 +63,9 @@ const Sprite = entity.Sprite;
 //TODO: space pirate battle around a whirpool
 //TODO: whaling pirate fight
 
+//Movement
+//TODO: allow to change movement mechanism: meatboy/more controlled/flying
+
 //Level editor
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
 //TODO: add option to draw a rectangle which becames an entity in the game with some magenta prefill

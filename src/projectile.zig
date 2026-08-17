@@ -450,14 +450,14 @@ fn captureExplosionVisual(
     impactPosition: vec.Vec2,
     pressureSourcePosition: vec.Vec2,
     explosion: Explosion,
+    pressureField: blast_pressure.Field,
 ) void {
     if (explosion.visual == null) return;
     explosion_visual.capture(explosion.visual.?, .{
         .impact_position = impactPosition,
         .pressure_source_position = pressureSourcePosition,
         .blast_radius = explosion.blastRadius,
-        .pressure_radius = explosion.pressureRadius,
-    }) catch |err| {
+    }, pressureField) catch |err| {
         std.log.warn("captureExplosionVisual: failed to capture explosion visual: {}", .{err});
     };
 }
@@ -492,7 +492,7 @@ fn explodeAtWithDirectHit(
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
     captureBlastPressureVisual(pressureField, explosion.visual);
-    captureExplosionVisual(impactPosition, pressureSourcePosition, explosion);
+    captureExplosionVisual(impactPosition, pressureSourcePosition, explosion, pressureField);
     logExplosionStage(perfId, "pressure_field", pressureStart);
 
     const soundStart = perf.begin(.explosion);

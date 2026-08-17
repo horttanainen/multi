@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const allocator = @import("allocator.zig").allocator;
+const blast_pressure = @import("blast_pressure.zig");
 const camera = @import("camera.zig");
 const conv = @import("conversion.zig");
 const runtime = @import("runtime.zig");
@@ -60,7 +61,6 @@ pub const Capture = struct {
     impact_position: vec.Vec2,
     pressure_source_position: vec.Vec2,
     blast_radius: f32,
-    pressure_radius: f32,
 };
 
 pub const Event = struct {
@@ -68,7 +68,6 @@ pub const Event = struct {
     impact_position: vec.Vec2,
     pressure_source_position: vec.Vec2,
     blast_radius: f32,
-    pressure_radius: f32,
     started_at: f64,
     seed: u64,
 };
@@ -87,6 +86,7 @@ const Random = struct {
 var visualRandom = Random{ .state = 1 };
 
 const maximumSmokeParticlesPerExplosion: usize = 64;
+const smokePlacementAttemptsPerParticle: u32 = 8;
 
 fn idFromName(name: []const u8) Id {
     return std.hash.Wyhash.hash(0, name);
@@ -323,7 +323,7 @@ fn emitEmbers(event: Event, preset: Preset) !void {
     }
 }
 
-fn emitSmoke(event: Event, preset: Preset) !void {
+fn emitSmoke(event: Event, preset: Preset, pressureField: blast_pressure.Field) !void {
     if (preset.smoke_count == 0) return;
     const spriteUuid = smokeSpriteUuid orelse {
         std.log.err("explosion_visual.emitSmoke: smoke sprite is not initialized", .{});
@@ -332,12 +332,21 @@ fn emitSmoke(event: Event, preset: Preset) !void {
 
     var random = randomForEffect(event, 0xd1b54a32d192ed03);
     const upwardDirection = vec.Vec2{ .x = 0, .y = -1 };
-    var index: u32 = 0;
-    while (index < preset.smoke_count) : (index += 1) {
+    const maximumPlacementAttempts = preset.smoke_count * smokePlacementAttemptsPerParticle;
+    var placementAttempts: u32 = 0;
+    var emittedCount: u32 = 0;
+    while (emittedCount < preset.smoke_count and placementAttempts < maximumPlacementAttempts) {
+        placementAttempts += 1;
         const angle = randomRange(&random, 0, std.math.tau);
         const radialDirection = vec.Vec2{ .x = @cos(angle), .y = @sin(angle) };
         const radius = randomRange(&random, preset.smoke_min_radius, preset.smoke_max_radius);
         const smokePosition = vec.add(event.impact_position, vec.mul(radialDirection, radius));
+        const pressureSample = blast_pressure.sample(pressureField, smokePosition) orelse continue;
+        const arrivalFraction = std.math.clamp(pressureSample.travel_distance / pressureField.radius, 0, 1);
+        const pressureDelayMs: u32 = @intFromFloat(@round(
+            arrivalFraction * @as(f32, @floatFromInt(preset.pressure_wave_duration_ms)),
+        ));
+
         const horizontalJitter = vec.Vec2{ .x = randomRange(&random, -0.25, 0.25), .y = 0 };
         const biasedDirection = vec.add(
             horizontalJitter,
@@ -362,17 +371,18 @@ fn emitSmoke(event: Event, preset: Preset) !void {
             .end_color = preset.smoke_end_color,
             .start_alpha = preset.smoke_max_alpha,
             .end_alpha = 0,
-            .delay_ms = randomRangeU32(&random, preset.smoke_min_delay_ms, preset.smoke_max_delay_ms),
+            .delay_ms = pressureDelayMs + randomRangeU32(&random, preset.smoke_min_delay_ms, preset.smoke_max_delay_ms),
             .fade_in_ms = preset.smoke_fade_in_ms,
             .lifetime_ms = randomRangeU32(&random, preset.smoke_min_lifetime_ms, preset.smoke_max_lifetime_ms),
             .angle = randomRange(&random, 0, std.math.tau),
             .angular_velocity = randomRange(&random, -1.2, 1.2),
             .blend_mode = .alpha,
         });
+        emittedCount += 1;
     }
 }
 
-pub fn capture(presetId: Id, captureData: Capture) !void {
+pub fn capture(presetId: Id, captureData: Capture, pressureField: blast_pressure.Field) !void {
     const preset = presets.get(presetId) orelse {
         std.log.err("explosion_visual.capture: preset {d} is missing", .{presetId});
         return error.ExplosionVisualPresetNotFound;
@@ -381,10 +391,8 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         std.log.err("explosion_visual.capture: explosion positions must be finite", .{});
         return error.InvalidExplosionVisualPosition;
     }
-    if (!std.math.isFinite(captureData.blast_radius) or captureData.blast_radius < 0 or
-        !std.math.isFinite(captureData.pressure_radius) or captureData.pressure_radius <= 0)
-    {
-        std.log.err("explosion_visual.capture: explosion radii are invalid", .{});
+    if (!std.math.isFinite(captureData.blast_radius) or captureData.blast_radius < 0) {
+        std.log.err("explosion_visual.capture: explosion blast radius is invalid", .{});
         return error.InvalidExplosionVisualRadius;
     }
 
@@ -393,13 +401,12 @@ pub fn capture(presetId: Id, captureData: Capture) !void {
         .impact_position = captureData.impact_position,
         .pressure_source_position = captureData.pressure_source_position,
         .blast_radius = captureData.blast_radius,
-        .pressure_radius = captureData.pressure_radius,
         .started_at = time.realNow(),
         .seed = randomNext(&visualRandom),
     };
     try events.append(allocator, event);
 
-    emitSmoke(event, preset) catch |err| {
+    emitSmoke(event, preset, pressureField) catch |err| {
         std.log.warn("explosion_visual.capture: failed to emit smoke for preset {d}: {}", .{ presetId, err });
     };
     emitEmbers(event, preset) catch |err| {
