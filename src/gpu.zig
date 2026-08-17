@@ -47,6 +47,25 @@ pub fn drawPaintBackground(uniforms: PaintUniforms) void {
 }
 
 pub const Texture = texture.Texture;
+pub const PressureFieldId = u64;
+
+pub const PressureFieldTexel = extern struct {
+    pressure_x: f16,
+    pressure_y: f16,
+    arrival_pressure: f16,
+    strength: f16,
+};
+
+pub const PressureFieldDraw = struct {
+    field_id: PressureFieldId,
+    rectangle_origin: [2]f32,
+    rectangle_size: [2]f32,
+    elapsed_seconds: f32,
+    propagation_seconds: f32,
+    trail_duration_seconds: f32,
+    rise_seconds: f32,
+    displacement_pixels: f32,
+};
 
 // ============================================================
 // Vertex types for batch renderer
@@ -95,6 +114,18 @@ const LutUniforms = extern struct {
 const PressureDistortionUniforms = extern struct {
     resolution: [2]f32,
     maximum_displacement_pixels: f32,
+    padding: f32 = 0,
+};
+
+const PressureFieldUniforms = extern struct {
+    viewport_size: [2]f32,
+    rectangle_origin: [2]f32,
+    rectangle_size: [2]f32,
+    elapsed_seconds: f32,
+    propagation_seconds: f32,
+    trail_duration_seconds: f32,
+    rise_seconds: f32,
+    displacement_ratio: f32,
     padding: f32 = 0,
 };
 
@@ -168,8 +199,9 @@ const INITIAL_COLOR_VERTEX_CAPACITY = 64 * 1024;
 const MAX_BATCH_RECORDS = 8192;
 const MAX_PENDING_DESTROYS = 256;
 const SELECTION_OUTLINE_RADIUS_PIXELS = 4.0;
-const PRESSURE_SOFT_CIRCLE_SEGMENTS: usize = 8;
 const PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS: f32 = 160.0;
+const PRESSURE_FIELD_TEXTURE_FORMAT = c.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+const PRESSURE_MASK_TEXTURE_FORMAT = c.SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
 
 const PipelineType = enum {
     sprite_alpha,
@@ -177,7 +209,6 @@ const PipelineType = enum {
     selection_mask,
     colored_triangles,
     colored_lines,
-    pressure_mask,
 };
 
 const BatchMode = enum { none, sprite, color };
@@ -199,6 +230,10 @@ const BatchRecord = union(enum) {
         vertex_offset: u32,
         vertex_count: u32,
     },
+    draw_pressure_field: struct {
+        texture: *c.SDL_GPUTexture,
+        draw: PressureFieldDraw,
+    },
     set_viewport: struct {
         x: f32,
         y: f32,
@@ -211,6 +246,13 @@ const BatchRecord = union(enum) {
     draw_paint_background: struct {
         uniforms: PaintUniforms,
     },
+};
+
+const PressureFieldResource = struct {
+    texture: *c.SDL_GPUTexture,
+    transfer_buffer: *c.SDL_GPUTransferBuffer,
+    dimension: u32,
+    upload_pending: bool = true,
 };
 
 const GpuState = struct {
@@ -228,9 +270,11 @@ const GpuState = struct {
     selection_outline_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_triangles_pipeline: *c.SDL_GPUGraphicsPipeline,
     colored_lines_pipeline: *c.SDL_GPUGraphicsPipeline,
-    pressure_mask_pipeline: *c.SDL_GPUGraphicsPipeline,
+    pressure_field_pipeline: *c.SDL_GPUGraphicsPipeline,
     pressure_distortion_pipeline: *c.SDL_GPUGraphicsPipeline,
     pressure_mask_texture: *c.SDL_GPUTexture,
+    pressure_fields: std.AutoArrayHashMapUnmanaged(PressureFieldId, PressureFieldResource) = .empty,
+    next_pressure_field_id: PressureFieldId = 1,
 
     // CRT post-processing
     crt_enabled: bool = true,
@@ -353,6 +397,50 @@ pub fn queueTextureDestroy(gpu_tex: *c.SDL_GPUTexture) void {
     }
 }
 
+pub fn createPressureField(dimension: u32, texels: []const PressureFieldTexel) !PressureFieldId {
+    const g = getGpu();
+    const gpuTexture = try createPressureFieldGpuTexture(g.device, dimension);
+    errdefer queueTextureDestroy(gpuTexture);
+
+    const texelBytes = std.mem.sliceAsBytes(texels);
+    const transferBuffer = c.SDL_CreateGPUTransferBuffer(g.device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = @intCast(texelBytes.len),
+        .props = 0,
+    }) orelse {
+        std.log.err("gpu.createPressureField: failed to create transfer buffer", .{});
+        return error.CreateBufferFailed;
+    };
+    errdefer c.SDL_ReleaseGPUTransferBuffer(g.device, transferBuffer);
+
+    const mapped = c.SDL_MapGPUTransferBuffer(g.device, transferBuffer, false) orelse {
+        std.log.err("gpu.createPressureField: failed to map transfer buffer", .{});
+        return error.MapBufferFailed;
+    };
+    const destination: [*]u8 = @ptrCast(mapped);
+    @memcpy(destination[0..texelBytes.len], texelBytes);
+    c.SDL_UnmapGPUTransferBuffer(g.device, transferBuffer);
+
+    const fieldId = g.next_pressure_field_id;
+    g.next_pressure_field_id += 1;
+    try g.pressure_fields.put(mem_allocator, fieldId, .{
+        .texture = gpuTexture,
+        .transfer_buffer = transferBuffer,
+        .dimension = dimension,
+    });
+    return fieldId;
+}
+
+pub fn destroyPressureField(fieldId: PressureFieldId) void {
+    const g = getGpu();
+    const removed = g.pressure_fields.fetchSwapRemove(fieldId) orelse {
+        std.log.warn("gpu.destroyPressureField: pressure field {d} is missing", .{fieldId});
+        return;
+    };
+    c.SDL_ReleaseGPUTransferBuffer(g.device, removed.value.transfer_buffer);
+    queueTextureDestroy(removed.value.texture);
+}
+
 // ============================================================
 // Shader loading helpers
 // ============================================================
@@ -363,6 +451,7 @@ const colored_vert_msl = @embedFile("shaders/colored.metal");
 const colored_frag_msl = @embedFile("shaders/colored.metal");
 const crt_msl = @embedFile("shaders/crt.metal");
 const lut_msl = @embedFile("shaders/lut.metal");
+const pressure_field_msl = @embedFile("shaders/pressure_field.metal");
 const pressure_distortion_msl = @embedFile("shaders/pressure_distortion.metal");
 const paint_msl = @embedFile("shaders/background_paint.metal");
 const selection_msl = @embedFile("shaders/selection.metal");
@@ -566,6 +655,36 @@ fn createOffscreenTexture(device: *c.SDL_GPUDevice, w: u32, h: u32, swapchain_fo
     return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
 }
 
+fn createPressureMaskTexture(device: *c.SDL_GPUDevice, width: u32, height: u32) !*c.SDL_GPUTexture {
+    const textureInfo = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = PRESSURE_MASK_TEXTURE_FORMAT,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER | c.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+        .width = width,
+        .height = height,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    return c.SDL_CreateGPUTexture(device, &textureInfo) orelse return error.CreateGPUTextureFailed;
+}
+
+fn createPressureFieldGpuTexture(device: *c.SDL_GPUDevice, dimension: u32) !*c.SDL_GPUTexture {
+    const textureInfo = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = PRESSURE_FIELD_TEXTURE_FORMAT,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+        .width = dimension,
+        .height = dimension,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    return c.SDL_CreateGPUTexture(device, &textureInfo) orelse return error.CreateGPUTextureFailed;
+}
+
 fn createAtlasTexture(device: *c.SDL_GPUDevice) !*c.SDL_GPUTexture {
     const tex_info = c.SDL_GPUTextureCreateInfo{
         .type = c.SDL_GPU_TEXTURETYPE_2D,
@@ -766,12 +885,14 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .primitive_type = c.SDL_GPU_PRIMITIVETYPE_LINELIST,
         .blend_state = alpha_blend,
     });
-    const pressure_mask = try createPipeline(device, swapchain_format, .{
-        .shader_code = colored_vert_msl,
-        .vert_entry = "colored_vert",
-        .frag_entry = "colored_frag",
+    const pressure_field = try createPipeline(device, PRESSURE_MASK_TEXTURE_FORMAT, .{
+        .shader_code = pressure_field_msl,
+        .vert_entry = "pressure_field_vert",
+        .frag_entry = "pressure_field_frag",
         .vert_uniforms = 1,
-        .vertex_layout = color_vertex_layout,
+        .frag_samplers = 1,
+        .frag_uniforms = 1,
+        .vertex_layout = fullscreen_vertex_layout,
         .blend_state = pressure_mask_blend,
     });
     const pressure_distortion = try createPipeline(device, swapchain_format, .{
@@ -880,7 +1001,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
     const offscreen_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
     const offscreen_tex_b = try createOffscreenTexture(device, ow, oh, swapchain_format);
     const selection_mask_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
-    const pressure_mask_tex = try createOffscreenTexture(device, ow, oh, swapchain_format);
+    const pressure_mask_tex = try createPressureMaskTexture(device, ow, oh);
 
     // Generate and upload identity LUT (32x32x32 stored as 1024x32 RGBA)
     const lut_tex = try createIdentityLut(device);
@@ -909,7 +1030,7 @@ pub fn createRenderer(window: *sdl.Window) !void {
         .selection_outline_pipeline = selection_outline,
         .colored_triangles_pipeline = colored_triangles,
         .colored_lines_pipeline = colored_lines,
-        .pressure_mask_pipeline = pressure_mask,
+        .pressure_field_pipeline = pressure_field,
         .pressure_distortion_pipeline = pressure_distortion,
         .pressure_mask_texture = pressure_mask_tex,
         .offscreen_texture = offscreen_tex,
@@ -966,7 +1087,12 @@ pub fn destroyRenderer() void {
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.selection_outline_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_triangles_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.colored_lines_pipeline);
-        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.pressure_mask_pipeline);
+        for (g.pressure_fields.values()) |field| {
+            c.SDL_ReleaseGPUTransferBuffer(g.device, field.transfer_buffer);
+            c.SDL_ReleaseGPUTexture(g.device, field.texture);
+        }
+        g.pressure_fields.deinit(mem_allocator);
+        c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.pressure_field_pipeline);
         c.SDL_ReleaseGPUGraphicsPipeline(g.device, g.pressure_distortion_pipeline);
         c.SDL_ReleaseWindowFromGPUDevice(g.device, g.window);
         c.SDL_DestroyGPUDevice(g.device);
@@ -1045,6 +1171,25 @@ fn ensureColorPipeline(g: *GpuState, pipeline_type: PipelineType) void {
         g.current_texture = null;
         g.color_batch_start = g.color_vertex_count;
     }
+}
+
+pub fn renderPressureField(draw: PressureFieldDraw) void {
+    const g = getGpu();
+    const field = g.pressure_fields.get(draw.field_id) orelse {
+        std.log.warn("gpu.renderPressureField: pressure field {d} is missing", .{draw.field_id});
+        return;
+    };
+
+    finalizeBatch(g);
+    if (g.batch_count >= MAX_BATCH_RECORDS) {
+        std.log.warn("gpu.renderPressureField: batch record capacity exceeded", .{});
+        return;
+    }
+    g.batch_records[g.batch_count] = .{ .draw_pressure_field = .{
+        .texture = field.texture,
+        .draw = draw,
+    } };
+    g.batch_count += 1;
 }
 
 fn nextVertexCapacity(currentCapacity: u32, neededCapacity: u32) u32 {
@@ -1168,7 +1313,7 @@ pub fn renderClear() !void {
             c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture_b);
             return error.AcquireSwapchainFailed;
         };
-        const new_pressure_mask_texture = createOffscreenTexture(g.device, sw_w, sw_h, g.swapchain_format) catch |err| {
+        const new_pressure_mask_texture = createPressureMaskTexture(g.device, sw_w, sw_h) catch |err| {
             std.log.warn("renderClear: failed to resize pressure mask texture: {}", .{err});
             c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture);
             c.SDL_ReleaseGPUTexture(g.device, new_offscreen_texture_b);
@@ -1254,8 +1399,15 @@ pub fn renderPresent() void {
     submitFrame(g, cmd);
 }
 
+fn hasPendingPressureFieldUploads(g: *GpuState) bool {
+    for (g.pressure_fields.values()) |field| {
+        if (field.upload_pending) return true;
+    }
+    return false;
+}
+
 fn uploadVertexData(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
-    if (g.sprite_vertex_count == 0 and g.color_vertex_count == 0) return;
+    if (g.sprite_vertex_count == 0 and g.color_vertex_count == 0 and !hasPendingPressureFieldUploads(g)) return;
 
     if (g.sprite_vertex_count > 0) {
         if (c.SDL_MapGPUTransferBuffer(g.device, g.sprite_transfer_buffer, true)) |mapped| {
@@ -1277,31 +1429,53 @@ fn uploadVertexData(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
         }
     }
 
-    const copy_pass = c.SDL_BeginGPUCopyPass(cmd);
-    if (copy_pass) |cp| {
-        if (g.sprite_vertex_count > 0) {
-            c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
-                .transfer_buffer = g.sprite_transfer_buffer,
-                .offset = 0,
-            }, &c.SDL_GPUBufferRegion{
-                .buffer = g.sprite_gpu_buffer,
-                .offset = 0,
-                .size = g.sprite_vertex_count * @sizeOf(SpriteVertex),
-            }, false);
-        }
+    const copyPass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        std.log.warn("gpu.uploadVertexData: failed to begin copy pass", .{});
+        return;
+    };
+    defer c.SDL_EndGPUCopyPass(copyPass);
 
-        if (g.color_vertex_count > 0) {
-            c.SDL_UploadToGPUBuffer(cp, &c.SDL_GPUTransferBufferLocation{
-                .transfer_buffer = g.color_transfer_buffer,
-                .offset = 0,
-            }, &c.SDL_GPUBufferRegion{
-                .buffer = g.color_gpu_buffer,
-                .offset = 0,
-                .size = g.color_vertex_count * @sizeOf(ColorVertex),
-            }, false);
-        }
+    if (g.sprite_vertex_count > 0) {
+        c.SDL_UploadToGPUBuffer(copyPass, &c.SDL_GPUTransferBufferLocation{
+            .transfer_buffer = g.sprite_transfer_buffer,
+            .offset = 0,
+        }, &c.SDL_GPUBufferRegion{
+            .buffer = g.sprite_gpu_buffer,
+            .offset = 0,
+            .size = g.sprite_vertex_count * @sizeOf(SpriteVertex),
+        }, false);
+    }
 
-        c.SDL_EndGPUCopyPass(cp);
+    if (g.color_vertex_count > 0) {
+        c.SDL_UploadToGPUBuffer(copyPass, &c.SDL_GPUTransferBufferLocation{
+            .transfer_buffer = g.color_transfer_buffer,
+            .offset = 0,
+        }, &c.SDL_GPUBufferRegion{
+            .buffer = g.color_gpu_buffer,
+            .offset = 0,
+            .size = g.color_vertex_count * @sizeOf(ColorVertex),
+        }, false);
+    }
+
+    for (g.pressure_fields.values()) |*field| {
+        if (!field.upload_pending) continue;
+        c.SDL_UploadToGPUTexture(copyPass, &c.SDL_GPUTextureTransferInfo{
+            .transfer_buffer = field.transfer_buffer,
+            .offset = 0,
+            .pixels_per_row = field.dimension,
+            .rows_per_layer = field.dimension,
+        }, &c.SDL_GPUTextureRegion{
+            .texture = field.texture,
+            .mip_level = 0,
+            .layer = 0,
+            .x = 0,
+            .y = 0,
+            .z = 0,
+            .w = field.dimension,
+            .h = field.dimension,
+            .d = 1,
+        }, false);
+        field.upload_pending = false;
     }
 }
 
@@ -1401,7 +1575,6 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
                 uniforms_dirty = true;
             },
             .draw_colored => |batch| {
-                if (batch.pipeline == .pressure_mask) continue;
                 if (last_pipeline != batch.pipeline) {
                     const pipeline = switch (batch.pipeline) {
                         .colored_triangles => g.colored_triangles_pipeline,
@@ -1428,7 +1601,7 @@ fn renderScene(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, target_texture: *c.SD
 
                 c.SDL_DrawGPUPrimitives(rp, batch.vertex_count, 1, 0, 0);
             },
-            .draw_selection_sprites => {},
+            .draw_selection_sprites, .draw_pressure_field => {},
         }
     }
 
@@ -1450,7 +1623,7 @@ fn hasPressureMaskRecords(g: *GpuState) bool {
     var index: u32 = 0;
     while (index < g.batch_count) : (index += 1) {
         switch (g.batch_records[index]) {
-            .draw_colored => |batch| if (batch.pipeline == .pressure_mask) return true,
+            .draw_pressure_field => return true,
             else => {},
         }
     }
@@ -1480,12 +1653,10 @@ fn renderPressureMask(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
     defer c.SDL_EndGPURenderPass(renderPass);
 
     setGpuViewport(renderPass, 0, 0, g.swapchain_w, g.swapchain_h);
-    c.SDL_BindGPUGraphicsPipeline(renderPass, g.pressure_mask_pipeline);
-
     var viewportWidth = g.swapchain_w;
     var viewportHeight = g.swapchain_h;
     var zoom: f32 = 1;
-    var uniformsDirty = true;
+    var pipelineBound = false;
     var index: u32 = 0;
     while (index < g.batch_count) : (index += 1) {
         switch (g.batch_records[index]) {
@@ -1493,26 +1664,41 @@ fn renderPressureMask(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
                 setGpuViewport(renderPass, viewport.x, viewport.y, viewport.w, viewport.h);
                 viewportWidth = viewport.w;
                 viewportHeight = viewport.h;
-                uniformsDirty = true;
             },
             .set_zoom => |zoomRecord| {
                 zoom = zoomRecord.zoom;
-                uniformsDirty = true;
             },
-            .draw_colored => |batch| {
-                if (batch.pipeline != .pressure_mask) continue;
-                if (uniformsDirty) {
-                    const uniforms = ViewportUniforms{ .viewport_size = .{ viewportWidth / zoom, viewportHeight / zoom } };
-                    c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(ViewportUniforms));
-                    uniformsDirty = false;
+            .draw_pressure_field => |batch| {
+                if (!pipelineBound) {
+                    c.SDL_BindGPUGraphicsPipeline(renderPass, g.pressure_field_pipeline);
+                    const quadBinding = c.SDL_GPUBufferBinding{
+                        .buffer = g.fullscreen_quad_buffer,
+                        .offset = 0,
+                    };
+                    c.SDL_BindGPUVertexBuffers(renderPass, 0, &quadBinding, 1);
+                    pipelineBound = true;
                 }
 
-                const binding = c.SDL_GPUBufferBinding{
-                    .buffer = g.color_gpu_buffer,
-                    .offset = batch.vertex_offset * @sizeOf(ColorVertex),
+                const samplerBinding = c.SDL_GPUTextureSamplerBinding{
+                    .texture = batch.texture,
+                    .sampler = g.crt_sampler,
                 };
-                c.SDL_BindGPUVertexBuffers(renderPass, 0, &binding, 1);
-                c.SDL_DrawGPUPrimitives(renderPass, batch.vertex_count, 1, 0, 0);
+                c.SDL_BindGPUFragmentSamplers(renderPass, 0, &samplerBinding, 1);
+
+                const draw = batch.draw;
+                const uniforms = PressureFieldUniforms{
+                    .viewport_size = .{ viewportWidth / zoom, viewportHeight / zoom },
+                    .rectangle_origin = draw.rectangle_origin,
+                    .rectangle_size = draw.rectangle_size,
+                    .elapsed_seconds = draw.elapsed_seconds,
+                    .propagation_seconds = draw.propagation_seconds,
+                    .trail_duration_seconds = draw.trail_duration_seconds,
+                    .rise_seconds = draw.rise_seconds,
+                    .displacement_ratio = draw.displacement_pixels / PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS,
+                };
+                c.SDL_PushGPUVertexUniformData(cmd, 0, &uniforms, @sizeOf(PressureFieldUniforms));
+                c.SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, @sizeOf(PressureFieldUniforms));
+                c.SDL_DrawGPUPrimitives(renderPass, 6, 1, 0, 0);
             },
             else => {},
         }
@@ -1598,7 +1784,7 @@ fn renderSelectionMask(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer) void {
 
                 c.SDL_DrawGPUPrimitives(render_pass, batch.vertex_count, 1, 0, 0);
             },
-            .draw_sprites, .draw_colored, .draw_paint_background => {},
+            .draw_sprites, .draw_colored, .draw_paint_background, .draw_pressure_field => {},
         }
     }
 
@@ -2262,49 +2448,6 @@ pub fn renderFillQuad(points: [4][2]f32) !void {
         };
     }
     g.color_vertex_count += 6;
-}
-
-fn pressureMaskByte(value: f32) u8 {
-    return @intFromFloat(@round(std.math.clamp(value, 0, 1) * 255));
-}
-
-pub fn renderPressureSoftCircle(center: [2]f32, radius: f32, direction: [2]f32, displacementPixels: f32) !void {
-    const g = getGpu();
-    ensureColorPipeline(g, .pressure_mask);
-
-    const vertexCount: u32 = PRESSURE_SOFT_CIRCLE_SEGMENTS * 3;
-    growColorVertexCapacity(g, g.color_vertex_count + vertexCount) catch |err| {
-        std.log.warn("renderPressureSoftCircle: failed to grow color vertex buffer: {}", .{err});
-        return;
-    };
-
-    const intensity = displacementPixels / PRESSURE_MAXIMUM_DISPLACEMENT_PIXELS;
-    const centerColor = PackedColor{
-        .r = pressureMaskByte(@max(direction[0], 0) * intensity),
-        .g = pressureMaskByte(@max(-direction[0], 0) * intensity),
-        .b = pressureMaskByte(@max(direction[1], 0) * intensity),
-        .a = pressureMaskByte(@max(-direction[1], 0) * intensity),
-    };
-    const outerColor = PackedColor{ .r = 0, .g = 0, .b = 0, .a = 0 };
-    const segmentCount: f32 = @floatFromInt(PRESSURE_SOFT_CIRCLE_SEGMENTS);
-    var segment: usize = 0;
-    while (segment < PRESSURE_SOFT_CIRCLE_SEGMENTS) : (segment += 1) {
-        const startAngle = @as(f32, @floatFromInt(segment)) / segmentCount * std.math.tau;
-        const endAngle = @as(f32, @floatFromInt(segment + 1)) / segmentCount * std.math.tau;
-        const vertexIndex = g.color_vertex_count;
-        g.color_vertices[vertexIndex] = .{ .x = center[0], .y = center[1], .color = centerColor };
-        g.color_vertices[vertexIndex + 1] = .{
-            .x = center[0] + @cos(startAngle) * radius,
-            .y = center[1] + @sin(startAngle) * radius,
-            .color = outerColor,
-        };
-        g.color_vertices[vertexIndex + 2] = .{
-            .x = center[0] + @cos(endAngle) * radius,
-            .y = center[1] + @sin(endAngle) * radius,
-            .color = outerColor,
-        };
-        g.color_vertex_count += 3;
-    }
 }
 
 pub fn renderDrawRect(rect: sdl.Rect) !void {

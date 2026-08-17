@@ -34,11 +34,7 @@ fragment float4 pressure_distortion_frag(
     sampler mask_sampler [[sampler(1)]],
     constant PressureDistortionUniforms &uniforms [[buffer(0)]]
 ) {
-    float4 encoded_pressure = pressure_mask.sample(mask_sampler, in.texcoord);
-    float2 pressure = float2(
-        encoded_pressure.r - encoded_pressure.g,
-        encoded_pressure.b - encoded_pressure.a
-    );
+    float2 pressure = pressure_mask.sample(mask_sampler, in.texcoord).rg;
     float2 displacement_uv = pressure * uniforms.maximum_displacement_pixels / uniforms.resolution;
     float2 sample_uv = clamp(in.texcoord - displacement_uv, float2(0.0), float2(1.0));
     float4 refracted = scene_texture.sample(scene_sampler, sample_uv);

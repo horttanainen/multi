@@ -470,7 +470,7 @@ fn captureBlastPressureVisual(field: blast_pressure.Field, visualId: ?explosion_
     };
     blast_pressure_visual.capture(field, .{
         .propagation_duration_ms = preset.pressure_wave_duration_ms,
-        .cell_lifetime_ms = preset.pressure_wave_cell_lifetime_ms,
+        .trail_duration_ms = preset.pressure_wave_trail_duration_ms,
         .distortion_pixels = preset.pressure_wave_distortion_pixels,
     }) catch |err| {
         std.log.warn("captureBlastPressureVisual: failed to capture blast pressure visualization: {}", .{err});

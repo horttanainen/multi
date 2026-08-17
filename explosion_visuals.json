@@ -2,7 +2,7 @@
     {
         "key": "missile_explosion",
         "pressureWaveDurationMs": 240,
-        "pressureWaveCellLifetimeMs": 90,
+        "pressureWaveTrailDurationMs": 90,
         "pressureWaveDistortionPixels": 100.0,
         "flashDurationMs": 90,
         "flashStartRadius": 0.12,
@@ -46,7 +46,7 @@
     {
         "key": "pellet_impact",
         "pressureWaveDurationMs": 100,
-        "pressureWaveCellLifetimeMs": 45,
+        "pressureWaveTrailDurationMs": 45,
         "pressureWaveDistortionPixels": 25.0,
         "flashDurationMs": 60,
         "flashStartRadius": 0.02,
@@ -90,8 +90,8 @@
     {
         "key": "railgun_impact",
         "pressureWaveDurationMs": 160,
-        "pressureWaveCellLifetimeMs": 60,
-        "pressureWaveDistortionPixels": 50.0,
+        "pressureWaveTrailDurationMs": 60,
+        "pressureWaveDistortionPixels": 200.0,
         "flashDurationMs": 90,
         "flashStartRadius": 0.04,
         "flashEndRadius": 0.4,

@@ -14,7 +14,7 @@ pub const Id = u64;
 
 pub const Preset = struct {
     pressure_wave_duration_ms: u32,
-    pressure_wave_cell_lifetime_ms: u32,
+    pressure_wave_trail_duration_ms: u32,
     pressure_wave_distortion_pixels: f32,
     flash_duration_ms: u32,
     flash_start_radius: f32,
@@ -171,7 +171,7 @@ fn validateSmokePreset(name: []const u8, preset: Preset) !void {
 }
 
 fn validatePreset(name: []const u8, preset: Preset) !void {
-    if (preset.pressure_wave_duration_ms == 0 or preset.pressure_wave_cell_lifetime_ms == 0) {
+    if (preset.pressure_wave_duration_ms == 0 or preset.pressure_wave_trail_duration_ms == 0) {
         std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid pressure-wave timing", .{name});
         return error.InvalidExplosionVisualPressureWaveTiming;
     }

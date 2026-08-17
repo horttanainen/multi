@@ -6,18 +6,23 @@ const camera = @import("camera.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const gpu = @import("gpu.zig");
+const perf = @import("perf.zig");
 const sdl = @import("sdl.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
 
 pub const Capture = struct {
     propagation_duration_ms: u32,
-    cell_lifetime_ms: u32,
+    trail_duration_ms: u32,
     distortion_pixels: f32,
 };
 
 const cellRiseSeconds: f64 = 0.012;
-const softCellRadiusScale: f32 = 0.9;
+
+const DrawMetrics = struct {
+    active_elements: usize = 0,
+    draw_vertices: usize = 0,
+};
 
 const Cell = struct {
     position: vec.Vec2,
@@ -27,12 +32,15 @@ const Cell = struct {
 };
 
 const Wave = struct {
-    cells: []Cell,
-    cell_count: usize,
+    field_id: gpu.PressureFieldId,
+    field_origin: vec.Vec2,
+    half_extent: usize,
+    debug_cells: []Cell,
+    debug_cell_count: usize,
     cell_size: f32,
     started_at: f64,
     propagation_seconds: f64,
-    cell_lifetime_seconds: f64,
+    trail_duration_seconds: f64,
     distortion_pixels: f32,
 };
 
@@ -45,51 +53,95 @@ fn activePropagationSeconds(wave: Wave) f64 {
     return wave.propagation_seconds;
 }
 
-fn activeCellLifetimeSeconds(wave: Wave) f64 {
+fn activeTrailDurationSeconds(wave: Wave) f64 {
     if (comptime config.debugBlastPressure.enabled) {
         return config.debugBlastPressure.slowMotionSeconds;
     }
-    return wave.cell_lifetime_seconds;
+    return wave.trail_duration_seconds;
 }
 
 fn freeWave(wave: Wave) void {
-    allocator.free(wave.cells);
+    gpu.destroyPressureField(wave.field_id);
+    if (comptime config.debugBlastPressure.enabled) {
+        allocator.free(wave.debug_cells);
+    }
 }
 
 pub fn capture(field: blast_pressure.Field, captureData: Capture) !void {
     const maximumCellCount = try std.math.mul(usize, field.dimension, field.dimension);
-    const cells = try allocator.alloc(Cell, maximumCellCount);
-    errdefer allocator.free(cells);
+    const texels = try allocator.alloc(gpu.PressureFieldTexel, maximumCellCount);
+    defer allocator.free(texels);
+
+    var debugCells: []Cell = &.{};
+    if (comptime config.debugBlastPressure.enabled) {
+        debugCells = try allocator.alloc(Cell, maximumCellCount);
+    }
+    errdefer if (comptime config.debugBlastPressure.enabled) allocator.free(debugCells);
 
     var cellCount: usize = 0;
     for (0..field.dimension) |row| {
         for (0..field.dimension) |column| {
+            const texelIndex = row * field.dimension + column;
             const columnOffset = @as(isize, @intCast(column)) - @as(isize, @intCast(field.half_extent));
             const rowOffset = @as(isize, @intCast(row)) - @as(isize, @intCast(field.half_extent));
             const position = vec.Vec2{
                 .x = field.origin.x + @as(f32, @floatFromInt(columnOffset)) * field.cell_size,
                 .y = field.origin.y + @as(f32, @floatFromInt(rowOffset)) * field.cell_size,
             };
-            const pressureSample = blast_pressure.sample(field, position) orelse continue;
-            cells[cellCount] = .{
-                .position = position,
-                .direction = if (pressureSample.travel_distance > 0) pressureSample.direction else vec.zero,
-                .strength = pressureSample.strength,
-                .arrival_fraction = pressureSample.travel_distance / field.radius,
+            const pressureSample = blast_pressure.sample(field, position);
+            if (pressureSample == null) {
+                texels[texelIndex] = .{
+                    .pressure_x = 0,
+                    .pressure_y = 0,
+                    .arrival_pressure = 0,
+                    .strength = 0,
+                };
+                continue;
+            }
+
+            const sample = pressureSample.?;
+            const direction = if (sample.travel_distance > 0) sample.direction else vec.zero;
+            const arrivalFraction = sample.travel_distance / field.radius;
+            texels[texelIndex] = .{
+                .pressure_x = @floatCast(direction.x * sample.strength),
+                .pressure_y = @floatCast(direction.y * sample.strength),
+                .arrival_pressure = @floatCast(arrivalFraction * sample.strength),
+                .strength = @floatCast(sample.strength),
             };
+
+            if (comptime config.debugBlastPressure.enabled) {
+                debugCells[cellCount] = .{
+                    .position = position,
+                    .direction = direction,
+                    .strength = sample.strength,
+                    .arrival_fraction = arrivalFraction,
+                };
+            }
             cellCount += 1;
         }
     }
 
+    const fieldId = try gpu.createPressureField(@intCast(field.dimension), texels);
+    errdefer gpu.destroyPressureField(fieldId);
+
     try waves.append(allocator, .{
-        .cells = cells,
-        .cell_count = cellCount,
+        .field_id = fieldId,
+        .field_origin = field.origin,
+        .half_extent = field.half_extent,
+        .debug_cells = debugCells,
+        .debug_cell_count = cellCount,
         .cell_size = field.cell_size,
         .started_at = time.realNow(),
         .propagation_seconds = @as(f64, @floatFromInt(captureData.propagation_duration_ms)) / 1000.0,
-        .cell_lifetime_seconds = @as(f64, @floatFromInt(captureData.cell_lifetime_ms)) / 1000.0,
+        .trail_duration_seconds = @as(f64, @floatFromInt(captureData.trail_duration_ms)) / 1000.0,
         .distortion_pixels = captureData.distortion_pixels,
     });
+
+    perf.log(
+        .explosion,
+        "perf.pressure_capture dimension={d} field_cells={d} reachable_cells={d} texture_bytes={d}",
+        .{ field.dimension, maximumCellCount, cellCount, maximumCellCount * @sizeOf(gpu.PressureFieldTexel) },
+    );
 
     if (comptime config.debugBlastPressure.enabled) {
         time.setSimulationScale(config.debugBlastPressure.slowMotionScale);
@@ -100,7 +152,7 @@ pub fn update() void {
     const now = time.realNow();
     var index: usize = 0;
     while (index < waves.items.len) {
-        const lifetime = activePropagationSeconds(waves.items[index]) + activeCellLifetimeSeconds(waves.items[index]);
+        const lifetime = activePropagationSeconds(waves.items[index]) + activeTrailDurationSeconds(waves.items[index]);
         if (now - waves.items[index].started_at < lifetime) {
             index += 1;
             continue;
@@ -132,7 +184,7 @@ fn fadeForCell(wave: Wave, elapsed: f64, arrivalFraction: f64) f32 {
     const cellAge = elapsed - arrivalTime;
     if (cellAge <= 0) return 0;
 
-    const lifetime = activeCellLifetimeSeconds(wave);
+    const lifetime = activeTrailDurationSeconds(wave);
     const riseDuration = @min(cellRiseSeconds, lifetime * 0.25);
     const attack = smoothStep(cellAge / riseDuration);
     const decay = 1.0 - smoothStep((cellAge - riseDuration) / (lifetime - riseDuration));
@@ -151,19 +203,21 @@ fn cellColor(strength: f32, fade: f32) sdl.Color {
     };
 }
 
-fn drawWave(wave: Wave, now: f64) !void {
+fn drawWave(wave: Wave, now: f64, metrics: *DrawMetrics) !void {
     const elapsed = now - wave.started_at;
-    const revealFraction = std.math.clamp(elapsed / activePropagationSeconds(wave), 0, 1);
-    const cellPixels = @max(1, @as(i32, @intFromFloat(@round(wave.cell_size * conv.met2pix))));
-    const softCellRadiusPixels = wave.cell_size * conv.met2pix * softCellRadiusScale;
+    if (comptime config.debugBlastPressure.enabled) {
+        const revealFraction = std.math.clamp(elapsed / activePropagationSeconds(wave), 0, 1);
+        const cellPixels = @max(1, @as(i32, @intFromFloat(@round(wave.cell_size * conv.met2pix))));
+        for (wave.debug_cells[0..wave.debug_cell_count]) |cell| {
+            if (cell.arrival_fraction > revealFraction) continue;
+            const fade = fadeForCell(wave, elapsed, cell.arrival_fraction);
+            if (fade <= 0) continue;
 
-    for (wave.cells[0..wave.cell_count]) |cell| {
-        if (cell.arrival_fraction > revealFraction) continue;
-        const fade = fadeForCell(wave, elapsed, cell.arrival_fraction);
-        if (fade <= 0) continue;
-
-        const center = camera.relativePosition(conv.m2Pixel(vec.toBox2d(cell.position)));
-        if (comptime config.debugBlastPressure.enabled) {
+            if (comptime perf.configured(.explosion)) {
+                metrics.active_elements += 1;
+                metrics.draw_vertices += 6;
+            }
+            const center = camera.relativePosition(conv.m2Pixel(vec.toBox2d(cell.position)));
             try gpu.setRenderDrawColor(cellColor(cell.strength, fade));
             try gpu.renderFillRect(.{
                 .x = center.x - @divFloor(cellPixels, 2),
@@ -171,20 +225,42 @@ fn drawWave(wave: Wave, now: f64) !void {
                 .w = cellPixels,
                 .h = cellPixels,
             });
-            continue;
         }
+        return;
+    }
 
-        try gpu.renderPressureSoftCircle(
-            .{ @floatFromInt(center.x), @floatFromInt(center.y) },
-            softCellRadiusPixels,
-            .{ cell.direction.x, cell.direction.y },
-            cell.strength * fade * wave.distortion_pixels,
-        );
+    const halfExtent: f32 = @floatFromInt(wave.half_extent);
+    const edgeOffset = (halfExtent + 0.5) * wave.cell_size;
+    const fieldTopLeft = vec.Vec2{
+        .x = wave.field_origin.x - edgeOffset,
+        .y = wave.field_origin.y - edgeOffset,
+    };
+    const screenTopLeft = camera.relativePosition(conv.m2Pixel(vec.toBox2d(fieldTopLeft)));
+    const fieldDimension: f32 = @floatFromInt(wave.half_extent * 2 + 1);
+    const fieldSizePixels = fieldDimension * wave.cell_size * conv.met2pix;
+    const lifetime = activeTrailDurationSeconds(wave);
+
+    gpu.renderPressureField(.{
+        .field_id = wave.field_id,
+        .rectangle_origin = .{ @floatFromInt(screenTopLeft.x), @floatFromInt(screenTopLeft.y) },
+        .rectangle_size = .{ fieldSizePixels, fieldSizePixels },
+        .elapsed_seconds = @floatCast(elapsed),
+        .propagation_seconds = @floatCast(activePropagationSeconds(wave)),
+        .trail_duration_seconds = @floatCast(lifetime),
+        .rise_seconds = @floatCast(@min(cellRiseSeconds, lifetime * 0.25)),
+        .displacement_pixels = wave.distortion_pixels,
+    });
+    if (comptime perf.configured(.explosion)) {
+        metrics.active_elements += 1;
+        metrics.draw_vertices += 6;
     }
 }
 
 pub fn draw() !void {
     if (waves.items.len == 0) return;
+
+    const drawStart = perf.begin(.explosion);
+    var metrics = DrawMetrics{};
 
     const previousBlendMode = try gpu.getRenderDrawBlendMode();
     try gpu.setRenderDrawBlendMode(.blend);
@@ -194,7 +270,21 @@ pub fn draw() !void {
 
     const now = time.realNow();
     for (waves.items) |wave| {
-        try drawWave(wave, now);
+        try drawWave(wave, now, &metrics);
+    }
+
+    if (comptime config.debugBlastPressure.enabled) {
+        perf.log(
+            .explosion,
+            "perf.pressure_visual waves={d} active_cells={d} vertices={d} draw_us={d}",
+            .{ waves.items.len, metrics.active_elements, metrics.draw_vertices, perf.elapsedUs(drawStart) },
+        );
+    } else {
+        perf.log(
+            .explosion,
+            "perf.pressure_visual waves={d} field_quads={d} static_vertices={d} uploaded_vertices=0 draw_us={d}",
+            .{ waves.items.len, metrics.active_elements, metrics.draw_vertices, perf.elapsedUs(drawStart) },
+        );
     }
 }
 
