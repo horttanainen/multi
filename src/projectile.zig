@@ -12,6 +12,7 @@ const player = @import("player.zig");
 const blood = @import("blood.zig");
 const blast_pressure = @import("blast_pressure.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
+const camera_shake = @import("camera_shake.zig");
 const explosion_visual = @import("explosion_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
@@ -75,6 +76,7 @@ const DirectHitDamage = struct {
 const PressureResponse = struct {
     direction: vec.Vec2 = vec.zero,
     strength: f32 = 0,
+    travel_distance: f32 = 0,
 };
 
 const perfLogFramesAfterExplosion: u32 = 120;
@@ -254,6 +256,7 @@ fn pressureResponseForPlayer(
         return .{
             .direction = normalizedOrUp(vec.subtract(playerPosition, field.origin)),
             .strength = 1,
+            .travel_distance = 0,
         };
     }
 
@@ -267,16 +270,19 @@ fn pressureResponseForPlayer(
     };
     var totalStrength: f32 = 0;
     var weightedDirection = vec.zero;
+    var weightedTravelDistance: f32 = 0;
     for (sampleOffsets) |offset| {
         const pressureSample = blast_pressure.sample(field, vec.add(playerPosition, offset)) orelse continue;
         totalStrength += pressureSample.strength;
         weightedDirection = vec.add(weightedDirection, vec.mul(pressureSample.direction, pressureSample.strength));
+        weightedTravelDistance += pressureSample.travel_distance * pressureSample.strength;
     }
     if (totalStrength <= 0) return .{};
 
     return .{
         .direction = normalizedOrUp(weightedDirection),
         .strength = totalStrength / @as(f32, @floatFromInt(sampleOffsets.len)),
+        .travel_distance = weightedTravelDistance / totalStrength,
     };
 }
 
@@ -346,6 +352,12 @@ pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, e
     const result = try player.damage(playerId, damage, attackerId);
     if (!result.applied) return result;
 
+    if (result.fatal) {
+        camera_shake.capturePlayerDeath(result.camera_id, emission.direction orelse vec.zero, result.gibbed) catch |err| {
+            std.log.warn("damagePlayerWithBlood: failed to capture player death camera shake: {}", .{err});
+        };
+    }
+
     const profileBlood = result.fatal and perf.isCapturingPlayerDeath(playerId);
     const bloodStart = if (profileBlood) perf.begin(.player_death) else 0;
     defer {
@@ -392,11 +404,18 @@ fn cutoutSeedForExplosion(impactPosition: vec.Vec2, pressureSourcePosition: vec.
 fn applyExplosionPressureToPlayers(
     field: blast_pressure.Field,
     explosion: Explosion,
+    visualPreset: ?explosion_visual.Preset,
     attackerId: ?usize,
     directHitDamage: ?DirectHitDamage,
 ) !void {
+    const shakeCaptureId = if (visualPreset != null and visualPreset.?.screen_shake_max_offset_pixels > 0)
+        camera_shake.beginCapture()
+    else
+        null;
+
     for (player.players.values()) |*p| {
-        if (p.isDead) continue;
+        const isDirectHit = directHitDamage != null and directHitDamage.?.player_id == p.id;
+        if (p.isDead and !isDirectHit) continue;
         if (!box2d.c.b2Body_IsValid(p.bodyId)) {
             std.log.warn("applyExplosionPressureToPlayers: player {d} body is invalid", .{p.id});
             continue;
@@ -404,7 +423,6 @@ fn applyExplosionPressureToPlayers(
 
         const playerBodyPosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
         const playerPosM = vec.add(playerBodyPosition, player.centerOffset);
-        const isDirectHit = directHitDamage != null and directHitDamage.?.player_id == p.id;
         const response = pressureResponseForPlayer(
             field,
             playerPosM,
@@ -412,6 +430,9 @@ fn applyExplosionPressureToPlayers(
             isDirectHit,
         );
         if (response.strength <= 0) continue;
+
+        capturePlayerCameraShake(p.cameraId, response, field.radius, visualPreset, shakeCaptureId);
+        if (p.isDead) continue;
 
         const playerVelocityChange = vec.mul(
             response.direction,
@@ -441,6 +462,30 @@ fn applyExplosionPressureToPlayers(
     }
 }
 
+fn capturePlayerCameraShake(
+    cameraId: usize,
+    response: PressureResponse,
+    pressureRadius: f32,
+    visualPreset: ?explosion_visual.Preset,
+    captureId: ?u64,
+) void {
+    if (captureId == null) return;
+    // A capture ID is created only when a visual preset enables screen shake.
+    const preset = visualPreset orelse unreachable;
+    camera_shake.capture(captureId.?, .{
+        .camera_id = cameraId,
+        .strength = response.strength,
+        .direction = response.direction,
+        .arrival_fraction = std.math.clamp(response.travel_distance / pressureRadius, 0, 1),
+    }, .{
+        .propagation_duration_ms = preset.pressure_wave_duration_ms,
+        .duration_ms = preset.screen_shake_duration_ms,
+        .max_offset_screen_pixels = preset.screen_shake_max_offset_pixels,
+    }) catch |err| {
+        std.log.warn("capturePlayerCameraShake: failed to capture camera shake: {}", .{err});
+    };
+}
+
 fn playExplosionSound(explosion: Explosion) !void {
     if (explosion.sound == null) return;
     try audio.playFor(explosion.sound.?);
@@ -462,12 +507,18 @@ fn captureExplosionVisual(
     };
 }
 
-fn captureBlastPressureVisual(field: blast_pressure.Field, visualId: ?explosion_visual.Id) void {
-    if (visualId == null) return;
+fn resolveExplosionVisualPreset(visualId: ?explosion_visual.Id) ?explosion_visual.Preset {
+    if (visualId == null) return null;
     const preset = explosion_visual.presets.get(visualId.?) orelse {
-        std.log.warn("captureBlastPressureVisual: explosion visual preset {d} is missing", .{visualId.?});
-        return;
+        std.log.warn("resolveExplosionVisualPreset: explosion visual preset {d} is missing", .{visualId.?});
+        return null;
     };
+    return preset;
+}
+
+fn captureBlastPressureVisual(field: blast_pressure.Field, visualPreset: ?explosion_visual.Preset) void {
+    if (visualPreset == null) return;
+    const preset = visualPreset.?;
     blast_pressure_visual.capture(field, .{
         .propagation_duration_ms = preset.pressure_wave_duration_ms,
         .trail_duration_ms = preset.pressure_wave_trail_duration_ms,
@@ -491,7 +542,8 @@ fn explodeAtWithDirectHit(
     const pressureStart = perf.begin(.explosion);
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
-    captureBlastPressureVisual(pressureField, explosion.visual);
+    const visualPreset = resolveExplosionVisualPreset(explosion.visual);
+    captureBlastPressureVisual(pressureField, visualPreset);
     captureExplosionVisual(impactPosition, pressureSourcePosition, explosion, pressureField);
     logExplosionStage(perfId, "pressure_field", pressureStart);
 
@@ -508,7 +560,7 @@ fn explodeAtWithDirectHit(
     logExplosionStage(perfId, "entity_damage", entityDamageStart);
 
     const playerPressureStart = perf.begin(.explosion);
-    try applyExplosionPressureToPlayers(pressureField, explosion, attackerId, directHitDamage);
+    try applyExplosionPressureToPlayers(pressureField, explosion, visualPreset, attackerId, directHitDamage);
     logExplosionStage(perfId, "player_pressure", playerPressureStart);
     logExplosionStage(perfId, "total", totalStart);
 }

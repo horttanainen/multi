@@ -17,6 +17,8 @@ pub const Preset = struct {
     pressure_wave_duration_ms: u32,
     pressure_wave_trail_duration_ms: u32,
     pressure_wave_distortion_pixels: f32,
+    screen_shake_duration_ms: u32,
+    screen_shake_max_offset_pixels: f32,
     flash_duration_ms: u32,
     flash_start_radius: f32,
     flash_end_radius: f32,
@@ -178,6 +180,12 @@ fn validatePreset(name: []const u8, preset: Preset) !void {
     if (!std.math.isFinite(preset.pressure_wave_distortion_pixels) or preset.pressure_wave_distortion_pixels < 0) {
         std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid pressure-wave distortion", .{name});
         return error.InvalidExplosionVisualPressureWaveDistortion;
+    }
+    if (!std.math.isFinite(preset.screen_shake_max_offset_pixels) or preset.screen_shake_max_offset_pixels < 0 or
+        (preset.screen_shake_max_offset_pixels > 0 and preset.screen_shake_duration_ms == 0))
+    {
+        std.log.err("explosion_visual.validatePreset: preset '{s}' has invalid screen shake", .{name});
+        return error.InvalidExplosionVisualScreenShake;
     }
     if (preset.flash_duration_ms == 0) {
         std.log.err("explosion_visual.validatePreset: preset '{s}' has no flash duration", .{name});

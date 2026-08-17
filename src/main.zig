@@ -15,6 +15,7 @@ const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
 const input = @import("input.zig");
 const camera = @import("camera.zig");
+const camera_shake = @import("camera_shake.zig");
 const animation = @import("animation.zig");
 
 const audio = @import("audio.zig");
@@ -244,6 +245,7 @@ pub fn main(init: std.process.Init) !void {
         } else if (blast_pressure_visual.shouldRunSimulationUpdate(physicsStepCount)) {
             try gameLoop();
         }
+        camera_shake.update(renderer.zoom);
         perf.recordPlayerDeathFrameStage(.logic, playerDeathLogicStart);
         const logicUs = perf.elapsedUs(logicStart);
 
@@ -297,6 +299,7 @@ pub fn main(init: std.process.Init) !void {
     data.cleanup();
     sprite.deinit();
     delay.cleanup();
+    camera_shake.cleanup();
     camera.cleanup();
     viewport.cleanup();
     box2d.destroyWorld();

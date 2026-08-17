@@ -15,6 +15,7 @@ pub const Camera = struct {
     id: usize,
     playerId: usize,
     posPx: vec.IVec2,
+    shakeOffsetPx: vec.Vec2 = vec.zero,
 };
 
 pub var cameras: std.AutoArrayHashMapUnmanaged(usize, Camera) = .empty;
@@ -58,31 +59,30 @@ pub fn getActiveCamera() ?*Camera {
     return cameras.getPtr(activeCameraId);
 }
 
-pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
-    var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (getActiveCamera()) |camera| {
-        camPos = camera.posPx;
-    }
+fn roundedShakeOffset(cam: Camera) vec.IVec2 {
+    return .{
+        .x = @intFromFloat(@round(cam.shakeOffsetPx.x)),
+        .y = @intFromFloat(@round(cam.shakeOffsetPx.y)),
+    };
+}
 
-    return vec.iadd(pos, camPos);
+pub fn relativePositionForCreating(pos: vec.IVec2) vec.IVec2 {
+    const cam = getActiveCamera() orelse return pos;
+    return vec.iadd(pos, vec.iadd(cam.posPx, roundedShakeOffset(cam.*)));
 }
 
 pub fn parallaxAdjustedRelativePosition(pos: vec.IVec2, parallaxDistance: f32) vec.IVec2 {
-    var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (getActiveCamera()) |camera| {
-        camPos = camera.posPx;
-    }
+    const cam = getActiveCamera() orelse return pos;
+    var camPos = cam.posPx;
     camPos.x = @intFromFloat(@as(f32, @floatFromInt(camPos.x)) / parallaxDistance);
     camPos.y = @intFromFloat(@as(f32, @floatFromInt(camPos.y)) / parallaxDistance);
+    camPos = vec.iadd(camPos, roundedShakeOffset(cam.*));
     return vec.isubtract(pos, camPos);
 }
 
 pub fn relativePosition(pos: vec.IVec2) vec.IVec2 {
-    var camPos = vec.IVec2{ .x = 0, .y = 0 };
-    if (getActiveCamera()) |camera| {
-        camPos = camera.posPx;
-    }
-    return vec.isubtract(pos, camPos);
+    const cam = getActiveCamera() orelse return pos;
+    return vec.isubtract(pos, vec.iadd(cam.posPx, roundedShakeOffset(cam.*)));
 }
 
 pub fn followAllPlayers(zoom: f32) void {

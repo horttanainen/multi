@@ -70,6 +70,8 @@ pub const Player = struct {
 pub const DamageResult = struct {
     applied: bool = false,
     fatal: bool = false,
+    gibbed: bool = false,
+    camera_id: usize = 0,
 };
 
 pub const bodyColliderHalfWidth: f32 = 0.2;
@@ -1032,6 +1034,8 @@ pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
     return .{
         .applied = true,
         .fatal = isFatal,
+        .gibbed = isGibbing,
+        .camera_id = p.cameraId,
     };
 }
 
