@@ -206,13 +206,6 @@ fn createGibletPool(spriteTemplates: []const u64, batchSize: usize) !pool.Id {
     return pool.create(bodyIds);
 }
 
-fn replenishGibletPool(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize) !void {
-    const bodyIds = try createGibletBodies(spriteTemplates, batchSize);
-    defer allocator.free(bodyIds);
-    errdefer destroyGibletBodies(bodyIds);
-    try pool.addBodies(poolId, bodyIds);
-}
-
 fn cleanupGibletSet(gibletSet: GibletSet) void {
     destroyGibletPool(gibletSet.headPoolId);
     destroyGibletPool(gibletSet.legPoolId);
@@ -278,21 +271,20 @@ pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void
     std.debug.print("Prepared giblet pools for player {}: {} heads, {} legs, {} meat, {} bodies\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len, headBatchSize + legBatchSize + meatBatchSize });
 }
 
-fn acquireGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize) !pool.Acquisition {
-    const available = try pool.acquire(poolId, .return_null);
-    if (available != null) return available.?;
-
-    try replenishGibletPool(poolId, spriteTemplates, batchSize);
-    const replenished = try pool.acquire(poolId, .return_null);
-    if (replenished == null) {
-        std.log.err("acquireGiblet: replenished pool {d} has no available body", .{poolId});
+fn acquireGiblet(poolId: pool.Id) !pool.Acquisition {
+    const acquisition = try pool.acquire(poolId, .recycle_oldest);
+    if (acquisition == null) {
+        std.log.err("acquireGiblet: pool {d} has no body to acquire or recycle", .{poolId});
         return error.EmptyGibletPool;
     }
-    return replenished.?;
+    return acquisition.?;
 }
 
-fn activateGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usize, posM: vec.Vec2) !void {
-    const acquisition = try acquireGiblet(poolId, spriteTemplates, batchSize);
+fn activateGiblet(poolId: pool.Id, posM: vec.Vec2) !void {
+    const acquisition = try acquireGiblet(poolId);
+    if (comptime config.perf.explosion) {
+        if (acquisition.recycled) poolRecycleCount += 1;
+    }
     const bodyId = acquisition.bodyId;
     if (!box2d.c.b2Body_IsValid(bodyId)) {
         std.log.err("activateGiblet: pooled body is invalid", .{});
@@ -344,16 +336,15 @@ fn activateGiblet(poolId: pool.Id, spriteTemplates: []const u64, batchSize: usiz
     box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, impulse, true);
 }
 
-fn activateRandomGiblets(poolId: pool.Id, spriteUuids: []const u64, maximumPerDeath: u32, count: u32, posM: vec.Vec2) void {
+fn activateRandomGiblets(poolId: pool.Id, spriteUuids: []const u64, count: u32, posM: vec.Vec2) void {
     if (count == 0) return;
     if (spriteUuids.len == 0) {
         std.log.err("activateRandomGiblets: requested {d} giblets without sprites", .{count});
         return;
     }
 
-    const batchSize = gibletBatchSize(spriteUuids, maximumPerDeath);
     for (0..count) |_| {
-        activateGiblet(poolId, spriteUuids, batchSize, posM) catch |err| {
+        activateGiblet(poolId, posM) catch |err| {
             std.log.err("activateRandomGiblets: failed to activate pooled giblet with {}", .{err});
         };
     }
@@ -367,13 +358,13 @@ pub fn gib(posM: vec.Vec2, playerId: usize) void {
     const gibletSet = playerGiblets.getPtr(playerId).?;
 
     const headCount = runtime.random().intRangeAtMost(u32, 0, maxHeadGibletsPerDeath);
-    activateRandomGiblets(gibletSet.headPoolId, gibletSet.heads, maxHeadGibletsPerDeath, headCount, posM);
+    activateRandomGiblets(gibletSet.headPoolId, gibletSet.heads, headCount, posM);
 
     const legCount = runtime.random().intRangeAtMost(u32, 0, maxLegGibletsPerDeath);
-    activateRandomGiblets(gibletSet.legPoolId, gibletSet.legs, maxLegGibletsPerDeath, legCount, posM);
+    activateRandomGiblets(gibletSet.legPoolId, gibletSet.legs, legCount, posM);
 
     const meatCount = runtime.random().intRangeAtMost(u32, 1, maxMeatGibletsPerDeath);
-    activateRandomGiblets(gibletSet.meatPoolId, gibletSet.meat, maxMeatGibletsPerDeath, meatCount, posM);
+    activateRandomGiblets(gibletSet.meatPoolId, gibletSet.meat, meatCount, posM);
 }
 
 fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {

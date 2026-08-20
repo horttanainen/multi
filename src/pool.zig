@@ -175,6 +175,7 @@ pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
             continue;
         }
 
+        _ = bodiesToRelease.swapRemove(bodyId);
         _ = bodyPool.activeIndices.orderedRemove(0);
         bodyPool.activeIndices.appendAssumeCapacity(recycledIndex);
         return .{

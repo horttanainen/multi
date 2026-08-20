@@ -37,6 +37,10 @@ for scenario in "${scenarios[@]}"; do
         echo "Explosion performance scenario '$scenario' did not complete" >&2
         exit 1
     fi
+    if rg -q "(trigger|capture)_giblet_bodies_created=[1-9]" "$log_path"; then
+        echo "Explosion performance scenario '$scenario' created giblet bodies on the hot path" >&2
+        exit 1
+    fi
     if rg -q "texture_migrations=[1-9]" "$log_path"; then
         echo "Explosion performance scenario '$scenario' migrated a texture on the hot path" >&2
         exit 1
