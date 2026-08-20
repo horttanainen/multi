@@ -2,6 +2,7 @@ const std = @import("std");
 
 const allocator = @import("allocator.zig").allocator;
 const conv = @import("conversion.zig");
+const perf = @import("perf.zig");
 const sprite = @import("sprite.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
@@ -28,6 +29,23 @@ const CutoutVertex = struct {
 const FracturedCutout = struct {
     vertices: [maximumFractureVertexCount]CutoutVertex,
     vertexCount: usize,
+};
+
+const CutoutEdge = struct {
+    start: vec.Vec2,
+    delta: vec.Vec2,
+    lengthSquared: f32,
+};
+
+const CutoutGeometry = struct {
+    edges: [maximumFractureVertexCount]CutoutEdge,
+    count: usize,
+};
+
+const CharPattern = struct {
+    phase: f32,
+    sectorCountFloat: f32,
+    sectorScales: [maximumFractureVertexCount * 2]f32,
 };
 
 const CutoutEdit = struct {
@@ -164,31 +182,6 @@ fn buildFracturedCutout(
     return cutout;
 }
 
-fn crossCutoutVectors(a: CutoutVertex, b: CutoutVertex) i64 {
-    return @as(i64, a.x) * b.y - @as(i64, a.y) * b.x;
-}
-
-fn pointInsideCutoutTriangle(point: CutoutVertex, a: CutoutVertex, b: CutoutVertex) bool {
-    const orientation = crossCutoutVectors(a, b);
-    const crossStart = crossCutoutVectors(a, point);
-    const crossEnd = crossCutoutVectors(point, b);
-    const edge = CutoutVertex{ .x = b.x - a.x, .y = b.y - a.y };
-    const relativePoint = CutoutVertex{ .x = point.x - a.x, .y = point.y - a.y };
-    const crossOuter = crossCutoutVectors(edge, relativePoint);
-
-    if (orientation >= 0) return crossStart >= 0 and crossEnd >= 0 and crossOuter >= 0;
-    return crossStart <= 0 and crossEnd <= 0 and crossOuter <= 0;
-}
-
-fn pointInsideFracturedCutout(point: CutoutVertex, cutout: *const FracturedCutout) bool {
-    const vertices = cutout.vertices[0..cutout.vertexCount];
-    for (vertices, 0..) |vertex, index| {
-        const nextVertex = vertices[(index + 1) % vertices.len];
-        if (pointInsideCutoutTriangle(point, vertex, nextVertex)) return true;
-    }
-    return false;
-}
-
 fn floorCutoutFixed(value: i32) i32 {
     return @divFloor(value, cutoutFixedPointScale);
 }
@@ -222,56 +215,100 @@ fn cutoutPointInWorldPixels(point: CutoutVertex, scale: vec.Vec2) vec.Vec2 {
     };
 }
 
-fn distanceSquaredToCutoutSegment(point: vec.Vec2, start: vec.Vec2, end: vec.Vec2) f32 {
-    const segment = vec.subtract(end, start);
-    const pointOffset = vec.subtract(point, start);
-    const lengthSquared = vec.dot(segment, segment);
-    if (lengthSquared <= 0.001) return vec.dot(pointOffset, pointOffset);
+fn buildCutoutGeometry(cutout: *const FracturedCutout, scale: vec.Vec2) CutoutGeometry {
+    var geometry: CutoutGeometry = undefined;
+    geometry.count = cutout.vertexCount;
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    for (vertices, 0..) |start, index| {
+        const end = vertices[(index + 1) % vertices.len];
+        const startPixels = cutoutPointInWorldPixels(start, scale);
+        const endPixels = cutoutPointInWorldPixels(end, scale);
+        const delta = vec.subtract(endPixels, startPixels);
+        geometry.edges[index] = .{
+            .start = startPixels,
+            .delta = delta,
+            .lengthSquared = vec.dot(delta, delta),
+        };
+    }
+    return geometry;
+}
 
-    const projection = std.math.clamp(vec.dot(pointOffset, segment) / lengthSquared, 0, 1);
-    const closest = vec.add(start, vec.mul(segment, projection));
+fn cutoutRowIntersections(cutout: *const FracturedCutout, pointY: i32, intersections: *[maximumFractureVertexCount]f32) usize {
+    const vertices = cutout.vertices[0..cutout.vertexCount];
+    var intersectionCount: usize = 0;
+    var previous = vertices[vertices.len - 1];
+    for (vertices) |current| {
+        const crossesRow = (current.y > pointY) != (previous.y > pointY);
+        if (!crossesRow) {
+            previous = current;
+            continue;
+        }
+
+        const rowOffset: f32 = @floatFromInt(pointY - current.y);
+        const edgeHeight: f32 = @floatFromInt(previous.y - current.y);
+        const edgeWidth: f32 = @floatFromInt(previous.x - current.x);
+        const intersectionX = @as(f32, @floatFromInt(current.x)) + edgeWidth * rowOffset / edgeHeight;
+
+        var insertionIndex = intersectionCount;
+        while (insertionIndex > 0 and intersections[insertionIndex - 1] > intersectionX) : (insertionIndex -= 1) {
+            intersections[insertionIndex] = intersections[insertionIndex - 1];
+        }
+        intersections[insertionIndex] = intersectionX;
+        intersectionCount += 1;
+        previous = current;
+    }
+    return intersectionCount;
+}
+
+fn distanceSquaredToCutoutEdge(point: vec.Vec2, edge: CutoutEdge) f32 {
+    const pointOffset = vec.subtract(point, edge.start);
+    if (edge.lengthSquared <= 0.001) return vec.dot(pointOffset, pointOffset);
+
+    const projection = std.math.clamp(vec.dot(pointOffset, edge.delta) / edge.lengthSquared, 0, 1);
+    const closest = vec.add(edge.start, vec.mul(edge.delta, projection));
     const distance = vec.subtract(point, closest);
     return vec.dot(distance, distance);
 }
 
-fn distanceToFracturedCutout(point: CutoutVertex, cutout: *const FracturedCutout, scale: vec.Vec2) f32 {
-    const pointPixels = cutoutPointInWorldPixels(point, scale);
-    const vertices = cutout.vertices[0..cutout.vertexCount];
+fn distanceSquaredToFracturedCutout(pointPixels: vec.Vec2, geometry: *const CutoutGeometry) f32 {
     var minimumDistanceSquared = std.math.inf(f32);
-    var previousVertex = cutoutPointInWorldPixels(vertices[vertices.len - 1], scale);
-    for (vertices) |vertex| {
-        const currentVertex = cutoutPointInWorldPixels(vertex, scale);
-        minimumDistanceSquared = @min(minimumDistanceSquared, distanceSquaredToCutoutSegment(pointPixels, previousVertex, currentVertex));
-        previousVertex = currentVertex;
+    for (geometry.edges[0..geometry.count]) |edge| {
+        minimumDistanceSquared = @min(minimumDistanceSquared, distanceSquaredToCutoutEdge(pointPixels, edge));
     }
-    return @sqrt(minimumDistanceSquared);
+    return minimumDistanceSquared;
+}
+
+fn buildCharPattern(seed: u64, vertexCount: usize) CharPattern {
+    const sectorCount = vertexCount * 2;
+    var pattern: CharPattern = undefined;
+    pattern.phase = randomUnitFromSeed(seed, 0xa4093822299f31d0) * std.math.tau;
+    pattern.sectorCountFloat = @floatFromInt(sectorCount);
+    for (pattern.sectorScales[0..sectorCount], 0..) |*sectorScale, sectorIndex| {
+        const spikeRoll = randomUnitFromSeed(seed, 0x082efa98ec4e6c89 ^ @as(u64, @intCast(sectorIndex)));
+        const spikeAmplitude = spikeRoll * spikeRoll * spikeRoll;
+        sectorScale.* = 0.55 + spikeAmplitude * 3.0;
+    }
+    return pattern;
 }
 
 fn charWidthAtPoint(
-    point: CutoutVertex,
-    cutout: *const FracturedCutout,
-    scale: vec.Vec2,
+    pointPixels: vec.Vec2,
+    pattern: *const CharPattern,
     baseWidth: f32,
     seed: u64,
     x: i32,
     y: i32,
 ) f32 {
-    const pointPixels = cutoutPointInWorldPixels(point, scale);
     var angle = std.math.atan2(pointPixels.y, pointPixels.x);
     if (angle < 0) angle += std.math.tau;
 
-    const sectorCount = cutout.vertexCount * 2;
-    const sectorCountFloat: f32 = @floatFromInt(sectorCount);
-    const phase = randomUnitFromSeed(seed, 0xa4093822299f31d0) * std.math.tau;
-    const sectorCoordinate = @mod(angle + phase, std.math.tau) / std.math.tau * sectorCountFloat;
+    const sectorCoordinate = @mod(angle + pattern.phase, std.math.tau) / std.math.tau * pattern.sectorCountFloat;
     const sectorIndex: usize = @intFromFloat(@floor(sectorCoordinate));
     const sectorPosition = sectorCoordinate - @floor(sectorCoordinate);
     const triangle = 1.0 - @abs(sectorPosition * 2.0 - 1.0);
     const triangleSquared = triangle * triangle;
     const spikeShape = triangleSquared * triangleSquared;
-    const spikeRoll = randomUnitFromSeed(seed, 0x082efa98ec4e6c89 ^ @as(u64, @intCast(sectorIndex)));
-    const spikeAmplitude = spikeRoll * spikeRoll * spikeRoll;
-    const spikeScale = 0.32 + spikeShape * (0.55 + spikeAmplitude * 3.0);
+    const spikeScale = 0.32 + spikeShape * pattern.sectorScales[sectorIndex];
     const edgeBreakup = 0.88 + pixelNoise(seed, x, y, 0x452821e638d01377) * 0.24;
     return baseWidth * spikeScale * edgeBreakup;
 }
@@ -301,6 +338,8 @@ fn applyFracturedSurfacePixels(
     centerXFixed: i32,
     centerYFixed: i32,
     cutout: *const FracturedCutout,
+    geometry: *const CutoutGeometry,
+    charPattern: *const CharPattern,
     scale: vec.Vec2,
     charWidthWorld: f32,
     charStrength: f32,
@@ -330,6 +369,7 @@ fn applyFracturedSurfacePixels(
         @intFromFloat(@ceil(@min(charWidthPixels * maximumCharWidthScale / scale.y, heightFloat)))
     else
         0;
+    const maximumCharHorizontalDistanceFixed = @as(f32, @floatFromInt(charExpansionX * cutoutFixedPointScale));
 
     const rawMinimumX = floorCutoutFixed(centerXFixed + minimumOffsetX) - charExpansionX;
     const rawMaximumX = ceilCutoutFixed(centerXFixed + maximumOffsetX) + charExpansionX;
@@ -346,14 +386,23 @@ fn applyFracturedSurfacePixels(
     var colliderEdit = CutoutEdit{ .minimumX = width, .minimumY = height };
     var y = minimumY;
     while (y <= maximumY) : (y += 1) {
+        const pointY = y * cutoutFixedPointScale - centerYFixed;
+        var intersections: [maximumFractureVertexCount]f32 = undefined;
+        const intersectionCount = cutoutRowIntersections(cutout, pointY, &intersections);
+        var intersectionIndex: usize = 0;
+        var insideCutout = false;
         var x = minimumX;
         while (x <= maximumX) : (x += 1) {
             const point = CutoutVertex{
                 .x = x * cutoutFixedPointScale - centerXFixed,
-                .y = y * cutoutFixedPointScale - centerYFixed,
+                .y = pointY,
             };
+            const pointX: f32 = @floatFromInt(point.x);
+            while (intersectionIndex < intersectionCount and pointX >= intersections[intersectionIndex]) : (intersectionIndex += 1) {
+                insideCutout = !insideCutout;
+            }
             const pixelIndex = @as(usize, @intCast(y)) * pitch + @as(usize, @intCast(x)) * bytesPerPixel;
-            if (pointInsideFracturedCutout(point, cutout)) {
+            if (insideCutout) {
                 if (pixels[pixelIndex + 3] == 0) continue;
 
                 pixels[pixelIndex + 3] = 0;
@@ -364,10 +413,22 @@ fn applyFracturedSurfacePixels(
 
             if (!shouldChar or pixels[pixelIndex + 3] == 0) continue;
 
-            const distance = distanceToFracturedCutout(point, cutout, scale);
-            const noisyWidth = charWidthAtPoint(point, cutout, scale, charWidthPixels, charSeed, x, y);
-            if (distance >= noisyWidth) continue;
+            var nearRowIntersection = intersectionCount == 0;
+            if (!nearRowIntersection) {
+                for (intersections[0..intersectionCount]) |intersectionX| {
+                    if (@abs(pointX - intersectionX) > maximumCharHorizontalDistanceFixed) continue;
+                    nearRowIntersection = true;
+                    break;
+                }
+            }
+            if (!nearRowIntersection) continue;
 
+            const pointPixels = cutoutPointInWorldPixels(point, scale);
+            const noisyWidth = charWidthAtPoint(pointPixels, charPattern, charWidthPixels, charSeed, x, y);
+            const distanceSquared = distanceSquaredToFracturedCutout(pointPixels, geometry);
+            if (distanceSquared >= noisyWidth * noisyWidth) continue;
+
+            const distance = @sqrt(distanceSquared);
             const distanceFalloff = 1.0 - distance / noisyWidth;
             const strengthNoise = pixelNoise(charSeed, x, y, 0x13198a2e03707344);
             const intensity = charStrength * @sqrt(distanceFalloff) * (0.82 + strengthNoise * 0.28);
@@ -390,7 +451,7 @@ fn hotRimPixel(
     y: i32,
     centerXFixed: i32,
     centerYFixed: i32,
-    cutout: *const FracturedCutout,
+    geometry: *const CutoutGeometry,
     scale: vec.Vec2,
     widthPixels: f32,
 ) bool {
@@ -402,8 +463,8 @@ fn hotRimPixel(
         .x = x * cutoutFixedPointScale - centerXFixed,
         .y = y * cutoutFixedPointScale - centerYFixed,
     };
-    if (pointInsideFracturedCutout(point, cutout)) return false;
-    return distanceToFracturedCutout(point, cutout, scale) < widthPixels;
+    const pointPixels = cutoutPointInWorldPixels(point, scale);
+    return distanceSquaredToFracturedCutout(pointPixels, geometry) < widthPixels * widthPixels;
 }
 
 fn hotRimQuadForRun(
@@ -436,6 +497,7 @@ fn buildHotRimQuads(
     centerXFixed: i32,
     centerYFixed: i32,
     cutout: *const FracturedCutout,
+    geometry: *const CutoutGeometry,
     entityPos: vec.Vec2,
     rotation: f32,
     hotRimWidthWorld: f32,
@@ -469,20 +531,33 @@ fn buildHotRimQuads(
     const maximumY = @min(height - 1, rawMaximumY);
     var quads = std.array_list.Managed(HotRimQuad).init(allocator);
     errdefer quads.deinit();
+    const maximumHorizontalDistanceFixed = @as(f32, @floatFromInt(expansionX * cutoutFixedPointScale));
 
     var y = minimumY;
     while (y <= maximumY) : (y += 1) {
+        const pointY = y * cutoutFixedPointScale - centerYFixed;
+        var intersections: [maximumFractureVertexCount]f32 = undefined;
+        const intersectionCount = cutoutRowIntersections(cutout, pointY, &intersections);
         var runStart: i32 = -1;
         var x = minimumX;
         while (x <= maximumX + 1) : (x += 1) {
-            const belongsToRim = x <= maximumX and hotRimPixel(
+            var nearRowIntersection = intersectionCount == 0;
+            if (x <= maximumX and !nearRowIntersection) {
+                const pointX: f32 = @floatFromInt(x * cutoutFixedPointScale - centerXFixed);
+                for (intersections[0..intersectionCount]) |intersectionX| {
+                    if (@abs(pointX - intersectionX) > maximumHorizontalDistanceFixed) continue;
+                    nearRowIntersection = true;
+                    break;
+                }
+            }
+            const belongsToRim = x <= maximumX and nearRowIntersection and hotRimPixel(
                 pixels,
                 pitch,
                 x,
                 y,
                 centerXFixed,
                 centerYFixed,
-                cutout,
+                geometry,
                 s.scale,
                 widthPixels,
             );
@@ -516,18 +591,22 @@ pub fn apply(
     charStrength: f32,
     hotRimWidthWorld: f32,
 ) ?Result {
+    const totalStart = perf.begin(.explosion);
     const radiusPixels = radiusWorld * conv.met2pix;
     const centerPixel = worldToSpritePixel(s, centerWorld, entityPos, rotation, @intCast(s.surface.w), @intCast(s.surface.h));
     const centerXFixed: i32 = @intFromFloat(@round(centerPixel.x * cutoutFixedPointScale));
     const centerYFixed: i32 = @intFromFloat(@round(centerPixel.y * cutoutFixedPointScale));
     const cutout = buildFracturedCutout(s, radiusPixels, rotation, seed, irregularity);
+    const geometry = buildCutoutGeometry(&cutout, s.scale);
 
     const width: i32 = s.surface.w;
     const height: i32 = s.surface.h;
     const pixels: [*]u8 = @ptrCast(s.surface.pixels);
     const pitch: usize = @intCast(s.surface.pitch);
     const charSeed = hash64(seed ^ @as(u64, @bitCast(time.realNow())));
-    const edit = applyFracturedSurfacePixels(
+    const charPattern = buildCharPattern(charSeed, cutout.vertexCount);
+    const pixelStart = perf.begin(.explosion);
+    const maybeEdit = applyFracturedSurfacePixels(
         pixels,
         pitch,
         width,
@@ -535,11 +614,20 @@ pub fn apply(
         centerXFixed,
         centerYFixed,
         &cutout,
+        &geometry,
+        &charPattern,
         s.scale,
         charWidthWorld,
         charStrength,
         charSeed,
-    ) orelse return null;
+    );
+    const pixelUs = perf.elapsedUs(pixelStart);
+    if (maybeEdit == null) {
+        perf.log(.explosion, "perf.surface_cutout changed=false pixel_us={d} total_us={d}", .{ pixelUs, perf.elapsedUs(totalStart) });
+        return null;
+    }
+    const edit = maybeEdit.?;
+    const hotRimStart = perf.begin(.explosion);
     const hotRimQuads = buildHotRimQuads(
         s,
         pixels,
@@ -549,12 +637,31 @@ pub fn apply(
         centerXFixed,
         centerYFixed,
         &cutout,
+        &geometry,
         entityPos,
         rotation,
         hotRimWidthWorld,
     ) catch |err| {
         std.log.warn("surface_cutout.apply: could not capture hot-rim geometry: {}", .{err});
+        perf.log(
+            .explosion,
+            "perf.surface_cutout changed=true pixel_us={d} hot_rim_us={d} hot_rim_quads=0 total_us={d}",
+            .{ pixelUs, perf.elapsedUs(hotRimStart), perf.elapsedUs(totalStart) },
+        );
         return .{ .edit = edit, .hotRimQuads = null };
     };
+    const hotRimQuadCount = if (hotRimQuads == null) 0 else hotRimQuads.?.len;
+    perf.log(
+        .explosion,
+        "perf.surface_cutout changed=true pixel_us={d} hot_rim_us={d} hot_rim_quads={d} dirty_width={d} dirty_height={d} total_us={d}",
+        .{
+            pixelUs,
+            perf.elapsedUs(hotRimStart),
+            hotRimQuadCount,
+            edit.textureDirtyRect.maxX - edit.textureDirtyRect.minX,
+            edit.textureDirtyRect.maxY - edit.textureDirtyRect.minY,
+            perf.elapsedUs(totalStart),
+        },
+    );
     return .{ .edit = edit, .hotRimQuads = hotRimQuads };
 }
