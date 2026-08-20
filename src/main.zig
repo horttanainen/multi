@@ -27,6 +27,7 @@ const friction = @import("friction.zig");
 const debug = @import("debug.zig");
 const blast_pressure_visual = @import("blast_pressure_visual.zig");
 const explosion_visual = @import("explosion_visual.zig");
+const explosion_benchmark = @import("explosion_benchmark.zig");
 const hot_rim_visual = @import("hot_rim_visual.zig");
 const visual_particle = @import("visual_particle.zig");
 
@@ -180,6 +181,13 @@ fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u
 pub fn main(init: std.process.Init) !void {
     runtime.init(init.io);
 
+    {
+        var argsArena = std.heap.ArenaAllocator.init(allocator.allocator);
+        defer argsArena.deinit();
+        const args = try init.minimal.args.toSlice(argsArena.allocator());
+        try explosion_benchmark.configure(args);
+    }
+
     try window.init();
     time.init();
     try audio.init();
@@ -206,7 +214,12 @@ pub fn main(init: std.process.Init) !void {
     try camera.spawn(.{ .x = 0, .y = 0 });
     try gibbing.init();
     gpu.saveAtlasCheckpoint();
-    try level.next();
+    const benchmarkLevelPath = explosion_benchmark.levelPath();
+    if (benchmarkLevelPath == null) {
+        try level.next();
+    } else {
+        try level.tryEditorLevel(benchmarkLevelPath.?);
+    }
 
     box2d.setFrictionCallback(&friction.callback);
     _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
@@ -348,6 +361,7 @@ fn gameLoop() !void {
     perf.recordPlayerDeathGameLoopStage(.giblet_contacts, gibletContactsStart);
 
     const projectileContactsStart = perf.begin(.player_death);
+    try explosion_benchmark.update();
     try debug.update();
     try projectile.checkContacts();
     pool.processQueuedReleases();

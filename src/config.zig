@@ -1,5 +1,6 @@
 const std = @import("std");
 const vec = @import("vector.zig");
+const build_options = @import("build_options");
 
 pub const window = .{
     .defaultWidth = 2000,
@@ -10,9 +11,9 @@ pub const debug = false;
 pub const debugLog = false;
 
 pub const perf = .{
-    .explosion = false,
+    .explosion = build_options.explosion_perf,
     .level_editor_static_spawn = false,
-    .player_death = false,
+    .player_death = build_options.explosion_perf,
 };
 
 pub const debugAutoMissileExplosionDelayMs: ?u32 = null;

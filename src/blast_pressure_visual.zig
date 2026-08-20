@@ -68,6 +68,7 @@ fn freeWave(wave: Wave) void {
 }
 
 pub fn capture(field: blast_pressure.Field, captureData: Capture) !void {
+    const captureStart = perf.begin(.explosion);
     const maximumCellCount = try std.math.mul(usize, field.dimension, field.dimension);
     const texels = try allocator.alloc(gpu.PressureFieldTexel, maximumCellCount);
     defer allocator.free(texels);
@@ -139,8 +140,8 @@ pub fn capture(field: blast_pressure.Field, captureData: Capture) !void {
 
     perf.log(
         .explosion,
-        "perf.pressure_capture dimension={d} field_cells={d} reachable_cells={d} texture_bytes={d}",
-        .{ field.dimension, maximumCellCount, cellCount, maximumCellCount * @sizeOf(gpu.PressureFieldTexel) },
+        "perf.pressure_capture dimension={d} field_cells={d} reachable_cells={d} texture_bytes={d} capture_us={d}",
+        .{ field.dimension, maximumCellCount, cellCount, maximumCellCount * @sizeOf(gpu.PressureFieldTexel), perf.elapsedUs(captureStart) },
     );
 
     if (comptime config.debugBlastPressure.enabled) {

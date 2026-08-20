@@ -540,11 +540,19 @@ fn explodeAtWithDirectHit(
     const cutoutSeed = cutoutSeedForExplosion(impactPosition, pressureSourcePosition, explosion);
 
     const pressureStart = perf.begin(.explosion);
+    const pressureBuildStart = perf.begin(.explosion);
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
+    logExplosionStage(perfId, "pressure_build", pressureBuildStart);
+
     const visualPreset = resolveExplosionVisualPreset(explosion.visual);
+    const pressureVisualStart = perf.begin(.explosion);
     captureBlastPressureVisual(pressureField, visualPreset);
+    logExplosionStage(perfId, "pressure_visual_capture", pressureVisualStart);
+
+    const explosionVisualStart = perf.begin(.explosion);
     captureExplosionVisual(impactPosition, pressureSourcePosition, explosion, pressureField);
+    logExplosionStage(perfId, "explosion_visual_capture", explosionVisualStart);
     logExplosionStage(perfId, "pressure_field", pressureStart);
 
     const soundStart = perf.begin(.explosion);
@@ -567,6 +575,13 @@ fn explodeAtWithDirectHit(
 
 pub fn explodeAt(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize) !void {
     try explodeAtWithDirectHit(pos, pos, explosion, attackerId, null);
+}
+
+pub fn explodeAtDirectPlayer(pos: vec.Vec2, explosion: Explosion, attackerId: ?usize, playerId: usize) !void {
+    try explodeAtWithDirectHit(pos, pos, explosion, attackerId, .{
+        .player_id = playerId,
+        .applied_damage = 0,
+    });
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, spec: Spec) !void {

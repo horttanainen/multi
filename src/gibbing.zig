@@ -6,6 +6,7 @@ const box2d = @import("box2d.zig");
 const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const collision = @import("collision.zig");
+const config = @import("config.zig");
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
 const pool = @import("pool.zig");
@@ -45,6 +46,8 @@ var templateMeatGiblets: []u64 = &[_]u64{};
 var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
 var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
 var bloodParticleEffectId: ?particle_effect.Id = null;
+pub var pooledBodyCreationCount: u64 = 0;
+pub var poolRecycleCount: u64 = 0;
 
 pub fn init() !void {
     templateHeadGiblets = try fs.loadSpritesFromFolder(
@@ -167,6 +170,7 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
     try gibletBloodCooldowns.put(allocator, gibletEntity.bodyId, 0.0);
     errdefer _ = gibletBloodCooldowns.swapRemove(gibletEntity.bodyId);
 
+    if (comptime config.perf.explosion) pooledBodyCreationCount += 1;
     return gibletEntity.bodyId;
 }
 

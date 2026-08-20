@@ -3,6 +3,9 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const explosion_perf = b.option(bool, "explosion-perf", "Compile explosion performance instrumentation and benchmark scenarios") orelse false;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "explosion_perf", explosion_perf);
 
     const exe = b.addExecutable(.{
         .name = "multi",
@@ -13,6 +16,7 @@ pub fn build(b: *std.Build) !void {
             .link_libc = true,
         }),
     });
+    exe.root_module.addOptions("build_options", build_options);
 
     const sdl_dep = b.dependency("SDL3", .{ .target = target, .optimize = optimize });
     const sdl = sdl_dep.artifact("SDL3");
@@ -90,6 +94,9 @@ pub fn build(b: *std.Build) !void {
 
     const run = b.step("run", "Run the game");
     const run_cmd = b.addRunArtifact(exe);
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
     run.dependOn(&run_cmd.step);
 
     const probe = b.addExecutable(.{

@@ -3,6 +3,7 @@ const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const camera = @import("camera.zig");
+const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const runtime = @import("runtime.zig");
@@ -59,6 +60,7 @@ const StainTextureUpdate = struct {
 };
 
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
+pub var bodyCreationCount: u64 = 0;
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
 var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
 const stainTextureUpdatePixelBudgetPerFrame: usize = 32 * 1024;
@@ -143,6 +145,7 @@ pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
         .behaviors = spawn.behaviors,
         .seed = spawn.seed,
     });
+    if (comptime config.perf.explosion) bodyCreationCount += 1;
 
     return bodyId;
 }

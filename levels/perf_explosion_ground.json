@@ -1,0 +1,48 @@
+{
+    "size": {
+        "x": 4096,
+        "y": 4096
+    },
+    "levelHeightMeters": 51.2,
+    "cameraZoomMeters": 15,
+    "aspectRatio": {
+        "width": 1,
+        "height": 1
+    },
+    "gravity": 10,
+    "pixelsPerMeter": 80,
+    "splitscreen": false,
+    "parallaxEntities": [],
+    "entities": [
+        {
+            "id": 1,
+            "type": "static",
+            "breakable": true,
+            "friction": 0.5,
+            "imgPath": "images/theater_breakable.png",
+            "scale": {
+                "x": 2.0,
+                "y": 2.0
+            },
+            "pos": {
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "id": 2,
+            "type": "spawn",
+            "breakable": false,
+            "friction": 0,
+            "imgPath": "images/spawn.png",
+            "scale": {
+                "x": 1.0,
+                "y": 1.0
+            },
+            "pos": {
+                "x": -1348,
+                "y": 1952
+            }
+        }
+    ]
+}

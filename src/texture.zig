@@ -2,6 +2,7 @@ const std = @import("std");
 const sdl = @import("sdl.zig");
 const gpu = @import("gpu.zig");
 const atlas = @import("atlas.zig");
+const perf = @import("perf.zig");
 const c = sdl.c;
 const Atlas = atlas.Atlas;
 const ATLAS_SIZE = atlas.ATLAS_SIZE;
@@ -19,6 +20,8 @@ const AtlasDumpTarget = enum {
 const atlasClearStripeHeight: u32 = 256;
 
 var pendingTextureUploads: std.ArrayListUnmanaged(PendingTextureUpload) = .empty;
+pub var fullMigrationCount: u64 = 0;
+pub var fullMigrationBytes: u64 = 0;
 
 pub const TextureBacking = enum {
     immutable_atlas,
@@ -289,6 +292,7 @@ pub fn ensureMutableTexture(texture: *Texture, surface: *sdl.Surface) !void {
         return;
     }
 
+    const migrationStart = perf.begin(.explosion);
     const device = gpu.getDevice();
     const rgba_surface = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_ABGR8888);
     if (rgba_surface == null) return error.ConvertSurfaceFailed;
@@ -305,6 +309,16 @@ pub fn ensureMutableTexture(texture: *Texture, surface: *sdl.Surface) !void {
 
         std.log.warn("ensureMutableTexture: mutable atlas full, using standalone texture", .{});
         try moveTextureToStandalone(texture, rgba_surface);
+        const migrationBytes = @as(u64, w) * @as(u64, h) * 4;
+        if (comptime perf.configured(.explosion)) {
+            fullMigrationCount += 1;
+            fullMigrationBytes += migrationBytes;
+        }
+        perf.log(
+            .explosion,
+            "perf.texture_migration backing=standalone width={d} height={d} bytes={d} us={d}",
+            .{ w, h, migrationBytes, perf.elapsedUs(migrationStart) },
+        );
         return;
     };
 
@@ -316,6 +330,16 @@ pub fn ensureMutableTexture(texture: *Texture, surface: *sdl.Surface) !void {
     texture.standalone_gpu_texture = null;
 
     uploadToAtlasRegion(device, tex_atlas, rgba_surface, region.x, region.y, w, h);
+    const migrationBytes = @as(u64, w) * @as(u64, h) * 4;
+    if (comptime perf.configured(.explosion)) {
+        fullMigrationCount += 1;
+        fullMigrationBytes += migrationBytes;
+    }
+    perf.log(
+        .explosion,
+        "perf.texture_migration backing=mutable_atlas width={d} height={d} bytes={d} us={d}",
+        .{ w, h, migrationBytes, perf.elapsedUs(migrationStart) },
+    );
 }
 
 /// Compatibility wrapper for older copy-on-write call sites.
