@@ -544,6 +544,11 @@ fn explodeAtWithDirectHit(
     var pressureField = try blast_pressure.build(pressureSourcePosition, explosion.pressureRadius);
     defer blast_pressure.deinit(&pressureField);
     logExplosionStage(perfId, "pressure_build", pressureBuildStart);
+    perf.log(
+        .explosion,
+        "perf.pressure_field_stats blocked_cells={d} cells={d}",
+        .{ pressureField.blocked_cell_count, pressureField.cells.len },
+    );
 
     const visualPreset = resolveExplosionVisualPreset(explosion.visual);
     const pressureVisualStart = perf.begin(.explosion);

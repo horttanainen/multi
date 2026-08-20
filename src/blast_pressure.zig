@@ -2,11 +2,18 @@ const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const collision = @import("collision.zig");
+const perf = @import("perf.zig");
 const vec = @import("vector.zig");
 
 const CellState = enum {
     unknown,
     open,
+    blocked,
+};
+
+const DirectVisibility = enum {
+    unknown,
+    visible,
     blocked,
 };
 
@@ -16,6 +23,7 @@ const Cell = struct {
     transmission: f32 = 0,
     wave_source_index: ?usize = null,
     state: CellState = .unknown,
+    direct_visibility: DirectVisibility = .unknown,
     settled: bool = false,
 };
 
@@ -26,6 +34,7 @@ pub const Field = struct {
     half_extent: usize,
     dimension: usize,
     center_index: usize,
+    blocked_cell_count: usize,
     cells: []Cell,
 };
 
@@ -129,6 +138,7 @@ fn cellPosition(field: Field, index: usize) vec.Vec2 {
 
 const BlockerRasterContext = struct {
     field: *Field,
+    blocked_cell_count: usize = 0,
 };
 
 fn clampedGridCoordinate(field: Field, worldCoordinate: f32, originCoordinate: f32, roundUp: bool) usize {
@@ -137,6 +147,49 @@ fn clampedGridCoordinate(field: Field, worldCoordinate: f32, originCoordinate: f
     const rounded = if (roundUp) @ceil(gridCoordinate) else @floor(gridCoordinate);
     const maximum: f32 = @floatFromInt(field.dimension - 1);
     return @intFromFloat(std.math.clamp(rounded, 0, maximum));
+}
+
+fn distanceSquaredToSegment(point: box2d.c.b2Vec2, start: box2d.c.b2Vec2, end: box2d.c.b2Vec2) f32 {
+    const segmentX = end.x - start.x;
+    const segmentY = end.y - start.y;
+    const pointOffsetX = point.x - start.x;
+    const pointOffsetY = point.y - start.y;
+    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+    if (lengthSquared <= 0.000001) return pointOffsetX * pointOffsetX + pointOffsetY * pointOffsetY;
+
+    const projection = std.math.clamp((pointOffsetX * segmentX + pointOffsetY * segmentY) / lengthSquared, 0, 1);
+    const distanceX = point.x - (start.x + segmentX * projection);
+    const distanceY = point.y - (start.y + segmentY * projection);
+    return distanceX * distanceX + distanceY * distanceY;
+}
+
+fn pointTouchesPolygon(
+    worldPoint: box2d.c.b2Vec2,
+    transform: box2d.c.b2Transform,
+    polygon: box2d.c.b2Polygon,
+    probeRadius: f32,
+) bool {
+    const localPoint = box2d.c.b2InvTransformPoint(transform, worldPoint);
+    const vertexCount: usize = @intCast(polygon.count);
+    var inside = true;
+    for (0..vertexCount) |index| {
+        const vertex = polygon.vertices[index];
+        const normal = polygon.normals[index];
+        const separation = normal.x * (localPoint.x - vertex.x) + normal.y * (localPoint.y - vertex.y);
+        if (separation <= 0) continue;
+        inside = false;
+        break;
+    }
+    if (inside) return true;
+
+    const combinedRadius = probeRadius + polygon.radius;
+    const combinedRadiusSquared = combinedRadius * combinedRadius;
+    var previous = polygon.vertices[vertexCount - 1];
+    for (polygon.vertices[0..vertexCount]) |current| {
+        if (distanceSquaredToSegment(localPoint, previous, current) <= combinedRadiusSquared) return true;
+        previous = current;
+    }
+    return false;
 }
 
 fn rasterizeBlocker(shapeId: box2d.c.b2ShapeId, rawContext: ?*anyopaque) callconv(.c) bool {
@@ -153,21 +206,34 @@ fn rasterizeBlocker(shapeId: box2d.c.b2ShapeId, rawContext: ?*anyopaque) callcon
     const minimumRow = clampedGridCoordinate(field.*, shapeAabb.lowerBound.y - probeRadius, field.origin.y, false);
     const maximumRow = clampedGridCoordinate(field.*, shapeAabb.upperBound.y + probeRadius, field.origin.y, true);
     const probeRadiusSquared = probeRadius * probeRadius;
+    const isPolygon = box2d.c.b2Shape_GetType(shapeId) == box2d.c.b2_polygonShape;
+    const polygon = if (isPolygon) box2d.c.b2Shape_GetPolygon(shapeId) else undefined;
+    const transform = if (isPolygon)
+        box2d.c.b2Body_GetTransform(box2d.c.b2Shape_GetBody(shapeId))
+    else
+        undefined;
 
     for (minimumRow..maximumRow + 1) |row| {
         for (minimumColumn..maximumColumn + 1) |column| {
             const index = row * field.dimension + column;
+            if (field.cells[index].state == .blocked) continue;
             const position = cellPosition(field.*, index);
-            const closestPoint = vec.fromBox2d(box2d.c.b2Shape_GetClosestPoint(shapeId, vec.toBox2d(position)));
-            const separation = vec.subtract(position, closestPoint);
-            if (vec.dot(separation, separation) > probeRadiusSquared) continue;
+            const worldPoint = vec.toBox2d(position);
+            if (isPolygon) {
+                if (!pointTouchesPolygon(worldPoint, transform, polygon, probeRadius)) continue;
+            } else {
+                const closestPoint = vec.fromBox2d(box2d.c.b2Shape_GetClosestPoint(shapeId, worldPoint));
+                const separation = vec.subtract(position, closestPoint);
+                if (vec.dot(separation, separation) > probeRadiusSquared) continue;
+            }
             field.cells[index].state = .blocked;
+            context.blocked_cell_count += 1;
         }
     }
     return true;
 }
 
-fn rasterizeBlockers(field: *Field) void {
+fn rasterizeBlockers(field: *Field) usize {
     const probeRadius = field.cell_size * 0.32;
     const gridExtent = @as(f32, @floatFromInt(field.half_extent)) * field.cell_size + probeRadius;
     const bounds = box2d.c.b2AABB{
@@ -184,6 +250,27 @@ fn rasterizeBlockers(field: *Field) void {
         if (cell.state == .unknown) cell.state = .open;
     }
     field.cells[field.center_index].state = .open;
+    return context.blocked_cell_count;
+}
+
+fn fillUnobstructedField(field: *Field) void {
+    const halfExtent: isize = @intCast(field.half_extent);
+    for (field.cells, 0..) |*cell, index| {
+        const coordinates = cellCoordinates(field.*, index);
+        const columnOffset = @abs(coordinates.column - halfExtent);
+        const rowOffset = @abs(coordinates.row - halfExtent);
+        const diagonalSteps = @min(columnOffset, rowOffset);
+        const straightSteps = @max(columnOffset, rowOffset) - diagonalSteps;
+        const travelDistance = (@as(f32, @floatFromInt(straightSteps)) +
+            @as(f32, @floatFromInt(diagonalSteps)) * diagonalDistance) * field.cell_size;
+        if (travelDistance > field.radius) continue;
+
+        cell.travel_distance = travelDistance;
+        cell.strength = falloff(travelDistance, field.radius);
+        cell.transmission = 1;
+        cell.wave_source_index = field.center_index;
+        cell.settled = true;
+    }
 }
 
 fn cellIsBlocked(field: *Field, index: usize) bool {
@@ -257,6 +344,16 @@ fn cellsHaveLineOfSight(field: *Field, startIndex: usize, endIndex: usize) bool 
     }
 }
 
+fn cellHasDirectLineOfSight(field: *Field, endIndex: usize) bool {
+    const endCell = &field.cells[endIndex];
+    if (endCell.direct_visibility == .visible) return true;
+    if (endCell.direct_visibility == .blocked) return false;
+
+    const visible = cellsHaveLineOfSight(field, field.center_index, endIndex);
+    endCell.direct_visibility = if (visible) .visible else .blocked;
+    return visible;
+}
+
 pub fn build(origin: vec.Vec2, radius: f32) !Field {
     if (!std.math.isFinite(radius) or radius <= 0) {
         std.log.err("blast_pressure.build: radius must be finite and positive", .{});
@@ -290,14 +387,30 @@ pub fn build(origin: vec.Vec2, radius: f32) !Field {
         .half_extent = halfExtent,
         .dimension = dimension,
         .center_index = centerIndex,
+        .blocked_cell_count = 0,
         .cells = cells,
     };
-    rasterizeBlockers(&field);
+    const rasterStart = perf.begin(.explosion);
+    const blockedCellCount = rasterizeBlockers(&field);
+    const rasterUs = perf.elapsedUs(rasterStart);
+    field.blocked_cell_count = blockedCellCount;
+    if (blockedCellCount == 0) {
+        const propagationStart = perf.begin(.explosion);
+        fillUnobstructedField(&field);
+        perf.log(
+            .explosion,
+            "perf.pressure_build_detail blocked_cells=0 raster_us={d} propagation_us={d}",
+            .{ rasterUs, perf.elapsedUs(propagationStart) },
+        );
+        return field;
+    }
     field.cells[centerIndex].travel_distance = 0;
     field.cells[centerIndex].strength = 1;
     field.cells[centerIndex].transmission = 1;
     field.cells[centerIndex].wave_source_index = centerIndex;
+    field.cells[centerIndex].direct_visibility = .visible;
 
+    const propagationStart = perf.begin(.explosion);
     var queue: std.PriorityQueue(QueueEntry, void, queueOrder) = .empty;
     defer queue.deinit(allocator);
     try queue.push(allocator, .{ .cell_index = centerIndex, .travel_distance = 0, .strength = 1 });
@@ -326,7 +439,11 @@ pub fn build(origin: vec.Vec2, radius: f32) !Field {
             };
             var candidateTransmission = currentCell.transmission;
             var candidateWaveSourceIndex = currentWaveSourceIndex;
-            if (!cellsHaveLineOfSight(&field, currentWaveSourceIndex, neighborIndex)) {
+            const hasLineOfSight = if (currentWaveSourceIndex == field.center_index)
+                cellHasDirectLineOfSight(&field, neighborIndex)
+            else
+                cellsHaveLineOfSight(&field, currentWaveSourceIndex, neighborIndex);
+            if (!hasLineOfSight) {
                 candidateTransmission *= diffractionTransmission;
                 candidateWaveSourceIndex = entry.cell_index;
             }
@@ -347,6 +464,12 @@ pub fn build(origin: vec.Vec2, radius: f32) !Field {
             });
         }
     }
+
+    perf.log(
+        .explosion,
+        "perf.pressure_build_detail blocked_cells={d} raster_us={d} propagation_us={d}",
+        .{ blockedCellCount, rasterUs, perf.elapsedUs(propagationStart) },
+    );
 
     return field;
 }
