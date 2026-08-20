@@ -90,6 +90,7 @@ const CachedTexInfo = struct {
     geometry_id: u64,
 };
 var textureCache = std.StringHashMap(CachedTexInfo).init(allocator);
+var stainStrengthScratch = std.ArrayListUnmanaged(f32).empty;
 
 fn sourceTextureSize(surface: *sdl.Surface) RuntimeTextureSize {
     return .{
@@ -1016,6 +1017,12 @@ pub fn stainSplatOnSurface(
     const maxX: usize = @intCast(@min(widthI - 1, rawMaxX));
     const minY: usize = @intCast(@max(0, rawMinY));
     const maxY: usize = @intCast(@min(heightI - 1, rawMaxY));
+    const regionWidth = maxX - minX + 1;
+    const regionHeight = maxY - minY + 1;
+    const regionPixelCount = try std.math.mul(usize, regionWidth, regionHeight);
+    try stainStrengthScratch.ensureTotalCapacity(allocator, regionPixelCount);
+    stainStrengthScratch.items.len = regionPixelCount;
+    @memset(stainStrengthScratch.items, 0);
 
     var changed = false;
     var dirtyMinX: i32 = widthI;
@@ -1023,44 +1030,74 @@ pub fn stainSplatOnSurface(
     var dirtyMaxX: i32 = 0;
     var dirtyMaxY: i32 = 0;
 
-    var y = minY;
-    while (y <= maxY) : (y += 1) {
-        var x = minX;
-        while (x <= maxX) : (x += 1) {
-            const pixelIndex = y * pitch + x * bytesPerPixel;
-            if (pixels[pixelIndex + 3] == 0) {
-                continue;
-            }
+    for (spots[0..spotCount], 0..) |spot, spotIndex| {
+        const stretch = if (spotIndex == 0) mainStretch else 1.0;
+        const spotExtent = spot.radius * stretch * 1.06;
+        const spotCenterX = centerPixelF.x + spot.offsetX;
+        const spotCenterY = centerPixelF.y + spot.offsetY;
+        const rawSpotMinX: i32 = @intFromFloat(@floor(spotCenterX - spotExtent));
+        const rawSpotMaxX: i32 = @intFromFloat(@ceil(spotCenterX + spotExtent));
+        const rawSpotMinY: i32 = @intFromFloat(@floor(spotCenterY - spotExtent));
+        const rawSpotMaxY: i32 = @intFromFloat(@ceil(spotCenterY + spotExtent));
+        const minXI: i32 = @intCast(minX);
+        const maxXI: i32 = @intCast(maxX);
+        const minYI: i32 = @intCast(minY);
+        const maxYI: i32 = @intCast(maxY);
 
-            const xi: i32 = @intCast(x);
-            const yi: i32 = @intCast(y);
-            const px = @as(f32, @floatFromInt(xi)) - centerPixelF.x;
-            const py = @as(f32, @floatFromInt(yi)) - centerPixelF.y;
-            const textureNoise = pixelNoise(seed, xi, yi, 700);
-            const holeNoise = pixelNoise(seed, xi, yi, 911);
-            var strongest: f32 = 0.0;
+        if (rawSpotMaxX < minXI or rawSpotMinX > maxXI or rawSpotMaxY < minYI or rawSpotMinY > maxYI) continue;
 
-            for (spots[0..spotCount], 0..) |spot, spotIndex| {
+        const spotMinX: usize = @intCast(@max(minXI, @min(maxXI, rawSpotMinX)));
+        const spotMaxX: usize = @intCast(@max(minXI, @min(maxXI, rawSpotMaxX)));
+        const spotMinY: usize = @intCast(@max(minYI, @min(maxYI, rawSpotMinY)));
+        const spotMaxY: usize = @intCast(@max(minYI, @min(maxYI, rawSpotMaxY)));
+
+        var y = spotMinY;
+        while (y <= spotMaxY) : (y += 1) {
+            var x = spotMinX;
+            while (x <= spotMaxX) : (x += 1) {
+                const pixelIndex = y * pitch + x * bytesPerPixel;
+                if (pixels[pixelIndex + 3] == 0) continue;
+
+                const xi: i32 = @intCast(x);
+                const yi: i32 = @intCast(y);
+                const px = @as(f32, @floatFromInt(xi)) - centerPixelF.x;
+                const py = @as(f32, @floatFromInt(yi)) - centerPixelF.y;
                 const localX = px - spot.offsetX;
                 const localY = py - spot.offsetY;
                 const along = localX * impactDir.x + localY * impactDir.y;
                 const across = localX * sideDir.x + localY * sideDir.y;
-                const stretch = if (spotIndex == 0) mainStretch else 1.0;
-                const normalized = @sqrt((along / stretch) * (along / stretch) + across * across) / spot.radius;
+                const stretchedAlong = along / stretch;
+                const normalizedSquared = (stretchedAlong * stretchedAlong + across * across) / (spot.radius * spot.radius);
+                if (normalizedSquared > 1.06 * 1.06) continue;
+
                 const edgeNoise = pixelNoise(seed, xi, yi, 1000 + @as(u64, @intCast(spotIndex)) * 97);
                 const edge = 0.72 + edgeNoise * 0.34;
-                if (normalized > edge) {
-                    continue;
-                }
+                if (normalizedSquared > edge * edge) continue;
 
+                const normalized = @sqrt(normalizedSquared);
                 const fade = 1.0 - normalized / @max(edge, 0.001);
+                const textureNoise = pixelNoise(seed, xi, yi, 700);
                 const strength = spot.strength * (0.25 + fade * 0.75) * (0.8 + textureNoise * 0.25);
-                strongest = @max(strongest, strength);
+                const scratchIndex = (y - minY) * regionWidth + (x - minX);
+                stainStrengthScratch.items[scratchIndex] = @max(stainStrengthScratch.items[scratchIndex], strength);
             }
+        }
+    }
 
+    var y = minY;
+    while (y <= maxY) : (y += 1) {
+        var x = minX;
+        while (x <= maxX) : (x += 1) {
+            const scratchIndex = (y - minY) * regionWidth + (x - minX);
+            const strongest = stainStrengthScratch.items[scratchIndex];
             if (strongest <= 0.04) {
                 continue;
             }
+            const pixelIndex = y * pitch + x * bytesPerPixel;
+            const xi: i32 = @intCast(x);
+            const yi: i32 = @intCast(y);
+            const textureNoise = pixelNoise(seed, xi, yi, 700);
+            const holeNoise = pixelNoise(seed, xi, yi, 911);
             if (holeNoise > 0.985 and strongest < 0.55) {
                 continue;
             }
@@ -1451,4 +1488,5 @@ pub fn deinit() void {
     spritesToCleanup.mutex.unlock(runtime.io());
 
     textureCache.deinit();
+    stainStrengthScratch.deinit(allocator);
 }

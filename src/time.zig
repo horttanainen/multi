@@ -59,6 +59,11 @@ pub fn realNow() f64 {
     return passedTime;
 }
 
+pub fn preciseNow() f64 {
+    return @as(f64, @floatFromInt(sdl.getPerformanceCounter())) /
+        @as(f64, @floatFromInt(sdl.getPerformanceFrequency()));
+}
+
 pub fn setSimulationScale(scale: f64) void {
     if (!std.math.isFinite(scale) or scale < 0) {
         std.log.err("setSimulationScale: scale must be finite and non-negative, got {d}", .{scale});

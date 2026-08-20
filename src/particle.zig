@@ -6,6 +6,7 @@ const camera = @import("camera.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
+const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const sprite = @import("sprite.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
@@ -59,10 +60,20 @@ const StainTextureUpdate = struct {
     dirtyRect: vec.IRect,
 };
 
+const PendingStain = struct {
+    position: vec.Vec2,
+    velocity: vec.Vec2,
+    behavior: StainBehavior,
+    seed: u64,
+};
+
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 pub var bodyCreationCount: u64 = 0;
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
+var pendingStains = std.ArrayListUnmanaged(PendingStain).empty;
 var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
+const stainsPerFrame: usize = 8;
+const stainWorkBudgetSeconds: f64 = 0.004;
 const stainTextureUpdatePixelBudgetPerFrame: usize = 32 * 1024;
 const stainTextureUpdatesPerFrame: usize = 4;
 const stainTextureRegionMaxEdge: i32 = 128;
@@ -272,14 +283,8 @@ pub fn processStainTextureUpdates() void {
     }
 }
 
-fn stainSurfaces(particle: Particle, stain: StainBehavior) !void {
-    if (!box2d.c.b2Body_IsValid(particle.bodyId)) {
-        std.log.warn("stainSurfaces: particle body became invalid before staining", .{});
-        return;
-    }
-
-    const particlePosition = vec.fromBox2d(box2d.c.b2Body_GetPosition(particle.bodyId));
-    const impactVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(particle.bodyId));
+fn stainSurfaces(pendingStain: PendingStain) !void {
+    const stain = pendingStain.behavior;
     var context = OverlapContext{
         .bodies = undefined,
         .count = 0,
@@ -290,7 +295,7 @@ fn stainSurfaces(particle: Particle, stain: StainBehavior) !void {
         .radius = stain.radius * stain.query_radius_scale,
     };
     const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(particlePosition),
+        .p = vec.toBox2d(pendingStain.position),
         .q = box2d.c.b2Rot_identity,
     };
     var filter = box2d.c.b2DefaultQueryFilter();
@@ -317,13 +322,13 @@ fn stainSurfaces(particle: Particle, stain: StainBehavior) !void {
         const spriteUuid = target.spriteUuids[0];
         const dirtyRect = try sprite.stainSplatOnSurface(
             spriteUuid,
-            particlePosition,
+            pendingStain.position,
             stain.radius,
             vec.fromBox2d(state.pos),
             state.rotAngle,
             stain.color,
-            impactVelocity,
-            particle.seed,
+            pendingStain.velocity,
+            pendingStain.seed,
         );
         if (dirtyRect == null) {
             continue;
@@ -341,7 +346,16 @@ fn processContact(bodyId: box2d.c.b2BodyId) !bool {
         return false;
     };
 
-    try stainSurfaces(particle, stain);
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("processContact: particle body became invalid before stain capture", .{});
+        return false;
+    }
+    try pendingStains.append(allocator, .{
+        .position = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId)),
+        .velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId)),
+        .behavior = stain,
+        .seed = particle.seed,
+    });
     if (!stain.destroy_on_contact) {
         return true;
     }
@@ -379,6 +393,27 @@ pub fn checkContacts() !void {
         const event = contactEvents.hitEvents[i];
         try processShapeContact(event.shapeIdA, event.shapeIdB);
     }
+}
+
+pub fn processPendingStains() !void {
+    if (pendingStains.items.len == 0) return;
+
+    const processStart = perf.begin(.player_death);
+    const budgetStart = time.preciseNow();
+    var processed: usize = 0;
+    while (processed < stainsPerFrame and pendingStains.items.len > 0) : (processed += 1) {
+        const pendingStain = pendingStains.swapRemove(0);
+        try stainSurfaces(pendingStain);
+        if (time.preciseNow() - budgetStart >= stainWorkBudgetSeconds) {
+            processed += 1;
+            break;
+        }
+    }
+    perf.log(
+        .player_death,
+        "perf.particle_stains processed={d} pending={d} us={d}",
+        .{ processed, pendingStains.items.len, perf.elapsedUs(processStart) },
+    );
 }
 
 fn destroyParticleBody(bodyId: box2d.c.b2BodyId) void {
@@ -421,6 +456,7 @@ pub fn cleanupParticles() !void {
 }
 
 pub fn cleanup() void {
+    pendingStains.deinit(allocator);
     stainTextureUpdates.deinit(allocator);
 
     particles.mutex.lockUncancelable(runtime.io());

@@ -353,6 +353,7 @@ fn gameLoop() !void {
     perf.recordPlayerDeathGameLoopStage(.blood_contacts, bloodContactsStart);
 
     const bloodTextureStart = perf.begin(.player_death);
+    try particle.processPendingStains();
     particle.processStainTextureUpdates();
     perf.recordPlayerDeathGameLoopStage(.blood_texture, bloodTextureStart);
 
