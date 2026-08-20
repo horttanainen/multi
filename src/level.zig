@@ -351,7 +351,7 @@ fn spawnTwoPlayers() !void {
 // Load a level from any path without spawning players (for level editor view).
 pub fn loadLevel(path: []const u8) !bool {
     reset();
-    try gravestone.warmColliderCache();
+    try gravestone.warmCaches();
 
     const parsed = try parseFromPath(path);
     defer parsed.deinit();

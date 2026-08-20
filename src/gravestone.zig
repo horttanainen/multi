@@ -7,6 +7,7 @@ const data = @import("data.zig");
 const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const polygon = @import("polygon.zig");
+const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const rubble = @import("rubble.zig");
 const sdl = @import("sdl.zig");
@@ -48,17 +49,18 @@ pub fn init() !void {
     templateSpriteUuid = spriteUuid;
 }
 
-pub fn warmColliderCache() !void {
+pub fn warmCaches() !void {
     const spriteUuid = templateSpriteUuid orelse {
-        std.log.err("gravestone.warmColliderCache: component is not initialized", .{});
+        std.log.err("gravestone.warmCaches: component is not initialized", .{});
         return error.GravestoneNotInitialized;
     };
     const templateSprite = sprite.getSprite(spriteUuid) orelse {
-        std.log.err("gravestone.warmColliderCache: template sprite {d} is missing", .{spriteUuid});
+        std.log.err("gravestone.warmCaches: template sprite {d} is missing", .{spriteUuid});
         return error.GravestoneSpriteMissing;
     };
 
     _ = try polygon.triangulateCached(templateSprite);
+    _ = try rubble.prepare(spriteUuid, gravestoneRubbleSeed);
 }
 
 pub fn schedule(playerId: usize, position: vec.Vec2) !void {
@@ -107,11 +109,14 @@ pub fn clearScheduledSpawns() void {
 }
 
 fn spawn(position: vec.Vec2) !void {
+    const totalStart = perf.begin(.player_death);
     const templateUuid = templateSpriteUuid orelse {
         std.log.err("gravestone.spawn: component is not initialized", .{});
         return error.GravestoneNotInitialized;
     };
+    const spriteStart = perf.begin(.player_death);
     const spriteUuid = try sprite.createMutableCopy(templateUuid);
+    const spriteUs = perf.elapsedUs(spriteStart);
     errdefer sprite.cleanupLater(spriteUuid);
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
@@ -121,11 +126,16 @@ fn spawn(position: vec.Vec2) !void {
     shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
 
     const bodyDef = box2d.createDynamicBodyDef(position);
+    const entityStart = perf.begin(.player_death);
     const gravestone = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
+    const entityUs = perf.elapsedUs(entityStart);
+    const rubbleStart = perf.begin(.player_death);
     const rubbleTemplateId = rubble.prepare(spriteUuid, gravestoneRubbleSeed) catch |err| {
         _ = entity.remove(gravestone.bodyId);
         return err;
     };
+    const rubbleUs = perf.elapsedUs(rubbleStart);
+    const damageStart = perf.begin(.player_death);
     damage.register(gravestone.bodyId, .{
         .model = .{ .health = .{
             .current = gravestoneHealth,
@@ -136,6 +146,11 @@ fn spawn(position: vec.Vec2) !void {
         _ = entity.remove(gravestone.bodyId);
         return err;
     };
+    perf.log(
+        .player_death,
+        "perf.gravestone_spawn sprite_us={d} entity_us={d} rubble_us={d} damage_us={d} total_us={d}",
+        .{ spriteUs, entityUs, rubbleUs, perf.elapsedUs(damageStart), perf.elapsedUs(totalStart) },
+    );
 }
 
 pub fn cleanup() void {
