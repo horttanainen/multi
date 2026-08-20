@@ -5,6 +5,7 @@ const box2d = @import("box2d.zig");
 const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const hot_rim_visual = @import("hot_rim_visual.zig");
+const perf = @import("perf.zig");
 const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
 const rubble = @import("rubble.zig");
@@ -18,12 +19,18 @@ const SurfaceEdit = struct {
     colliderDirtyRect: ?vec.IRect,
 };
 
+const SurfaceColliderUpdate = struct {
+    dirtyRect: vec.IRect,
+    nextChunkIndex: usize = 0,
+};
+
 const surfaceTextureUpdatesPerFrame: usize = 2;
 const surfaceColliderUpdatesPerFrame: usize = 1;
+const surfaceColliderChunksPerFrame: usize = 1;
 
 var surfaceEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceEdit).empty;
 var surfaceTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceEdit).empty;
-var surfaceColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, vec.IRect).empty;
+var surfaceColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceColliderUpdate).empty;
 
 pub fn pendingSurfaceTextureUpdateCount() usize {
     return surfaceTextureUpdates.count();
@@ -59,14 +66,15 @@ fn queueSurfaceEdit(bodyId: box2d.c.b2BodyId, spriteUuid: u64, cutoutEdit: surfa
 }
 
 fn queueSurfaceColliderUpdate(bodyId: box2d.c.b2BodyId, dirtyRect: vec.IRect) !void {
-    const maybeDirtyRect = surfaceColliderUpdates.getPtr(bodyId);
-    if (maybeDirtyRect == null) {
-        try surfaceColliderUpdates.put(allocator, bodyId, dirtyRect);
+    const maybeUpdate = surfaceColliderUpdates.getPtr(bodyId);
+    if (maybeUpdate == null) {
+        try surfaceColliderUpdates.put(allocator, bodyId, .{ .dirtyRect = dirtyRect });
         return;
     }
 
-    const dirtyRectPtr = maybeDirtyRect.?;
-    dirtyRectPtr.* = vec.irectUnion(dirtyRectPtr.*, dirtyRect);
+    const update = maybeUpdate.?;
+    update.dirtyRect = vec.irectUnion(update.dirtyRect, dirtyRect);
+    update.nextChunkIndex = 0;
 }
 
 fn queueSurfaceTextureUpdate(bodyId: box2d.c.b2BodyId, edit: SurfaceEdit) !void {
@@ -236,6 +244,7 @@ pub fn processSurfaceTextureUpdates() void {
         const bodyId = surfaceTextureUpdates.keys()[0];
         const edit = surfaceTextureUpdates.values()[0];
         _ = surfaceTextureUpdates.swapRemove(bodyId);
+        const updateStart = perf.begin(.explosion);
 
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             std.log.warn("destruction.processSurfaceTextureUpdates: body became invalid before texture update", .{});
@@ -245,6 +254,15 @@ pub fn processSurfaceTextureUpdates() void {
         sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.textureDirtyRect) catch |err| {
             std.log.warn("destruction.processSurfaceTextureUpdates: texture update failed with {}", .{err});
         };
+        perf.log(
+            .explosion,
+            "perf.surface_texture_update us={d} dirty_width={d} dirty_height={d}",
+            .{
+                perf.elapsedUs(updateStart),
+                edit.textureDirtyRect.maxX - edit.textureDirtyRect.minX,
+                edit.textureDirtyRect.maxY - edit.textureDirtyRect.minY,
+            },
+        );
         if (edit.colliderDirtyRect == null) continue;
 
         queueSurfaceColliderUpdate(bodyId, edit.colliderDirtyRect.?) catch |err| {
@@ -257,25 +275,52 @@ pub fn processSurfaceColliderUpdates() void {
     var processed: usize = 0;
     while (processed < surfaceColliderUpdatesPerFrame and surfaceColliderUpdates.count() > 0) : (processed += 1) {
         const bodyId = surfaceColliderUpdates.keys()[0];
-        const dirtyRect = surfaceColliderUpdates.values()[0];
-        _ = surfaceColliderUpdates.swapRemove(bodyId);
+        const update = surfaceColliderUpdates.values()[0];
+        const updateStart = perf.begin(.explosion);
 
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             std.log.warn("destruction.processSurfaceColliderUpdates: body became invalid before collider rebuild", .{});
+            _ = surfaceColliderUpdates.swapRemove(bodyId);
             continue;
         }
 
-        const ent = entity.entities.getPtrLocking(bodyId) orelse {
-            std.log.warn("destruction.processSurfaceColliderUpdates: entity missing before collider rebuild", .{});
-            continue;
-        };
-        const stillExists = entity.regenerateCollidersInPixelRect(ent, dirtyRect) catch |err| {
+        const progress = entity.regenerateColliderChunksInPixelRect(
+            bodyId,
+            update.dirtyRect,
+            update.nextChunkIndex,
+            surfaceColliderChunksPerFrame,
+        ) catch |err| {
             std.log.warn("destruction.processSurfaceColliderUpdates: collider rebuild failed with {}", .{err});
+            _ = surfaceColliderUpdates.swapRemove(bodyId);
             continue;
         };
-        if (stillExists) continue;
+        if (!progress.completed) {
+            const pendingUpdate = surfaceColliderUpdates.getPtr(bodyId) orelse {
+                std.log.err("destruction.processSurfaceColliderUpdates: pending update disappeared during collider rebuild", .{});
+                continue;
+            };
+            pendingUpdate.nextChunkIndex = progress.nextChunkIndex;
+        } else {
+            _ = surfaceColliderUpdates.swapRemove(bodyId);
+        }
+        perf.log(
+            .explosion,
+            "perf.surface_collider_update us={d} dirty_width={d} dirty_height={d} chunks={d} completed={}",
+            .{
+                perf.elapsedUs(updateStart),
+                update.dirtyRect.maxX - update.dirtyRect.minX,
+                update.dirtyRect.maxY - update.dirtyRect.minY,
+                progress.regeneratedChunkCount,
+                progress.completed,
+            },
+        );
+        if (!progress.completed) continue;
+        if (progress.stillExists) continue;
 
-        const response = damage.markDestroyed(bodyId) orelse continue;
+        const response = damage.markDestroyed(bodyId) orelse {
+            std.log.warn("destruction.processSurfaceColliderUpdates: destroyed surface has no damage response", .{});
+            continue;
+        };
         destroy(bodyId, .{
             .source = .explosion,
             .amount = 0,

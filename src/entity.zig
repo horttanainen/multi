@@ -32,6 +32,13 @@ pub const ColliderChunk = struct {
     shapeIds: []box2d.c.b2ShapeId,
 };
 
+pub const ColliderRegenerationProgress = struct {
+    nextChunkIndex: usize,
+    regeneratedChunkCount: usize,
+    completed: bool,
+    stillExists: bool,
+};
+
 pub const Entity = struct {
     type: []const u8,
     friction: f32,
@@ -472,14 +479,40 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     return true;
 }
 
-pub fn regenerateCollidersInPixelRect(entity: *Entity, dirtyRect: vec.IRect) !bool {
+pub fn regenerateColliderChunksInPixelRect(
+    bodyId: box2d.c.b2BodyId,
+    dirtyRect: vec.IRect,
+    startChunkIndex: usize,
+    maximumChunks: usize,
+) !ColliderRegenerationProgress {
+    if (maximumChunks == 0) {
+        std.log.err("regenerateColliderChunksInPixelRect: maximum chunk count must be positive", .{});
+        return error.InvalidColliderChunkBudget;
+    }
+
+    const entity = entities.getPtrLocking(bodyId) orelse {
+        std.log.warn("regenerateColliderChunksInPixelRect: entity missing for body", .{});
+        return error.EntityNotFound;
+    };
     if (entity.colliderChunks.len == 0) {
-        return regenerateColliders(entity);
+        return .{
+            .nextChunkIndex = 0,
+            .regeneratedChunkCount = 0,
+            .completed = true,
+            .stillExists = try regenerateColliders(entity),
+        };
+    }
+    if (startChunkIndex > entity.colliderChunks.len) {
+        std.log.err(
+            "regenerateColliderChunksInPixelRect: start chunk {d} exceeds chunk count {d}",
+            .{ startChunkIndex, entity.colliderChunks.len },
+        );
+        return error.InvalidColliderChunkIndex;
     }
 
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse {
-        std.log.warn("regenerateCollidersInPixelRect: sprite {d} not found", .{entity.spriteUuids[0]});
-        return false;
+        std.log.warn("regenerateColliderChunksInPixelRect: sprite {d} not found", .{entity.spriteUuids[0]});
+        return error.SpriteNotFound;
     };
 
     const surface = firstSprite.surface.*;
@@ -488,16 +521,24 @@ pub fn regenerateCollidersInPixelRect(entity: *Entity, dirtyRect: vec.IRect) !bo
     const affectedRect = vec.irectExpandedClamped(dirtyRect, 1, width, height);
     const shapeDef = createShapeDefForEntity(entity.*);
 
-    var regeneratedAny = false;
-    for (entity.colliderChunks) |*colliderChunk| {
+    var regeneratedChunkCount: usize = 0;
+    var chunkIndex = startChunkIndex;
+    while (chunkIndex < entity.colliderChunks.len) {
+        const colliderChunk = &entity.colliderChunks[chunkIndex];
+        chunkIndex += 1;
         if (!vec.irectIntersects(colliderChunk.rect, affectedRect)) continue;
 
         try regenerateColliderChunk(entity.bodyId, firstSprite, shapeDef, colliderChunk);
-        regeneratedAny = true;
-    }
+        regeneratedChunkCount += 1;
+        if (regeneratedChunkCount < maximumChunks) continue;
+        if (chunkIndex >= entity.colliderChunks.len) break;
 
-    if (!regeneratedAny) {
-        return true;
+        return .{
+            .nextChunkIndex = chunkIndex,
+            .regeneratedChunkCount = regeneratedChunkCount,
+            .completed = false,
+            .stillExists = true,
+        };
     }
 
     const newShapeIds = flattenColliderChunkShapeIds(entity.colliderChunks) catch |err| {
@@ -508,7 +549,12 @@ pub fn regenerateCollidersInPixelRect(entity: *Entity, dirtyRect: vec.IRect) !bo
     allocator.free(entity.shapeIds);
     entity.shapeIds = newShapeIds;
 
-    return entity.shapeIds.len > 0;
+    return .{
+        .nextChunkIndex = entity.colliderChunks.len,
+        .regeneratedChunkCount = regeneratedChunkCount,
+        .completed = true,
+        .stillExists = entity.shapeIds.len > 0,
+    };
 }
 
 fn regenerateColliderChunk(
