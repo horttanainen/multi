@@ -15,6 +15,8 @@ pub fn step() !usize {
         entity.updateStates();
         particle.updateStates();
         player.updateAllStates();
+        player.clampAllSpeeds();
+        player.applyAllMovement(config.physics.dt);
         box2d.worldStep(config.physics.dt, config.physics.subStepCount);
         try player.checkAllSensors();
         try sensor.processSensorEvents();

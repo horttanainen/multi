@@ -335,7 +335,6 @@ fn gameLoop() !void {
     }
 
     gravestone.processScheduledSpawns();
-    player.clampAllSpeeds();
     projectile.applyPropulsion();
 
     const ropeStart = perf.begin(.player_death);

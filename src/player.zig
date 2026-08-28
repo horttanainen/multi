@@ -48,6 +48,7 @@ pub const Player = struct {
     groundState: movement.GroundState,
     leftWallContactCount: usize,
     rightWallContactCount: usize,
+    lateralMovementIntent: i8,
     isMoving: bool,
     touchesWallOnLeft: bool,
     touchesWallOnRight: bool,
@@ -324,6 +325,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .groundState = .{},
         .leftWallContactCount = 0,
         .rightWallContactCount = 0,
+        .lateralMovementIntent = 0,
         .isMoving = false,
         .touchesWallOnLeft = false,
         .touchesWallOnRight = false,
@@ -436,34 +438,41 @@ fn processBufferedJump(player: *Player, currentTimeMs: u64) void {
 }
 
 pub fn brake(player: *Player) void {
+    player.lateralMovementIntent = 0;
     player.isMoving = false;
 }
 
 pub fn moveLeft(player: *Player) void {
+    player.lateralMovementIntent = -1;
+    player.isMoving = true;
     player.movingRight = false;
-    applyForce(player, box2d.c.b2Vec2{ .x = -movement.control.lateralForce, .y = 0 });
 }
 
 pub fn moveRight(player: *Player) void {
+    player.lateralMovementIntent = 1;
+    player.isMoving = true;
     player.movingRight = true;
-    applyForce(player, box2d.c.b2Vec2{ .x = movement.control.lateralForce, .y = 0 });
 }
 
-fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
-    player.isMoving = true;
+fn applyLieroMovement(player: *Player, dt: f32) void {
+    if (player.lateralMovementIntent == 0) return;
+
+    const direction: f32 = @floatFromInt(player.lateralMovementIntent);
+    const velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
+    const currentSpeed = velocity.x * direction;
+    if (currentSpeed >= movement.control.maxLateralSpeed) return;
+
+    const remainingSpeed = movement.control.maxLateralSpeed - currentSpeed;
+    const bodyMass = box2d.c.b2Body_GetMass(player.bodyId);
+    const forceMagnitude = @min(movement.control.lateralForce, remainingSpeed * bodyMass / dt);
+    const force = box2d.c.b2Vec2{ .x = direction * forceMagnitude, .y = 0 };
     box2d.c.b2Body_ApplyForceToCenter(player.bodyId, force, true);
 }
 
-fn clampLateralSpeed(player: *Player) void {
-    var velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
-    if (@abs(velocity.x) <= movement.control.maxLateralSpeed) return;
-
-    velocity.x = std.math.clamp(
-        velocity.x,
-        -movement.control.maxLateralSpeed,
-        movement.control.maxLateralSpeed,
-    );
-    box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
+fn applyMovement(player: *Player, dt: f32) void {
+    switch (movement.mechanism) {
+        .liero => applyLieroMovement(player, dt),
+    }
 }
 
 fn clampLinearSpeed(player: *Player) void {
@@ -474,13 +483,6 @@ fn clampLinearSpeed(player: *Player) void {
 
     const clampedVelocity = vec.mul(velocity, maxLinearSpeed / speed);
     box2d.c.b2Body_SetLinearVelocity(player.bodyId, vec.toBox2d(clampedVelocity));
-}
-
-pub fn clampSpeed(player: *Player) void {
-    switch (movement.mechanism) {
-        .liero => clampLateralSpeed(player),
-    }
-    clampLinearSpeed(player);
 }
 
 pub fn getFrictionForPlayer(player: *Player) f32 {
@@ -816,9 +818,23 @@ pub fn checkAllSensors() !void {
     }
 }
 
+pub fn applyAllMovement(dt: f32) void {
+    for (players.values()) |*p| {
+        if (p.isDead) continue;
+        applyMovement(p, dt);
+    }
+}
+
 pub fn clampAllSpeeds() void {
     for (players.values()) |*p| {
-        clampSpeed(p);
+        if (p.isDead) continue;
+        clampLinearSpeed(p);
+    }
+}
+
+pub fn clearAllMovementIntents() void {
+    for (players.values()) |*p| {
+        brake(p);
     }
 }
 
@@ -1123,6 +1139,7 @@ pub fn kill(p: *Player, killerId: ?usize) !void {
     // Release rope on death
     rope.releaseRope(p.id);
 
+    brake(p);
     p.isDead = true;
 
     score.recordKill(killerId, p.id);
@@ -1156,6 +1173,7 @@ pub fn processRespawns() !void {
             p.groundState = .{};
             p.airJumpCounter = 0;
             p.bufferedJumpUntilMs = null;
+            brake(p);
 
             const spawnPosM = conv.p2m(level.spawnLocation);
             box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);
