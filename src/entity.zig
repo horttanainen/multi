@@ -479,19 +479,13 @@ pub fn regenerateColliders(entity: *Entity) !bool {
     return true;
 }
 
-pub fn regenerateColliderChunksInPixelRect(
+pub fn regenerateNextColliderChunkInPixelRect(
     bodyId: box2d.c.b2BodyId,
     dirtyRect: vec.IRect,
     startChunkIndex: usize,
-    maximumChunks: usize,
 ) !ColliderRegenerationProgress {
-    if (maximumChunks == 0) {
-        std.log.err("regenerateColliderChunksInPixelRect: maximum chunk count must be positive", .{});
-        return error.InvalidColliderChunkBudget;
-    }
-
     const entity = entities.getPtrLocking(bodyId) orelse {
-        std.log.warn("regenerateColliderChunksInPixelRect: entity missing for body", .{});
+        std.log.warn("regenerateNextColliderChunkInPixelRect: entity missing for body", .{});
         return error.EntityNotFound;
     };
     if (entity.colliderChunks.len == 0) {
@@ -504,14 +498,14 @@ pub fn regenerateColliderChunksInPixelRect(
     }
     if (startChunkIndex > entity.colliderChunks.len) {
         std.log.err(
-            "regenerateColliderChunksInPixelRect: start chunk {d} exceeds chunk count {d}",
+            "regenerateNextColliderChunkInPixelRect: start chunk {d} exceeds chunk count {d}",
             .{ startChunkIndex, entity.colliderChunks.len },
         );
         return error.InvalidColliderChunkIndex;
     }
 
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse {
-        std.log.warn("regenerateColliderChunksInPixelRect: sprite {d} not found", .{entity.spriteUuids[0]});
+        std.log.warn("regenerateNextColliderChunkInPixelRect: sprite {d} not found", .{entity.spriteUuids[0]});
         return error.SpriteNotFound;
     };
 
@@ -530,7 +524,6 @@ pub fn regenerateColliderChunksInPixelRect(
 
         try regenerateColliderChunk(entity.bodyId, firstSprite, shapeDef, colliderChunk);
         regeneratedChunkCount += 1;
-        if (regeneratedChunkCount < maximumChunks) continue;
         if (chunkIndex >= entity.colliderChunks.len) break;
 
         return .{

@@ -319,9 +319,8 @@ pub inline fn recordPlayerDeathFrameStage(comptime stage: PlayerDeathFrameStage,
     }
 }
 
-pub inline fn recordPlayerDeathGameLoopStage(comptime stage: PlayerDeathGameLoopStage, start: u64) void {
+pub inline fn recordPlayerDeathGameLoopElapsed(comptime stage: PlayerDeathGameLoopStage, elapsed_us: u64) void {
     if (comptime !configured(.player_death)) return;
-    const elapsed_us = elapsedUs(start);
     switch (stage) {
         .terrain_updates => currentPlayerDeathFrameMetrics.game_loop.terrain_updates_us += elapsed_us,
         .rope => currentPlayerDeathFrameMetrics.game_loop.rope_us += elapsed_us,
@@ -333,6 +332,11 @@ pub inline fn recordPlayerDeathGameLoopStage(comptime stage: PlayerDeathGameLoop
         .player_and_sensor => currentPlayerDeathFrameMetrics.game_loop.player_and_sensor_us += elapsed_us,
         .animation_and_camera => currentPlayerDeathFrameMetrics.game_loop.animation_and_camera_us += elapsed_us,
     }
+}
+
+pub inline fn recordPlayerDeathGameLoopStage(comptime stage: PlayerDeathGameLoopStage, start: u64) void {
+    if (comptime !configured(.player_death)) return;
+    recordPlayerDeathGameLoopElapsed(stage, elapsedUs(start));
 }
 
 pub inline fn recordPlayerDeathTriggerStage(comptime stage: PlayerDeathTriggerStage, start: u64) void {

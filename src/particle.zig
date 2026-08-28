@@ -6,7 +6,6 @@ const camera = @import("camera.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
-const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const sprite = @import("sprite.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
@@ -55,12 +54,12 @@ pub const Particle = struct {
     seed: u64,
 };
 
-const StainTextureUpdate = struct {
+pub const StainTextureUpdate = struct {
     spriteUuid: u64,
     dirtyRect: vec.IRect,
 };
 
-const PendingStain = struct {
+pub const PendingStain = struct {
     position: vec.Vec2,
     velocity: vec.Vec2,
     behavior: StainBehavior,
@@ -70,12 +69,8 @@ const PendingStain = struct {
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 pub var bodyCreationCount: u64 = 0;
 var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
-var pendingStains = std.ArrayListUnmanaged(PendingStain).empty;
-var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
-const stainsPerFrame: usize = 8;
-const stainWorkBudgetSeconds: f64 = 0.004;
-const stainTextureUpdatePixelBudgetPerFrame: usize = 32 * 1024;
-const stainTextureUpdatesPerFrame: usize = 4;
+pub var pendingStains = std.ArrayListUnmanaged(PendingStain).empty;
+pub var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
 const stainTextureRegionMaxEdge: i32 = 128;
 const stainTextureMergeDistance: i32 = 2;
 var circleSpriteUuid: ?u64 = null;
@@ -214,12 +209,6 @@ fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c
     return true;
 }
 
-fn rectArea(rect: vec.IRect) usize {
-    const width = @max(0, rect.maxX - rect.minX);
-    const height = @max(0, rect.maxY - rect.minY);
-    return @intCast(width * height);
-}
-
 fn queueStainTextureRegion(spriteUuid: u64, dirtyRect: vec.IRect) !void {
     for (stainTextureUpdates.items) |*pendingUpdate| {
         if (pendingUpdate.spriteUuid != spriteUuid) continue;
@@ -266,21 +255,15 @@ fn queueStainTextureUpdate(spriteUuid: u64, dirtyRect: vec.IRect) !void {
     }
 }
 
-pub fn processStainTextureUpdates() void {
-    var processedPixels: usize = 0;
-    var processed: usize = 0;
-    while (processed < stainTextureUpdatesPerFrame and stainTextureUpdates.items.len > 0) : (processed += 1) {
-        const update = stainTextureUpdates.items[0];
-        const updatePixels = rectArea(update.dirtyRect);
-        if (processed > 0 and processedPixels + updatePixels > stainTextureUpdatePixelBudgetPerFrame) break;
+pub fn processOneStainTextureUpdate() bool {
+    if (stainTextureUpdates.items.len == 0) return false;
 
-        _ = stainTextureUpdates.swapRemove(0);
-        processedPixels += updatePixels;
-
-        sprite.updateTextureVisualRegionFromSurface(update.spriteUuid, update.dirtyRect) catch |err| {
-            std.log.warn("processStainTextureUpdates: sprite {d} update failed with {}", .{ update.spriteUuid, err });
-        };
-    }
+    const update = stainTextureUpdates.items[0];
+    _ = stainTextureUpdates.swapRemove(0);
+    sprite.updateTextureVisualRegionFromSurface(update.spriteUuid, update.dirtyRect) catch |err| {
+        std.log.warn("processOneStainTextureUpdate: sprite {d} update failed with {}", .{ update.spriteUuid, err });
+    };
+    return true;
 }
 
 fn stainSurfaces(pendingStain: PendingStain) !void {
@@ -395,25 +378,12 @@ pub fn checkContacts() !void {
     }
 }
 
-pub fn processPendingStains() !void {
-    if (pendingStains.items.len == 0) return;
+pub fn processOnePendingStain() !bool {
+    if (pendingStains.items.len == 0) return false;
 
-    const processStart = perf.begin(.player_death);
-    const budgetStart = time.preciseNow();
-    var processed: usize = 0;
-    while (processed < stainsPerFrame and pendingStains.items.len > 0) : (processed += 1) {
-        const pendingStain = pendingStains.swapRemove(0);
-        try stainSurfaces(pendingStain);
-        if (time.preciseNow() - budgetStart >= stainWorkBudgetSeconds) {
-            processed += 1;
-            break;
-        }
-    }
-    perf.log(
-        .player_death,
-        "perf.particle_stains processed={d} pending={d} us={d}",
-        .{ processed, pendingStains.items.len, perf.elapsedUs(processStart) },
-    );
+    const pendingStain = pendingStains.swapRemove(0);
+    try stainSurfaces(pendingStain);
+    return true;
 }
 
 fn destroyParticleBody(bodyId: box2d.c.b2BodyId) void {

@@ -48,6 +48,7 @@ const particle = @import("particle.zig");
 const particle_effect = @import("particle_effect.zig");
 const pool = @import("pool.zig");
 const damage = @import("damage.zig");
+const deferred_work = @import("deferred_work.zig");
 const destruction = @import("destruction.zig");
 const blood = @import("blood.zig");
 const perf = @import("perf.zig");
@@ -338,11 +339,6 @@ fn gameLoop() !void {
     player.clampAllSpeeds();
     projectile.applyPropulsion();
 
-    const terrainUpdatesStart = perf.begin(.player_death);
-    destruction.processSurfaceTextureUpdates();
-    destruction.processSurfaceColliderUpdates();
-    perf.recordPlayerDeathGameLoopStage(.terrain_updates, terrainUpdatesStart);
-
     const ropeStart = perf.begin(.player_death);
     try rope.checkHookContacts();
     rope.applyTension();
@@ -352,10 +348,7 @@ fn gameLoop() !void {
     try particle.checkContacts();
     perf.recordPlayerDeathGameLoopStage(.blood_contacts, bloodContactsStart);
 
-    const bloodTextureStart = perf.begin(.player_death);
-    try particle.processPendingStains();
-    particle.processStainTextureUpdates();
-    perf.recordPlayerDeathGameLoopStage(.blood_texture, bloodTextureStart);
+    try deferred_work.process();
 
     const gibletContactsStart = perf.begin(.player_death);
     try gibbing.checkContacts();

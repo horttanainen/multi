@@ -24,10 +24,6 @@ const SurfaceColliderUpdate = struct {
     nextChunkIndex: usize = 0,
 };
 
-const surfaceTextureUpdatesPerFrame: usize = 2;
-const surfaceColliderUpdatesPerFrame: usize = 1;
-const surfaceColliderChunksPerFrame: usize = 1;
-
 var surfaceEdits = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceEdit).empty;
 var surfaceTextureUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceEdit).empty;
 var surfaceColliderUpdates = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, SurfaceColliderUpdate).empty;
@@ -238,95 +234,94 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: damage.Event) !void {
     }
 }
 
-pub fn processSurfaceTextureUpdates() void {
-    var processed: usize = 0;
-    while (processed < surfaceTextureUpdatesPerFrame and surfaceTextureUpdates.count() > 0) : (processed += 1) {
-        const bodyId = surfaceTextureUpdates.keys()[0];
-        const edit = surfaceTextureUpdates.values()[0];
-        _ = surfaceTextureUpdates.swapRemove(bodyId);
-        const updateStart = perf.begin(.explosion);
+pub fn processOneSurfaceTextureUpdate() bool {
+    if (surfaceTextureUpdates.count() == 0) return false;
 
-        if (!box2d.c.b2Body_IsValid(bodyId)) {
-            std.log.warn("destruction.processSurfaceTextureUpdates: body became invalid before texture update", .{});
-            continue;
-        }
+    const bodyId = surfaceTextureUpdates.keys()[0];
+    const edit = surfaceTextureUpdates.values()[0];
+    _ = surfaceTextureUpdates.swapRemove(bodyId);
+    const updateStart = perf.begin(.explosion);
 
-        sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.textureDirtyRect) catch |err| {
-            std.log.warn("destruction.processSurfaceTextureUpdates: texture update failed with {}", .{err});
-        };
-        perf.log(
-            .explosion,
-            "perf.surface_texture_update us={d} dirty_width={d} dirty_height={d}",
-            .{
-                perf.elapsedUs(updateStart),
-                edit.textureDirtyRect.maxX - edit.textureDirtyRect.minX,
-                edit.textureDirtyRect.maxY - edit.textureDirtyRect.minY,
-            },
-        );
-        if (edit.colliderDirtyRect == null) continue;
-
-        queueSurfaceColliderUpdate(bodyId, edit.colliderDirtyRect.?) catch |err| {
-            std.log.warn("destruction.processSurfaceTextureUpdates: failed to queue collider update with {}", .{err});
-        };
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("destruction.processOneSurfaceTextureUpdate: body became invalid before texture update", .{});
+        return true;
     }
+
+    sprite.updateTextureGeometryRegionFromSurface(edit.spriteUuid, edit.textureDirtyRect) catch |err| {
+        std.log.warn("destruction.processOneSurfaceTextureUpdate: texture update failed with {}", .{err});
+    };
+    perf.log(
+        .explosion,
+        "perf.surface_texture_update us={d} dirty_width={d} dirty_height={d}",
+        .{
+            perf.elapsedUs(updateStart),
+            edit.textureDirtyRect.maxX - edit.textureDirtyRect.minX,
+            edit.textureDirtyRect.maxY - edit.textureDirtyRect.minY,
+        },
+    );
+    if (edit.colliderDirtyRect == null) return true;
+
+    queueSurfaceColliderUpdate(bodyId, edit.colliderDirtyRect.?) catch |err| {
+        std.log.warn("destruction.processOneSurfaceTextureUpdate: failed to queue collider update with {}", .{err});
+    };
+    return true;
 }
 
-pub fn processSurfaceColliderUpdates() void {
-    var processed: usize = 0;
-    while (processed < surfaceColliderUpdatesPerFrame and surfaceColliderUpdates.count() > 0) : (processed += 1) {
-        const bodyId = surfaceColliderUpdates.keys()[0];
-        const update = surfaceColliderUpdates.values()[0];
-        const updateStart = perf.begin(.explosion);
+pub fn processOneSurfaceColliderChunk() bool {
+    if (surfaceColliderUpdates.count() == 0) return false;
 
-        if (!box2d.c.b2Body_IsValid(bodyId)) {
-            std.log.warn("destruction.processSurfaceColliderUpdates: body became invalid before collider rebuild", .{});
-            _ = surfaceColliderUpdates.swapRemove(bodyId);
-            continue;
-        }
+    const bodyId = surfaceColliderUpdates.keys()[0];
+    const update = surfaceColliderUpdates.values()[0];
+    const updateStart = perf.begin(.explosion);
 
-        const progress = entity.regenerateColliderChunksInPixelRect(
-            bodyId,
-            update.dirtyRect,
-            update.nextChunkIndex,
-            surfaceColliderChunksPerFrame,
-        ) catch |err| {
-            std.log.warn("destruction.processSurfaceColliderUpdates: collider rebuild failed with {}", .{err});
-            _ = surfaceColliderUpdates.swapRemove(bodyId);
-            continue;
-        };
-        if (!progress.completed) {
-            const pendingUpdate = surfaceColliderUpdates.getPtr(bodyId) orelse {
-                std.log.err("destruction.processSurfaceColliderUpdates: pending update disappeared during collider rebuild", .{});
-                continue;
-            };
-            pendingUpdate.nextChunkIndex = progress.nextChunkIndex;
-        } else {
-            _ = surfaceColliderUpdates.swapRemove(bodyId);
-        }
-        perf.log(
-            .explosion,
-            "perf.surface_collider_update us={d} dirty_width={d} dirty_height={d} chunks={d} completed={}",
-            .{
-                perf.elapsedUs(updateStart),
-                update.dirtyRect.maxX - update.dirtyRect.minX,
-                update.dirtyRect.maxY - update.dirtyRect.minY,
-                progress.regeneratedChunkCount,
-                progress.completed,
-            },
-        );
-        if (!progress.completed) continue;
-        if (progress.stillExists) continue;
-
-        const response = damage.markDestroyed(bodyId) orelse {
-            std.log.warn("destruction.processSurfaceColliderUpdates: destroyed surface has no damage response", .{});
-            continue;
-        };
-        destroy(bodyId, .{
-            .source = .explosion,
-            .amount = 0,
-            .position = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId)),
-        }, response);
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("destruction.processOneSurfaceColliderChunk: body became invalid before collider rebuild", .{});
+        _ = surfaceColliderUpdates.swapRemove(bodyId);
+        return true;
     }
+
+    const progress = entity.regenerateNextColliderChunkInPixelRect(
+        bodyId,
+        update.dirtyRect,
+        update.nextChunkIndex,
+    ) catch |err| {
+        std.log.warn("destruction.processOneSurfaceColliderChunk: collider rebuild failed with {}", .{err});
+        _ = surfaceColliderUpdates.swapRemove(bodyId);
+        return true;
+    };
+    if (!progress.completed) {
+        const pendingUpdate = surfaceColliderUpdates.getPtr(bodyId) orelse {
+            std.log.err("destruction.processOneSurfaceColliderChunk: pending update disappeared during collider rebuild", .{});
+            return true;
+        };
+        pendingUpdate.nextChunkIndex = progress.nextChunkIndex;
+    } else {
+        _ = surfaceColliderUpdates.swapRemove(bodyId);
+    }
+    perf.log(
+        .explosion,
+        "perf.surface_collider_update us={d} dirty_width={d} dirty_height={d} chunks={d} completed={}",
+        .{
+            perf.elapsedUs(updateStart),
+            update.dirtyRect.maxX - update.dirtyRect.minX,
+            update.dirtyRect.maxY - update.dirtyRect.minY,
+            progress.regeneratedChunkCount,
+            progress.completed,
+        },
+    );
+    if (!progress.completed) return true;
+    if (progress.stillExists) return true;
+
+    const response = damage.markDestroyed(bodyId) orelse {
+        std.log.warn("destruction.processOneSurfaceColliderChunk: destroyed surface has no damage response", .{});
+        return true;
+    };
+    destroy(bodyId, .{
+        .source = .explosion,
+        .amount = 0,
+        .position = vec.fromBox2d(box2d.c.b2Body_GetPosition(bodyId)),
+    }, response);
+    return true;
 }
 
 pub fn cleanup() void {
