@@ -1,5 +1,11 @@
 const data = @import("data.zig");
 
+pub const GroundState = struct {
+    contactCount: usize = 0,
+    supported: bool = false,
+    jumpAvailable: bool = false,
+};
+
 pub var mechanism: data.MovementMechanism = undefined;
 pub var control: data.MovementControlData = undefined;
 pub var bodyMotion: data.MovementBodyMotionData = undefined;

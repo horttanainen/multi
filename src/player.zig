@@ -45,11 +45,10 @@ pub const Player = struct {
     weapons: []weapon.Weapon,
     selectedWeaponIndex: usize,
 
-    groundContactCount: usize,
+    groundState: movement.GroundState,
     leftWallContactCount: usize,
     rightWallContactCount: usize,
     isMoving: bool,
-    touchesGround: bool,
     touchesWallOnLeft: bool,
     touchesWallOnRight: bool,
     aimDirection: vec.Vec2,
@@ -321,11 +320,10 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .weapons = try weapons.toOwnedSlice(),
         .selectedWeaponIndex = 0,
         // Initialize per-player state
-        .groundContactCount = 0,
+        .groundState = .{},
         .leftWallContactCount = 0,
         .rightWallContactCount = 0,
         .isMoving = false,
-        .touchesGround = false,
         .touchesWallOnLeft = false,
         .touchesWallOnRight = false,
         .aimDirection = vec.west,
@@ -361,9 +359,9 @@ pub fn updateAnimationState(player: *Player) void {
     const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
     const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
 
-    const targetAnimationKey = if (!player.touchesGround and movingUpward)
+    const targetAnimationKey = if (!player.groundState.supported and movingUpward)
         "afterjump"
-    else if (!player.touchesGround and movingDownward)
+    else if (!player.groundState.supported and movingDownward)
         "fall"
     else if (player.isMoving)
         "run"
@@ -381,10 +379,13 @@ pub fn jump(player: *Player) void {
         return;
     }
 
-    if (!player.touchesGround and player.airJumpCounter < movement.jump.maxAirJumps) {
+    if (player.groundState.supported and !player.groundState.jumpAvailable) return;
+    if (!player.groundState.supported and player.airJumpCounter >= movement.jump.maxAirJumps) return;
+
+    if (player.groundState.supported) {
+        player.groundState.jumpAvailable = false;
+    } else {
         player.airJumpCounter += 1;
-    } else if (!player.touchesGround and player.airJumpCounter >= movement.jump.maxAirJumps) {
-        return;
     }
 
     var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -movement.jump.impulse };
@@ -448,8 +449,12 @@ pub fn checkSensors(player: *Player) !void {
         }
 
         if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
-            player.airJumpCounter = 0;
-            player.groundContactCount += 1;
+            if (player.groundState.contactCount == 0) {
+                player.groundState.supported = true;
+                player.groundState.jumpAvailable = true;
+                player.airJumpCounter = 0;
+            }
+            player.groundState.contactCount += 1;
         }
 
         if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.leftWallSensorId)) {
@@ -473,8 +478,8 @@ pub fn checkSensors(player: *Player) !void {
         }
 
         if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
-            if (player.groundContactCount > 0) {
-                player.groundContactCount -= 1;
+            if (player.groundState.contactCount > 0) {
+                player.groundState.contactCount -= 1;
             }
         }
 
@@ -489,7 +494,7 @@ pub fn checkSensors(player: *Player) !void {
             }
         }
     }
-    player.touchesGround = player.groundContactCount > 0;
+    player.groundState.supported = player.groundState.contactCount > 0;
     player.touchesWallOnRight = player.rightWallContactCount > 0;
     player.touchesWallOnLeft = player.leftWallContactCount > 0;
 }
@@ -920,7 +925,7 @@ fn drawLeftArmWithHook(p: *Player) !void {
 
     // Swing arm back and forth when running
     const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
-    const swingAngle: f32 = if (p.isMoving and p.touchesGround)
+    const swingAngle: f32 = if (p.isMoving and p.groundState.supported)
         @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
     else
         0;
@@ -1085,6 +1090,8 @@ pub fn processRespawns() !void {
         const maybePlayer = players.getPtr(playerId);
         if (maybePlayer) |p| {
             p.health = 100;
+            p.groundState = .{};
+            p.airJumpCounter = 0;
 
             const spawnPosM = conv.p2m(level.spawnLocation);
             box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);
