@@ -2,6 +2,7 @@ const std = @import("std");
 
 const config = @import("config.zig");
 const data = @import("data.zig");
+const movement = @import("movement.zig");
 const collision = @import("collision.zig");
 const polygon = @import("polygon.zig");
 const box2d = @import("box2d.zig");
@@ -82,7 +83,6 @@ const defaultDynamicHealth: f32 = 100;
 
 pub var splitscreen: bool = false;
 pub var cameraZoomMeters: f32 = defaultCameraZoomMeters;
-pub var movementData: data.MovementData = undefined;
 
 pub fn sanitizeCameraZoomMeters(value: f32) f32 {
     if (value <= 0) {
@@ -147,7 +147,8 @@ fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
 }
 
 pub fn applyLevelSettings(lev: Level) !void {
-    movementData = try data.loadMovementData(lev.movementFile);
+    const movementData = try data.loadMovementData(lev.movementFile);
+    movement.configure(movementData);
     box2d.setGravity(lev.gravity);
     conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
     spawnLocation = vec.IVec2{ .x = 0, .y = 0 };

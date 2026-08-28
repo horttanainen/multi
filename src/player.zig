@@ -17,6 +17,7 @@ const runtime = @import("runtime.zig");
 
 const viewport = @import("viewport.zig");
 const level = @import("level.zig");
+const movement = @import("movement.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const gravestone = @import("gravestone.zig");
@@ -54,7 +55,7 @@ pub const Player = struct {
     aimDirection: vec.Vec2,
     isAiming: bool,
     aimMagnitude: f32,
-    airJumpCounter: i32,
+    airJumpCounter: u32,
     movingRight: bool,
     crosshairUuid: u64,
     health: f32,
@@ -163,7 +164,9 @@ pub fn spawn(position: vec.IVec2) !usize {
 fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     const pos = conv.pixel2M(position);
 
-    const bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
+    var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
+    bodyDef.linearDamping = movement.bodyMotion.linearDamping;
+    bodyDef.gravityScale = movement.bodyMotion.gravityScale;
     const bodyId = try box2d.createBody(bodyDef);
 
     const playerId = players.values().len;
@@ -177,7 +180,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     );
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.density = 0.45;
-    shapeDef.material.friction = config.player.movementFriction;
+    shapeDef.material.friction = movement.surfaceResponse.movingFriction;
     shapeDef.material.userMaterialId = playerMaterialId;
     shapeDef.enableSensorEvents = true;
     shapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
@@ -193,14 +196,19 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     };
     var lowerBodyShapeDef = box2d.c.b2DefaultShapeDef();
     lowerBodyShapeDef.density = 0;
-    lowerBodyShapeDef.material.friction = config.player.movementFriction;
+    lowerBodyShapeDef.material.friction = movement.surfaceResponse.movingFriction;
     lowerBodyShapeDef.material.userMaterialId = playerMaterialId;
     lowerBodyShapeDef.enableSensorEvents = true;
     lowerBodyShapeDef.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(playerId);
     lowerBodyShapeDef.filter.maskBits = collision.MASK_PLAYER_LOWER_BODY;
     const lowerBodyShapeId = box2d.c.b2CreateCircleShape(bodyId, &lowerBodyShapeDef, &lowerBodyCircle);
 
-    const footBox = box2d.c.b2MakeOffsetBox(0.2, 0.1, .{ .x = 0, .y = 0.4 }, .{ .c = 1, .s = 0 });
+    const footBox = box2d.c.b2MakeOffsetBox(
+        movement.grounding.probeHalfWidth,
+        movement.grounding.probeHalfHeight,
+        vec.toBox2d(movement.grounding.probeOffset),
+        .{ .c = 1, .s = 0 },
+    );
     var footShapeDef = box2d.c.b2DefaultShapeDef();
     footShapeDef.isSensor = true;
     footShapeDef.enableSensorEvents = true;
@@ -265,7 +273,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
 
     const playerEntity = entity.Entity{
         .type = try allocator.dupe(u8, "dynamic"),
-        .friction = config.player.movementFriction,
+        .friction = movement.surfaceResponse.movingFriction,
         .colliderShapeDef = shapeDef,
         .bodyId = bodyId,
         .spriteUuids = playerSpriteUuids,
@@ -375,27 +383,27 @@ pub fn jump(player: *Player) void {
 
     player.groundContactCount = 0;
 
-    if (!player.touchesGround and player.airJumpCounter < config.player.maxAirJumps) {
+    if (!player.touchesGround and player.airJumpCounter < movement.jump.maxAirJumps) {
         player.airJumpCounter += 1;
-    } else if (!player.touchesGround and player.airJumpCounter >= config.player.maxAirJumps) {
+    } else if (!player.touchesGround and player.airJumpCounter >= movement.jump.maxAirJumps) {
         return;
     }
 
-    var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -config.player.jumpImpulse };
+    var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -movement.jump.impulse };
     if (player.touchesWallOnRight or player.touchesWallOnLeft) {
         jumpImpulse = if (player.touchesWallOnLeft) box2d.c.b2Vec2{
-            .x = config.player.jumpImpulse / 2,
-            .y = -config.player.jumpImpulse,
+            .x = movement.jump.impulse / 2,
+            .y = -movement.jump.impulse,
         } else box2d.c.b2Vec2{
-            .x = -config.player.jumpImpulse / 2,
-            .y = -config.player.jumpImpulse,
+            .x = -movement.jump.impulse / 2,
+            .y = -movement.jump.impulse,
         };
         player.leftWallContactCount = 0;
         player.rightWallContactCount = 0;
     }
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, jumpImpulse, true);
-    delay.action(delayKey, config.jumpDelayMs);
+    delay.action(delayKey, movement.jump.cooldownMs);
 }
 
 pub fn brake(player: *Player) void {
@@ -404,12 +412,12 @@ pub fn brake(player: *Player) void {
 
 pub fn moveLeft(player: *Player) void {
     player.movingRight = false;
-    applyForce(player, box2d.c.b2Vec2{ .x = -config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(player, box2d.c.b2Vec2{ .x = -movement.control.lateralForce, .y = 0 });
 }
 
 pub fn moveRight(player: *Player) void {
     player.movingRight = true;
-    applyForce(player, box2d.c.b2Vec2{ .x = config.player.sidewaysMovementForce, .y = 0 });
+    applyForce(player, box2d.c.b2Vec2{ .x = movement.control.lateralForce, .y = 0 });
 }
 
 fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
@@ -418,18 +426,16 @@ fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
 }
 
 pub fn clampSpeed(player: *Player) void {
-    var velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
-    if (velocity.x > config.player.maxMovementSpeed) {
-        velocity.x = config.player.maxMovementSpeed;
-        box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
-    } else if (velocity.x < -config.player.maxMovementSpeed) {
-        velocity.x = -config.player.maxMovementSpeed;
-        box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
-    }
+    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
+    const speed = vec.magnitude(velocity);
+    if (speed <= movement.bodyMotion.maxLinearSpeed) return;
+
+    const clampedVelocity = vec.mul(velocity, movement.bodyMotion.maxLinearSpeed / speed);
+    box2d.c.b2Body_SetLinearVelocity(player.bodyId, vec.toBox2d(clampedVelocity));
 }
 
 pub fn getFrictionForPlayer(player: *Player) f32 {
-    return if (player.isMoving) config.player.movementFriction else config.player.restingFriction;
+    return if (player.isMoving) movement.surfaceResponse.movingFriction else movement.surfaceResponse.restingFriction;
 }
 
 pub fn checkSensors(player: *Player) !void {

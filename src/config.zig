@@ -110,22 +110,10 @@ pub const aimCircleOffset: vec.IVec2 = .{ .x = 0, .y = -25 };
 pub const runAnimationFps: i32 = 12;
 
 pub const Player = struct {
-    restingFriction: f32,
-    movementFriction: f32,
-    sidewaysMovementForce: f32,
-    jumpImpulse: f32,
-    maxAirJumps: i32,
-    maxMovementSpeed: f32,
     materialOffset: i32,
 };
 
 pub const player: Player = .{
-    .restingFriction = 100,
-    .movementFriction = 0.1,
-    .sidewaysMovementForce = 5,
-    .jumpImpulse = 1.7,
-    .maxAirJumps = 1,
-    .maxMovementSpeed = 6,
     .materialOffset = 600,
 };
 
@@ -148,7 +136,6 @@ pub const levelEditorSnapMoveDelayMs = 150;
 pub const levelEditorSteppedSnapMinGranularityMeters: f32 = 1.0;
 
 pub const levelEditorToggleDelayMs: f32 = 1000;
-pub const jumpDelayMs = 500;
 pub const boxCreateDelayMs = 200;
 pub const levelEditorClickDelayMs = 200;
 pub const levelEditorScaleRepeatDelayMs = 75;
