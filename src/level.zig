@@ -388,6 +388,7 @@ pub fn reload() !void {
 pub fn cleanup() void {
     rope.cleanup();
     player.cleanup();
+    movement.cleanup();
     gravestone.clearScheduledSpawns();
     sensor.cleanup();
     projectile.cleanup();

@@ -13,6 +13,7 @@ const entity = @import("entity.zig");
 const levelEditor = @import("level_editor.zig");
 const levelEditorGrid = @import("level_editor_grid.zig");
 const level = @import("level.zig");
+const movement = @import("movement.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
 const sprite = @import("sprite.zig");
@@ -112,10 +113,10 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
         if (p.isDead) return;
 
         switch (action) {
-            .move_left => player.moveLeft(p),
-            .move_right => player.moveRight(p),
-            .brake => player.brake(p),
-            .jump => player.jump(p),
+            .move_left => movement.moveLeft(playerId),
+            .move_right => movement.moveRight(playerId),
+            .brake => movement.brake(playerId),
+            .jump => movement.jump(playerId),
             .shoot => player.shoot(p) catch |err| {
                 std.debug.print("Error shooting: {}\n", .{err});
             },

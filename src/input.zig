@@ -3,7 +3,7 @@ const sdl = @import("sdl.zig");
 const state = @import("state.zig");
 const control = @import("control.zig");
 const controller = @import("controller.zig");
-const player = @import("player.zig");
+const movement = @import("movement.zig");
 const keyboard = @import("keyboard.zig");
 const gamepad = @import("gamepad.zig");
 const window = @import("window.zig");
@@ -33,7 +33,7 @@ pub fn handle() !void {
         }
     }
 
-    player.clearAllMovementIntents();
+    movement.clearAllMovementIntents();
     control.handleAtlasDumpHotkey();
 
     // Any open menu (game menu or config menu) takes priority

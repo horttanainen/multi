@@ -38,26 +38,12 @@ pub const Player = struct {
     bodyId: box2d.c.b2BodyId,
     cameraId: usize,
     bodyShapeId: box2d.c.b2ShapeId,
-    lowerBodyShapeId: box2d.c.b2ShapeId,
-    footSensorShapeId: box2d.c.b2ShapeId,
-    leftWallSensorId: box2d.c.b2ShapeId,
-    rightWallSensorId: box2d.c.b2ShapeId,
     weapons: []weapon.Weapon,
     selectedWeaponIndex: usize,
 
-    groundState: movement.GroundState,
-    leftWallContactCount: usize,
-    rightWallContactCount: usize,
-    lateralMovementIntent: i8,
-    isMoving: bool,
-    touchesWallOnLeft: bool,
-    touchesWallOnRight: bool,
     aimDirection: vec.Vec2,
     isAiming: bool,
     aimMagnitude: f32,
-    airJumpCounter: u32,
-    bufferedJumpUntilMs: ?u64,
-    movingRight: bool,
     crosshairUuid: u64,
     health: f32,
     isDead: bool,
@@ -311,30 +297,23 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         break :blk id;
     };
 
+    try movement.states.put(allocator, playerId, .{
+        .bodyId = bodyId,
+        .footSensorShapeId = footSensorShapeId,
+        .leftWallSensorId = leftWallSensorId,
+        .rightWallSensorId = rightWallSensorId,
+    });
+    errdefer _ = movement.states.swapRemove(playerId);
+
     try players.put(allocator, playerId, Player{
         .id = playerId,
         .bodyId = bodyId,
         .bodyShapeId = bodyShapeId,
-        .lowerBodyShapeId = lowerBodyShapeId,
-        .footSensorShapeId = footSensorShapeId,
-        .leftWallSensorId = leftWallSensorId,
-        .rightWallSensorId = rightWallSensorId,
         .weapons = try weapons.toOwnedSlice(),
         .selectedWeaponIndex = 0,
-        // Initialize per-player state
-        .groundState = .{},
-        .leftWallContactCount = 0,
-        .rightWallContactCount = 0,
-        .lateralMovementIntent = 0,
-        .isMoving = false,
-        .touchesWallOnLeft = false,
-        .touchesWallOnRight = false,
         .aimDirection = vec.west,
         .isAiming = false,
         .aimMagnitude = 0,
-        .airJumpCounter = 0,
-        .bufferedJumpUntilMs = null,
-        .movingRight = false,
         .crosshairUuid = crosshairUuid,
         .cameraId = cameraId,
         .health = 100,
@@ -359,15 +338,19 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
 }
 
 pub fn updateAnimationState(player: *Player) void {
+    const movementState = movement.states.get(player.id) orelse {
+        std.log.warn("player.updateAnimationState: movement state is missing for player {d}", .{player.id});
+        return;
+    };
     const velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
     const movingUpward = velocity.y < 0; // Negative y = upward in Box2D
     const movingDownward = velocity.y > 0; // Positive y = downward in Box2D
 
-    const targetAnimationKey = if (!player.groundState.supported and movingUpward)
+    const targetAnimationKey = if (!movementState.groundState.supported and movingUpward)
         "afterjump"
-    else if (!player.groundState.supported and movingDownward)
+    else if (!movementState.groundState.supported and movingDownward)
         "fall"
-    else if (player.isMoving)
+    else if (movementState.lateralMovementIntent != 0)
         "run"
     else
         "idle";
@@ -375,199 +358,14 @@ pub fn updateAnimationState(player: *Player) void {
     animation.switchAnimation(player.bodyId, targetAnimationKey) catch {};
 }
 
-fn canUseGroundJump(player: *const Player, currentTimeMs: u64) bool {
-    if (!player.groundState.jumpAvailable) return false;
-    if (player.groundState.supported) return true;
-    if (movement.jump.coyoteTimeMs == 0) return false;
-
-    const supportLostAtMs = player.groundState.supportLostAtMs orelse return false;
-    return currentTimeMs <= supportLostAtMs + @as(u64, movement.jump.coyoteTimeMs);
-}
-
-fn executeJump(player: *Player, currentTimeMs: u64, groundOnly: bool) bool {
-    var buf: [32:0]u8 = undefined;
-    const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_jump", .{player.id}) catch unreachable;
-
-    if (delay.check(delayKey)) return false;
-
-    const useGroundJump = canUseGroundJump(player, currentTimeMs);
-    if (groundOnly and !useGroundJump) return false;
-    if (!useGroundJump and player.airJumpCounter >= movement.jump.maxAirJumps) return false;
-
-    if (useGroundJump) {
-        player.groundState.jumpAvailable = false;
-        player.groundState.supportLostAtMs = null;
-    } else {
-        player.airJumpCounter += 1;
-    }
-
-    var jumpImpulse = box2d.c.b2Vec2{ .x = 0, .y = -movement.jump.impulse };
-    if (player.touchesWallOnRight or player.touchesWallOnLeft) {
-        jumpImpulse = if (player.touchesWallOnLeft) box2d.c.b2Vec2{
-            .x = movement.jump.impulse / 2,
-            .y = -movement.jump.impulse,
-        } else box2d.c.b2Vec2{
-            .x = -movement.jump.impulse / 2,
-            .y = -movement.jump.impulse,
-        };
-    }
-
-    box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, jumpImpulse, true);
-    delay.action(delayKey, movement.jump.cooldownMs);
-    player.bufferedJumpUntilMs = null;
-    return true;
-}
-
-pub fn jump(player: *Player) void {
-    const currentTimeMs = time.nowMs();
-    if (executeJump(player, currentTimeMs, false)) return;
-    if (movement.jump.bufferTimeMs == 0) return;
-
-    player.bufferedJumpUntilMs = currentTimeMs + movement.jump.bufferTimeMs;
-}
-
-fn processBufferedJump(player: *Player, currentTimeMs: u64) void {
-    const bufferedJumpUntilMs = player.bufferedJumpUntilMs orelse return;
-    if (currentTimeMs > bufferedJumpUntilMs) {
-        player.bufferedJumpUntilMs = null;
-        return;
-    }
-    if (!canUseGroundJump(player, currentTimeMs)) return;
-
-    _ = executeJump(player, currentTimeMs, true);
-}
-
-pub fn brake(player: *Player) void {
-    player.lateralMovementIntent = 0;
-    player.isMoving = false;
-}
-
-pub fn moveLeft(player: *Player) void {
-    player.lateralMovementIntent = -1;
-    player.isMoving = true;
-    player.movingRight = false;
-}
-
-pub fn moveRight(player: *Player) void {
-    player.lateralMovementIntent = 1;
-    player.isMoving = true;
-    player.movingRight = true;
-}
-
-fn applyLieroMovement(player: *Player, dt: f32) void {
-    if (player.lateralMovementIntent == 0) return;
-
-    const direction: f32 = @floatFromInt(player.lateralMovementIntent);
-    const velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
-    const currentSpeed = velocity.x * direction;
-    if (currentSpeed >= movement.control.maxLateralSpeed) return;
-
-    const remainingSpeed = movement.control.maxLateralSpeed - currentSpeed;
-    const bodyMass = box2d.c.b2Body_GetMass(player.bodyId);
-    const forceMagnitude = @min(movement.control.lateralForce, remainingSpeed * bodyMass / dt);
-    const force = box2d.c.b2Vec2{ .x = direction * forceMagnitude, .y = 0 };
-    box2d.c.b2Body_ApplyForceToCenter(player.bodyId, force, true);
-}
-
-fn applyMovement(player: *Player, dt: f32) void {
-    switch (movement.mechanism) {
-        .liero => applyLieroMovement(player, dt),
-    }
-}
-
-fn clampLinearSpeed(player: *Player) void {
-    const maxLinearSpeed = movement.bodyMotion.maxLinearSpeed orelse return;
-    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
-    const speed = vec.magnitude(velocity);
-    if (speed <= maxLinearSpeed) return;
-
-    const clampedVelocity = vec.mul(velocity, maxLinearSpeed / speed);
-    box2d.c.b2Body_SetLinearVelocity(player.bodyId, vec.toBox2d(clampedVelocity));
-}
-
-pub fn getFrictionForPlayer(player: *Player) f32 {
-    return if (player.isMoving) movement.surfaceResponse.movingFriction else movement.surfaceResponse.restingFriction;
-}
-
-pub fn checkSensors(player: *Player) !void {
-    const sensorEvents = box2d.getSensorEvents();
-    const currentTimeMs = time.nowMs();
-    const wasSupported = player.groundState.supported;
-
-    for (0..@intCast(sensorEvents.beginCount)) |i| {
-        const e = sensorEvents.beginEvents[i];
-
-        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.bodyShapeId)) {
-            continue;
-        }
-        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.lowerBodyShapeId)) {
-            continue;
-        }
-
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
-            if (player.groundState.contactCount == 0) {
-                player.groundState.supported = true;
-                player.groundState.jumpAvailable = true;
-                player.airJumpCounter = 0;
-            }
-            player.groundState.contactCount += 1;
-        }
-
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.leftWallSensorId)) {
-            player.airJumpCounter = 0;
-            player.leftWallContactCount += 1;
-        }
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.rightWallSensorId)) {
-            player.airJumpCounter = 0;
-            player.rightWallContactCount += 1;
-        }
-    }
-
-    for (0..@intCast(sensorEvents.endCount)) |i| {
-        const e = sensorEvents.endEvents[i];
-
-        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.bodyShapeId)) {
-            continue;
-        }
-        if (box2d.c.B2_ID_EQUALS(e.visitorShapeId, player.lowerBodyShapeId)) {
-            continue;
-        }
-
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.footSensorShapeId)) {
-            if (player.groundState.contactCount > 0) {
-                player.groundState.contactCount -= 1;
-            }
-        }
-
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.leftWallSensorId)) {
-            if (player.leftWallContactCount > 0) {
-                player.leftWallContactCount -= 1;
-            }
-        }
-        if (box2d.c.B2_ID_EQUALS(e.sensorShapeId, player.rightWallSensorId)) {
-            if (player.rightWallContactCount > 0) {
-                player.rightWallContactCount -= 1;
-            }
-        }
-    }
-    const supported = player.groundState.contactCount > 0;
-    if (wasSupported and !supported) {
-        player.groundState.supportLostAtMs = currentTimeMs;
-    }
-    if (!wasSupported and supported) {
-        player.groundState.supportLostAtMs = null;
-    }
-
-    player.groundState.supported = supported;
-    player.touchesWallOnRight = player.rightWallContactCount > 0;
-    player.touchesWallOnLeft = player.leftWallContactCount > 0;
-    processBufferedJump(player, currentTimeMs);
-}
-
 pub fn aim(p: *Player, direction: vec.Vec2) void {
+    const movementState = movement.states.get(p.id) orelse {
+        std.log.warn("player.aim: movement state is missing for player {d}", .{p.id});
+        return;
+    };
     var dir = direction;
     if (vec.equals(dir, vec.zero)) {
-        dir = vec.add(dir, if (p.movingRight) vec.east else vec.west);
+        dir = vec.add(dir, if (movementState.facingRight) vec.east else vec.west);
     }
     p.isAiming = true;
     p.aimMagnitude = std.math.clamp(vec.magnitude(dir), 0, 1);
@@ -812,32 +610,6 @@ pub fn updateAllAnimationStates() void {
     }
 }
 
-pub fn checkAllSensors() !void {
-    for (players.values()) |*p| {
-        try checkSensors(p);
-    }
-}
-
-pub fn applyAllMovement(dt: f32) void {
-    for (players.values()) |*p| {
-        if (p.isDead) continue;
-        applyMovement(p, dt);
-    }
-}
-
-pub fn clampAllSpeeds() void {
-    for (players.values()) |*p| {
-        if (p.isDead) continue;
-        clampLinearSpeed(p);
-    }
-}
-
-pub fn clearAllMovementIntents() void {
-    for (players.values()) |*p| {
-        brake(p);
-    }
-}
-
 pub fn drawAllCrosshairs() !void {
     for (players.values()) |*p| {
         if (p.isDead) {
@@ -999,12 +771,16 @@ pub fn drawLeftHand(p: *Player) !void {
 }
 
 fn drawLeftArmWithHook(p: *Player) !void {
+    const movementState = movement.states.get(p.id) orelse {
+        std.log.warn("player.drawLeftArmWithHook: movement state is missing for player {d}", .{p.id});
+        return;
+    };
     const handSprite = sprite.getSprite(p.leftHandSpriteUuid) orelse return;
     const placement = calcLeftArmPlacement(p.*, handSprite) orelse return;
 
     // Swing arm back and forth when running
     const armSwingSpeed = 2.0 * std.math.pi * @as(f64, @floatFromInt(config.runAnimationFps)) / @as(f64, @floatFromInt(runAnimationFrameCount));
-    const swingAngle: f32 = if (p.isMoving and p.groundState.supported)
+    const swingAngle: f32 = if (movementState.lateralMovementIntent != 0 and movementState.groundState.supported)
         @as(f32, @floatCast(std.math.sin(time.now() * armSwingSpeed))) * 0.6
     else
         0;
@@ -1139,7 +915,7 @@ pub fn kill(p: *Player, killerId: ?usize) !void {
     // Release rope on death
     rope.releaseRope(p.id);
 
-    brake(p);
+    movement.reset(p.id);
     p.isDead = true;
 
     score.recordKill(killerId, p.id);
@@ -1170,10 +946,7 @@ pub fn processRespawns() !void {
         const maybePlayer = players.getPtr(playerId);
         if (maybePlayer) |p| {
             p.health = 100;
-            p.groundState = .{};
-            p.airJumpCounter = 0;
-            p.bufferedJumpUntilMs = null;
-            brake(p);
+            movement.reset(playerId);
 
             const spawnPosM = conv.p2m(level.spawnLocation);
             box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);
