@@ -12,6 +12,7 @@
     "gravity": 10,
     "pixelsPerMeter": 80,
     "splitscreen": false,
+    "movementFile": "movements/liero_default.json",
     "parallaxEntities": [],
     "entities": [
         {

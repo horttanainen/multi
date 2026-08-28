@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const config = @import("config.zig");
+const data = @import("data.zig");
 const collision = @import("collision.zig");
 const polygon = @import("polygon.zig");
 const box2d = @import("box2d.zig");
@@ -62,6 +63,7 @@ pub const Level = struct {
     gravity: f32 = 10.0,
     pixelsPerMeter: i32 = defaultPixelsPerMeter,
     splitscreen: bool = false,
+    movementFile: []const u8 = defaultMovementFile,
     parallaxEntities: []background.SerializableParallaxEntity,
     entities: []entity.SerializableEntity,
 };
@@ -75,10 +77,12 @@ pub const defaultPixelsPerMeter: i32 = 80;
 pub const defaultLevelHeightMeters: f32 = 12.0;
 pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
+pub const defaultMovementFile = "movements/liero_default.json";
 const defaultDynamicHealth: f32 = 100;
 
 pub var splitscreen: bool = false;
 pub var cameraZoomMeters: f32 = defaultCameraZoomMeters;
+pub var movementData: data.MovementData = undefined;
 
 pub fn sanitizeCameraZoomMeters(value: f32) f32 {
     if (value <= 0) {
@@ -116,21 +120,21 @@ pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio,
     };
 }
 
-pub fn parseFromData(data: []const u8) !std.json.Parsed(Level) {
-    const parsed = try std.json.parseFromSlice(Level, allocator, data, .{ .allocate = .alloc_always });
+pub fn parseFromData(jsonData: []const u8) !std.json.Parsed(Level) {
+    const parsed = try std.json.parseFromSlice(Level, allocator, jsonData, .{ .allocate = .alloc_always });
     return parsed;
 }
 
 pub fn parseFromPath(path: []const u8) !std.json.Parsed(Level) {
-    const data = try std.Io.Dir.cwd().readFileAlloc(runtime.io(), path, allocator, .limited(config.maxLevelSizeInBytes));
-    defer allocator.free(data);
-    return parseFromData(data);
+    const jsonData = try std.Io.Dir.cwd().readFileAlloc(runtime.io(), path, allocator, .limited(config.maxLevelSizeInBytes));
+    defer allocator.free(jsonData);
+    return parseFromData(jsonData);
 }
 
 pub fn loadLevelPaths() !std.json.Parsed([][]const u8) {
     var jsonBuf: [4096]u8 = undefined;
-    const data = try fs.readFile("levels.json", &jsonBuf);
-    return std.json.parseFromSlice([][]const u8, allocator, data, .{ .allocate = .alloc_always });
+    const jsonData = try fs.readFile("levels.json", &jsonBuf);
+    return std.json.parseFromSlice([][]const u8, allocator, jsonData, .{ .allocate = .alloc_always });
 }
 
 fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
@@ -142,7 +146,8 @@ fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
     }
 }
 
-pub fn applyLevelSettings(lev: Level) void {
+pub fn applyLevelSettings(lev: Level) !void {
+    movementData = try data.loadMovementData(lev.movementFile);
     box2d.setGravity(lev.gravity);
     conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
     spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
@@ -357,7 +362,7 @@ pub fn loadLevel(path: []const u8) !bool {
     defer parsed.deinit();
     const lev = parsed.value;
 
-    applyLevelSettings(lev);
+    try applyLevelSettings(lev);
     const hasSpawn = try loadLevelContents(lev);
     return hasSpawn;
 }

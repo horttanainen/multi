@@ -195,6 +195,9 @@ fn clearFreeformScaleEditState() void {
 }
 
 fn cloneLevelData(src: level.Level) !level.Level {
+    const movementFile = try allocator.dupe(u8, src.movementFile);
+    errdefer allocator.free(movementFile);
+
     var parallaxEntities = try allocator.alloc(background.SerializableParallaxEntity, src.parallaxEntities.len);
     errdefer allocator.free(parallaxEntities);
     var parallaxInitialized: usize = 0;
@@ -231,12 +234,15 @@ fn cloneLevelData(src: level.Level) !level.Level {
         .gravity = src.gravity,
         .pixelsPerMeter = level.defaultPixelsPerMeter,
         .splitscreen = src.splitscreen,
+        .movementFile = movementFile,
         .parallaxEntities = parallaxEntities,
         .entities = entities,
     };
 }
 
 fn freeLevelData(lev: *level.Level) void {
+    allocator.free(lev.movementFile);
+
     for (lev.parallaxEntities) |e| {
         freeParallaxEntity(e);
     }
@@ -249,6 +255,7 @@ fn freeLevelData(lev: *level.Level) void {
 
     lev.parallaxEntities = &.{};
     lev.entities = &.{};
+    lev.movementFile = "";
 }
 
 fn cloneCommand(command: EditorCommand) !EditorCommand {
@@ -328,6 +335,9 @@ fn loadDocumentFromPath(path: []const u8) !void {
 }
 
 fn createEmptyLevelData() !level.Level {
+    const movementFile = try allocator.dupe(u8, level.defaultMovementFile);
+    errdefer allocator.free(movementFile);
+
     const parallaxEntities = try allocator.alloc(background.SerializableParallaxEntity, 0);
     errdefer allocator.free(parallaxEntities);
 
@@ -342,6 +352,7 @@ fn createEmptyLevelData() !level.Level {
         .gravity = 10.0,
         .pixelsPerMeter = level.defaultPixelsPerMeter,
         .splitscreen = false,
+        .movementFile = movementFile,
         .parallaxEntities = parallaxEntities,
         .entities = entities,
     };
@@ -1136,7 +1147,7 @@ pub fn tryCurrentLevel() !void {
 fn spawnDocumentRuntime() !void {
     const document = try getDocument();
 
-    level.applyLevelSettings(document.levelData);
+    try level.applyLevelSettings(document.levelData);
 
     for (document.levelData.parallaxEntities) |e| {
         try level.spawnParallaxEntity(e);
