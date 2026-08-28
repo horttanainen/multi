@@ -67,7 +67,7 @@ const Sprite = entity.Sprite;
 //TODO: whaling pirate fight
 
 //Movement
-//TODO: allow to change movement mechanism: meatboy/more controlled/flying
+//TODO: allow to change movement mechanism: meatboy/more controlled/flying, stricly liero like (like now)
 
 //Level editor
 //TODO: add option to turn the colliders on so that objects can not be placed on top of each other
