@@ -1,0 +1,29 @@
+{
+  "mechanism": "liero",
+  "control": {
+    "lateralForce": 5.0
+  },
+  "bodyMotion": {
+    "maxLinearSpeed": 6.0,
+    "linearDamping": 0.0,
+    "gravityScale": 1.0
+  },
+  "surfaceResponse": {
+    "movingFriction": 0.1,
+    "restingFriction": 100.0
+  },
+  "jump": {
+    "impulse": 1.7,
+    "maxAirJumps": 1,
+    "cooldownMs": 500
+  },
+  "grounding": {
+    "mode": "foot_overlap",
+    "probeHalfWidth": 0.2,
+    "probeHalfHeight": 0.1,
+    "probeOffset": {
+      "x": 0.0,
+      "y": 0.4
+    }
+  }
+}

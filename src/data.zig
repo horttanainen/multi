@@ -120,6 +120,67 @@ pub const ParticleData = struct {
     groupIndex: i32,
 };
 
+pub const MovementMechanism = enum {
+    liero,
+};
+
+pub const MovementGroundingMode = enum {
+    foot_overlap,
+};
+
+pub const MovementControlData = struct {
+    lateralForce: f32,
+};
+
+pub const MovementBodyMotionData = struct {
+    maxLinearSpeed: f32,
+    linearDamping: f32,
+    gravityScale: f32,
+};
+
+pub const MovementSurfaceResponseData = struct {
+    movingFriction: f32,
+    restingFriction: f32,
+};
+
+pub const MovementJumpData = struct {
+    impulse: f32,
+    maxAirJumps: u32,
+    cooldownMs: u32,
+};
+
+pub const MovementGroundingData = struct {
+    mode: MovementGroundingMode,
+    probeHalfWidth: f32,
+    probeHalfHeight: f32,
+    probeOffset: vec.Vec2,
+};
+
+pub const MovementData = struct {
+    mechanism: MovementMechanism,
+    control: MovementControlData,
+    bodyMotion: MovementBodyMotionData,
+    surfaceResponse: MovementSurfaceResponseData,
+    jump: MovementJumpData,
+    grounding: MovementGroundingData,
+};
+
+pub fn loadMovementData(path: []const u8) !MovementData {
+    var jsonBuf: [16384]u8 = undefined;
+    const jsonData = fs.readFile(path, &jsonBuf) catch |err| {
+        std.log.warn("data.loadMovementData: failed to read '{s}': {}", .{ path, err });
+        return err;
+    };
+
+    const parsed = std.json.parseFromSlice(MovementData, allocator, jsonData, .{}) catch |err| {
+        std.log.warn("data.loadMovementData: failed to parse '{s}': {}", .{ path, err });
+        return err;
+    };
+    defer parsed.deinit();
+
+    return parsed.value;
+}
+
 pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
 var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
