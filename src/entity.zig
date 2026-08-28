@@ -130,8 +130,9 @@ fn drawEditorSelectionMask(entity: Entity, entitySprite: Sprite, pos: vec.IVec2,
 pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
     const entityType = try allocator.dupe(u8, eType);
+    const colliderShapeDef = enableSolidSensorEvents(shapeDef);
 
-    const shapeId = box2d.c.b2CreatePolygonShape(bodyId, &shapeDef, &shape);
+    const shapeId = box2d.c.b2CreatePolygonShape(bodyId, &colliderShapeDef, &shape);
 
     const shapeIds = try allocator.alloc(box2d.c.b2ShapeId, 1);
     shapeIds[0] = shapeId;
@@ -143,8 +144,8 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
 
     const entity = Entity{
         .type = entityType,
-        .friction = shapeDef.material.friction,
-        .colliderShapeDef = shapeDef,
+        .friction = colliderShapeDef.material.friction,
+        .colliderShapeDef = colliderShapeDef,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -154,8 +155,8 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .hovered = false,
         .animated = false,
         .flipEntityHorizontally = false,
-        .categoryBits = shapeDef.filter.categoryBits,
-        .maskBits = shapeDef.filter.maskBits,
+        .categoryBits = colliderShapeDef.filter.categoryBits,
+        .maskBits = colliderShapeDef.filter.maskBits,
         .enabled = true,
     };
 
@@ -178,6 +179,15 @@ pub fn createFromImg(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box
 
 fn isStaticTerrainType(eType: []const u8) bool {
     return std.mem.eql(u8, eType, "static");
+}
+
+fn enableSolidSensorEvents(shapeDef: box2d.c.b2ShapeDef) box2d.c.b2ShapeDef {
+    if (shapeDef.isSensor) return shapeDef;
+    if ((shapeDef.filter.maskBits & collision.CATEGORY_SENSOR) == 0) return shapeDef;
+
+    var enabledShapeDef = shapeDef;
+    enabledShapeDef.enableSensorEvents = true;
+    return enabledShapeDef;
 }
 
 fn createShapeDefForEntity(entity: Entity) box2d.c.b2ShapeDef {
@@ -260,6 +270,7 @@ fn createColliderChunksForSprite(
 pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, eType: []const u8) !Entity {
     const entityType = try allocator.dupe(u8, eType);
     errdefer allocator.free(entityType);
+    const colliderShapeDef = enableSolidSensorEvents(shapeDef);
 
     const s = sprite.getSprite(spriteUuid) orelse {
         std.log.warn("createEntityForBody: sprite {d} not found for type {s}", .{ spriteUuid, eType });
@@ -267,7 +278,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
     };
 
     const colliderChunks = if (isStaticTerrainType(eType))
-        try createColliderChunksForSprite(bodyId, s, shapeDef)
+        try createColliderChunksForSprite(bodyId, s, colliderShapeDef)
     else
         try allocator.alloc(ColliderChunk, 0);
     errdefer freeColliderChunks(colliderChunks);
@@ -276,7 +287,7 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         break :blk try flattenColliderChunkShapeIds(colliderChunks);
     } else blk: {
         const triangles = try polygon.triangulateCached(s);
-        break :blk try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, shapeDef);
+        break :blk try box2d.createPolygonShape(bodyId, triangles, .{ .x = s.sizeP.x, .y = s.sizeP.y }, colliderShapeDef);
     };
     errdefer allocator.free(shapeIds);
 
@@ -285,8 +296,8 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
 
     const entity = Entity{
         .type = entityType,
-        .friction = shapeDef.material.friction,
-        .colliderShapeDef = shapeDef,
+        .friction = colliderShapeDef.material.friction,
+        .colliderShapeDef = colliderShapeDef,
         .state = null,
         .bodyId = bodyId,
         .spriteUuids = spriteUuids,
@@ -296,8 +307,8 @@ pub fn createEntityForBody(bodyId: box2d.c.b2BodyId, spriteUuid: u64, shapeDef: 
         .hovered = false,
         .animated = false,
         .flipEntityHorizontally = false,
-        .categoryBits = shapeDef.filter.categoryBits,
-        .maskBits = shapeDef.filter.maskBits,
+        .categoryBits = colliderShapeDef.filter.categoryBits,
+        .maskBits = colliderShapeDef.filter.maskBits,
         .enabled = true,
     };
     return entity;
