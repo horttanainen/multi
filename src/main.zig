@@ -9,7 +9,6 @@ const state = @import("state.zig");
 const gpu = @import("gpu.zig");
 const text = @import("text.zig");
 const sprite = @import("sprite.zig");
-const sensor = @import("sensor.zig");
 const time = @import("time.zig");
 const renderer = @import("renderer.zig");
 const physics = @import("physics.zig");
@@ -378,11 +377,6 @@ fn gameLoop() !void {
     entity.cleanupEntities();
     sprite.cleanupSprites();
     perf.recordPlayerDeathGameLoopStage(.cleanup, entityCleanupStart);
-
-    const sensorStart = perf.begin(.player_death);
-    try player.checkAllSensors();
-    try sensor.processSensorEvents();
-    perf.recordPlayerDeathGameLoopStage(.player_and_sensor, sensorStart);
 
     const cameraStart = perf.begin(.player_death);
     renderer.updateZoom();

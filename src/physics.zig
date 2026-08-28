@@ -6,6 +6,7 @@ const player = @import("player.zig");
 const entity = @import("entity.zig");
 const camera = @import("camera.zig");
 const particle = @import("particle.zig");
+const sensor = @import("sensor.zig");
 
 pub fn step() !usize {
     // Step box2d.c physics world
@@ -15,6 +16,8 @@ pub fn step() !usize {
         particle.updateStates();
         player.updateAllStates();
         box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+        try player.checkAllSensors();
+        try sensor.processSensorEvents();
         time.accumulator -= config.physics.dt;
         stepCount += 1;
     }

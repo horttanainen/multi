@@ -381,8 +381,6 @@ pub fn jump(player: *Player) void {
         return;
     }
 
-    player.groundContactCount = 0;
-
     if (!player.touchesGround and player.airJumpCounter < movement.jump.maxAirJumps) {
         player.airJumpCounter += 1;
     } else if (!player.touchesGround and player.airJumpCounter >= movement.jump.maxAirJumps) {
@@ -398,8 +396,6 @@ pub fn jump(player: *Player) void {
             .x = -movement.jump.impulse / 2,
             .y = -movement.jump.impulse,
         };
-        player.leftWallContactCount = 0;
-        player.rightWallContactCount = 0;
     }
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, jumpImpulse, true);
