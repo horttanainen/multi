@@ -130,10 +130,11 @@ pub const MovementGroundingMode = enum {
 
 pub const MovementControlData = struct {
     lateralForce: f32,
+    maxLateralSpeed: f32,
 };
 
 pub const MovementBodyMotionData = struct {
-    maxLinearSpeed: f32,
+    maxLinearSpeed: ?f32 = null,
     linearDamping: f32,
     gravityScale: f32,
 };
@@ -147,6 +148,8 @@ pub const MovementJumpData = struct {
     impulse: f32,
     maxAirJumps: u32,
     cooldownMs: u32,
+    coyoteTimeMs: u32 = 0,
+    bufferTimeMs: u32 = 0,
 };
 
 pub const MovementGroundingData = struct {

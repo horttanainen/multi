@@ -17,8 +17,8 @@
     "impulse": 1.7,
     "maxAirJumps": 1,
     "cooldownMs": 500,
-    "coyoteTimeMs": 0,
-    "bufferTimeMs": 0
+    "coyoteTimeMs": 100,
+    "bufferTimeMs": 70
   },
   "grounding": {
     "mode": "foot_overlap",

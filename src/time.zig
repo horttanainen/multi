@@ -55,6 +55,10 @@ pub fn now() f64 {
     return simulationTime;
 }
 
+pub fn nowMs() u64 {
+    return @intFromFloat(simulationTime * 1000.0);
+}
+
 pub fn realNow() f64 {
     return passedTime;
 }

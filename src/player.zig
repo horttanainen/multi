@@ -55,6 +55,7 @@ pub const Player = struct {
     isAiming: bool,
     aimMagnitude: f32,
     airJumpCounter: u32,
+    bufferedJumpUntilMs: ?u64,
     movingRight: bool,
     crosshairUuid: u64,
     health: f32,
@@ -330,6 +331,7 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
         .isAiming = false,
         .aimMagnitude = 0,
         .airJumpCounter = 0,
+        .bufferedJumpUntilMs = null,
         .movingRight = false,
         .crosshairUuid = crosshairUuid,
         .cameraId = cameraId,
@@ -371,19 +373,28 @@ pub fn updateAnimationState(player: *Player) void {
     animation.switchAnimation(player.bodyId, targetAnimationKey) catch {};
 }
 
-pub fn jump(player: *Player) void {
+fn canUseGroundJump(player: *const Player, currentTimeMs: u64) bool {
+    if (!player.groundState.jumpAvailable) return false;
+    if (player.groundState.supported) return true;
+    if (movement.jump.coyoteTimeMs == 0) return false;
+
+    const supportLostAtMs = player.groundState.supportLostAtMs orelse return false;
+    return currentTimeMs <= supportLostAtMs + @as(u64, movement.jump.coyoteTimeMs);
+}
+
+fn executeJump(player: *Player, currentTimeMs: u64, groundOnly: bool) bool {
     var buf: [32:0]u8 = undefined;
     const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_jump", .{player.id}) catch unreachable;
 
-    if (delay.check(delayKey)) {
-        return;
-    }
+    if (delay.check(delayKey)) return false;
 
-    if (player.groundState.supported and !player.groundState.jumpAvailable) return;
-    if (!player.groundState.supported and player.airJumpCounter >= movement.jump.maxAirJumps) return;
+    const useGroundJump = canUseGroundJump(player, currentTimeMs);
+    if (groundOnly and !useGroundJump) return false;
+    if (!useGroundJump and player.airJumpCounter >= movement.jump.maxAirJumps) return false;
 
-    if (player.groundState.supported) {
+    if (useGroundJump) {
         player.groundState.jumpAvailable = false;
+        player.groundState.supportLostAtMs = null;
     } else {
         player.airJumpCounter += 1;
     }
@@ -401,6 +412,27 @@ pub fn jump(player: *Player) void {
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, jumpImpulse, true);
     delay.action(delayKey, movement.jump.cooldownMs);
+    player.bufferedJumpUntilMs = null;
+    return true;
+}
+
+pub fn jump(player: *Player) void {
+    const currentTimeMs = time.nowMs();
+    if (executeJump(player, currentTimeMs, false)) return;
+    if (movement.jump.bufferTimeMs == 0) return;
+
+    player.bufferedJumpUntilMs = currentTimeMs + movement.jump.bufferTimeMs;
+}
+
+fn processBufferedJump(player: *Player, currentTimeMs: u64) void {
+    const bufferedJumpUntilMs = player.bufferedJumpUntilMs orelse return;
+    if (currentTimeMs > bufferedJumpUntilMs) {
+        player.bufferedJumpUntilMs = null;
+        return;
+    }
+    if (!canUseGroundJump(player, currentTimeMs)) return;
+
+    _ = executeJump(player, currentTimeMs, true);
 }
 
 pub fn brake(player: *Player) void {
@@ -422,13 +454,33 @@ fn applyForce(player: *Player, force: box2d.c.b2Vec2) void {
     box2d.c.b2Body_ApplyForceToCenter(player.bodyId, force, true);
 }
 
-pub fn clampSpeed(player: *Player) void {
+fn clampLateralSpeed(player: *Player) void {
+    var velocity = box2d.c.b2Body_GetLinearVelocity(player.bodyId);
+    if (@abs(velocity.x) <= movement.control.maxLateralSpeed) return;
+
+    velocity.x = std.math.clamp(
+        velocity.x,
+        -movement.control.maxLateralSpeed,
+        movement.control.maxLateralSpeed,
+    );
+    box2d.c.b2Body_SetLinearVelocity(player.bodyId, velocity);
+}
+
+fn clampLinearSpeed(player: *Player) void {
+    const maxLinearSpeed = movement.bodyMotion.maxLinearSpeed orelse return;
     const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
     const speed = vec.magnitude(velocity);
-    if (speed <= movement.bodyMotion.maxLinearSpeed) return;
+    if (speed <= maxLinearSpeed) return;
 
-    const clampedVelocity = vec.mul(velocity, movement.bodyMotion.maxLinearSpeed / speed);
+    const clampedVelocity = vec.mul(velocity, maxLinearSpeed / speed);
     box2d.c.b2Body_SetLinearVelocity(player.bodyId, vec.toBox2d(clampedVelocity));
+}
+
+pub fn clampSpeed(player: *Player) void {
+    switch (movement.mechanism) {
+        .liero => clampLateralSpeed(player),
+    }
+    clampLinearSpeed(player);
 }
 
 pub fn getFrictionForPlayer(player: *Player) f32 {
@@ -437,6 +489,8 @@ pub fn getFrictionForPlayer(player: *Player) f32 {
 
 pub fn checkSensors(player: *Player) !void {
     const sensorEvents = box2d.getSensorEvents();
+    const currentTimeMs = time.nowMs();
+    const wasSupported = player.groundState.supported;
 
     for (0..@intCast(sensorEvents.beginCount)) |i| {
         const e = sensorEvents.beginEvents[i];
@@ -494,9 +548,18 @@ pub fn checkSensors(player: *Player) !void {
             }
         }
     }
-    player.groundState.supported = player.groundState.contactCount > 0;
+    const supported = player.groundState.contactCount > 0;
+    if (wasSupported and !supported) {
+        player.groundState.supportLostAtMs = currentTimeMs;
+    }
+    if (!wasSupported and supported) {
+        player.groundState.supportLostAtMs = null;
+    }
+
+    player.groundState.supported = supported;
     player.touchesWallOnRight = player.rightWallContactCount > 0;
     player.touchesWallOnLeft = player.leftWallContactCount > 0;
+    processBufferedJump(player, currentTimeMs);
 }
 
 pub fn aim(p: *Player, direction: vec.Vec2) void {
@@ -1092,6 +1155,7 @@ pub fn processRespawns() !void {
             p.health = 100;
             p.groundState = .{};
             p.airJumpCounter = 0;
+            p.bufferedJumpUntilMs = null;
 
             const spawnPosM = conv.p2m(level.spawnLocation);
             box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);

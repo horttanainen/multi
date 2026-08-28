@@ -12,7 +12,7 @@
     "gravity": 10,
     "pixelsPerMeter": 80,
     "splitscreen": true,
-    "movementFile": "movements/liero_default.json",
+    "movementFile": "movements/liero_theater.json",
     "parallaxEntities": [
         {
             "parallaxDistance": 2,

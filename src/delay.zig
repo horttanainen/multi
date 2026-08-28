@@ -4,13 +4,9 @@ const time = @import("time.zig");
 const allocator = @import("allocator.zig").allocator;
 pub var delayedActions: std.StringHashMap(u64) = std.StringHashMap(u64).init(allocator);
 
-fn nowMs() u64 {
-    return @intFromFloat(time.now() * 1000.0);
-}
-
 pub fn check(name: [:0]const u8) bool {
     const expires_at = delayedActions.get(name) orelse return false;
-    if (expires_at > nowMs()) return true;
+    if (expires_at > time.nowMs()) return true;
 
     const removed = delayedActions.fetchRemove(name);
     if (removed == null) {
@@ -22,7 +18,7 @@ pub fn check(name: [:0]const u8) bool {
 }
 
 pub fn action(name: [:0]const u8, delayMs: u32) void {
-    const now = nowMs();
+    const now = time.nowMs();
     const expires_at = now + delayMs;
     if (delayedActions.get(name)) |existing_expires_at| {
         if (existing_expires_at > now) return;

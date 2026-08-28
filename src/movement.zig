@@ -4,6 +4,7 @@ pub const GroundState = struct {
     contactCount: usize = 0,
     supported: bool = false,
     jumpAvailable: bool = false,
+    supportLostAtMs: ?u64 = null,
 };
 
 pub var mechanism: data.MovementMechanism = undefined;
