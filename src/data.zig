@@ -127,6 +127,7 @@ pub const MovementMechanism = enum {
 pub const MovementGroundingMode = enum {
     foot_contact,
     body_contact,
+    ground_sweep,
     none,
 };
 
@@ -159,6 +160,7 @@ pub const MovementGroundingData = struct {
     probeHalfWidth: f32,
     probeHalfHeight: f32,
     probeOffset: vec.Vec2,
+    sweepDistance: f32 = 0,
     maxSlopeAngleDegrees: f32 = 60,
 };
 

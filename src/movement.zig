@@ -16,6 +16,12 @@ pub const GroundContact = struct {
     localPoint: vec.Vec2,
 };
 
+const GroundSweepContext = struct {
+    playerBodyId: box2d.c.b2BodyId,
+    groundContact: ?GroundContact = null,
+    fraction: f32 = 1,
+};
+
 pub const GroundState = struct {
     footOverlapCount: usize = 0,
     supported: bool = false,
@@ -274,6 +280,66 @@ fn findGroundContact(state: *const State) !?GroundContact {
     return bestGroundContact;
 }
 
+fn collectGroundSweep(
+    shapeId: box2d.c.b2ShapeId,
+    point: box2d.c.b2Vec2,
+    normal: box2d.c.b2Vec2,
+    fraction: f32,
+    context: ?*anyopaque,
+) callconv(.c) f32 {
+    if (context == null) {
+        std.log.err("movement.collectGroundSweep: shape cast context is missing", .{});
+        return 0;
+    }
+
+    const sweepContext: *GroundSweepContext = @ptrCast(@alignCast(context.?));
+    const bodyId = box2d.c.b2Shape_GetBody(shapeId);
+    if (box2d.c.B2_ID_EQUALS(bodyId, sweepContext.playerBodyId)) return -1;
+    if (normal.x == 0 and normal.y == 0) return -1;
+    if (sweepContext.groundContact != null and sweepContext.fraction <= fraction) return sweepContext.fraction;
+
+    sweepContext.groundContact = .{
+        .normal = vec.fromBox2d(normal),
+        .shapeId = shapeId,
+        .bodyId = bodyId,
+        .worldPoint = vec.fromBox2d(point),
+        .localPoint = vec.fromBox2d(box2d.c.b2Body_GetLocalPoint(bodyId, point)),
+    };
+    sweepContext.fraction = fraction;
+    return fraction;
+}
+
+fn sweepGroundContact(state: *const State) ?GroundContact {
+    const radius = grounding.probeHalfHeight;
+    const segmentHalfLength = @max(0, grounding.probeHalfWidth - radius);
+    const points = [_]box2d.c.b2Vec2{
+        .{ .x = -segmentHalfLength, .y = 0 },
+        .{ .x = segmentHalfLength, .y = 0 },
+    };
+    const probeCenter = box2d.c.b2Body_GetWorldPoint(state.bodyId, vec.toBox2d(grounding.probeOffset));
+    const proxy = box2d.c.b2MakeOffsetProxy(
+        &points,
+        points.len,
+        radius,
+        probeCenter,
+        box2d.c.b2Body_GetRotation(state.bodyId),
+    );
+
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = collision.CATEGORY_SENSOR;
+    filter.maskBits = collision.MASK_SENSOR_FOOT;
+
+    var context = GroundSweepContext{ .playerBodyId = state.bodyId };
+    box2d.castShape(
+        &proxy,
+        .{ .x = 0, .y = grounding.sweepDistance },
+        filter,
+        collectGroundSweep,
+        &context,
+    );
+    return context.groundContact;
+}
+
 fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) !void {
     const sensorEvents = box2d.getSensorEvents();
     const wasSupported = state.groundState.supported;
@@ -322,6 +388,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         else
             null,
         .body_contact => try findGroundContact(state),
+        .ground_sweep => sweepGroundContact(state),
         .none => null,
     };
     const supported = groundContact != null and vec.dot(groundContact.?.normal, .{ .x = 0, .y = -1 }) >= minimumSupportUpAmount;

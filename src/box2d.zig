@@ -202,6 +202,16 @@ pub fn castRay(
     _ = c.b2World_CastRay(getWorldId(), origin, translation, filter, callback, context);
 }
 
+pub fn castShape(
+    proxy: *const c.b2ShapeProxy,
+    translation: c.b2Vec2,
+    filter: c.b2QueryFilter,
+    callback: ?*const c.b2CastResultFcn,
+    context: ?*anyopaque,
+) void {
+    _ = c.b2World_CastShape(getWorldId(), proxy, translation, filter, callback, context);
+}
+
 pub fn createWeldJoint(def: *const c.b2WeldJointDef) c.b2JointId {
     return c.b2CreateWeldJoint(getWorldId(), def);
 }

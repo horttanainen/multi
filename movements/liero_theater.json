@@ -21,13 +21,14 @@
     "bufferTimeMs": 70
   },
   "grounding": {
-    "mode": "foot_contact",
+    "mode": "ground_sweep",
     "probeHalfWidth": 0.2,
-    "probeHalfHeight": 0.1,
+    "probeHalfHeight": 0.04,
     "probeOffset": {
       "x": 0.0,
-      "y": 0.4
+      "y": 0.25
     },
+    "sweepDistance": 0.12,
     "maxSlopeAngleDegrees": 60.0
   }
 }
