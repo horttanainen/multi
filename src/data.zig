@@ -126,6 +126,8 @@ pub const MovementMechanism = enum {
 
 pub const MovementGroundingMode = enum {
     foot_contact,
+    body_contact,
+    none,
 };
 
 pub const MovementControlData = struct {

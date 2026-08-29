@@ -316,10 +316,14 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         }
     }
 
-    const groundContact = if (state.groundState.footOverlapCount > 0)
-        try findGroundContact(state)
-    else
-        null;
+    const groundContact = switch (grounding.mode) {
+        .foot_contact => if (state.groundState.footOverlapCount > 0)
+            try findGroundContact(state)
+        else
+            null,
+        .body_contact => try findGroundContact(state),
+        .none => null,
+    };
     const supported = groundContact != null and vec.dot(groundContact.?.normal, .{ .x = 0, .y = -1 }) >= minimumSupportUpAmount;
     if (wasSupported and !supported) {
         state.groundState.supportLostAtMs = currentTimeMs;
