@@ -21,7 +21,7 @@
     "bufferTimeMs": 70
   },
   "grounding": {
-    "mode": "foot_overlap",
+    "mode": "foot_contact",
     "probeHalfWidth": 0.2,
     "probeHalfHeight": 0.1,
     "probeOffset": {
