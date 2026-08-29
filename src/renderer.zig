@@ -99,6 +99,9 @@ fn renderCamera(cameraId: usize) !void {
     if (config.debug) {
         try debug.draw();
     }
+    if (comptime config.debugMovementSupport.enabled) {
+        try debug.drawMovementSupport();
+    }
 
     try gpu.setRenderDrawColor(.{ .r = 0, .g = 255, .b = 255, .a = 255 });
 

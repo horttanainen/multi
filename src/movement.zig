@@ -8,7 +8,7 @@ const delay = @import("delay.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
 
-pub const Support = struct {
+pub const GroundContact = struct {
     normal: vec.Vec2,
     shapeId: box2d.c.b2ShapeId,
     bodyId: box2d.c.b2BodyId,
@@ -21,7 +21,7 @@ pub const GroundState = struct {
     supported: bool = false,
     jumpAvailable: bool = false,
     supportLostAtMs: ?u64 = null,
-    support: ?Support = null,
+    groundContact: ?GroundContact = null,
 };
 
 pub const State = struct {
@@ -208,7 +208,7 @@ pub fn surfaceFriction(playerId: usize) ?f32 {
     return if (state.lateralMovementIntent != 0) surfaceResponse.movingFriction else surfaceResponse.restingFriction;
 }
 
-fn contactSupport(state: *const State, contact: box2d.c.b2ContactData) ?Support {
+fn groundContactForContact(state: *const State, contact: box2d.c.b2ContactData) ?GroundContact {
     if (contact.manifold.pointCount == 0) return null;
 
     const bodyA = box2d.c.b2Shape_GetBody(contact.shapeIdA);
@@ -216,18 +216,16 @@ fn contactSupport(state: *const State, contact: box2d.c.b2ContactData) ?Support 
     const bodyB = box2d.c.b2Shape_GetBody(contact.shapeIdB);
     const playerIsShapeB = box2d.c.B2_ID_EQUALS(bodyB, state.bodyId);
     if (!playerIsShapeA and !playerIsShapeB) {
-        std.log.warn("movement.contactSupport: contact does not contain the player body", .{});
+        std.log.warn("movement.groundContactForContact: contact does not contain the player body", .{});
         return null;
     }
 
-    const supportShapeId = if (playerIsShapeA) contact.shapeIdB else contact.shapeIdA;
-    const supportFilter = box2d.c.b2Shape_GetFilter(supportShapeId);
-    if (supportFilter.categoryBits & collision.MASK_SENSOR_FOOT == 0) return null;
+    const contactShapeId = if (playerIsShapeA) contact.shapeIdB else contact.shapeIdA;
+    const contactFilter = box2d.c.b2Shape_GetFilter(contactShapeId);
+    if (contactFilter.categoryBits & collision.MASK_SENSOR_FOOT == 0) return null;
 
     const manifoldNormal = vec.fromBox2d(contact.manifold.normal);
-    const supportNormal = if (playerIsShapeA) vec.mul(manifoldNormal, -1) else manifoldNormal;
-    const upAmount = vec.dot(supportNormal, .{ .x = 0, .y = -1 });
-    if (upAmount < minimumSupportUpAmount) return null;
+    const contactNormal = if (playerIsShapeA) vec.mul(manifoldNormal, -1) else manifoldNormal;
 
     var strongestPointIndex: usize = 0;
     var strongestPointImpulse = contact.manifold.points[0].totalNormalImpulse;
@@ -238,18 +236,18 @@ fn contactSupport(state: *const State, contact: box2d.c.b2ContactData) ?Support 
     }
 
     const worldPoint = contact.manifold.points[strongestPointIndex].point;
-    const supportBodyId = box2d.c.b2Shape_GetBody(supportShapeId);
-    const localPoint = box2d.c.b2Body_GetLocalPoint(supportBodyId, worldPoint);
+    const contactBodyId = box2d.c.b2Shape_GetBody(contactShapeId);
+    const localPoint = box2d.c.b2Body_GetLocalPoint(contactBodyId, worldPoint);
     return .{
-        .normal = supportNormal,
-        .shapeId = supportShapeId,
-        .bodyId = supportBodyId,
+        .normal = contactNormal,
+        .shapeId = contactShapeId,
+        .bodyId = contactBodyId,
         .worldPoint = vec.fromBox2d(worldPoint),
         .localPoint = vec.fromBox2d(localPoint),
     };
 }
 
-fn findSupport(state: *const State) !?Support {
+fn findGroundContact(state: *const State) !?GroundContact {
     const contactCapacity = box2d.c.b2Body_GetContactCapacity(state.bodyId);
     if (contactCapacity == 0) return null;
 
@@ -263,17 +261,17 @@ fn findSupport(state: *const State) !?Support {
         contactCapacity,
     ));
 
-    var bestSupport: ?Support = null;
-    var bestUpAmount = minimumSupportUpAmount;
+    var bestGroundContact: ?GroundContact = null;
+    var bestUpAmount: f32 = -1.0;
     for (contactDataScratch.items[0..contactCount]) |contact| {
-        const support = contactSupport(state, contact) orelse continue;
-        const upAmount = vec.dot(support.normal, .{ .x = 0, .y = -1 });
-        if (bestSupport != null and upAmount <= bestUpAmount) continue;
+        const groundContact = groundContactForContact(state, contact) orelse continue;
+        const upAmount = vec.dot(groundContact.normal, .{ .x = 0, .y = -1 });
+        if (bestGroundContact != null and upAmount <= bestUpAmount) continue;
 
-        bestSupport = support;
+        bestGroundContact = groundContact;
         bestUpAmount = upAmount;
     }
-    return bestSupport;
+    return bestGroundContact;
 }
 
 fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) !void {
@@ -318,11 +316,11 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         }
     }
 
-    const support = if (state.groundState.footOverlapCount > 0)
-        try findSupport(state)
+    const groundContact = if (state.groundState.footOverlapCount > 0)
+        try findGroundContact(state)
     else
         null;
-    const supported = support != null;
+    const supported = groundContact != null and vec.dot(groundContact.?.normal, .{ .x = 0, .y = -1 }) >= minimumSupportUpAmount;
     if (wasSupported and !supported) {
         state.groundState.supportLostAtMs = currentTimeMs;
     }
@@ -333,7 +331,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
     }
 
     state.groundState.supported = supported;
-    state.groundState.support = support;
+    state.groundState.groundContact = groundContact;
     processBufferedJump(playerId, state, currentTimeMs);
 }
 

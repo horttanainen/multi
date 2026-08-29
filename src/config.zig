@@ -26,6 +26,11 @@ pub const debugBlastPressure = .{
     .slowMotionScale = 0.1,
 };
 
+pub const debugMovementSupport = .{
+    .enabled = true,
+    .lineLengthMeters = 1.0,
+};
+
 pub const maxLevelSizeInBytes = 1024 * 1024;
 pub const maxAudioSizeInBytes = 10 * 1024 * 1024;
 

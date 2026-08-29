@@ -10,6 +10,7 @@ const viewport = @import("viewport.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const m2Pixel = conv.m2Pixel;
+const movement = @import("movement.zig");
 const renderer = @import("renderer.zig");
 const player = @import("player.zig");
 const projectile = @import("projectile.zig");
@@ -238,5 +239,23 @@ pub fn draw() !void {
             debugDraw.useDrawingBounds = true;
         }
         box2d.worldDraw(debugDraw);
+    }
+}
+
+pub fn drawMovementSupport() !void {
+    for (movement.states.values()) |state| {
+        const groundContact = state.groundState.groundContact orelse continue;
+        const color = if (state.groundState.supported)
+            sdl.Color{ .r = 0, .g = 255, .b = 0, .a = 255 }
+        else
+            sdl.Color{ .r = 255, .g = 0, .b = 0, .a = 255 };
+        try gpu.setRenderDrawColor(color);
+
+        const worldPoint = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(groundContact.bodyId, vec.toBox2d(groundContact.localPoint)));
+        const tangent = vec.Vec2{ .x = -groundContact.normal.y, .y = groundContact.normal.x };
+        const halfLine = vec.mul(tangent, config.debugMovementSupport.lineLengthMeters / 2.0);
+        const start = camera.relativePosition(m2Pixel(vec.toBox2d(vec.subtract(worldPoint, halfLine))));
+        const end = camera.relativePosition(m2Pixel(vec.toBox2d(vec.add(worldPoint, halfLine))));
+        try gpu.renderDrawLine(start.x, start.y, end.x, end.y);
     }
 }
