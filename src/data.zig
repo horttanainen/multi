@@ -157,6 +157,7 @@ pub const MovementGroundingData = struct {
     probeHalfWidth: f32,
     probeHalfHeight: f32,
     probeOffset: vec.Vec2,
+    maxSlopeAngleDegrees: f32 = 60,
 };
 
 pub const MovementData = struct {

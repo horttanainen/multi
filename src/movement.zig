@@ -2,16 +2,26 @@ const std = @import("std");
 
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
+const collision = @import("collision.zig");
 const data = @import("data.zig");
 const delay = @import("delay.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
 
+pub const Support = struct {
+    normal: vec.Vec2,
+    shapeId: box2d.c.b2ShapeId,
+    bodyId: box2d.c.b2BodyId,
+    worldPoint: vec.Vec2,
+    localPoint: vec.Vec2,
+};
+
 pub const GroundState = struct {
-    contactCount: usize = 0,
+    footOverlapCount: usize = 0,
     supported: bool = false,
     jumpAvailable: bool = false,
     supportLostAtMs: ?u64 = null,
+    support: ?Support = null,
 };
 
 pub const State = struct {
@@ -37,6 +47,9 @@ pub var surfaceResponse: data.MovementSurfaceResponseData = undefined;
 pub var jumpSettings: data.MovementJumpData = undefined;
 pub var grounding: data.MovementGroundingData = undefined;
 
+var minimumSupportUpAmount: f32 = undefined;
+var contactDataScratch: std.ArrayListUnmanaged(box2d.c.b2ContactData) = .empty;
+
 pub fn configure(movementData: data.MovementData) void {
     mechanism = movementData.mechanism;
     control = movementData.control;
@@ -44,6 +57,7 @@ pub fn configure(movementData: data.MovementData) void {
     surfaceResponse = movementData.surfaceResponse;
     jumpSettings = movementData.jump;
     grounding = movementData.grounding;
+    minimumSupportUpAmount = @cos(grounding.maxSlopeAngleDegrees * std.math.pi / 180.0);
 }
 
 fn clearRuntimeState(state: *State) void {
@@ -194,7 +208,75 @@ pub fn surfaceFriction(playerId: usize) ?f32 {
     return if (state.lateralMovementIntent != 0) surfaceResponse.movingFriction else surfaceResponse.restingFriction;
 }
 
-fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) void {
+fn contactSupport(state: *const State, contact: box2d.c.b2ContactData) ?Support {
+    if (contact.manifold.pointCount == 0) return null;
+
+    const bodyA = box2d.c.b2Shape_GetBody(contact.shapeIdA);
+    const playerIsShapeA = box2d.c.B2_ID_EQUALS(bodyA, state.bodyId);
+    const bodyB = box2d.c.b2Shape_GetBody(contact.shapeIdB);
+    const playerIsShapeB = box2d.c.B2_ID_EQUALS(bodyB, state.bodyId);
+    if (!playerIsShapeA and !playerIsShapeB) {
+        std.log.warn("movement.contactSupport: contact does not contain the player body", .{});
+        return null;
+    }
+
+    const supportShapeId = if (playerIsShapeA) contact.shapeIdB else contact.shapeIdA;
+    const supportFilter = box2d.c.b2Shape_GetFilter(supportShapeId);
+    if (supportFilter.categoryBits & collision.MASK_SENSOR_FOOT == 0) return null;
+
+    const manifoldNormal = vec.fromBox2d(contact.manifold.normal);
+    const supportNormal = if (playerIsShapeA) vec.mul(manifoldNormal, -1) else manifoldNormal;
+    const upAmount = vec.dot(supportNormal, .{ .x = 0, .y = -1 });
+    if (upAmount < minimumSupportUpAmount) return null;
+
+    var strongestPointIndex: usize = 0;
+    var strongestPointImpulse = contact.manifold.points[0].totalNormalImpulse;
+    for (contact.manifold.points[1..@intCast(contact.manifold.pointCount)], 1..) |point, pointIndex| {
+        if (point.totalNormalImpulse <= strongestPointImpulse) continue;
+        strongestPointIndex = pointIndex;
+        strongestPointImpulse = point.totalNormalImpulse;
+    }
+
+    const worldPoint = contact.manifold.points[strongestPointIndex].point;
+    const supportBodyId = box2d.c.b2Shape_GetBody(supportShapeId);
+    const localPoint = box2d.c.b2Body_GetLocalPoint(supportBodyId, worldPoint);
+    return .{
+        .normal = supportNormal,
+        .shapeId = supportShapeId,
+        .bodyId = supportBodyId,
+        .worldPoint = vec.fromBox2d(worldPoint),
+        .localPoint = vec.fromBox2d(localPoint),
+    };
+}
+
+fn findSupport(state: *const State) !?Support {
+    const contactCapacity = box2d.c.b2Body_GetContactCapacity(state.bodyId);
+    if (contactCapacity == 0) return null;
+
+    const capacity: usize = @intCast(contactCapacity);
+    try contactDataScratch.ensureTotalCapacity(allocator, capacity);
+    contactDataScratch.items.len = capacity;
+
+    const contactCount: usize = @intCast(box2d.c.b2Body_GetContactData(
+        state.bodyId,
+        contactDataScratch.items.ptr,
+        contactCapacity,
+    ));
+
+    var bestSupport: ?Support = null;
+    var bestUpAmount = minimumSupportUpAmount;
+    for (contactDataScratch.items[0..contactCount]) |contact| {
+        const support = contactSupport(state, contact) orelse continue;
+        const upAmount = vec.dot(support.normal, .{ .x = 0, .y = -1 });
+        if (bestSupport != null and upAmount <= bestUpAmount) continue;
+
+        bestSupport = support;
+        bestUpAmount = upAmount;
+    }
+    return bestSupport;
+}
+
+fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) !void {
     const sensorEvents = box2d.getSensorEvents();
     const wasSupported = state.groundState.supported;
 
@@ -205,12 +287,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         if (box2d.c.B2_ID_EQUALS(visitorBodyId, state.bodyId)) continue;
 
         if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.footSensorShapeId)) {
-            if (state.groundState.contactCount == 0) {
-                state.groundState.supported = true;
-                state.groundState.jumpAvailable = true;
-                state.airJumpCounter = 0;
-            }
-            state.groundState.contactCount += 1;
+            state.groundState.footOverlapCount += 1;
         }
 
         if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.leftWallSensorId)) {
@@ -229,8 +306,8 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         const visitorBodyId = box2d.c.b2Shape_GetBody(event.visitorShapeId);
         if (box2d.c.B2_ID_EQUALS(visitorBodyId, state.bodyId)) continue;
 
-        if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.footSensorShapeId) and state.groundState.contactCount > 0) {
-            state.groundState.contactCount -= 1;
+        if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.footSensorShapeId) and state.groundState.footOverlapCount > 0) {
+            state.groundState.footOverlapCount -= 1;
         }
 
         if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.leftWallSensorId) and state.leftWallContactCount > 0) {
@@ -241,22 +318,29 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         }
     }
 
-    const supported = state.groundState.contactCount > 0;
+    const support = if (state.groundState.footOverlapCount > 0)
+        try findSupport(state)
+    else
+        null;
+    const supported = support != null;
     if (wasSupported and !supported) {
         state.groundState.supportLostAtMs = currentTimeMs;
     }
     if (!wasSupported and supported) {
         state.groundState.supportLostAtMs = null;
+        state.groundState.jumpAvailable = true;
+        state.airJumpCounter = 0;
     }
 
     state.groundState.supported = supported;
+    state.groundState.support = support;
     processBufferedJump(playerId, state, currentTimeMs);
 }
 
-pub fn processSensorEvents() void {
+pub fn processSensorEvents() !void {
     const currentTimeMs = time.nowMs();
     for (states.keys(), states.values()) |playerId, *state| {
-        processStateSensorEvents(playerId, state, currentTimeMs);
+        try processStateSensorEvents(playerId, state, currentTimeMs);
     }
 }
 
@@ -280,4 +364,6 @@ pub fn clearAllMovementIntents() void {
 
 pub fn cleanup() void {
     states.clearAndFree(allocator);
+    contactDataScratch.deinit(allocator);
+    contactDataScratch = .empty;
 }

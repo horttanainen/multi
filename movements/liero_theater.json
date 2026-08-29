@@ -27,6 +27,7 @@
     "probeOffset": {
       "x": 0.0,
       "y": 0.4
-    }
+    },
+    "maxSlopeAngleDegrees": 60.0
   }
 }

@@ -19,7 +19,7 @@ pub fn step() !usize {
         movement.clampAllSpeeds();
         movement.applyAll(config.physics.dt);
         box2d.worldStep(config.physics.dt, config.physics.subStepCount);
-        movement.processSensorEvents();
+        try movement.processSensorEvents();
         try sensor.processSensorEvents();
         time.accumulator -= config.physics.dt;
         stepCount += 1;
