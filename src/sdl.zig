@@ -210,6 +210,25 @@ pub fn blitSurfaceScaled(src: *Surface, src_rect: ?*const Rect, dst_surface: *Su
     if (!c.SDL_BlitSurfaceScaled(src, sr, dst_surface, dr, @intFromEnum(scale_mode))) return error.BlitSurfaceFailed;
 }
 
+pub fn setSurfaceBlendMode(surface: *Surface, blendMode: BlendMode) !void {
+    if (!c.SDL_SetSurfaceBlendMode(surface, @intFromEnum(blendMode))) return error.SetSurfaceBlendModeFailed;
+}
+
+pub fn fillSurfaceRect(surface: *Surface, rect: ?*const Rect, color: Color) !void {
+    const surfaceRect = if (rect) |value| &c.SDL_Rect{
+        .x = value.x,
+        .y = value.y,
+        .w = value.w,
+        .h = value.h,
+    } else null;
+    const pixel = c.SDL_MapSurfaceRGBA(surface, color.r, color.g, color.b, color.a);
+    if (!c.SDL_FillSurfaceRect(surface, surfaceRect, pixel)) return error.FillSurfaceRectFailed;
+}
+
+pub fn savePng(surface: *Surface, path: [*:0]const u8) !void {
+    if (!c.IMG_SavePNG(surface, path)) return error.SavePngFailed;
+}
+
 pub fn lockSurface(surface: *Surface) !void {
     if (!c.SDL_LockSurface(surface)) return error.LockSurfaceFailed;
 }

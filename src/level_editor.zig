@@ -162,6 +162,8 @@ fn cloneSerializableEntity(e: entity.SerializableEntity) !entity.SerializableEnt
         .imgPath = imgPath,
         .scale = e.scale,
         .pos = e.pos,
+        .rotationDegrees = e.rotationDegrees,
+        .colliderSource = e.colliderSource,
         .breakable = e.breakable,
         .health = e.health,
     };

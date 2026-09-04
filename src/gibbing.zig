@@ -143,7 +143,7 @@ fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
     };
     const collider = try gibletCollider(templateSpriteUuid);
     const bodyDef = box2d.createDynamicBodyDef(vec.zero);
-    const gibletEntity = try entity.createFromShape(templateSpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic");
+    const gibletEntity = try entity.createFromShape(templateSpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic", .image);
     errdefer _ = entity.remove(gibletEntity.bodyId);
     entity.markSpriteUuidsShared(gibletEntity.bodyId);
 

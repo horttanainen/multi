@@ -37,6 +37,7 @@ const gamepad = @import("gamepad.zig");
 const rope = @import("rope.zig");
 
 const level = @import("level.zig");
+const level_overview = @import("level_overview.zig");
 const levelEditor = @import("level_editor.zig");
 const lut = @import("lut.zig");
 const settings = @import("settings.zig");
@@ -186,6 +187,7 @@ pub fn main(init: std.process.Init) !void {
         defer argsArena.deinit();
         const args = try init.minimal.args.toSlice(argsArena.allocator());
         try explosion_benchmark.configure(args);
+        try level_overview.configure(args);
     }
 
     try window.init();
@@ -215,14 +217,22 @@ pub fn main(init: std.process.Init) !void {
     try gibbing.init();
     gpu.saveAtlasCheckpoint();
     const benchmarkLevelPath = explosion_benchmark.levelPath();
-    if (benchmarkLevelPath == null) {
+    const overviewLevelPath = level_overview.levelPath();
+    if (overviewLevelPath != null) {
+        _ = try level.loadLevel(overviewLevelPath.?);
+    } else if (benchmarkLevelPath == null) {
         try level.next();
     } else {
         try level.tryEditorLevel(benchmarkLevelPath.?);
     }
 
     box2d.setFrictionCallback(&friction.callback);
-    _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
+    if (level_overview.options.enabled) {
+        try level_overview.capture();
+        state.quitGame = true;
+    } else {
+        _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
+    }
 
     while (!state.quitGame) {
         const collectFramePerf = projectile.shouldCollectPerfFrameLog();

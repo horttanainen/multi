@@ -190,8 +190,9 @@ fn staticShapeDef(serializedEntity: entity.SerializableEntity, shapeDef: box2d.c
     return staticDef;
 }
 
-fn staticSpriteBacking(_: entity.SerializableEntity) sprite.Backing {
-    return .mutable;
+fn staticSpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
+    if (serializedEntity.breakable) return .mutable;
+    return .immutable;
 }
 
 fn entitySpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backing {
@@ -199,7 +200,18 @@ fn entitySpriteBacking(serializedEntity: entity.SerializableEntity) sprite.Backi
     return .immutable;
 }
 
+fn bodyDefWithRotation(bodyDef: box2d.c.b2BodyDef, rotationDegrees: f32) box2d.c.b2BodyDef {
+    var rotatedBodyDef = bodyDef;
+    rotatedBodyDef.rotation = box2d.c.b2MakeRot(std.math.degreesToRadians(rotationDegrees));
+    return rotatedBodyDef;
+}
+
 fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2ShapeDef) ![]box2d.c.b2BodyId {
+    if (e.colliderSource == .rectangle and e.breakable) {
+        std.log.err("spawnSingleStaticEntity: entity {d} uses a rectangular collider but is breakable", .{e.id});
+        return error.BreakableRectangleCollider;
+    }
+
     const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e));
     errdefer sprite.cleanupLater(spriteUuid);
 
@@ -207,14 +219,17 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
     errdefer bodyIds.deinit();
     errdefer cleanupSpawnedBodies(bodyIds.items);
 
-    const bodyDef = box2d.createStaticBodyDef(conv.pixel2M(e.pos));
-    const spawnedEntity = entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
-        if (err == polygon.PolygonError.CouldNotCreateTriangle) {
-            std.log.warn("spawnSingleStaticEntity: static entity {d} produced no collider triangles", .{e.id});
-            sprite.cleanupLater(spriteUuid);
-            return bodyIds.toOwnedSlice();
-        }
-        return err;
+    const bodyDef = bodyDefWithRotation(box2d.createStaticBodyDef(conv.pixel2M(e.pos)), e.rotationDegrees);
+    const spawnedEntity = switch (e.colliderSource) {
+        .rectangle => try entity.createRectangle(spriteUuid, shapeDef, bodyDef, "static"),
+        .image => entity.createFromImg(spriteUuid, shapeDef, bodyDef, "static") catch |err| {
+            if (err == polygon.PolygonError.CouldNotCreateTriangle) {
+                std.log.warn("spawnSingleStaticEntity: static entity {d} produced no collider triangles", .{e.id});
+                sprite.cleanupLater(spriteUuid);
+                return bodyIds.toOwnedSlice();
+            }
+            return err;
+        },
     };
 
     if (e.breakable) {
@@ -260,7 +275,7 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
             return error.InvalidDynamicHealth;
         }
 
-        const bodyDef = box2d.createDynamicBodyDef(pos);
+        const bodyDef = bodyDefWithRotation(box2d.createDynamicBodyDef(pos), e.rotationDegrees);
         shapeDef.filter.categoryBits = collision.CATEGORY_DYNAMIC;
         shapeDef.filter.maskBits = collision.MASK_DYNAMIC;
         const spawnedEntity = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");
@@ -288,14 +303,14 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         goalShapeDef.enableSensorEvents = true;
         goalShapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
         goalShapeDef.filter.maskBits = collision.MASK_SENSOR_GOAL;
-        const goalBodyDef = box2d.createStaticBodyDef(pos);
+        const goalBodyDef = bodyDefWithRotation(box2d.createStaticBodyDef(pos), e.rotationDegrees);
         const bodyId = try sensor.createSensorEntityFromImg(spriteUuid, goalShapeDef, goalBodyDef, "goal", onGoalBegin);
         try appendSpawnedSensorBody(&bodyIds, bodyId);
         return bodyIds.toOwnedSlice();
     }
 
     if (std.mem.eql(u8, e.type, "spawn")) {
-        const bodyDef = box2d.createStaticBodyDef(pos);
+        const bodyDef = bodyDefWithRotation(box2d.createStaticBodyDef(pos), e.rotationDegrees);
         shapeDef.isSensor = true;
         shapeDef.filter.categoryBits = collision.CATEGORY_SENSOR;
         shapeDef.filter.maskBits = collision.MASK_SENSOR_SPAWN;

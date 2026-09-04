@@ -39,6 +39,11 @@ pub const ColliderRegenerationProgress = struct {
     stillExists: bool,
 };
 
+pub const ColliderSource = enum {
+    image,
+    rectangle,
+};
+
 pub const Entity = struct {
     type: []const u8,
     friction: f32,
@@ -55,6 +60,7 @@ pub const Entity = struct {
     categoryBits: u64,
     maskBits: u64,
     enabled: bool,
+    colliderSource: ColliderSource = .image,
     ownsSpriteUuids: bool = true,
     color: ?sprite.Color = null,
     glow: bool = false,
@@ -67,6 +73,8 @@ pub const SerializableEntity = struct {
     imgPath: []const u8,
     scale: vec.Vec2,
     pos: vec.IVec2,
+    rotationDegrees: f32 = 0,
+    colliderSource: ColliderSource = .image,
     breakable: bool = true,
     health: ?f32 = null,
 };
@@ -89,6 +97,17 @@ pub fn drawAll() !void {
     for (entities.map.values()) |*e| {
         // Skip drawing disabled entities
         if (!e.enabled) continue;
+
+        try drawWithOptions(e, e.flipEntityHorizontally);
+    }
+}
+
+pub fn drawAllForOverview() !void {
+    entities.mutex.lockUncancelable(runtime.io());
+    defer entities.mutex.unlock(runtime.io());
+    for (entities.map.values()) |*e| {
+        if (!e.enabled) continue;
+        if (std.mem.eql(u8, e.type, "spawn")) continue;
 
         try drawWithOptions(e, e.flipEntityHorizontally);
     }
@@ -127,7 +146,7 @@ fn drawEditorSelectionMask(entity: Entity, entitySprite: Sprite, pos: vec.IVec2,
     try sprite.drawSelectionMask(entitySprite, pos, angle, flip, alpha);
 }
 
-pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
+pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8, colliderSource: ColliderSource) !Entity {
     const bodyId = try box2d.createBody(bodyDef);
     const entityType = try allocator.dupe(u8, eType);
     const colliderShapeDef = enableSolidSensorEvents(shapeDef);
@@ -158,10 +177,21 @@ pub fn createFromShape(spriteUuid: u64, shape: box2d.c.b2Polygon, shapeDef: box2
         .categoryBits = colliderShapeDef.filter.categoryBits,
         .maskBits = colliderShapeDef.filter.maskBits,
         .enabled = true,
+        .colliderSource = colliderSource,
     };
 
     try entities.putLocking(bodyId, entity);
     return entity;
+}
+
+pub fn createRectangle(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, eType: []const u8) !Entity {
+    const entitySprite = sprite.getSprite(spriteUuid) orelse {
+        std.log.err("createRectangle: sprite {d} not found", .{spriteUuid});
+        return error.SpriteNotFound;
+    };
+
+    const rectangle = box2d.c.b2MakeBox(entitySprite.sizeM.x * 0.5, entitySprite.sizeM.y * 0.5);
+    return createFromShape(spriteUuid, rectangle, shapeDef, bodyDef, eType, .rectangle);
 }
 
 pub fn createFromImg(spriteUuid: u64, shapeDef: box2d.c.b2ShapeDef, bodyDef: box2d.c.b2BodyDef, entityType: []const u8) !Entity {
@@ -420,11 +450,14 @@ pub fn serialize(entity: Entity, pos: vec.IVec2, id: u64) ?SerializableEntity {
     const firstSprite = sprite.getSprite(entity.spriteUuids[0]) orelse return null;
 
     const breakable = entity.categoryBits == collision.CATEGORY_TERRAIN;
+    const state = box2d.getState(entity.bodyId);
     return SerializableEntity{
         .id = id,
         .type = entity.type,
         .scale = firstSprite.scale,
         .pos = pos,
+        .rotationDegrees = std.math.radiansToDegrees(state.rotAngle),
+        .colliderSource = entity.colliderSource,
         .friction = entity.friction,
         .imgPath = firstSprite.imgPath,
         .breakable = breakable,

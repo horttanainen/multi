@@ -1399,6 +1399,132 @@ pub fn renderPresent() void {
     submitFrame(g, cmd);
 }
 
+fn captureSurfacePixelFormat(textureFormat: c.SDL_GPUTextureFormat) !sdl.PixelFormat {
+    return switch (textureFormat) {
+        c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+        => .abgr8888,
+        c.SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+        c.SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB,
+        => .argb8888,
+        else => {
+            std.log.err("captureSurfacePixelFormat: unsupported swapchain texture format {d}", .{textureFormat});
+            return error.UnsupportedCaptureTextureFormat;
+        },
+    };
+}
+
+fn finishCapturedFrame(g: *GpuState) void {
+    texture.cleanupCompletedUploads();
+
+    var destroyIndex: u32 = 0;
+    while (destroyIndex < g.pending_destroy_count) : (destroyIndex += 1) {
+        c.SDL_ReleaseGPUTexture(g.device, g.pending_destroys[destroyIndex]);
+    }
+    g.pending_destroy_count = 0;
+    g.cmd_buf = null;
+    g.swapchain_texture = null;
+}
+
+fn downloadCapturedFrame(g: *GpuState, cmd: *c.SDL_GPUCommandBuffer, sourceTexture: *c.SDL_GPUTexture) !*sdl.Surface {
+    const width = g.offscreen_w;
+    const height = g.offscreen_h;
+    const bytesPerPixel: u32 = 4;
+    const byteCount = std.math.mul(u32, width, height) catch {
+        std.log.err("downloadCapturedFrame: capture dimensions {d}x{d} overflow", .{ width, height });
+        return error.CaptureDimensionsOverflow;
+    };
+    const dataSize = std.math.mul(u32, byteCount, bytesPerPixel) catch {
+        std.log.err("downloadCapturedFrame: capture byte count for {d}x{d} overflows", .{ width, height });
+        return error.CaptureDimensionsOverflow;
+    };
+
+    const transferBuffer = c.SDL_CreateGPUTransferBuffer(g.device, &c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
+        .size = dataSize,
+        .props = 0,
+    }) orelse {
+        std.log.err("downloadCapturedFrame: failed to create transfer buffer: {s}", .{c.SDL_GetError()});
+        return error.CreateCaptureTransferBufferFailed;
+    };
+    defer c.SDL_ReleaseGPUTransferBuffer(g.device, transferBuffer);
+
+    const copyPass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        std.log.err("downloadCapturedFrame: failed to begin GPU copy pass: {s}", .{c.SDL_GetError()});
+        return error.BeginCaptureCopyPassFailed;
+    };
+    const sourceRegion = c.SDL_GPUTextureRegion{
+        .texture = sourceTexture,
+        .mip_level = 0,
+        .layer = 0,
+        .x = 0,
+        .y = 0,
+        .z = 0,
+        .w = width,
+        .h = height,
+        .d = 1,
+    };
+    const destination = c.SDL_GPUTextureTransferInfo{
+        .transfer_buffer = transferBuffer,
+        .offset = 0,
+        .pixels_per_row = width,
+        .rows_per_layer = height,
+    };
+    c.SDL_DownloadFromGPUTexture(copyPass, &sourceRegion, &destination);
+    c.SDL_EndGPUCopyPass(copyPass);
+
+    const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd) orelse {
+        std.log.err("downloadCapturedFrame: failed to submit capture command buffer: {s}", .{c.SDL_GetError()});
+        return error.SubmitCaptureCommandBufferFailed;
+    };
+    defer c.SDL_ReleaseGPUFence(g.device, fence);
+    if (!c.SDL_WaitForGPUFences(g.device, true, @ptrCast(&fence), 1)) {
+        std.log.err("downloadCapturedFrame: failed waiting for capture fence: {s}", .{c.SDL_GetError()});
+        return error.WaitForCaptureFenceFailed;
+    }
+
+    const mapped = c.SDL_MapGPUTransferBuffer(g.device, transferBuffer, false) orelse {
+        std.log.err("downloadCapturedFrame: failed to map transfer buffer: {s}", .{c.SDL_GetError()});
+        return error.MapCaptureTransferBufferFailed;
+    };
+    defer c.SDL_UnmapGPUTransferBuffer(g.device, transferBuffer);
+
+    const pixelFormat = try captureSurfacePixelFormat(g.swapchain_format);
+    const surface = try sdl.createSurface(@intCast(width), @intCast(height), pixelFormat);
+    errdefer sdl.destroySurface(surface);
+    const sourceBytes: [*]const u8 = @ptrCast(mapped);
+    const destinationBytes: [*]u8 = @ptrCast(surface.pixels);
+    const destinationPitch: usize = @intCast(surface.pitch);
+    const sourcePitch: usize = @as(usize, width) * bytesPerPixel;
+    for (0..height) |row| {
+        const sourceOffset = @as(usize, row) * sourcePitch;
+        const destinationOffset = @as(usize, row) * destinationPitch;
+        @memcpy(destinationBytes[destinationOffset..][0..sourcePitch], sourceBytes[sourceOffset..][0..sourcePitch]);
+    }
+    return surface;
+}
+
+pub fn renderPresentCapture() !*sdl.Surface {
+    const g = getGpu();
+    finalizeBatch(g);
+
+    const cmd = g.cmd_buf orelse {
+        std.log.err("renderPresentCapture: command buffer is missing", .{});
+        return error.CaptureCommandBufferMissing;
+    };
+    if (g.swapchain_texture == null) {
+        std.log.err("renderPresentCapture: swapchain texture is missing", .{});
+        return error.CaptureSwapchainTextureMissing;
+    }
+
+    uploadVertexData(g, cmd);
+    renderScene(g, cmd, g.offscreen_texture);
+    renderSelectionOverlay(g, cmd, g.offscreen_texture);
+    const surface = try downloadCapturedFrame(g, cmd, g.offscreen_texture);
+    finishCapturedFrame(g);
+    return surface;
+}
+
 fn hasPendingPressureFieldUploads(g: *GpuState) bool {
     for (g.pressure_fields.values()) |field| {
         if (field.upload_pending) return true;

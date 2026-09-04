@@ -1,5 +1,6 @@
 const std = @import("std");
 const gpu = @import("gpu.zig");
+const sdl = @import("sdl.zig");
 
 const background = @import("background.zig");
 const camera = @import("camera.zig");
@@ -30,6 +31,11 @@ const hot_rim_visual = @import("hot_rim_visual.zig");
 const visual_particle = @import("visual_particle.zig");
 
 const RendererError = error{RendererUninitialized};
+
+pub const OverviewLayer = enum {
+    entities,
+    collision,
+};
 
 pub var zoom: f32 = 1.0;
 
@@ -74,6 +80,26 @@ pub fn render() !void {
     try menu.draw();
 
     gpu.renderPresent();
+}
+
+pub fn renderOverview(layer: OverviewLayer) !*sdl.Surface {
+    try gpu.setRenderDrawColor(.{ .r = 0, .g = 0, .b = 0, .a = 0 });
+    try gpu.renderClear();
+    try camera.setActiveCamera(0);
+    gpu.setZoom(zoom);
+
+    switch (layer) {
+        .entities => {
+            try sensor.drawAllSensors();
+            try entity.drawAllForOverview();
+        },
+        .collision => {
+            try debug.drawOverview();
+            try debug.drawPlayerClearanceReference(level.spawnLocation);
+        },
+    }
+
+    return gpu.renderPresentCapture();
 }
 
 fn renderCamera(cameraId: usize) !void {

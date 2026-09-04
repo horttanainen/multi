@@ -17,6 +17,7 @@ const projectile = @import("projectile.zig");
 const time = @import("time.zig");
 
 var dDraw: ?box2d.c.b2DebugDraw = null;
+var shapeColorOverride: ?sdl.Color = null;
 var autoMissileExplosionNextAtMs: f64 = 0;
 const autoMissileExplosionMaximumDamage: f32 = 100;
 
@@ -100,15 +101,21 @@ fn b2Mul(rot: box2d.c.b2Rot, v: box2d.c.b2Vec2) box2d.c.b2Vec2 {
     };
 }
 
+fn shapeColor(color: box2d.c.b2HexColor) sdl.Color {
+    if (shapeColorOverride != null) return shapeColorOverride.?;
+    return .{
+        .r = @intCast((color >> 16) & 0xFF),
+        .g = @intCast((color >> 8) & 0xFF),
+        .b = @intCast(color & 0xFF),
+        .a = 255,
+    };
+}
+
 pub fn drawSolidPolygon(transform: box2d.c.b2Transform, vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, radius: f32, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     _ = radius;
     _ = context;
 
-    const r: u8 = @intCast((color >> 16) & 0xFF);
-    const g: u8 = @intCast((color >> 8) & 0xFF);
-    const b: u8 = @intCast(color & 0xFF);
-
-    gpu.setRenderDrawColor(.{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(shapeColor(color)) catch {
         std.debug.print("Error setting draw color\n", .{});
         return;
     };
@@ -144,11 +151,7 @@ pub fn drawSolidPolygon(transform: box2d.c.b2Transform, vertices: [*c]const box2
 pub fn drawPolygon(vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     _ = context;
 
-    const r: u8 = @intCast((color >> 16) & 0xFF);
-    const g: u8 = @intCast((color >> 8) & 0xFF);
-    const b: u8 = @intCast(color & 0xFF);
-
-    gpu.setRenderDrawColor(.{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(shapeColor(color)) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -168,11 +171,7 @@ pub fn drawPolygon(vertices: [*c]const box2d.c.b2Vec2, vertexCount: c_int, color
 pub fn drawSegment(p1: box2d.c.b2Vec2, p2: box2d.c.b2Vec2, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     _ = context;
 
-    const r: u8 = @intCast((color >> 16) & 0xFF);
-    const g: u8 = @intCast((color >> 8) & 0xFF);
-    const b: u8 = @intCast(color & 0xFF);
-
-    gpu.setRenderDrawColor(.{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(shapeColor(color)) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -189,11 +188,7 @@ pub fn drawSegment(p1: box2d.c.b2Vec2, p2: box2d.c.b2Vec2, color: box2d.c.b2HexC
 pub fn drawPoint(p1: box2d.c.b2Vec2, size: f32, color: box2d.c.b2HexColor, context: ?*anyopaque) callconv(.c) void {
     _ = context;
 
-    const r: u8 = @intCast((color >> 16) & 0xFF);
-    const g: u8 = @intCast((color >> 8) & 0xFF);
-    const b: u8 = @intCast(color & 0xFF);
-
-    gpu.setRenderDrawColor(.{ .r = r, .g = g, .b = b, .a = 255 }) catch {
+    gpu.setRenderDrawColor(shapeColor(color)) catch {
         std.debug.print("encountered error in debugDrawPolygon when trying to setRenderDrawColor\n", .{});
         return;
     };
@@ -242,6 +237,12 @@ pub fn draw() !void {
     }
 }
 
+pub fn drawOverview() !void {
+    shapeColorOverride = .{ .r = 0, .g = 255, .b = 255, .a = 255 };
+    defer shapeColorOverride = null;
+    try draw();
+}
+
 pub fn drawMovementSupport() !void {
     for (movement.states.values()) |state| {
         const groundContact = state.groundState.groundContact orelse continue;
@@ -257,5 +258,43 @@ pub fn drawMovementSupport() !void {
         const start = camera.relativePosition(m2Pixel(vec.toBox2d(vec.subtract(worldPoint, halfLine))));
         const end = camera.relativePosition(m2Pixel(vec.toBox2d(vec.add(worldPoint, halfLine))));
         try gpu.renderDrawLine(start.x, start.y, end.x, end.y);
+    }
+}
+
+fn drawWorldLine(startWorld: vec.Vec2, endWorld: vec.Vec2) !void {
+    const start = camera.relativePosition(m2Pixel(vec.toBox2d(startWorld)));
+    const end = camera.relativePosition(m2Pixel(vec.toBox2d(endWorld)));
+    try gpu.renderDrawLine(start.x, start.y, end.x, end.y);
+}
+
+pub fn drawPlayerClearanceReference(positionPixels: vec.IVec2) !void {
+    try gpu.setRenderDrawColor(.{ .r = 255, .g = 0, .b = 255, .a = 255 });
+
+    const bodyPosition = conv.pixel2M(positionPixels);
+    const bodyCenter = vec.add(bodyPosition, player.bodyColliderOffset);
+    const boxCorners = [_]vec.Vec2{
+        .{ .x = bodyCenter.x - player.bodyColliderHalfWidth, .y = bodyCenter.y - player.bodyColliderHalfHeight },
+        .{ .x = bodyCenter.x + player.bodyColliderHalfWidth, .y = bodyCenter.y - player.bodyColliderHalfHeight },
+        .{ .x = bodyCenter.x + player.bodyColliderHalfWidth, .y = bodyCenter.y + player.bodyColliderHalfHeight },
+        .{ .x = bodyCenter.x - player.bodyColliderHalfWidth, .y = bodyCenter.y + player.bodyColliderHalfHeight },
+    };
+    for (boxCorners, 0..) |corner, index| {
+        try drawWorldLine(corner, boxCorners[(index + 1) % boxCorners.len]);
+    }
+
+    const circleSegmentCount = 24;
+    var segment: usize = 0;
+    while (segment < circleSegmentCount) : (segment += 1) {
+        const startAngle = @as(f32, @floatFromInt(segment)) * std.math.tau / circleSegmentCount;
+        const endAngle = @as(f32, @floatFromInt(segment + 1)) * std.math.tau / circleSegmentCount;
+        const start = vec.add(bodyPosition, .{
+            .x = @cos(startAngle) * player.lowerBodyColliderRadius,
+            .y = @sin(startAngle) * player.lowerBodyColliderRadius,
+        });
+        const end = vec.add(bodyPosition, .{
+            .x = @cos(endAngle) * player.lowerBodyColliderRadius,
+            .y = @sin(endAngle) * player.lowerBodyColliderRadius,
+        });
+        try drawWorldLine(start, end);
     }
 }
