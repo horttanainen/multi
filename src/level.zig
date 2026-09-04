@@ -151,7 +151,7 @@ pub fn applyLevelSettings(lev: Level) !void {
     }
 
     const movementData = try data.loadMovementData(lev.movementFile);
-    movement.configure(movementData);
+    try movement.configure(movementData);
     box2d.setGravity(lev.gravity);
     conv.met2pix = @floatFromInt(lev.pixelsPerMeter);
     sprite.applyPixelsPerMeter();

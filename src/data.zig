@@ -133,6 +133,7 @@ pub const ParticleData = struct {
 
 pub const MovementMechanism = enum {
     liero,
+    towerfall,
 };
 
 pub const MovementGroundingMode = enum {
@@ -175,12 +176,40 @@ pub const MovementGroundingData = struct {
     maxSlopeAngleDegrees: f32 = 60,
 };
 
-pub const MovementData = struct {
-    mechanism: MovementMechanism,
+pub const LieroMovementData = struct {
     control: MovementControlData,
     bodyMotion: MovementBodyMotionData,
     surfaceResponse: MovementSurfaceResponseData,
     jump: MovementJumpData,
+};
+
+pub const TowerfallControlData = struct {
+    maxRunSpeed: f32,
+    groundAcceleration: f32,
+    groundDeceleration: f32,
+    airAcceleration: f32,
+    airDeceleration: f32,
+    gravity: f32,
+    maxFallSpeed: f32,
+};
+
+pub const TowerfallJumpData = struct {
+    speed: f32,
+    coyoteTimeMs: u32,
+    bufferTimeMs: u32,
+};
+
+pub const TowerfallMovementData = struct {
+    control: TowerfallControlData,
+    bodyMotion: MovementBodyMotionData,
+    surfaceResponse: MovementSurfaceResponseData,
+    jump: TowerfallJumpData,
+};
+
+pub const MovementData = struct {
+    mechanism: MovementMechanism,
+    liero: ?LieroMovementData = null,
+    towerfall: ?TowerfallMovementData = null,
     grounding: MovementGroundingData,
 };
 

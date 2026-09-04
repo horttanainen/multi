@@ -6,7 +6,7 @@
   "gravity": 10,
   "pixelsPerMeter": 50,
   "splitscreen": false,
-  "movementFile": "movements/liero_theater.json",
+  "movementFile": "movements/towerfall_keep.json",
   "parallaxEntities": [
     {
       "parallaxDistance": 8,

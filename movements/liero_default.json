@@ -1,24 +1,26 @@
 {
   "mechanism": "liero",
-  "control": {
-    "lateralForce": 5.0,
-    "maxLateralSpeed": 6.0
-  },
-  "bodyMotion": {
-    "maxLinearSpeed": null,
-    "linearDamping": 0.0,
-    "gravityScale": 1.0
-  },
-  "surfaceResponse": {
-    "movingFriction": 0.1,
-    "restingFriction": 100.0
-  },
-  "jump": {
-    "impulse": 1.7,
-    "maxAirJumps": 1,
-    "cooldownMs": 500,
-    "coyoteTimeMs": 0,
-    "bufferTimeMs": 0
+  "liero": {
+    "control": {
+      "lateralForce": 5.0,
+      "maxLateralSpeed": 6.0
+    },
+    "bodyMotion": {
+      "maxLinearSpeed": null,
+      "linearDamping": 0.0,
+      "gravityScale": 1.0
+    },
+    "surfaceResponse": {
+      "movingFriction": 0.1,
+      "restingFriction": 100.0
+    },
+    "jump": {
+      "impulse": 1.7,
+      "maxAirJumps": 1,
+      "cooldownMs": 500,
+      "coyoteTimeMs": 0,
+      "bufferTimeMs": 0
+    }
   },
   "grounding": {
     "mode": "foot_contact",

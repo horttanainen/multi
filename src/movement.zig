@@ -7,6 +7,7 @@ const data = @import("data.zig");
 const delay = @import("delay.zig");
 const time = @import("time.zig");
 const vec = @import("vector.zig");
+const player_input = @import("player_input.zig");
 
 pub const GroundContact = struct {
     normal: vec.Vec2,
@@ -51,18 +52,38 @@ pub var control: data.MovementControlData = undefined;
 pub var bodyMotion: data.MovementBodyMotionData = undefined;
 pub var surfaceResponse: data.MovementSurfaceResponseData = undefined;
 pub var jumpSettings: data.MovementJumpData = undefined;
+pub var towerfallSettings: data.TowerfallMovementData = undefined;
 pub var grounding: data.MovementGroundingData = undefined;
 
 var minimumSupportUpAmount: f32 = undefined;
 var contactDataScratch: std.ArrayListUnmanaged(box2d.c.b2ContactData) = .empty;
 
-pub fn configure(movementData: data.MovementData) void {
+pub fn configure(movementData: data.MovementData) !void {
     mechanism = movementData.mechanism;
-    control = movementData.control;
-    bodyMotion = movementData.bodyMotion;
-    surfaceResponse = movementData.surfaceResponse;
-    jumpSettings = movementData.jump;
     grounding = movementData.grounding;
+
+    switch (mechanism) {
+        .liero => {
+            const settings = movementData.liero orelse {
+                std.log.err("movement.configure: liero settings are missing", .{});
+                return error.MissingLieroMovementSettings;
+            };
+            control = settings.control;
+            bodyMotion = settings.bodyMotion;
+            surfaceResponse = settings.surfaceResponse;
+            jumpSettings = settings.jump;
+        },
+        .towerfall => {
+            const settings = movementData.towerfall orelse {
+                std.log.err("movement.configure: TowerFall settings are missing", .{});
+                return error.MissingTowerfallMovementSettings;
+            };
+            towerfallSettings = settings;
+            bodyMotion = settings.bodyMotion;
+            surfaceResponse = settings.surfaceResponse;
+        },
+    }
+
     minimumSupportUpAmount = @cos(grounding.maxSlopeAngleDegrees * std.math.pi / 180.0);
 }
 
@@ -83,13 +104,13 @@ pub fn reset(playerId: usize) void {
     clearRuntimeState(state);
 }
 
-fn canUseGroundJump(state: *const State, currentTimeMs: u64) bool {
+fn canUseGroundJump(state: *const State, currentTimeMs: u64, coyoteTimeMs: u32) bool {
     if (!state.groundState.jumpAvailable) return false;
     if (state.groundState.supported) return true;
-    if (jumpSettings.coyoteTimeMs == 0) return false;
+    if (coyoteTimeMs == 0) return false;
 
     const supportLostAtMs = state.groundState.supportLostAtMs orelse return false;
-    return currentTimeMs <= supportLostAtMs + @as(u64, jumpSettings.coyoteTimeMs);
+    return currentTimeMs <= supportLostAtMs + @as(u64, coyoteTimeMs);
 }
 
 fn executeJump(playerId: usize, state: *State, currentTimeMs: u64, groundOnly: bool) bool {
@@ -98,7 +119,7 @@ fn executeJump(playerId: usize, state: *State, currentTimeMs: u64, groundOnly: b
 
     if (delay.check(delayKey)) return false;
 
-    const useGroundJump = canUseGroundJump(state, currentTimeMs);
+    const useGroundJump = canUseGroundJump(state, currentTimeMs, jumpSettings.coyoteTimeMs);
     if (groundOnly and !useGroundJump) return false;
     if (!useGroundJump and state.airJumpCounter >= jumpSettings.maxAirJumps) return false;
 
@@ -127,6 +148,8 @@ fn executeJump(playerId: usize, state: *State, currentTimeMs: u64, groundOnly: b
 }
 
 pub fn jump(playerId: usize) void {
+    if (mechanism != .liero) return;
+
     const state = states.getPtr(playerId) orelse {
         std.log.warn("movement.jump: movement state is missing for player {d}", .{playerId});
         return;
@@ -138,13 +161,13 @@ pub fn jump(playerId: usize) void {
     state.bufferedJumpUntilMs = currentTimeMs + jumpSettings.bufferTimeMs;
 }
 
-fn processBufferedJump(playerId: usize, state: *State, currentTimeMs: u64) void {
+fn processLieroBufferedJump(playerId: usize, state: *State, currentTimeMs: u64) void {
     const bufferedJumpUntilMs = state.bufferedJumpUntilMs orelse return;
     if (currentTimeMs > bufferedJumpUntilMs) {
         state.bufferedJumpUntilMs = null;
         return;
     }
-    if (!canUseGroundJump(state, currentTimeMs)) return;
+    if (!canUseGroundJump(state, currentTimeMs, jumpSettings.coyoteTimeMs)) return;
 
     _ = executeJump(playerId, state, currentTimeMs, true);
 }
@@ -190,9 +213,77 @@ fn applyLieroMovement(state: *State, dt: f32) void {
     box2d.c.b2Body_ApplyForceToCenter(state.bodyId, force, true);
 }
 
-fn applyMovement(state: *State, dt: f32) void {
+fn executeTowerfallJump(state: *State, currentTimeMs: u64) bool {
+    const towerfallJump = towerfallSettings.jump;
+    if (!canUseGroundJump(state, currentTimeMs, towerfallJump.coyoteTimeMs)) return false;
+
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    velocity.y = -towerfallJump.speed;
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
+
+    state.groundState.jumpAvailable = false;
+    state.groundState.supportLostAtMs = null;
+    state.bufferedJumpUntilMs = null;
+    return true;
+}
+
+fn requestTowerfallJump(state: *State, currentTimeMs: u64) void {
+    if (executeTowerfallJump(state, currentTimeMs)) return;
+
+    const bufferTimeMs = towerfallSettings.jump.bufferTimeMs;
+    if (bufferTimeMs == 0) return;
+    state.bufferedJumpUntilMs = currentTimeMs + bufferTimeMs;
+}
+
+fn processTowerfallBufferedJump(state: *State, currentTimeMs: u64) void {
+    const bufferedJumpUntilMs = state.bufferedJumpUntilMs orelse return;
+    if (currentTimeMs > bufferedJumpUntilMs) {
+        state.bufferedJumpUntilMs = null;
+        return;
+    }
+    if (!canUseGroundJump(state, currentTimeMs, towerfallSettings.jump.coyoteTimeMs)) return;
+
+    _ = executeTowerfallJump(state, currentTimeMs);
+}
+
+fn moveTowards(current: f32, target: f32, maxChange: f32) f32 {
+    if (current < target) return @min(current + maxChange, target);
+    if (current > target) return @max(current - maxChange, target);
+    return target;
+}
+
+fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
+    const inputState = player_input.playerInputs.get(playerId) orelse {
+        std.log.warn("movement.applyTowerfallMovement: input state is missing for player {d}", .{playerId});
+        return;
+    };
+    const controlSettings = towerfallSettings.control;
+    const movementDirection = std.math.clamp(inputState.movementDirection.x, -1, 1);
+    const targetSpeed = movementDirection * controlSettings.maxRunSpeed;
+    const acceleration = if (movementDirection == 0)
+        if (state.groundState.supported) controlSettings.groundDeceleration else controlSettings.airDeceleration
+    else if (state.groundState.supported)
+        controlSettings.groundAcceleration
+    else
+        controlSettings.airAcceleration;
+
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    velocity.x = moveTowards(velocity.x, targetSpeed, acceleration * dt);
+    if (velocity.y < controlSettings.maxFallSpeed) {
+        velocity.y = @min(velocity.y + controlSettings.gravity * dt, controlSettings.maxFallSpeed);
+    }
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
+
+    if (!inputState.buttons.get(.jump).pressed) return;
+    requestTowerfallJump(state, time.nowMs());
+}
+
+fn applyMovement(playerId: usize, state: *State, dt: f32) void {
+    if (!box2d.c.b2Body_IsEnabled(state.bodyId)) return;
+
     switch (mechanism) {
         .liero => applyLieroMovement(state, dt),
+        .towerfall => applyTowerfallMovement(playerId, state, dt),
     }
 }
 
@@ -408,7 +499,10 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
 
     state.groundState.supported = supported;
     state.groundState.groundContact = groundContact;
-    processBufferedJump(playerId, state, currentTimeMs);
+    switch (mechanism) {
+        .liero => processLieroBufferedJump(playerId, state, currentTimeMs),
+        .towerfall => processTowerfallBufferedJump(state, currentTimeMs),
+    }
 }
 
 pub fn processSensorEvents() !void {
@@ -419,8 +513,8 @@ pub fn processSensorEvents() !void {
 }
 
 pub fn applyAll(dt: f32) void {
-    for (states.values()) |*state| {
-        applyMovement(state, dt);
+    for (states.keys(), states.values()) |playerId, *state| {
+        applyMovement(playerId, state, dt);
     }
 }
 
