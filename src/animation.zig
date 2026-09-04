@@ -227,8 +227,8 @@ pub fn cleanupOne(anim: Animation) void {
     allocator.free(anim.frames);
 }
 
-pub fn loadWorldHeightWithBacking(pathToAnimationDir: []const u8, fps: i32, heightMeters: f32, offsetMeters: vec.Vec2, loop: bool, spriteIndex: usize, backing: sprite.Backing) !Animation {
-    const frameUuids = try fs.loadWorldHeightSpritesFromFolderWithBacking(pathToAnimationDir, heightMeters, offsetMeters, backing);
+pub fn loadWorldHeightWithBacking(pathToAnimationDir: []const u8, fps: i32, heightMeters: f32, offsetMeters: vec.Vec2, loop: bool, spriteIndex: usize, backing: sprite.Backing, markerExtraction: sprite.MarkerExtraction) !Animation {
+    const frameUuids = try fs.loadWorldHeightSpritesFromFolderWithBacking(pathToAnimationDir, heightMeters, offsetMeters, backing, markerExtraction);
 
     return .{
         .fps = fps,

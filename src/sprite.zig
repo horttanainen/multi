@@ -31,6 +31,7 @@ pub const Sprite = struct {
     basisOffset: vec.Vec2,
     basisAnchorPointLeft: ?vec.Vec2,
     basisAnchorPointRight: ?vec.Vec2,
+    basisMuzzlePoint: ?vec.Vec2,
     scale: vec.Vec2,
     sizeM: vec.Vec2,
     sizeP: vec.IVec2,
@@ -41,6 +42,7 @@ pub const Sprite = struct {
     geometryVersion: u64 = 0,
     anchorPointLeft: ?vec.IVec2 = null, // Magenta pixel - left shoulder
     anchorPointRight: ?vec.IVec2 = null, // Green pixel - right shoulder
+    muzzlePoint: ?vec.IVec2 = null, // Alpha-1 cyan pixel - weapon muzzle
 };
 
 pub const ScalePreviewState = struct {
@@ -48,6 +50,19 @@ pub const ScalePreviewState = struct {
     sizeM: vec.Vec2,
     basisAnchorPointLeft: ?vec.Vec2,
     basisAnchorPointRight: ?vec.Vec2,
+    basisMuzzlePoint: ?vec.Vec2,
+};
+
+const MarkerPoints = struct {
+    anchorPointLeft: ?vec.Vec2,
+    anchorPointRight: ?vec.Vec2,
+    muzzlePoint: ?vec.Vec2,
+};
+
+pub const MarkerExtraction = struct {
+    anchorLeft: bool = false,
+    anchorRight: bool = false,
+    muzzle: bool = false,
 };
 
 pub const SizeBasis = enum {
@@ -268,6 +283,7 @@ fn updateRenderedGeometry(s: *Sprite) void {
     };
     s.anchorPointLeft = scaledOptionalPoint(s.basisAnchorPointLeft, basisScale);
     s.anchorPointRight = scaledOptionalPoint(s.basisAnchorPointRight, basisScale);
+    s.muzzlePoint = scaledOptionalPoint(s.basisMuzzlePoint, basisScale);
 }
 
 pub fn applyPixelsPerMeter() void {
@@ -283,14 +299,11 @@ pub fn applyPixelsPerMeter() void {
     }
 }
 
-fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, sourceScale: vec.Vec2, basisOffset: vec.Vec2, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, geometryId: u64) !u64 {
+fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, sourceScale: vec.Vec2, basisOffset: vec.Vec2, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, geometryId: u64, markerPoints: MarkerPoints) !u64 {
     const spriteUuid = uuid.generate();
 
     const imgPath = try allocator.dupe(u8, imagePath);
     errdefer allocator.free(imgPath);
-
-    const basisAnchorPointLeft = findAndProcessAnchorPixel(surface, sourceScale, isMagenta);
-    const basisAnchorPointRight = findAndProcessAnchorPixel(surface, sourceScale, isGreen);
 
     var size = sdl.Point{
         .x = surface.w,
@@ -317,13 +330,15 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
         .sizeBasis = sizeBasis,
         .sourceScale = sourceScale,
         .basisOffset = basisOffset,
-        .basisAnchorPointLeft = basisAnchorPointLeft,
-        .basisAnchorPointRight = basisAnchorPointRight,
+        .basisAnchorPointLeft = markerPoints.anchorPointLeft,
+        .basisAnchorPointRight = markerPoints.anchorPointRight,
+        .basisMuzzlePoint = markerPoints.muzzlePoint,
         .scale = undefined,
         .offset = undefined,
         .geometryId = geometryId,
         .anchorPointLeft = undefined,
         .anchorPointRight = undefined,
+        .muzzlePoint = undefined,
         .sizeM = sizeM,
         .sizeP = undefined,
     };
@@ -451,24 +466,24 @@ pub fn createMutableFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.
 }
 
 pub fn createFromImgWithBacking(imagePath: []const u8, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis) !u64 {
-    return createFromImgWithAtlasProfile(imagePath, scale, offset, backing, sizeBasis, config.defaultRuntimeAtlasProfile);
+    return createFromImgWithAtlasProfile(imagePath, scale, offset, backing, sizeBasis, config.defaultRuntimeAtlasProfile, .{});
 }
 
-pub fn createFromImgWithAtlasProfile(imagePath: []const u8, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile) !u64 {
+pub fn createFromImgWithAtlasProfile(imagePath: []const u8, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, markerExtraction: MarkerExtraction) !u64 {
     const imgPathZ = try allocator.dupeZ(u8, imagePath);
     defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
 
     const atlasConfig = config.runtimeAtlasConfigForProfile(atlasProfile);
-    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing, sizeBasis, atlasProfile, atlasConfig);
+    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing, sizeBasis, atlasProfile, atlasConfig, markerExtraction);
 }
 
 pub fn createFromImgWorldHeight(imagePath: []const u8, heightMeters: f32, offsetMeters: vec.Vec2) !u64 {
-    return createFromImgWorldHeightWithBacking(imagePath, heightMeters, offsetMeters, .immutable, config.defaultRuntimeAtlasProfile);
+    return createFromImgWorldHeightWithBacking(imagePath, heightMeters, offsetMeters, .immutable, config.defaultRuntimeAtlasProfile, .{});
 }
 
-pub fn createFromImgWorldHeightWithBacking(imagePath: []const u8, heightMeters: f32, offsetMeters: vec.Vec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile) !u64 {
+pub fn createFromImgWorldHeightWithBacking(imagePath: []const u8, heightMeters: f32, offsetMeters: vec.Vec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile, markerExtraction: MarkerExtraction) !u64 {
     if (!std.math.isFinite(heightMeters) or heightMeters <= 0.0) {
         std.log.err("createFromImgWorldHeightWithBacking: invalid height {d} for '{s}'", .{ heightMeters, imagePath });
         return error.InvalidWorldHeight;
@@ -487,7 +502,7 @@ pub fn createFromImgWorldHeightWithBacking(imagePath: []const u8, heightMeters: 
     const sourceScaleValue = heightMeters / @as(f32, @floatFromInt(surface.h));
     const sourceScale = vec.Vec2{ .x = sourceScaleValue, .y = sourceScaleValue };
     const atlasConfig = config.runtimeAtlasConfigForProfile(atlasProfile);
-    return createFromLoadedSurfaceWithBacking(imagePath, surface, sourceScale, offsetMeters, backing, .world_meters, atlasProfile, atlasConfig);
+    return createFromLoadedSurfaceWithBacking(imagePath, surface, sourceScale, offsetMeters, backing, .world_meters, atlasProfile, atlasConfig, markerExtraction);
 }
 
 pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.Vec2, sizeBasis: SizeBasis) !u64 {
@@ -500,6 +515,7 @@ pub fn createMutableFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surfac
 
 pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis) !u64 {
     errdefer sdl.destroySurface(surface);
+    const markerPoints = extractMarkerPoints(surface, scale, .{});
 
     const renderedScale = vec.Vec2{
         .x = scale.x * sizeBasisScale(sizeBasis),
@@ -520,7 +536,7 @@ pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Su
     };
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, sizeBasis, config.defaultRuntimeAtlasProfile, uuid.generate());
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, sizeBasis, config.defaultRuntimeAtlasProfile, uuid.generate(), markerPoints);
 }
 
 const TextureForImage = struct {
@@ -528,7 +544,8 @@ const TextureForImage = struct {
     geometryId: u64,
 };
 
-fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, atlasConfig: config.RuntimeAtlasConfig) !u64 {
+fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.Vec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, atlasConfig: config.RuntimeAtlasConfig, markerExtraction: MarkerExtraction) !u64 {
+    const markerPoints = extractMarkerPoints(surface, scale, markerExtraction);
     const renderedScale = vec.Vec2{
         .x = scale.x * sizeBasisScale(sizeBasis),
         .y = scale.y * sizeBasisScale(sizeBasis),
@@ -536,7 +553,7 @@ fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surfa
     const textureForImage = try createTextureForImage(imagePath, surface, renderedScale, backing, atlasConfig);
     errdefer tex.destroyTexture(textureForImage.texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, sizeBasis, atlasProfile, textureForImage.geometryId);
+    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, sizeBasis, atlasProfile, textureForImage.geometryId, markerPoints);
 }
 
 fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, backing: Backing, atlasConfig: config.RuntimeAtlasConfig) !TextureForImage {
@@ -620,6 +637,7 @@ pub fn getScalePreviewState(spriteUuid: u64) ?ScalePreviewState {
         .sizeM = s.sizeM,
         .basisAnchorPointLeft = s.basisAnchorPointLeft,
         .basisAnchorPointRight = s.basisAnchorPointRight,
+        .basisMuzzlePoint = s.basisMuzzlePoint,
     };
 }
 
@@ -647,6 +665,7 @@ pub fn applyScalePreview(spriteUuid: u64, base: ScalePreviewState, ratio: vec.Ve
     };
     s.basisAnchorPointLeft = scaledAnchor(base.basisAnchorPointLeft, ratio);
     s.basisAnchorPointRight = scaledAnchor(base.basisAnchorPointRight, ratio);
+    s.basisMuzzlePoint = scaledAnchor(base.basisMuzzlePoint, ratio);
     updateRenderedGeometry(s);
 }
 
@@ -663,6 +682,7 @@ pub fn restoreScalePreview(spriteUuid: u64, base: ScalePreviewState) void {
     s.sizeM = base.sizeM;
     s.basisAnchorPointLeft = base.basisAnchorPointLeft;
     s.basisAnchorPointRight = base.basisAnchorPointRight;
+    s.basisMuzzlePoint = base.basisMuzzlePoint;
     updateRenderedGeometry(s);
 }
 
@@ -770,6 +790,7 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
         .basisOffset = originalSprite.basisOffset,
         .basisAnchorPointLeft = originalSprite.basisAnchorPointLeft,
         .basisAnchorPointRight = originalSprite.basisAnchorPointRight,
+        .basisMuzzlePoint = originalSprite.basisMuzzlePoint,
         .scale = originalSprite.scale,
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,
@@ -778,6 +799,7 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
         .geometryVersion = originalSprite.geometryVersion,
         .anchorPointLeft = originalSprite.anchorPointLeft,
         .anchorPointRight = originalSprite.anchorPointRight,
+        .muzzlePoint = originalSprite.muzzlePoint,
     };
 
     try sprites.putLocking(newUuid, newSprite);
@@ -791,6 +813,14 @@ pub fn isMagenta(r: u8, g: u8, b: u8) bool {
 
 pub fn isGreen(r: u8, g: u8, b: u8) bool {
     return r <= 5 and g >= 250 and b <= 5;
+}
+
+fn extractMarkerPoints(surface: *sdl.Surface, scale: vec.Vec2, markerExtraction: MarkerExtraction) MarkerPoints {
+    return .{
+        .anchorPointLeft = if (markerExtraction.anchorLeft) findAndProcessAnchorPixel(surface, scale, isMagenta) else null,
+        .anchorPointRight = if (markerExtraction.anchorRight) findAndProcessAnchorPixel(surface, scale, isGreen) else null,
+        .muzzlePoint = if (markerExtraction.muzzle) findAndClearMuzzleMarker(surface, scale) else null,
+    };
 }
 
 fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2, comptime predicate: fn (u8, u8, u8) bool) ?vec.Vec2 {
@@ -831,6 +861,34 @@ fn findAndProcessAnchorPixel(surface: *sdl.Surface, scale: vec.Vec2, comptime pr
                     .y = @as(f32, @floatFromInt(y)) * scale.y,
                 };
             }
+        }
+    }
+    return null;
+}
+
+fn findAndClearMuzzleMarker(surface: *sdl.Surface, scale: vec.Vec2) ?vec.Vec2 {
+    const pixels: [*]u8 = @ptrCast(surface.pixels);
+    const pitch: usize = @intCast(surface.pitch);
+    const width: usize = @intCast(surface.w);
+    const height: usize = @intCast(surface.h);
+    const bytesPerPixel: usize = 4;
+
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            const pixelIndex = y * pitch + x * bytesPerPixel;
+            if (pixels[pixelIndex + 3] != 1) continue;
+            if (pixels[pixelIndex + 2] != 0 or pixels[pixelIndex + 1] != 255 or pixels[pixelIndex + 0] != 255) continue;
+
+            pixels[pixelIndex + 0] = 0;
+            pixels[pixelIndex + 1] = 0;
+            pixels[pixelIndex + 2] = 0;
+            pixels[pixelIndex + 3] = 0;
+            return .{
+                .x = @as(f32, @floatFromInt(x)) * scale.x,
+                .y = @as(f32, @floatFromInt(y)) * scale.y,
+            };
         }
     }
     return null;

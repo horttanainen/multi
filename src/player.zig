@@ -122,7 +122,7 @@ pub fn getCrosshairOffset(p: Player) vec.IVec2 {
     };
 }
 
-fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
+fn calcPlayerSpritePosition(p: Player) vec.IVec2 {
     const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity) |ent| {
         const currentState = box2d.getState(p.bodyId);
@@ -138,6 +138,67 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
         return spawnPos;
     }
     return vec.izero;
+}
+
+const WeaponPlacement = struct {
+    shoulderPos: vec.IVec2,
+    centerPos: vec.IVec2,
+    anchor: vec.IVec2,
+    effectiveAnchorX: i32,
+    flip: bool,
+    angle: f32,
+};
+
+fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite) ?WeaponPlacement {
+    const maybeEntity = entity.getEntity(p.bodyId);
+    if (maybeEntity == null) return null;
+    const ent = maybeEntity.?;
+    if (ent.spriteUuids.len == 0) return null;
+
+    const playerSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return null;
+    const weaponAnchor = weaponSprite.anchorPointLeft orelse return null;
+    const playerFlip = ent.flipEntityHorizontally;
+    const weaponFlip = !playerFlip;
+    const playerAnchor = if (playerFlip)
+        playerSprite.anchorPointLeft
+    else
+        playerSprite.anchorPointRight orelse playerSprite.anchorPointLeft;
+    if (playerAnchor == null) return null;
+
+    const currentState = box2d.getState(p.bodyId);
+    const state = box2d.getInterpolatedState(ent.state, currentState);
+    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+    const shoulderPos = calcShoulderPos(playerSprite, playerPos, playerAnchor.?, playerFlip);
+    const effectiveAnchorX: i32 = if (weaponFlip) weaponSprite.sizeP.x - weaponAnchor.x else weaponAnchor.x;
+    const centerPos = vec.IVec2{
+        .x = shoulderPos.x - effectiveAnchorX + @divTrunc(weaponSprite.sizeP.x, 2),
+        .y = shoulderPos.y - weaponAnchor.y + @divTrunc(weaponSprite.sizeP.y, 2),
+    };
+    const aimAngle = std.math.atan2(-p.aimDirection.y, p.aimDirection.x);
+
+    return .{
+        .shoulderPos = shoulderPos,
+        .centerPos = centerPos,
+        .anchor = weaponAnchor,
+        .effectiveAnchorX = effectiveAnchorX,
+        .flip = weaponFlip,
+        .angle = if (weaponFlip) std.math.pi + aimAngle else aimAngle,
+    };
+}
+
+fn calcWeaponMuzzlePosition(p: Player, weaponSprite: sprite.Sprite) ?vec.IVec2 {
+    const muzzlePoint = weaponSprite.muzzlePoint orelse return null;
+    const placement = calcWeaponPlacement(p, weaponSprite) orelse return null;
+    const effectiveMuzzleX: i32 = if (placement.flip) weaponSprite.sizeP.x - muzzlePoint.x else muzzlePoint.x;
+    const relativeX = @as(f32, @floatFromInt(effectiveMuzzleX - placement.effectiveAnchorX));
+    const relativeY = @as(f32, @floatFromInt(muzzlePoint.y - placement.anchor.y));
+    const cosAngle = @cos(placement.angle);
+    const sinAngle = @sin(placement.angle);
+
+    return .{
+        .x = placement.shoulderPos.x + @as(i32, @intFromFloat(relativeX * cosAngle - relativeY * sinAngle)),
+        .y = placement.shoulderPos.y + @as(i32, @intFromFloat(relativeX * sinAngle + relativeY * cosAngle)),
+    };
 }
 
 pub fn spawnWithSharedCamera(cameraId: usize) !usize {
@@ -415,7 +476,18 @@ pub fn shoot(player: *Player) !void {
     }
 
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-    const spawnPos = calcProjectileSpawnPosition(player.*);
+    if (selectedWeapon.spriteUuid == 0) {
+        std.log.err("shoot: weapon '{s}' has no sprite", .{selectedWeapon.name});
+        return error.WeaponSpriteNotFound;
+    }
+    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse {
+        std.log.err("shoot: sprite for weapon '{s}' is missing", .{selectedWeapon.name});
+        return error.WeaponSpriteNotFound;
+    };
+    const spawnPos = calcWeaponMuzzlePosition(player.*, weaponSprite) orelse {
+        std.log.err("shoot: weapon '{s}' has no usable muzzle point", .{selectedWeapon.name});
+        return error.WeaponMuzzleNotFound;
+    };
     const position = camera.relativePositionForCreating(spawnPos);
 
     const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
@@ -439,7 +511,7 @@ pub fn toggleRope(p: *Player) !void {
     if (currentRope != null and currentRope.?.state != .inactive) {
         rope.releaseRope(p.id);
     } else {
-        const spawnPos = calcProjectileSpawnPosition(p.*);
+        const spawnPos = calcPlayerSpritePosition(p.*);
         const worldPixelPos = camera.relativePositionForCreating(spawnPos);
         const originM = conv.p2m(worldPixelPos);
         try rope.shootHook(p.id, .{ .x = originM.x, .y = originM.y }, p.aimDirection);
@@ -626,62 +698,14 @@ pub fn drawWeapon(player: *Player) !void {
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
     if (selectedWeapon.spriteUuid == 0) return;
     const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
-
-    const maybeEntity = entity.getEntity(player.bodyId);
-    if (maybeEntity == null) {
-        return;
-    }
-    const ent = maybeEntity.?;
-    const currentState = box2d.getState(player.bodyId);
-    const state = box2d.getInterpolatedState(ent.state, currentState);
-    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-    const playerSprite = if (ent.spriteUuids.len > 0) sprite.getSprite(ent.spriteUuids[0]) else null;
-
-    const playerFlip = ent.flipEntityHorizontally;
-    const weaponFlip = !ent.flipEntityHorizontally;
-
-    // Use left shoulder anchor when facing right (flipped), right shoulder when facing left (default)
-    const playerAnchor = if (playerSprite) |ps| (if (playerFlip) ps.anchorPointLeft else ps.anchorPointRight orelse ps.anchorPointLeft) else null;
-    const weaponAnchor = weaponSprite.anchorPointLeft;
-
-    if (playerAnchor == null or weaponAnchor == null or playerSprite == null) {
-        const weaponPos = vec.iadd(playerPos, weaponSprite.offset);
+    const placement = calcWeaponPlacement(player.*, weaponSprite) orelse {
+        const weaponPos = vec.iadd(calcPlayerSpritePosition(player.*), weaponSprite.offset);
+        const weaponFlip = !(entity.getEntity(player.bodyId) orelse return).flipEntityHorizontally;
         try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, weaponFlip, 0, null, null);
         return;
-    }
-    const pAnchor = playerAnchor.?;
-    const wAnchor = weaponAnchor.?;
-    const ps = playerSprite.?;
-
-    const playerHalfW = @divTrunc(ps.sizeP.x, 2);
-    const playerHalfH = @divTrunc(ps.sizeP.y, 2);
-    const playerOffsetX: i32 = if (playerFlip) ps.offset.x else -ps.offset.x;
-    const playerUpperLeft = vec.IVec2{
-        .x = playerPos.x - playerHalfW + playerOffsetX,
-        .y = playerPos.y - playerHalfH + ps.offset.y,
     };
-
-    // When flipped, mirror the anchor X within the sprite
-    const shoulderPos = if (playerFlip)
-        vec.iadd(playerUpperLeft, .{ .x = ps.sizeP.x - pAnchor.x, .y = pAnchor.y })
-    else
-        vec.iadd(playerUpperLeft, pAnchor);
-
-    const effectiveWAnchorX: i32 = if (weaponFlip) weaponSprite.sizeP.x - wAnchor.x else wAnchor.x;
-
-    const weaponHalfW = @divTrunc(weaponSprite.sizeP.x, 2);
-    const weaponHalfH = @divTrunc(weaponSprite.sizeP.y, 2);
-    const weaponCenterPos = vec.IVec2{
-        .x = shoulderPos.x - effectiveWAnchorX + weaponHalfW,
-        .y = shoulderPos.y - wAnchor.y + weaponHalfH,
-    };
-
-    const aimAngle = std.math.atan2(-player.aimDirection.y, player.aimDirection.x);
-    const weaponAngle: f32 = if (weaponFlip) std.math.pi + aimAngle else aimAngle;
-
-    const pivotPoint: sdl.Point = .{ .x = effectiveWAnchorX, .y = wAnchor.y };
-    try sprite.drawWithOptions(weaponSprite, weaponCenterPos, weaponAngle, false, weaponFlip, 0, null, pivotPoint);
+    const pivotPoint: sdl.Point = .{ .x = placement.effectiveAnchorX, .y = placement.anchor.y };
+    try sprite.drawWithOptions(weaponSprite, placement.centerPos, placement.angle, false, placement.flip, 0, null, pivotPoint);
 }
 
 pub fn drawAllWeaponsBehind() !void {

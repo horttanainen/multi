@@ -21,7 +21,7 @@ var pendingScale: vec.Vec2 = .{ .x = 1, .y = 1 };
 const editorCrosshairPath = "images/crosshair.png";
 
 fn createEditorCrosshair() ?u64 {
-    return sprite.createFromImgWithAtlasProfile(editorCrosshairPath, .{ .x = 1, .y = 1 }, vec.zero, .immutable, .canvas_pixels, .preserve_detail) catch |err| {
+    return sprite.createFromImgWithAtlasProfile(editorCrosshairPath, .{ .x = 1, .y = 1 }, vec.zero, .immutable, .canvas_pixels, .preserve_detail, .{}) catch |err| {
         std.log.warn("createEditorCrosshair: failed to create editor crosshair: {}", .{err});
         return null;
     };

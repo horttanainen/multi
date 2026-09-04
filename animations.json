@@ -7,7 +7,8 @@
         "offsetMeters": { "x": 0, "y": -0.375 },
         "loop": true,
         "spriteIndex": 0,
-        "switchDelay": 0.25
+        "switchDelay": 0.25,
+        "markers": { "anchorLeft": true, "anchorRight": true }
     },
     {
         "key": "player_run",
@@ -16,7 +17,8 @@
         "heightMeters": 1.56,
         "offsetMeters": { "x": 0, "y": -0.375 },
         "loop": true,
-        "spriteIndex": 0
+        "spriteIndex": 0,
+        "markers": { "anchorLeft": true, "anchorRight": true }
     },
     {
         "key": "player_fall",
@@ -25,7 +27,8 @@
         "heightMeters": 1.56,
         "offsetMeters": { "x": 0, "y": -0.375 },
         "loop": true,
-        "spriteIndex": 0
+        "spriteIndex": 0,
+        "markers": { "anchorLeft": true, "anchorRight": true }
     },
     {
         "key": "player_afterjump",
@@ -34,7 +37,8 @@
         "heightMeters": 1.56,
         "offsetMeters": { "x": 0, "y": -0.375 },
         "loop": true,
-        "spriteIndex": 0
+        "spriteIndex": 0,
+        "markers": { "anchorLeft": true, "anchorRight": true }
     },
     {
         "key": "missile_projectile",
@@ -53,5 +57,14 @@
         "offsetMeters": { "x": 0, "y": 0.625 },
         "loop": false,
         "spriteIndex": 1
+    },
+    {
+        "key": "harpoon_projectile",
+        "path": "weapons/harpoon/projectile",
+        "fps": 1,
+        "heightMeters": 0.8,
+        "offsetMeters": { "x": 0, "y": 0 },
+        "loop": true,
+        "spriteIndex": 0
     }
 ]

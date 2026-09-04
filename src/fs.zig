@@ -54,7 +54,7 @@ pub fn writeFile(path: []const u8, contents: []const u8) !void {
     try file.writeStreamingAll(io_value, contents);
 }
 
-pub fn loadWorldHeightSpritesFromFolderWithBacking(folderPath: []const u8, heightMeters: f32, offsetMeters: vec.Vec2, backing: sprite.Backing) ![]u64 {
+pub fn loadWorldHeightSpritesFromFolderWithBacking(folderPath: []const u8, heightMeters: f32, offsetMeters: vec.Vec2, backing: sprite.Backing, markerExtraction: sprite.MarkerExtraction) ![]u64 {
     const fileNames = try listFiles(folderPath);
     defer {
         for (fileNames) |name| allocator.free(name);
@@ -70,7 +70,7 @@ pub fn loadWorldHeightSpritesFromFolderWithBacking(folderPath: []const u8, heigh
     for (fileNames) |imageName| {
         var pathBuf: [256]u8 = undefined;
         const imagePath = try std.fmt.bufPrint(&pathBuf, "{s}/{s}", .{ folderPath, imageName });
-        const spriteUuid = try sprite.createFromImgWorldHeightWithBacking(imagePath, heightMeters, offsetMeters, backing, config.defaultRuntimeAtlasProfile);
+        const spriteUuid = try sprite.createFromImgWorldHeightWithBacking(imagePath, heightMeters, offsetMeters, backing, config.defaultRuntimeAtlasProfile, markerExtraction);
         try spriteUuids.append(spriteUuid);
     }
 

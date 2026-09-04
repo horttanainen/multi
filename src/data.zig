@@ -15,6 +15,7 @@ pub const SpriteData = struct {
     path: []const u8,
     heightMeters: f32,
     atlasProfile: config.RuntimeAtlasProfile,
+    markers: sprite.MarkerExtraction,
 };
 
 pub const GibletGroup = enum {
@@ -37,6 +38,7 @@ pub const AnimationData = struct {
     loop: bool,
     spriteIndex: usize,
     switchDelay: f64,
+    markers: sprite.MarkerExtraction,
 };
 
 pub const SoundData = struct {
@@ -422,6 +424,7 @@ fn initSprites() !void {
         path: []const u8,
         heightMeters: f32,
         atlasProfile: ?[]const u8 = null,
+        markers: sprite.MarkerExtraction = .{},
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -441,6 +444,7 @@ fn initSprites() !void {
             .path = path,
             .heightMeters = entry.heightMeters,
             .atlasProfile = runtimeAtlasProfileForSpriteEntry(entry.key, entry.atlasProfile),
+            .markers = entry.markers,
         }) catch {
             allocator.free(key);
             allocator.free(path);
@@ -540,6 +544,7 @@ fn initAnimations() !void {
         loop: bool = true,
         spriteIndex: usize = 0,
         switchDelay: f64 = 0,
+        markers: sprite.MarkerExtraction = .{},
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -563,6 +568,7 @@ fn initAnimations() !void {
             .loop = entry.loop,
             .spriteIndex = entry.spriteIndex,
             .switchDelay = entry.switchDelay,
+            .markers = entry.markers,
         }) catch {
             allocator.free(key);
             allocator.free(path);
@@ -933,7 +939,7 @@ pub fn createSpriteFrom(key: []const u8) ?u64 {
 
 pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing) ?u64 {
     const d = spriteDataMap.get(key) orelse return null;
-    return sprite.createFromImgWorldHeightWithBacking(d.path, d.heightMeters, vec.zero, backing, d.atlasProfile) catch |err| {
+    return sprite.createFromImgWorldHeightWithBacking(d.path, d.heightMeters, vec.zero, backing, d.atlasProfile, d.markers) catch |err| {
         std.debug.print("Warning: Failed to create sprite for '{s}': {}\n", .{ key, err });
         return null;
     };
@@ -945,7 +951,7 @@ pub fn createAnimationFrom(key: []const u8) !animation.Animation {
 
 pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing) !animation.Animation {
     const d = animationDataMap.get(key) orelse return error.AnimationDataNotFound;
-    var anim = try animation.loadWorldHeightWithBacking(d.path, d.fps, d.heightMeters, d.offsetMeters, d.loop, d.spriteIndex, backing);
+    var anim = try animation.loadWorldHeightWithBacking(d.path, d.fps, d.heightMeters, d.offsetMeters, d.loop, d.spriteIndex, backing, d.markers);
     anim.switchDelay = d.switchDelay;
     return anim;
 }
@@ -1084,6 +1090,7 @@ pub fn createGibletSprite(giblet: GibletData) !u64 {
         vec.zero,
         .immutable,
         config.defaultRuntimeAtlasProfile,
+        .{},
     );
 }
 
