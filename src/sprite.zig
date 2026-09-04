@@ -980,24 +980,20 @@ fn spritePixelToWorld(s: Sprite, pixel: vec.Vec2, entityPos: vec.Vec2, rotation:
     };
 }
 
-fn worldDirectionToSpritePixelDirection(directionWorld: vec.Vec2, rotation: f32, scale: vec.Vec2) vec.Vec2 {
+fn worldDirectionToSpriteRenderDirection(directionWorld: vec.Vec2, rotation: f32) vec.Vec2 {
     const cosA = @cos(-rotation);
     const sinA = @sin(-rotation);
     const rotatedLocal = vec.Vec2{
         .x = directionWorld.x * cosA - directionWorld.y * sinA,
         .y = directionWorld.x * sinA + directionWorld.y * cosA,
     };
-    const pixelDirection = vec.Vec2{
-        .x = rotatedLocal.x / scale.x,
-        .y = rotatedLocal.y / scale.y,
-    };
-    const length = vec.magnitude(pixelDirection);
+    const length = vec.magnitude(rotatedLocal);
     if (length < 0.001) {
         return .{ .x = 0.0, .y = -1.0 };
     }
     return .{
-        .x = pixelDirection.x / length,
-        .y = pixelDirection.y / length,
+        .x = rotatedLocal.x / length,
+        .y = rotatedLocal.y / length,
     };
 }
 
@@ -1052,9 +1048,9 @@ pub fn stainSplatOnSurface(
     const bytesPerPixel: usize = 4;
 
     const centerPixelF = worldToSpritePixel(s, centerWorld, entityPos, rotation, width, height);
-    const radiusPixels = @max(1.0, (radiusWorld * conv.met2pix) / @max(s.scale.x, s.scale.y));
+    const radiusRenderedPixels = @max(1.0, radiusWorld * conv.met2pix);
     const impactSpeed = vec.magnitude(impactVelocityWorld);
-    const impactDir = worldDirectionToSpritePixelDirection(impactVelocityWorld, rotation, s.scale);
+    const impactDir = worldDirectionToSpriteRenderDirection(impactVelocityWorld, rotation);
     const sideDir = vec.Vec2{ .x = -impactDir.y, .y = impactDir.x };
     const mainStretch = 1.0 + @min(impactSpeed * 0.08, 1.25);
 
@@ -1063,7 +1059,7 @@ pub fn stainSplatOnSurface(
     spots[spotCount] = .{
         .offsetX = 0.0,
         .offsetY = 0.0,
-        .radius = radiusPixels,
+        .radius = radiusRenderedPixels,
         .strength = 0.9,
     };
     spotCount += 1;
@@ -1072,12 +1068,12 @@ pub fn stainSplatOnSurface(
     for (0..satelliteCount) |i| {
         const saltBase = @as(u64, @intCast(i)) * 17;
         const alongBias = randomUnitFromSeed(seed, 40 + saltBase);
-        const distance = radiusPixels * (0.45 + randomUnitFromSeed(seed, 41 + saltBase) * (1.15 + @min(impactSpeed * 0.035, 0.85)));
-        const radius = radiusPixels * (0.08 + randomUnitFromSeed(seed, 42 + saltBase) * 0.2);
+        const distance = radiusRenderedPixels * (0.45 + randomUnitFromSeed(seed, 41 + saltBase) * (1.15 + @min(impactSpeed * 0.035, 0.85)));
+        const radius = radiusRenderedPixels * (0.08 + randomUnitFromSeed(seed, 42 + saltBase) * 0.2);
         const strength = 0.35 + randomUnitFromSeed(seed, 43 + saltBase) * 0.45;
 
         if (alongBias < 0.62) {
-            const sideOffset = (randomUnitFromSeed(seed, 44 + saltBase) - 0.5) * radiusPixels * 1.15;
+            const sideOffset = (randomUnitFromSeed(seed, 44 + saltBase) - 0.5) * radiusRenderedPixels * 1.15;
             spots[spotCount] = .{
                 .offsetX = impactDir.x * distance + sideDir.x * sideOffset,
                 .offsetY = impactDir.y * distance + sideDir.y * sideOffset,
@@ -1096,17 +1092,17 @@ pub fn stainSplatOnSurface(
         spotCount += 1;
     }
 
-    var extent = radiusPixels * mainStretch;
+    var extent = radiusRenderedPixels * mainStretch;
     for (spots[0..spotCount]) |spot| {
         extent = @max(extent, @abs(spot.offsetX) + spot.radius);
         extent = @max(extent, @abs(spot.offsetY) + spot.radius);
     }
     extent += 2.0;
 
-    const rawMinX: i32 = @intFromFloat(@floor(centerPixelF.x - extent));
-    const rawMaxX: i32 = @intFromFloat(@ceil(centerPixelF.x + extent));
-    const rawMinY: i32 = @intFromFloat(@floor(centerPixelF.y - extent));
-    const rawMaxY: i32 = @intFromFloat(@ceil(centerPixelF.y + extent));
+    const rawMinX: i32 = @intFromFloat(@floor(centerPixelF.x - extent / s.scale.x));
+    const rawMaxX: i32 = @intFromFloat(@ceil(centerPixelF.x + extent / s.scale.x));
+    const rawMinY: i32 = @intFromFloat(@floor(centerPixelF.y - extent / s.scale.y));
+    const rawMaxY: i32 = @intFromFloat(@ceil(centerPixelF.y + extent / s.scale.y));
 
     const widthI: i32 = @intCast(width);
     const heightI: i32 = @intCast(height);
@@ -1135,12 +1131,12 @@ pub fn stainSplatOnSurface(
     for (spots[0..spotCount], 0..) |spot, spotIndex| {
         const stretch = if (spotIndex == 0) mainStretch else 1.0;
         const spotExtent = spot.radius * stretch * 1.06;
-        const spotCenterX = centerPixelF.x + spot.offsetX;
-        const spotCenterY = centerPixelF.y + spot.offsetY;
-        const rawSpotMinX: i32 = @intFromFloat(@floor(spotCenterX - spotExtent));
-        const rawSpotMaxX: i32 = @intFromFloat(@ceil(spotCenterX + spotExtent));
-        const rawSpotMinY: i32 = @intFromFloat(@floor(spotCenterY - spotExtent));
-        const rawSpotMaxY: i32 = @intFromFloat(@ceil(spotCenterY + spotExtent));
+        const spotCenterX = centerPixelF.x + spot.offsetX / s.scale.x;
+        const spotCenterY = centerPixelF.y + spot.offsetY / s.scale.y;
+        const rawSpotMinX: i32 = @intFromFloat(@floor(spotCenterX - spotExtent / s.scale.x));
+        const rawSpotMaxX: i32 = @intFromFloat(@ceil(spotCenterX + spotExtent / s.scale.x));
+        const rawSpotMinY: i32 = @intFromFloat(@floor(spotCenterY - spotExtent / s.scale.y));
+        const rawSpotMaxY: i32 = @intFromFloat(@ceil(spotCenterY + spotExtent / s.scale.y));
         const minXI: i32 = @intCast(minX);
         const maxXI: i32 = @intCast(maxX);
         const minYI: i32 = @intCast(minY);
@@ -1162,8 +1158,8 @@ pub fn stainSplatOnSurface(
 
                 const xi: i32 = @intCast(x);
                 const yi: i32 = @intCast(y);
-                const px = @as(f32, @floatFromInt(xi)) - centerPixelF.x;
-                const py = @as(f32, @floatFromInt(yi)) - centerPixelF.y;
+                const px = (@as(f32, @floatFromInt(xi)) - centerPixelF.x) * s.scale.x;
+                const py = (@as(f32, @floatFromInt(yi)) - centerPixelF.y) * s.scale.y;
                 const localX = px - spot.offsetX;
                 const localY = py - spot.offsetY;
                 const along = localX * impactDir.x + localY * impactDir.y;
