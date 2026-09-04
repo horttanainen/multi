@@ -5,13 +5,17 @@ const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
+const player_input = @import("player_input.zig");
 const vec = @import("vector.zig");
 
 pub const KeyboardBindings = struct {
     moveLeft: sdl.Scancode,
     moveRight: sdl.Scancode,
+    moveUp: sdl.Scancode,
+    moveDown: sdl.Scancode,
 
     jump: sdl.Scancode,
+    dodge: sdl.Scancode,
 
     aimLeft: sdl.Scancode,
     aimRight: sdl.Scancode,
@@ -26,7 +30,10 @@ pub const KeyboardBindings = struct {
 pub const player1Bindings = KeyboardBindings{
     .moveLeft = .a,
     .moveRight = .d,
+    .moveUp = .t,
+    .moveDown = .g,
     .jump = .w,
+    .dodge = .e,
     .aimLeft = .f,
     .aimRight = .h,
     .aimUp = .t,
@@ -39,7 +46,10 @@ pub const player1Bindings = KeyboardBindings{
 pub const player2Bindings = KeyboardBindings{
     .moveLeft = .j,
     .moveRight = .l,
+    .moveUp = .up,
+    .moveDown = .down,
     .jump = .i,
+    .dodge = .u,
     .aimLeft = .left,
     .aimRight = .right,
     .aimUp = .up,
@@ -171,32 +181,20 @@ pub fn handleLevelEditor(_: *const controller.Controller) void {
 }
 
 pub fn handle(ctrl: *const controller.Controller) void {
-    const bindings = ctrl.keyBindings orelse return;
+    const bindings = ctrl.keyBindings orelse {
+        std.log.warn("keyboard.handle: key bindings are missing for player {d}", .{ctrl.playerId});
+        return;
+    };
 
     const keyStates = sdl.getKeyboardState();
+    var movementDirection = vec.zero;
     var aimDirection = vec.zero;
 
-    // Movement
-    const movingLeft = key(keyStates, bindings.moveLeft);
-    const movingRight = key(keyStates, bindings.moveRight);
+    if (key(keyStates, bindings.moveLeft)) movementDirection.x = -1;
+    if (key(keyStates, bindings.moveRight)) movementDirection.x = 1;
+    if (key(keyStates, bindings.moveUp)) movementDirection.y = 1;
+    if (key(keyStates, bindings.moveDown)) movementDirection.y = -1;
 
-    if (movingLeft) {
-        control.executeAction(ctrl.playerId, .move_left);
-    }
-    if (movingRight) {
-        control.executeAction(ctrl.playerId, .move_right);
-    }
-
-    if (!movingLeft and !movingRight) {
-        control.executeAction(ctrl.playerId, .brake);
-    }
-
-    // Jump
-    if (key(keyStates, bindings.jump)) {
-        control.executeAction(ctrl.playerId, .jump);
-    }
-
-    // Aiming - accumulate directions
     if (key(keyStates, bindings.aimLeft)) {
         aimDirection = vec.add(aimDirection, vec.west);
     }
@@ -210,22 +208,14 @@ pub fn handle(ctrl: *const controller.Controller) void {
         aimDirection = vec.add(aimDirection, vec.south);
     }
 
-    if (aimDirection.x != 0 or aimDirection.y != 0) {
-        control.executeAim(ctrl.playerId, aimDirection);
-    } else {
-        control.executeAimRelease(ctrl.playerId);
-    }
-
-    // Shooting
-    if (key(keyStates, bindings.shoot)) {
-        control.executeAction(ctrl.playerId, .shoot);
-    }
-
-    if (key(keyStates, bindings.rope)) {
-        control.executeAction(ctrl.playerId, .rope);
-    }
-
-    if (key(keyStates, bindings.sprayPaint)) {
-        control.executeAction(ctrl.playerId, .spray_paint);
-    }
+    var sample: player_input.Sample = .{
+        .movementDirection = movementDirection,
+        .aimDirection = aimDirection,
+    };
+    sample.buttons.set(.jump, key(keyStates, bindings.jump));
+    sample.buttons.set(.dodge, key(keyStates, bindings.dodge));
+    sample.buttons.set(.shoot, key(keyStates, bindings.shoot));
+    sample.buttons.set(.rope, key(keyStates, bindings.rope));
+    sample.buttons.set(.sprayPaint, key(keyStates, bindings.sprayPaint));
+    player_input.submit(ctrl.playerId, sample);
 }

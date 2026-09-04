@@ -24,6 +24,7 @@ const gameMenu = @import("gameMenu.zig");
 const rubble = @import("rubble.zig");
 const cursor = @import("cursor.zig");
 const spritePicker = @import("spritePicker.zig");
+const player_input = @import("player_input.zig");
 
 const leftButtonMask: u32 = 1;
 const middleButtonMask: u32 = 1 << 1;
@@ -104,6 +105,46 @@ pub fn handleAtlasDumpHotkey() void {
             delay.action("atlasDump", 1000);
         }
     }
+}
+
+pub fn applyAllPlayerInputs() void {
+    for (player_input.playerInputs.keys()) |playerId| {
+        applyPlayerInput(playerId);
+    }
+}
+
+pub fn applyPlayerInput(playerId: usize) void {
+    const inputState = player_input.playerInputs.get(playerId) orelse {
+        std.log.warn("control.applyPlayerInput: input state is missing for player {d}", .{playerId});
+        return;
+    };
+
+    if (inputState.movementDirection.x < 0) {
+        executeAction(playerId, .move_left);
+    } else if (inputState.movementDirection.x > 0) {
+        executeAction(playerId, .move_right);
+    } else {
+        executeAction(playerId, .brake);
+    }
+
+    if (inputState.buttons.get(.jump).held) executeAction(playerId, .jump);
+
+    if (inputState.aimDirection.x == 0 and inputState.aimDirection.y == 0) {
+        executeAimRelease(playerId);
+    } else {
+        executeAim(playerId, inputState.aimDirection);
+    }
+
+    if (inputState.buttons.get(.shoot).held) executeAction(playerId, .shoot);
+    if (inputState.buttons.get(.zoom).held) {
+        executeZoom(playerId);
+    } else {
+        executeZoomRelease(playerId);
+    }
+    if (inputState.buttons.get(.rope).held) executeAction(playerId, .rope);
+    if (inputState.buttons.get(.sprayPaint).held) executeAction(playerId, .spray_paint);
+    if (inputState.buttons.get(.weaponNext).held) executeAction(playerId, .weapon_next);
+    if (inputState.buttons.get(.weaponPrev).held) executeAction(playerId, .weapon_prev);
 }
 
 pub fn executeAction(playerId: usize, action: controller.GameAction) void {

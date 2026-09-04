@@ -4,6 +4,7 @@ const state = @import("state.zig");
 const control = @import("control.zig");
 const controller = @import("controller.zig");
 const movement = @import("movement.zig");
+const player_input = @import("player_input.zig");
 const keyboard = @import("keyboard.zig");
 const gamepad = @import("gamepad.zig");
 const window = @import("window.zig");
@@ -36,8 +37,14 @@ pub fn handle() !void {
     movement.clearAllMovementIntents();
     control.handleAtlasDumpHotkey();
 
+    if (state.quitGame) {
+        neutralizeGameplayInput();
+        return;
+    }
+
     // Any open menu (game menu or config menu) takes priority
     if (menu.isOpen()) {
+        neutralizeGameplayInput();
         try menu.handleInput();
         return;
     }
@@ -59,11 +66,14 @@ pub fn handle() !void {
         if (start_pressed and !delay.check("menuToggle")) {
             gameMenu.openGameMenu();
             delay.action("menuToggle", 400);
+            neutralizeGameplayInput();
             return;
         }
     }
 
     if (state.editingBackground) {
+        neutralizeGameplayInput();
+
         // Y/triangle button or T key opens background config menu
         {
             var it = gamepad.assignedGamepads.valueIterator();
@@ -85,6 +95,8 @@ pub fn handle() !void {
     }
 
     if (state.editingLevel) {
+        neutralizeGameplayInput();
+
         var it = controller.controllers.iterator();
         while (it.next()) |kv| {
             const ctrl = kv.value_ptr;
@@ -106,6 +118,12 @@ pub fn handle() !void {
             }
         }
 
+        control.applyAllPlayerInputs();
         try control.handleGameMouseInput();
     }
+}
+
+fn neutralizeGameplayInput() void {
+    player_input.neutralizeAll();
+    control.applyAllPlayerInputs();
 }

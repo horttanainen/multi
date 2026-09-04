@@ -241,6 +241,13 @@ pub fn main(init: std.process.Init) !void {
 
         time.frameBegin();
 
+        const inputStart = if (collectFramePerf) perf.begin(.explosion) else 0;
+        const playerDeathInputStart = perf.begin(.player_death);
+        try input.handle();
+        perf.recordPlayerDeathFrameStage(.input, playerDeathInputStart);
+        const inputUs = perf.elapsedUs(inputStart);
+        if (state.quitGame) break;
+
         const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         const playerDeathPhysicsStart = perf.begin(.player_death);
         blast_pressure_visual.update();
@@ -250,12 +257,6 @@ pub fn main(init: std.process.Init) !void {
         const physicsStepCount = try physics.step();
         perf.recordPlayerDeathFrameStage(.physics, playerDeathPhysicsStart);
         const physicsUs = perf.elapsedUs(physicsStart);
-
-        const inputStart = if (collectFramePerf) perf.begin(.explosion) else 0;
-        const playerDeathInputStart = perf.begin(.player_death);
-        try input.handle();
-        perf.recordPlayerDeathFrameStage(.input, playerDeathInputStart);
-        const inputUs = perf.elapsedUs(inputStart);
 
         const logicStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         const playerDeathLogicStart = perf.begin(.player_death);

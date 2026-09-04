@@ -8,19 +8,25 @@ const entity = @import("entity.zig");
 const camera = @import("camera.zig");
 const particle = @import("particle.zig");
 const sensor = @import("sensor.zig");
+const player_input = @import("player_input.zig");
 
 pub fn step() !usize {
     // Step box2d.c physics world
     var stepCount: usize = 0;
     while (time.accumulator >= config.physics.dt) {
-        entity.updateStates();
-        particle.updateStates();
-        player.updateAllStates();
-        movement.clampAllSpeeds();
-        movement.applyAll(config.physics.dt);
-        box2d.worldStep(config.physics.dt, config.physics.subStepCount);
-        try movement.processSensorEvents();
-        try sensor.processSensorEvents();
+        {
+            player_input.beginPhysicsStep();
+            defer player_input.endPhysicsStep();
+
+            entity.updateStates();
+            particle.updateStates();
+            player.updateAllStates();
+            movement.clampAllSpeeds();
+            movement.applyAll(config.physics.dt);
+            box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+            try movement.processSensorEvents();
+            try sensor.processSensorEvents();
+        }
         time.accumulator -= config.physics.dt;
         stepCount += 1;
     }

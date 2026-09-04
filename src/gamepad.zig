@@ -7,6 +7,7 @@ const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
+const player_input = @import("player_input.zig");
 const vec = @import("vector.zig");
 
 pub const stickDeadzone: f32 = 0.15;
@@ -21,12 +22,13 @@ pub const GamepadState = struct {
 
 pub const GamepadBindings = struct {
     // Movement
-    moveLeftAxis: sdl.GamepadAxis,
-    moveRightAxis: sdl.GamepadAxis,
+    moveXAxis: sdl.GamepadAxis,
+    moveYAxis: sdl.GamepadAxis,
     moveThreshold: f32,
 
-    // Jump
+    // Platforming
     jumpButton: sdl.GamepadButton,
+    dodgeButton: sdl.GamepadButton,
 
     // Aiming
     aimXAxis: sdl.GamepadAxis,
@@ -79,11 +81,12 @@ pub const defaultEditorBindings = LevelEditorGamepadBindings{
 };
 
 pub const defaultBindings = GamepadBindings{
-    .moveLeftAxis = .leftx,
-    .moveRightAxis = .leftx,
+    .moveXAxis = .leftx,
+    .moveYAxis = .lefty,
     .moveThreshold = MOVEMENT_THRESHOLD,
 
     .jumpButton = .a,
+    .dodgeButton = .b,
 
     .aimXAxis = .rightx,
     .aimYAxis = .righty,
@@ -167,6 +170,12 @@ fn normalizeAxis(rawValue: i16) f32 {
         return 0.0;
     }
     return normalized;
+}
+
+fn digitalAxis(value: f32, threshold: f32) f32 {
+    if (value < -threshold) return -1;
+    if (value > threshold) return 1;
+    return 0;
 }
 
 fn applyRadialDeadzone(rawX: i16, rawY: i16, deadzone: f32) vec.Vec2 {
@@ -256,61 +265,54 @@ pub fn handleLevelEditor(ctrl: *const controller.Controller) void {
 }
 
 pub fn handle(ctrl: *const controller.Controller) void {
-    const bindings = ctrl.gamepadBindings orelse return;
+    const bindings = ctrl.gamepadBindings orelse {
+        std.log.warn("gamepad.handle: gamepad bindings are missing for player {d}", .{ctrl.playerId});
+        return;
+    };
 
-    const gp = assignedGamepads.get(ctrl.playerId) orelse return;
-    const sdlGamepad = gp.gamepad orelse return;
+    const gp = assignedGamepads.get(ctrl.playerId) orelse {
+        std.log.warn("gamepad.handle: assigned gamepad is missing for player {d}", .{ctrl.playerId});
+        player_input.neutralize(ctrl.playerId);
+        return;
+    };
+    const sdlGamepad = gp.gamepad orelse {
+        std.log.warn("gamepad.handle: SDL gamepad is missing for player {d}", .{ctrl.playerId});
+        player_input.neutralize(ctrl.playerId);
+        return;
+    };
 
-    const moveAxis = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveLeftAxis));
-    if (moveAxis < -bindings.moveThreshold) {
-        control.executeAction(ctrl.playerId, .move_left);
-    } else if (moveAxis > bindings.moveThreshold) {
-        control.executeAction(ctrl.playerId, .move_right);
-    } else {
-        control.executeAction(ctrl.playerId, .brake);
-    }
-
-    if (sdl.getGamepadButton(sdlGamepad, bindings.jumpButton)) {
-        control.executeAction(ctrl.playerId, .jump);
-    }
+    const moveX = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveXAxis));
+    const moveY = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveYAxis));
+    const movementDirection: vec.Vec2 = .{
+        .x = digitalAxis(moveX, bindings.moveThreshold),
+        .y = -digitalAxis(moveY, bindings.moveThreshold),
+    };
 
     const rawAimX = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis);
     const rawAimY = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis);
     const aim = applyRadialDeadzone(rawAimX, rawAimY, stickDeadzone);
 
-    if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold) {
-        const aimDirection = vec.Vec2{ .x = aim.x, .y = -aim.y };
-        control.executeAim(ctrl.playerId, aimDirection);
-    } else {
-        control.executeAimRelease(ctrl.playerId);
-    }
+    const aimDirection: vec.Vec2 = if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold)
+        .{ .x = aim.x, .y = -aim.y }
+    else
+        vec.zero;
 
     const shootValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.shootAxis));
-    if (shootValue > bindings.shootThreshold) {
-        control.executeAction(ctrl.playerId, .shoot);
-    }
-
     const zoomValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, .triggerleft));
-    if (zoomValue > TRIGGER_THRESHOLD) {
-        control.executeZoom(ctrl.playerId);
-    } else {
-        control.executeZoomRelease(ctrl.playerId);
-    }
 
-    if (sdl.getGamepadButton(sdlGamepad, bindings.ropeButton)) {
-        control.executeAction(ctrl.playerId, .rope);
-    }
-
-    if (sdl.getGamepadButton(sdlGamepad, bindings.sprayPaintButton)) {
-        control.executeAction(ctrl.playerId, .spray_paint);
-    }
-
-    if (sdl.getGamepadButton(sdlGamepad, bindings.weaponNextButton)) {
-        control.executeAction(ctrl.playerId, .weapon_next);
-    }
-    if (sdl.getGamepadButton(sdlGamepad, bindings.weaponPrevButton)) {
-        control.executeAction(ctrl.playerId, .weapon_prev);
-    }
+    var sample: player_input.Sample = .{
+        .movementDirection = movementDirection,
+        .aimDirection = aimDirection,
+    };
+    sample.buttons.set(.jump, sdl.getGamepadButton(sdlGamepad, bindings.jumpButton));
+    sample.buttons.set(.dodge, sdl.getGamepadButton(sdlGamepad, bindings.dodgeButton));
+    sample.buttons.set(.shoot, shootValue > bindings.shootThreshold);
+    sample.buttons.set(.zoom, zoomValue > TRIGGER_THRESHOLD);
+    sample.buttons.set(.rope, sdl.getGamepadButton(sdlGamepad, bindings.ropeButton));
+    sample.buttons.set(.sprayPaint, sdl.getGamepadButton(sdlGamepad, bindings.sprayPaintButton));
+    sample.buttons.set(.weaponNext, sdl.getGamepadButton(sdlGamepad, bindings.weaponNextButton));
+    sample.buttons.set(.weaponPrev, sdl.getGamepadButton(sdlGamepad, bindings.weaponPrevButton));
+    player_input.submit(ctrl.playerId, sample);
 }
 
 pub fn cleanup() void {

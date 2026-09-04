@@ -5,6 +5,7 @@ const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const gamepad = @import("gamepad.zig");
 const keyboard = @import("keyboard.zig");
+const player_input = @import("player_input.zig");
 
 pub const InputType = enum {
     keyboard,
@@ -66,6 +67,7 @@ pub fn recalculateControllers() !void {
         const ctrl = entry.value_ptr;
         if (ctrl.inputType == .keyboard) {
             if (gamepad.createController(ctrl.playerId, ctrl.color)) |newCtrl| {
+                player_input.neutralize(ctrl.playerId);
                 if (ctrl.keyBindings) |keyBindings| {
                     try keyboard.keyboardBindings.append(allocator, keyBindings);
                 }
@@ -73,6 +75,7 @@ pub fn recalculateControllers() !void {
             }
         }
         if (ctrl.inputType == .gamepad and !gamepad.assignedGamepads.contains(ctrl.playerId)) {
+            player_input.neutralize(ctrl.playerId);
             if (keyboard.createController(ctrl.playerId, ctrl.color)) |newCtrl| {
                 try controllers.put(allocator, ctrl.playerId, newCtrl);
             }
@@ -81,6 +84,8 @@ pub fn recalculateControllers() !void {
 }
 
 pub fn createControllerForPlayer(playerId: usize) !sprite.Color {
+    try player_input.register(playerId);
+
     const maybeColor = availableColors.pop();
     const defaultColor: sprite.Color = .{ .r = 150, .g = 150, .b = 150 };
     const color = if (maybeColor) |c| c else defaultColor;
@@ -108,4 +113,5 @@ pub fn init() !void {
 pub fn cleanup() void {
     controllers.deinit(allocator);
     availableColors.deinit(allocator);
+    player_input.cleanup();
 }
