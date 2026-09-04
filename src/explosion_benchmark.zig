@@ -9,9 +9,11 @@ const particle = @import("particle.zig");
 const perf = @import("perf.zig");
 const player = @import("player.zig");
 const projectile = @import("projectile.zig");
+const spawn = @import("spawn.zig");
 const state = @import("state.zig");
 const tex = @import("texture.zig");
 const vec = @import("vector.zig");
+const weapon = @import("weapon.zig");
 
 pub const Scenario = enum {
     air_explosion,
@@ -20,6 +22,7 @@ pub const Scenario = enum {
     ground_explosion,
     ground_explosion_no_visual,
     ground_death,
+    tower_keep_player_kill,
 };
 
 pub const Options = struct {
@@ -37,14 +40,19 @@ const CounterSnapshot = struct {
 };
 
 const maximumGroundEvents: u32 = 3;
-const warmupFrameCount: u32 = 30;
+const maximumImpactWaitFrames: u32 = 600;
+const maximumTowerKeepEvents: u32 = 1;
+const warmupFrameCount: u32 = 240;
 const betweenEventFrameCount: u32 = 30;
-const benchmarkLevelPath = "levels/perf_explosion_ground.json";
+const explosionBenchmarkLevelPath = "levels/perf_explosion_ground.json";
+const towerKeepLevelPath = "levels/tower_keep.json";
 
 pub var options: Options = .{};
 
 var framesUntilTrigger: u32 = warmupFrameCount;
 var eventIndex: u32 = 0;
+var framesWaitingForImpact: u32 = 0;
+var waitingForImpact = false;
 var waitingForCapture = false;
 var eventCounters: CounterSnapshot = undefined;
 var triggerCounters: CounterSnapshot = undefined;
@@ -57,6 +65,7 @@ fn scenarioFromName(name: []const u8) !Scenario {
     if (std.mem.eql(u8, name, "ground-explosion")) return .ground_explosion;
     if (std.mem.eql(u8, name, "ground-explosion-no-visual")) return .ground_explosion_no_visual;
     if (std.mem.eql(u8, name, "ground-death")) return .ground_death;
+    if (std.mem.eql(u8, name, "tower-keep-player-kill")) return .tower_keep_player_kill;
 
     std.log.err("explosion_benchmark.scenarioFromName: unknown scenario '{s}'", .{name});
     return error.InvalidExplosionBenchmarkScenario;
@@ -70,6 +79,7 @@ fn scenarioName(scenario: Scenario) []const u8 {
         .ground_explosion => "ground-explosion",
         .ground_explosion_no_visual => "ground-explosion-no-visual",
         .ground_death => "ground-death",
+        .tower_keep_player_kill => "tower-keep-player-kill",
     };
 }
 
@@ -117,6 +127,10 @@ pub fn configure(args: []const []const u8) !void {
         std.log.err("explosion_benchmark.configure: ground scenarios support at most {d} non-overlapping events", .{maximumGroundEvents});
         return error.TooManyExplosionBenchmarkEvents;
     }
+    if (options.scenario == .tower_keep_player_kill and options.event_count > maximumTowerKeepEvents) {
+        std.log.err("explosion_benchmark.configure: Tower Keep player-kill scenario supports one first-kill event", .{});
+        return error.TooManyExplosionBenchmarkEvents;
+    }
 
     std.log.info(
         "perf.benchmark_config scenario={s} events={d} warmup_frames={d}",
@@ -129,7 +143,7 @@ fn scenarioUsesGround(scenario: Scenario) bool {
 }
 
 fn scenarioDamagesPlayer(scenario: Scenario) bool {
-    return scenario == .air_death or scenario == .ground_death;
+    return scenario == .air_death or scenario == .ground_death or scenario == .tower_keep_player_kill;
 }
 
 fn scenarioUsesVisual(scenario: Scenario) bool {
@@ -138,7 +152,8 @@ fn scenarioUsesVisual(scenario: Scenario) bool {
 
 pub fn levelPath() ?[]const u8 {
     if (!options.enabled) return null;
-    return benchmarkLevelPath;
+    if (options.scenario == .tower_keep_player_kill) return towerKeepLevelPath;
+    return explosionBenchmarkLevelPath;
 }
 
 fn counterSnapshot() CounterSnapshot {
@@ -204,6 +219,57 @@ fn prepareVictim(victimId: usize, attackerId: usize, maximumDamage: f32) !void {
     }
 }
 
+fn triggerTowerKeepPlayerKill(attackerId: usize, victimId: usize, explosion: projectile.Explosion) !void {
+    const attacker = player.players.getPtr(attackerId) orelse {
+        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: attacker player {d} is missing", .{attackerId});
+        return error.ExplosionBenchmarkPlayerMissing;
+    };
+    if (attacker.weapons.len == 0) {
+        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: attacker player {d} has no weapon", .{attackerId});
+        return error.ExplosionBenchmarkWeaponMissing;
+    }
+
+    const attackerSpawn = try spawn.positionForPlayer(attackerId);
+    const victimSpawn = try spawn.positionForPlayer(victimId);
+    const victimBodyPosition = conv.pixel2M(victimSpawn);
+    try positionPlayer(attackerId, conv.pixel2M(attackerSpawn));
+    try positionPlayer(victimId, victimBodyPosition);
+    player.aim(attacker, vec.east);
+    try prepareVictim(victimId, attackerId, explosion.maximumDamage);
+
+    const selectedWeapon = attacker.weapons[attacker.selectedWeaponIndex];
+    if (selectedWeapon.projectile == null) {
+        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: player {d} selected a non-projectile weapon", .{attackerId});
+        return error.ExplosionBenchmarkProjectileWeaponMissing;
+    }
+    const target = vec.add(victimBodyPosition, player.centerOffset);
+    const launchPosition = vec.Vec2{
+        .x = conv.pixel2M(attackerSpawn).x,
+        .y = target.y,
+    };
+    const launchPixelPosition = conv.m2Pixel(vec.toBox2d(launchPosition));
+
+    eventCounters = counterSnapshot();
+    const projectileCountBefore = projectile.activeProjectiles.count();
+    const triggerStart = perf.begin(.explosion);
+    try weapon.shoot(selectedWeapon, launchPixelPosition, vec.east, vec.zero, attackerId);
+    eventTriggerUs = perf.elapsedUs(triggerStart);
+    const projectileCountAfter = projectile.activeProjectiles.count();
+    if (projectileCountAfter <= projectileCountBefore) {
+        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: player {d} did not fire a projectile", .{attackerId});
+        return error.ExplosionBenchmarkProjectileMissing;
+    }
+
+    triggerCounters = counterSnapshot();
+    waitingForImpact = true;
+    framesWaitingForImpact = 0;
+
+    std.log.info(
+        "perf.benchmark_event_begin scenario={s} event={d} cold={} target_x={d:.3} target_y={d:.3} trigger_us={d}",
+        .{ scenarioName(options.scenario), eventIndex + 1, eventIndex == 0, target.x, target.y, eventTriggerUs },
+    );
+}
+
 fn triggerEvent() !void {
     const attackerId: usize = 0;
     const victimId: usize = 1;
@@ -214,6 +280,10 @@ fn triggerEvent() !void {
     if (victim.isDead) return;
 
     var explosion = try data.createExplosionFrom("missile_explosion");
+    if (options.scenario == .tower_keep_player_kill) {
+        try triggerTowerKeepPlayerKill(attackerId, victimId, explosion);
+        return;
+    }
     if (!scenarioDamagesPlayer(options.scenario)) explosion.damagePlayers = false;
     if (!scenarioUsesVisual(options.scenario)) explosion.visual = null;
 
@@ -266,6 +336,29 @@ fn reportCompletedEvent() void {
 
 pub fn update() !void {
     if (!options.enabled) return;
+
+    if (waitingForImpact) {
+        const victimId: usize = 1;
+        const victim = player.players.get(victimId) orelse {
+            std.log.err("explosion_benchmark.update: victim player {d} is missing while waiting for impact", .{victimId});
+            return error.ExplosionBenchmarkPlayerMissing;
+        };
+        if (victim.isDead) {
+            waitingForImpact = false;
+            waitingForCapture = true;
+            return;
+        }
+        if (projectile.activeProjectiles.count() == 0) {
+            std.log.err("explosion_benchmark.update: Tower Keep projectile ended without killing player {d}", .{victimId});
+            return error.ExplosionBenchmarkProjectileMissed;
+        }
+        if (framesWaitingForImpact >= maximumImpactWaitFrames) {
+            std.log.err("explosion_benchmark.update: Tower Keep projectile did not hit within {d} frames", .{maximumImpactWaitFrames});
+            return error.ExplosionBenchmarkProjectileTimedOut;
+        }
+        framesWaitingForImpact += 1;
+        return;
+    }
 
     if (waitingForCapture) {
         if (projectile.shouldCollectPerfFrameLog() or perf.playerDeathCaptureActive()) return;

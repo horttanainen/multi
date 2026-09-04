@@ -46,12 +46,18 @@ pub const CircleSpawn = struct {
 
 pub const Particle = struct {
     bodyId: box2d.c.b2BodyId,
+    shapeId: box2d.c.b2ShapeId,
     state: ?box2d.State,
     color: ?sprite.Color,
     visual_scale: f32,
     expires_at: f64,
     behaviors: Behaviors,
     seed: u64,
+};
+
+const ParticleBody = struct {
+    bodyId: box2d.c.b2BodyId,
+    shapeId: box2d.c.b2ShapeId,
 };
 
 pub const StainTextureUpdate = struct {
@@ -68,7 +74,8 @@ pub const PendingStain = struct {
 
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 pub var bodyCreationCount: u64 = 0;
-var particlesToCleanup = thread_safe.ThreadSafeArrayList(box2d.c.b2BodyId).init(allocator);
+var availableBodies = std.ArrayListUnmanaged(ParticleBody).empty;
+var particlesToCleanup = thread_safe.ThreadSafeArrayList(ParticleBody).init(allocator);
 pub var pendingStains = std.ArrayListUnmanaged(PendingStain).empty;
 pub var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
 const stainTextureRegionMaxEdge: i32 = 128;
@@ -86,6 +93,71 @@ pub fn init(circleSpritePath: []const u8) !void {
         vec.zero,
         .canvas_pixels,
     );
+}
+
+fn destroyParticleBody(body: ParticleBody) void {
+    if (!box2d.c.b2Body_IsValid(body.bodyId)) {
+        std.log.warn("particle.destroyParticleBody: particle body is already invalid", .{});
+        return;
+    }
+    box2d.c.b2DestroyBody(body.bodyId);
+}
+
+fn createParticleBody() !ParticleBody {
+    const bodyDef = box2d.createNonRotatingDynamicBodyDef(vec.zero);
+    const bodyId = try box2d.createBody(bodyDef);
+    errdefer box2d.c.b2DestroyBody(bodyId);
+
+    const shapeDef = box2d.c.b2DefaultShapeDef();
+    const circle = box2d.c.b2Circle{
+        .center = box2d.c.b2Vec2_zero,
+        .radius = 0.1,
+    };
+    const shapeId = box2d.c.b2CreateCircleShape(bodyId, &shapeDef, &circle);
+    if (!box2d.c.b2Shape_IsValid(shapeId)) {
+        std.log.err("particle.createParticleBody: Box2D returned an invalid shape", .{});
+        return error.InvalidParticleShape;
+    }
+    box2d.c.b2Body_Disable(bodyId);
+
+    if (comptime config.perf.explosion) bodyCreationCount += 1;
+    return .{ .bodyId = bodyId, .shapeId = shapeId };
+}
+
+pub fn prewarmBodies(count: usize) !void {
+    if (count <= availableBodies.items.len) return;
+
+    try availableBodies.ensureTotalCapacity(allocator, count);
+    particles.mutex.lockUncancelable(runtime.io());
+    defer particles.mutex.unlock(runtime.io());
+    try particles.map.ensureTotalCapacity(allocator, count);
+
+    particlesToCleanup.mutex.lockUncancelable(runtime.io());
+    defer particlesToCleanup.mutex.unlock(runtime.io());
+    try particlesToCleanup.list.ensureTotalCapacity(count);
+
+    while (availableBodies.items.len < count) {
+        availableBodies.appendAssumeCapacity(try createParticleBody());
+    }
+}
+
+fn acquireParticleBody() !ParticleBody {
+    const body = availableBodies.pop() orelse return createParticleBody();
+    return body;
+}
+
+fn retainParticleBody(body: ParticleBody) void {
+    if (!box2d.c.b2Body_IsValid(body.bodyId) or !box2d.c.b2Shape_IsValid(body.shapeId)) {
+        std.log.warn("particle.retainParticleBody: particle body or shape became invalid", .{});
+        destroyParticleBody(body);
+        return;
+    }
+
+    box2d.c.b2Body_Disable(body.bodyId);
+    availableBodies.append(allocator, body) catch |err| {
+        std.log.err("particle.retainParticleBody: could not retain particle body: {}", .{err});
+        destroyParticleBody(body);
+    };
 }
 
 fn validateBehaviors(behaviors: Behaviors) !void {
@@ -118,33 +190,36 @@ pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
     }
     try validateBehaviors(spawn.behaviors);
 
-    var bodyDef = box2d.createNonRotatingDynamicBodyDef(spawn.position);
-    bodyDef.isBullet = spawn.is_bullet;
-    bodyDef.linearDamping = spawn.linear_damping;
-    bodyDef.gravityScale = spawn.gravity_scale;
-    bodyDef.linearVelocity = vec.toBox2d(spawn.velocity);
-
-    const bodyId = try box2d.createBody(bodyDef);
-    errdefer box2d.c.b2DestroyBody(bodyId);
-
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.density = spawn.density;
-    shapeDef.material.friction = spawn.friction;
-    shapeDef.material.restitution = spawn.restitution;
-    shapeDef.filter.groupIndex = spawn.group_index;
-    shapeDef.filter.categoryBits = spawn.category_bits;
-    shapeDef.filter.maskBits = spawn.mask_bits;
-    shapeDef.enableHitEvents = spawn.behaviors.stain != null;
-    shapeDef.enableContactEvents = spawn.behaviors.stain != null;
-
+    const body = try acquireParticleBody();
+    errdefer retainParticleBody(body);
     const circle = box2d.c.b2Circle{
         .center = box2d.c.b2Vec2_zero,
         .radius = radius,
     };
-    _ = box2d.c.b2CreateCircleShape(bodyId, &shapeDef, &circle);
+    box2d.c.b2Shape_SetCircle(body.shapeId, &circle);
+    box2d.c.b2Shape_SetDensity(body.shapeId, spawn.density, false);
+    box2d.c.b2Shape_SetFriction(body.shapeId, spawn.friction);
+    box2d.c.b2Shape_SetRestitution(body.shapeId, spawn.restitution);
+    var filter = box2d.c.b2DefaultFilter();
+    filter.groupIndex = spawn.group_index;
+    filter.categoryBits = spawn.category_bits;
+    filter.maskBits = spawn.mask_bits;
+    box2d.c.b2Shape_SetFilter(body.shapeId, filter);
+    box2d.c.b2Shape_EnableHitEvents(body.shapeId, spawn.behaviors.stain != null);
+    box2d.c.b2Shape_EnableContactEvents(body.shapeId, spawn.behaviors.stain != null);
 
-    try particles.putLocking(bodyId, .{
-        .bodyId = bodyId,
+    box2d.c.b2Body_SetTransform(body.bodyId, vec.toBox2d(spawn.position), box2d.c.b2Rot_identity);
+    box2d.c.b2Body_SetLinearVelocity(body.bodyId, vec.toBox2d(spawn.velocity));
+    box2d.c.b2Body_SetAngularVelocity(body.bodyId, 0);
+    box2d.c.b2Body_SetLinearDamping(body.bodyId, spawn.linear_damping);
+    box2d.c.b2Body_SetGravityScale(body.bodyId, spawn.gravity_scale);
+    box2d.c.b2Body_SetFixedRotation(body.bodyId, true);
+    box2d.c.b2Body_SetBullet(body.bodyId, spawn.is_bullet);
+    box2d.c.b2Body_ApplyMassFromShapes(body.bodyId);
+
+    try particles.putLocking(body.bodyId, .{
+        .bodyId = body.bodyId,
+        .shapeId = body.shapeId,
         .state = null,
         .color = spawn.color,
         .visual_scale = spawn.visual_scale,
@@ -152,9 +227,9 @@ pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
         .behaviors = spawn.behaviors,
         .seed = spawn.seed,
     });
-    if (comptime config.perf.explosion) bodyCreationCount += 1;
+    box2d.c.b2Body_Enable(body.bodyId);
 
-    return bodyId;
+    return body.bodyId;
 }
 
 pub fn updateStates() void {
@@ -344,11 +419,15 @@ fn processContact(bodyId: box2d.c.b2BodyId) !bool {
         return true;
     }
 
-    _ = particles.fetchSwapRemoveLocking(bodyId);
-    if (box2d.c.b2Body_IsValid(bodyId)) {
-        box2d.c.b2Body_Disable(bodyId);
-    }
-    try particlesToCleanup.appendLocking(bodyId);
+    const removed = particles.fetchSwapRemoveLocking(bodyId) orelse {
+        std.log.warn("particle.processContact: particle disappeared before cleanup", .{});
+        return true;
+    };
+    box2d.c.b2Body_Disable(bodyId);
+    try particlesToCleanup.appendLocking(.{
+        .bodyId = removed.value.bodyId,
+        .shapeId = removed.value.shapeId,
+    });
     return true;
 }
 
@@ -387,20 +466,13 @@ pub fn processOnePendingStain() !bool {
     return true;
 }
 
-fn destroyParticleBody(bodyId: box2d.c.b2BodyId) void {
-    if (box2d.c.b2Body_IsValid(bodyId)) {
-        box2d.c.b2DestroyBody(bodyId);
-    }
-}
-
 pub fn cleanupParticles() !void {
     {
         particlesToCleanup.mutex.lockUncancelable(runtime.io());
         defer particlesToCleanup.mutex.unlock(runtime.io());
 
-        for (particlesToCleanup.list.items) |bodyId| {
-            _ = particles.fetchSwapRemoveLocking(bodyId);
-            destroyParticleBody(bodyId);
+        for (particlesToCleanup.list.items) |body| {
+            retainParticleBody(body);
         }
         particlesToCleanup.list.clearRetainingCapacity();
     }
@@ -421,8 +493,14 @@ pub fn cleanupParticles() !void {
     }
 
     for (expiredBodyIds.items) |bodyId| {
-        _ = particles.fetchSwapRemoveLocking(bodyId);
-        destroyParticleBody(bodyId);
+        const removed = particles.fetchSwapRemoveLocking(bodyId) orelse {
+            std.log.warn("particle.cleanupParticles: expired particle disappeared before cleanup", .{});
+            continue;
+        };
+        retainParticleBody(.{
+            .bodyId = removed.value.bodyId,
+            .shapeId = removed.value.shapeId,
+        });
     }
 }
 
@@ -431,16 +509,22 @@ pub fn cleanup() void {
     stainTextureUpdates.deinit(allocator);
 
     particles.mutex.lockUncancelable(runtime.io());
-    for (particles.map.keys()) |bodyId| {
-        destroyParticleBody(bodyId);
+    for (particles.map.values()) |particle| {
+        destroyParticleBody(.{ .bodyId = particle.bodyId, .shapeId = particle.shapeId });
     }
     particles.map.clearAndFree(allocator);
     particles.mutex.unlock(runtime.io());
 
     particlesToCleanup.mutex.lockUncancelable(runtime.io());
     defer particlesToCleanup.mutex.unlock(runtime.io());
-    for (particlesToCleanup.list.items) |bodyId| {
-        destroyParticleBody(bodyId);
+    for (particlesToCleanup.list.items) |body| {
+        destroyParticleBody(body);
     }
     particlesToCleanup.list.clearAndFree();
+
+    for (availableBodies.items) |body| {
+        destroyParticleBody(body);
+    }
+    availableBodies.deinit(allocator);
+    availableBodies = .empty;
 }

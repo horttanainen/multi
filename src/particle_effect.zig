@@ -25,6 +25,7 @@ pub const Emission = struct {
 
 pub var presets = std.AutoArrayHashMapUnmanaged(Id, data.ParticleData).empty;
 var presetNames = std.AutoArrayHashMapUnmanaged(Id, []const u8).empty;
+const prewarmedBurstCount: usize = 2;
 
 fn idFromName(name: []const u8) Id {
     return std.hash.Wyhash.hash(0, name);
@@ -78,6 +79,7 @@ fn validatePreset(name: []const u8, preset: data.ParticleData) !void {
 pub fn init() !void {
     errdefer cleanup();
 
+    var maximumParticleCount: usize = 0;
     var presetIterator = data.particleDataMap.iterator();
     while (presetIterator.next()) |entry| {
         const name = entry.key_ptr.*;
@@ -93,7 +95,10 @@ pub fn init() !void {
 
         try presets.put(allocator, id, preset);
         try presetNames.put(allocator, id, name);
+        maximumParticleCount = @max(maximumParticleCount, preset.maxParticles);
     }
+
+    try particle.prewarmBodies(maximumParticleCount * prewarmedBurstCount);
 }
 
 pub fn idForName(name: []const u8) ?Id {

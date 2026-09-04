@@ -88,6 +88,7 @@ const Random = struct {
 var visualRandom = Random{ .state = 1 };
 
 const maximumSmokeParticlesPerExplosion: usize = 64;
+const maximumConcurrentExplosionEvents: usize = 64;
 const smokePlacementAttemptsPerParticle: u32 = 8;
 
 fn idFromName(name: []const u8) Id {
@@ -218,6 +219,8 @@ pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
     circleSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
     flashSpriteUuid = try sprite.createFromImg("particles/explosion-flash.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
     smokeSpriteUuid = try sprite.createFromImg("particles/smoke-puff.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
+    try events.ensureTotalCapacity(allocator, maximumConcurrentExplosionEvents);
+    try visual_particle.reserveCapacity();
 
     var iterator = sourcePresets.iterator();
     while (iterator.next()) |entry| {

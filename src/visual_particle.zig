@@ -42,6 +42,10 @@ pub const Particle = struct {
 
 pub var particles = std.ArrayListUnmanaged(Particle).empty;
 
+pub fn reserveCapacity() !void {
+    try particles.ensureTotalCapacity(allocator, maxParticles);
+}
+
 pub fn spawn(spawnData: Spawn) !void {
     if (particles.items.len >= maxParticles) return;
     try particles.append(allocator, .{

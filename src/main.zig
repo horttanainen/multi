@@ -230,7 +230,7 @@ pub fn main(init: std.process.Init) !void {
     if (level_overview.options.enabled) {
         try level_overview.capture();
         state.quitGame = true;
-    } else {
+    } else if (!explosion_benchmark.options.enabled) {
         _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
     }
 
