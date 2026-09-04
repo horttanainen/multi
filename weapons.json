@@ -10,6 +10,16 @@
         "penetration": "non_penetrating"
     },
     {
+        "key": "harpoon",
+        "sprite": "rocket_launcher",
+        "delay": 500,
+        "sound": "cannon_fire",
+        "impulse": 0,
+        "projectile": "harpoon",
+        "directDamage": 100,
+        "penetration": "non_penetrating"
+    },
+    {
         "key": "shotgun",
         "sprite": "rocket_launcher",
         "delay": 1000,

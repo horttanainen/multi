@@ -16,6 +16,7 @@ const camera_shake = @import("camera_shake.zig");
 const explosion_visual = @import("explosion_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
+const sprite = @import("sprite.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
@@ -39,11 +40,24 @@ pub const PenetrationMode = enum {
     penetrating,
 };
 
+pub const ImpactBehavior = enum {
+    destroy,
+    stick,
+};
+
+pub const FlightRotation = enum {
+    fixed,
+    velocity_aligned,
+};
+
 pub const Spec = struct {
     owner_id: usize,
     direct_damage: f32 = 0,
     penetration: PenetrationMode = .non_penetrating,
     explosion: ?Explosion = null,
+    impact_behavior: ImpactBehavior = .destroy,
+    flight_rotation: FlightRotation = .fixed,
+    stick_depth: f32 = 0,
 };
 
 const ActiveProjectile = struct {
@@ -51,6 +65,10 @@ const ActiveProjectile = struct {
     direct_damage: f32,
     penetration: PenetrationMode,
     explosion: ?Explosion,
+    impact_behavior: ImpactBehavior,
+    flight_rotation: FlightRotation,
+    flight_angle: f32,
+    stick_depth: f32,
     hit_player_bits: u64 = 0,
 };
 
@@ -590,11 +608,16 @@ pub fn explodeAtDirectPlayer(pos: vec.Vec2, explosion: Explosion, attackerId: ?u
 }
 
 pub fn create(bodyId: box2d.c.b2BodyId, spec: Spec) !void {
+    const rotation = box2d.c.b2Body_GetRotation(bodyId);
     try activeProjectiles.put(allocator, bodyId, .{
         .owner_id = spec.owner_id,
         .direct_damage = spec.direct_damage,
         .penetration = spec.penetration,
         .explosion = spec.explosion,
+        .impact_behavior = spec.impact_behavior,
+        .flight_rotation = spec.flight_rotation,
+        .flight_angle = std.math.atan2(rotation.s, rotation.c),
+        .stick_depth = spec.stick_depth,
     });
 }
 
@@ -634,6 +657,24 @@ pub fn applyPropulsion() void {
         const lateralVelocity = vec.subtract(velocity, forwardVelocity);
         const lateralDampingForce = vec.mul(lateralVelocity, -propData.lateralDamping);
         box2d.c.b2Body_ApplyForceToCenter(bodyId, vec.toBox2d(lateralDampingForce), true);
+    }
+}
+
+pub fn updateFlightRotation() void {
+    for (activeProjectiles.keys(), activeProjectiles.values()) |bodyId, *active| {
+        if (active.flight_rotation != .velocity_aligned) continue;
+        if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+
+        const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
+        if (vec.magnitude(velocity) < 0.001) continue;
+
+        const angle = std.math.atan2(velocity.y, velocity.x) + std.math.pi * 0.5;
+        active.flight_angle = angle;
+        box2d.c.b2Body_SetTransform(
+            bodyId,
+            box2d.c.b2Body_GetPosition(bodyId),
+            box2d.c.b2MakeRot(angle),
+        );
     }
 }
 
@@ -729,6 +770,69 @@ fn finishProjectile(
     try triggerProjectileExplosion(active.explosion, impactPoint, pressureSourcePosition, active.owner_id, directHitDamage);
 }
 
+fn stickProjectile(bodyId: box2d.c.b2BodyId, targetBodyId: box2d.c.b2BodyId, impactPoint: vec.Vec2, active: ActiveProjectile) void {
+    if (!box2d.c.b2Body_IsValid(bodyId)) {
+        std.log.warn("stickProjectile: projectile body became invalid before attachment", .{});
+        return;
+    }
+    if (!box2d.c.b2Body_IsValid(targetBodyId)) {
+        std.log.warn("stickProjectile: target body became invalid before attachment", .{});
+        return;
+    }
+
+    const projectileEntity = entity.entities.getLocking(bodyId) orelse {
+        std.log.warn("stickProjectile: projectile body has no entity", .{});
+        return;
+    };
+    if (projectileEntity.spriteUuids.len == 0) {
+        std.log.warn("stickProjectile: projectile entity has no sprite", .{});
+        return;
+    }
+    const projectileSprite = sprite.getSprite(projectileEntity.spriteUuids[0]) orelse {
+        std.log.warn("stickProjectile: projectile sprite is missing", .{});
+        return;
+    };
+
+    if (activeProjectiles.fetchSwapRemove(bodyId) == null) return;
+    _ = propulsions.swapRemove(bodyId);
+
+    for (projectileEntity.shapeIds) |shapeId| {
+        if (!box2d.c.b2Shape_IsValid(shapeId)) {
+            std.log.warn("stickProjectile: projectile shape became invalid before attachment", .{});
+            continue;
+        }
+        var filter = box2d.c.b2Shape_GetFilter(shapeId);
+        filter.maskBits = 0;
+        box2d.c.b2Shape_SetFilter(shapeId, filter);
+    }
+
+    const projectileRotation = if (active.flight_rotation == .velocity_aligned)
+        box2d.c.b2MakeRot(active.flight_angle)
+    else
+        box2d.c.b2Body_GetRotation(bodyId);
+    const targetRotation = box2d.c.b2Body_GetRotation(targetBodyId);
+    const forward = vec.Vec2{ .x = projectileRotation.s, .y = -projectileRotation.c };
+    const buriedTip = vec.add(impactPoint, vec.mul(forward, active.stick_depth));
+    const localTip = vec.Vec2{ .x = 0, .y = projectileSprite.sizeM.y * -0.5 };
+    const rotatedLocalTip = vec.Vec2{
+        .x = projectileRotation.c * localTip.x - projectileRotation.s * localTip.y,
+        .y = projectileRotation.s * localTip.x + projectileRotation.c * localTip.y,
+    };
+    const projectilePosition = vec.subtract(buriedTip, rotatedLocalTip);
+
+    box2d.c.b2Body_SetTransform(bodyId, vec.toBox2d(projectilePosition), projectileRotation);
+    box2d.c.b2Body_SetLinearVelocity(bodyId, box2d.c.b2Vec2_zero);
+    box2d.c.b2Body_SetAngularVelocity(bodyId, 0);
+
+    var weldDef = box2d.c.b2DefaultWeldJointDef();
+    weldDef.bodyIdA = bodyId;
+    weldDef.bodyIdB = targetBodyId;
+    weldDef.localAnchorA = vec.toBox2d(localTip);
+    weldDef.localAnchorB = box2d.c.b2Body_GetLocalPoint(targetBodyId, vec.toBox2d(buriedTip));
+    weldDef.referenceAngle = box2d.c.b2RelativeAngle(targetRotation, projectileRotation);
+    _ = box2d.createWeldJoint(&weldDef);
+}
+
 fn projectileImpactPoint(bodyId: box2d.c.b2BodyId, maybePoint: ?vec.Vec2) vec.Vec2 {
     if (maybePoint != null) return maybePoint.?;
     if (!box2d.c.b2Body_IsValid(bodyId)) {
@@ -807,6 +911,11 @@ fn handleProjectileContactForBody(
     const impactPoint = projectileImpactPoint(bodyId, maybePoint);
     if ((otherFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) {
         const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
+        if (active.impact_behavior == .stick) {
+            stickProjectile(bodyId, otherBodyId, impactPoint, active);
+            return;
+        }
+
         const projectileVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(bodyId));
         const pressureSourcePosition = pressureSourceForImpact(
             bodyId,

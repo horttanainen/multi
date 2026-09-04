@@ -248,11 +248,13 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
     try animations.put("afterjump", afterJumpAnim);
 
     const rocketLauncher = try data.createWeaponFromWithSpriteBacking("rocket_launcher", playerSpriteBacking);
+    const harpoon = try data.createWeaponFromWithSpriteBacking("harpoon", playerSpriteBacking);
     const shotgun = try data.createWeaponFromWithSpriteBacking("shotgun", playerSpriteBacking);
     const railgun = try data.createWeaponFromWithSpriteBacking("railgun", playerSpriteBacking);
 
     var weapons = std.array_list.Managed(weapon.Weapon).init(allocator);
     try weapons.append(rocketLauncher);
+    try weapons.append(harpoon);
     try weapons.append(shotgun);
     try weapons.append(railgun);
 

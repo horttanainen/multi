@@ -64,11 +64,16 @@ pub const ExplosionData = struct {
 pub const ProjectileData = struct {
     gravityScale: f32,
     density: f32,
+    launchSpeed: f32,
+    linearDamping: f32,
     propulsion: f32,
     lateralDamping: f32,
     animation: []const u8,
     propulsionAnimation: ?[]const u8,
     explosion: ?[]const u8,
+    impactBehavior: projectile.ImpactBehavior,
+    flightRotation: projectile.FlightRotation,
+    stickDepth: f32,
 };
 
 pub const PelletData = struct {
@@ -714,11 +719,16 @@ fn initProjectiles() !void {
         key: []const u8,
         gravityScale: f32 = 0.2,
         density: f32 = 10,
+        launchSpeed: f32 = 0,
+        linearDamping: f32 = 0,
         propulsion: f32 = 40,
         lateralDamping: f32 = 10,
         animation: []const u8,
         propulsionAnimation: ?[]const u8 = null,
         explosion: ?[]const u8 = null,
+        impactBehavior: []const u8 = "destroy",
+        flightRotation: []const u8 = "fixed",
+        stickDepth: f32 = 0,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -728,6 +738,14 @@ fn initProjectiles() !void {
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
+        const impactBehavior = std.meta.stringToEnum(projectile.ImpactBehavior, entry.impactBehavior) orelse {
+            std.log.warn("initProjectiles: projectile '{s}' has invalid impact behavior '{s}'", .{ entry.key, entry.impactBehavior });
+            continue;
+        };
+        const flightRotation = std.meta.stringToEnum(projectile.FlightRotation, entry.flightRotation) orelse {
+            std.log.warn("initProjectiles: projectile '{s}' has invalid flight rotation '{s}'", .{ entry.key, entry.flightRotation });
+            continue;
+        };
         const key = allocator.dupe(u8, entry.key) catch continue;
         const animKey = allocator.dupe(u8, entry.animation) catch {
             allocator.free(key);
@@ -754,11 +772,16 @@ fn initProjectiles() !void {
         projectileDataMap.put(allocator, key, .{
             .gravityScale = entry.gravityScale,
             .density = entry.density,
+            .launchSpeed = entry.launchSpeed,
+            .linearDamping = entry.linearDamping,
             .propulsion = entry.propulsion,
             .lateralDamping = entry.lateralDamping,
             .animation = animKey,
             .propulsionAnimation = propAnimKey,
             .explosion = explosionKey,
+            .impactBehavior = impactBehavior,
+            .flightRotation = flightRotation,
+            .stickDepth = entry.stickDepth,
         }) catch {
             allocator.free(key);
             allocator.free(animKey);
@@ -982,11 +1005,16 @@ pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
     return weapon.Projectile{
         .gravityScale = d.gravityScale,
         .density = d.density,
+        .launchSpeed = d.launchSpeed,
+        .linearDamping = d.linearDamping,
         .propulsion = d.propulsion,
         .lateralDamping = d.lateralDamping,
         .animation = anim,
         .explosion = explosion,
         .propulsionAnimation = propAnim,
+        .impactBehavior = d.impactBehavior,
+        .flightRotation = d.flightRotation,
+        .stickDepth = d.stickDepth,
     };
 }
 

@@ -19,11 +19,16 @@ const gpu = @import("gpu.zig");
 pub const Projectile = struct {
     gravityScale: f32,
     density: f32,
+    launchSpeed: f32,
+    linearDamping: f32,
     propulsion: f32,
     lateralDamping: f32,
     animation: animation.Animation,
     explosion: ?projectile.Explosion = null,
     propulsionAnimation: ?animation.Animation = null,
+    impactBehavior: projectile.ImpactBehavior = .destroy,
+    flightRotation: projectile.FlightRotation = .fixed,
+    stickDepth: f32 = 0,
 };
 
 pub const Pellet = struct {
@@ -114,18 +119,18 @@ fn collectHitscanPlayer(
     return 1;
 }
 
-pub fn shoot(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
+pub fn shoot(w: Weapon, position: vec.IVec2, direction: vec.Vec2, shooterVelocity: vec.Vec2, playerId: usize) !void {
     if (w.projectile != null) {
-        try shootProjectile(w, position, direction, initialVelocity, playerId);
+        try shootProjectile(w, position, direction, shooterVelocity, playerId);
     } else if (w.pellet != null) {
-        try shootPellets(w, position, direction, initialVelocity, playerId);
+        try shootPellets(w, position, direction, shooterVelocity, playerId);
     } else {
         try shootHitscan(w, position, direction, playerId);
     }
     try audio.playFor(w.sound);
 }
 
-fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
+fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, shooterVelocity: vec.Vec2, playerId: usize) !void {
     const proj = w.projectile.?;
 
     var shapeDef = box2d.c.b2DefaultShapeDef();
@@ -146,6 +151,7 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
     var bodyDef = box2d.createDynamicBodyDef(pos);
     bodyDef.isBullet = true;
     bodyDef.gravityScale = proj.gravityScale;
+    bodyDef.linearDamping = proj.linearDamping;
 
     const angle = std.math.atan2(-direction.y, direction.x);
     bodyDef.rotation = box2d.c.b2MakeRot(angle + std.math.pi * 0.5);
@@ -170,17 +176,18 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
         }
     }
 
-    const impulse = vec.mul(vec.normalize(.{
+    const launchDirection = vec.normalize(.{
         .x = direction.x,
         .y = -direction.y,
-    }), w.impulse);
-
+    });
+    const impulse = vec.mul(launchDirection, w.impulse);
     box2d.c.b2Body_ApplyLinearImpulseToCenter(projectileEntity.bodyId, vec.toBox2d(impulse), true);
 
-    const currentVel = box2d.c.b2Body_GetLinearVelocity(projectileEntity.bodyId);
+    const impulseVelocity = box2d.c.b2Body_GetLinearVelocity(projectileEntity.bodyId);
+    const launchVelocity = vec.mul(launchDirection, proj.launchSpeed);
     box2d.c.b2Body_SetLinearVelocity(projectileEntity.bodyId, .{
-        .x = currentVel.x + initialVelocity.x,
-        .y = currentVel.y + initialVelocity.y,
+        .x = impulseVelocity.x + launchVelocity.x + shooterVelocity.x,
+        .y = impulseVelocity.y + launchVelocity.y + shooterVelocity.y,
     });
 
     try projectile.create(projectileEntity.bodyId, .{
@@ -188,6 +195,9 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialV
         .direct_damage = w.directDamage,
         .penetration = w.penetration,
         .explosion = proj.explosion,
+        .impact_behavior = proj.impactBehavior,
+        .flight_rotation = proj.flightRotation,
+        .stick_depth = proj.stickDepth,
     });
     try projectile.registerPropulsion(projectileEntity.bodyId, proj.propulsion, proj.lateralDamping);
 
@@ -333,7 +343,7 @@ fn shootPenetratingHitscan(
     return endPoint;
 }
 
-fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelocity: vec.Vec2, playerId: usize) !void {
+fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, shooterVelocity: vec.Vec2, playerId: usize) !void {
     const pel = w.pellet.?;
 
     const pos = conv.pixel2M(position);
@@ -423,8 +433,8 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
 
         const currentVel = box2d.c.b2Body_GetLinearVelocity(bodyId);
         box2d.c.b2Body_SetLinearVelocity(bodyId, .{
-            .x = currentVel.x + initialVelocity.x,
-            .y = currentVel.y + initialVelocity.y,
+            .x = currentVel.x + shooterVelocity.x,
+            .y = currentVel.y + shooterVelocity.y,
         });
 
         try projectile.create(bodyId, .{

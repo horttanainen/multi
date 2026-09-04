@@ -8,5 +8,18 @@
         "animation": "missile_projectile",
         "propulsionAnimation": "missile_propulsion",
         "explosion": "missile_explosion"
+    },
+    {
+        "key": "harpoon",
+        "gravityScale": 2.0,
+        "density": 10,
+        "launchSpeed": 28,
+        "linearDamping": 0.6,
+        "propulsion": 0,
+        "lateralDamping": 0,
+        "animation": "harpoon_projectile",
+        "impactBehavior": "stick",
+        "flightRotation": "velocity_aligned",
+        "stickDepth": 0.08
     }
 ]

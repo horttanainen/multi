@@ -250,6 +250,7 @@ pub fn main(init: std.process.Init) !void {
 
         const physicsStart = if (collectFramePerf) perf.begin(.explosion) else 0;
         const playerDeathPhysicsStart = perf.begin(.player_death);
+        projectile.updateFlightRotation();
         blast_pressure_visual.update();
         explosion_visual.update();
         hot_rim_visual.update();
