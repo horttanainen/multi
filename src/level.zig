@@ -9,6 +9,7 @@ const box2d = @import("box2d.zig");
 const allocator = @import("allocator.zig").allocator;
 const state = @import("state.zig");
 const player = @import("player.zig");
+const spawn = @import("spawn.zig");
 const sensor = @import("sensor.zig");
 const camera = @import("camera.zig");
 const viewport = @import("viewport.zig");
@@ -47,11 +48,6 @@ pub var size: vec.IVec2 = .{
     .x = 100,
     .y = 100,
 };
-pub var spawnLocation: vec.IVec2 = .{
-    .x = 0,
-    .y = 0,
-};
-
 const LevelError = error{
     Uninitialized,
 };
@@ -151,7 +147,7 @@ pub fn applyLevelSettings(lev: Level) !void {
     movement.configure(movementData);
     box2d.setGravity(lev.gravity);
     conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
-    spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    spawn.locations.clearRetainingCapacity();
     cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
     splitscreen = lev.splitscreen;
     size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
@@ -325,8 +321,6 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
 
 // Loads parallax backgrounds and entities from a parsed Level. Returns true if a spawn point was found.
 fn loadLevelContents(lev: Level) !bool {
-    var hasSpawn = false;
-
     for (lev.parallaxEntities) |e| {
         try spawnParallaxEntity(e);
     }
@@ -336,16 +330,15 @@ fn loadLevelContents(lev: Level) !bool {
         defer allocator.free(bodyIds);
 
         if (std.mem.eql(u8, e.type, "spawn")) {
-            spawnLocation = e.pos;
-            hasSpawn = true;
+            try spawn.addLocation(e.pos);
         }
     }
 
-    return hasSpawn;
+    return spawn.locations.count() > 0;
 }
 
 fn spawnTwoPlayers() !void {
-    const playerId1 = try player.spawn(spawnLocation);
+    const playerId1 = try player.spawn();
     if (!controller.controllers.contains(playerId1)) {
         const color1 = try controller.createControllerForPlayer(playerId1);
         player.setColor(playerId1, color1);
@@ -353,14 +346,10 @@ fn spawnTwoPlayers() !void {
         player.setColor(playerId1, controller.controllers.get(playerId1).?.color);
     }
 
-    const p2Position = vec.IVec2{
-        .x = spawnLocation.x + 10,
-        .y = spawnLocation.y,
-    };
     const playerId2 = if (splitscreen)
-        try player.spawn(p2Position)
+        try player.spawn()
     else
-        try player.spawnWithSharedCamera(p2Position, player.players.get(playerId1).?.cameraId);
+        try player.spawnWithSharedCamera(player.players.get(playerId1).?.cameraId);
     if (!controller.controllers.contains(playerId2)) {
         const color2 = try controller.createControllerForPlayer(playerId2);
         player.setColor(playerId2, color2);
@@ -418,6 +407,7 @@ pub fn cleanup() void {
     gpu.resetAtlasToCheckpoint();
     viewport.cleanup();
     camera.resetPlayerCameraIds();
+    spawn.cleanup();
 }
 
 pub fn reset() void {

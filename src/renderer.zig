@@ -17,6 +17,7 @@ const entity = @import("entity.zig");
 const sensor = @import("sensor.zig");
 const cursor = @import("cursor.zig");
 const level = @import("level.zig");
+const spawn = @import("spawn.zig");
 const levelEditor = @import("level_editor.zig");
 const level_editor_grid = @import("level_editor_grid.zig");
 const viewport = @import("viewport.zig");
@@ -95,7 +96,9 @@ pub fn renderOverview(layer: OverviewLayer) !*sdl.Surface {
         },
         .collision => {
             try debug.drawOverview();
-            try debug.drawPlayerClearanceReference(level.spawnLocation);
+            for (spawn.locations.values()) |spawnPosition| {
+                try debug.drawPlayerClearanceReference(spawnPosition);
+            }
         },
     }
 

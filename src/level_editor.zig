@@ -14,6 +14,7 @@ const levelEditorGrid = @import("level_editor_grid.zig");
 const perf = @import("perf.zig");
 const runtime = @import("runtime.zig");
 const sensor = @import("sensor.zig");
+const spawn = @import("spawn.zig");
 const sprite = @import("sprite.zig");
 const state = @import("state.zig");
 const uuid = @import("uuid.zig");
@@ -461,14 +462,13 @@ fn replaceEntityInDocument(document: *LevelDocument, replacement: entity.Seriali
     return oldEntity;
 }
 
-fn updateSpawnLocationFromDocument() void {
+fn updateSpawnLocationsFromDocument() !void {
     if (maybeDocument == null) return;
 
-    level.spawnLocation = vec.IVec2{ .x = 0, .y = 0 };
+    spawn.locations.clearRetainingCapacity();
     for (maybeDocument.?.levelData.entities) |e| {
         if (!std.mem.eql(u8, e.type, "spawn")) continue;
-        level.spawnLocation = e.pos;
-        return;
+        try spawn.addLocation(e.pos);
     }
 }
 
@@ -896,7 +896,7 @@ fn addEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool) !
         recordCommand(.{ .add_entity = serializedEntity });
     }
 
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 fn deleteEntity(entityId: u64, recordHistory: bool) !void {
@@ -929,7 +929,7 @@ fn deleteEntity(entityId: u64, recordHistory: bool) !void {
     }
 
     freeSerializableEntity(removedEntity);
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 fn updateEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool) !void {
@@ -959,7 +959,7 @@ fn updateEntity(serializedEntity: entity.SerializableEntity, recordHistory: bool
     if (maybeHoveredEntityId != null and maybeHoveredEntityId.? == serializedEntity.id) {
         setRuntimeEntityHover(serializedEntity.id, true);
     }
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 fn updateEntityDocumentOnly(serializedEntity: entity.SerializableEntity, recordHistory: bool) !void {
@@ -981,7 +981,7 @@ fn updateEntityDocumentOnly(serializedEntity: entity.SerializableEntity, recordH
         } });
     }
 
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 fn applyCommand(command: EditorCommand, isUndo: bool) !void {
@@ -1159,7 +1159,7 @@ fn spawnDocumentRuntime() !void {
         try spawnRuntimeEntity(e);
     }
 
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 pub fn reloadForEditor() !void {
@@ -1515,7 +1515,7 @@ pub fn moveEntity(entityId: u64, position: vec.IVec2) !void {
         .before = oldEntityForHistory,
         .after = updatedEntity,
     } });
-    updateSpawnLocationFromDocument();
+    try updateSpawnLocationsFromDocument();
 }
 
 pub fn resizeEntity(entityId: u64, scale: vec.Vec2) !void {

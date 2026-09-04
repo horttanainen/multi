@@ -16,8 +16,8 @@ const weapon = @import("weapon.zig");
 const runtime = @import("runtime.zig");
 
 const viewport = @import("viewport.zig");
-const level = @import("level.zig");
 const movement = @import("movement.zig");
+const spawn_points = @import("spawn.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
 const gravestone = @import("gravestone.zig");
@@ -140,15 +140,17 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
     return vec.izero;
 }
 
-pub fn spawnWithSharedCamera(position: vec.IVec2, cameraId: usize) !usize {
-    return spawnImpl(position, cameraId);
+pub fn spawnWithSharedCamera(cameraId: usize) !usize {
+    return spawnImpl(cameraId);
 }
 
-pub fn spawn(position: vec.IVec2) !usize {
-    return spawnImpl(position, null);
+pub fn spawn() !usize {
+    return spawnImpl(null);
 }
 
-fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
+fn spawnImpl(existingCameraId: ?usize) !usize {
+    const playerId = players.values().len;
+    const position = try spawn_points.positionForPlayer(playerId);
     const pos = conv.pixel2M(position);
 
     var bodyDef = box2d.createNonRotatingDynamicBodyDef(pos);
@@ -156,7 +158,6 @@ fn spawnImpl(position: vec.IVec2, existingCameraId: ?usize) !usize {
     bodyDef.gravityScale = movement.bodyMotion.gravityScale;
     const bodyId = try box2d.createBody(bodyDef);
 
-    const playerId = players.values().len;
     const playerMaterialId: i32 = @intCast(playerId + config.player.materialOffset);
 
     const dynamicBox = box2d.c.b2MakeOffsetBox(
@@ -948,7 +949,8 @@ pub fn processRespawns() !void {
             p.health = 100;
             movement.reset(playerId);
 
-            const spawnPosM = conv.p2m(level.spawnLocation);
+            const spawnPosition = try spawn_points.positionForPlayer(playerId);
+            const spawnPosM = conv.p2m(spawnPosition);
             box2d.c.b2Body_SetTransform(p.bodyId, spawnPosM, box2d.c.b2Rot_identity);
 
             box2d.c.b2Body_SetLinearVelocity(p.bodyId, box2d.c.b2Vec2_zero);
