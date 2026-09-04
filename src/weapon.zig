@@ -8,6 +8,7 @@ const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const destruction = @import("destruction.zig");
 const projectile = @import("projectile.zig");
+const polygon = @import("polygon.zig");
 const runtime = @import("runtime.zig");
 const collision = @import("collision.zig");
 const animation = @import("animation.zig");
@@ -59,6 +60,19 @@ pub const Weapon = struct {
     directDamage: f32 = 0,
     penetration: projectile.PenetrationMode = .non_penetrating,
 };
+
+pub fn warmProjectileCollider(proj: Projectile) !void {
+    if (proj.animation.frames.len == 0) {
+        std.log.err("warmProjectileCollider: projectile animation has no frames", .{});
+        return error.ProjectileAnimationEmpty;
+    }
+
+    const projectileSprite = sprite.getSprite(proj.animation.frames[0]) orelse {
+        std.log.err("warmProjectileCollider: projectile sprite {d} is missing", .{proj.animation.frames[0]});
+        return error.ProjectileSpriteNotFound;
+    };
+    _ = try polygon.triangulateCached(projectileSprite);
+}
 
 const Trail = struct {
     startPos: vec.Vec2,
@@ -171,8 +185,8 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, shooterV
                 std.log.warn("shootProjectile: projectile shape became invalid before sensor creation", .{});
                 continue;
             }
-            const polygon = box2d.c.b2Shape_GetPolygon(shapeId);
-            _ = box2d.c.b2CreatePolygonShape(projectileEntity.bodyId, &sensorShapeDef, &polygon);
+            const sensorPolygon = box2d.c.b2Shape_GetPolygon(shapeId);
+            _ = box2d.c.b2CreatePolygonShape(projectileEntity.bodyId, &sensorShapeDef, &sensorPolygon);
         }
     }
 

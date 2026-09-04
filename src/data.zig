@@ -1008,7 +1008,7 @@ pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
         try createAnimationFrom(paKey)
     else
         null;
-    return weapon.Projectile{
+    const proj = weapon.Projectile{
         .gravityScale = d.gravityScale,
         .density = d.density,
         .launchSpeed = d.launchSpeed,
@@ -1022,6 +1022,8 @@ pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
         .flightRotation = d.flightRotation,
         .stickDepth = d.stickDepth,
     };
+    try weapon.warmProjectileCollider(proj);
+    return proj;
 }
 
 pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
