@@ -340,6 +340,13 @@ fn sweepGroundContact(state: *const State) ?GroundContact {
     return context.groundContact;
 }
 
+fn visitorBelongsToBody(visitorShapeId: box2d.c.b2ShapeId, bodyId: box2d.c.b2BodyId) bool {
+    if (!box2d.c.b2Shape_IsValid(visitorShapeId)) return false;
+
+    const visitorBodyId = box2d.c.b2Shape_GetBody(visitorShapeId);
+    return box2d.c.B2_ID_EQUALS(visitorBodyId, bodyId);
+}
+
 fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) !void {
     const sensorEvents = box2d.getSensorEvents();
     const wasSupported = state.groundState.supported;
@@ -347,8 +354,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
     for (0..@intCast(sensorEvents.beginCount)) |i| {
         const event = sensorEvents.beginEvents[i];
 
-        const visitorBodyId = box2d.c.b2Shape_GetBody(event.visitorShapeId);
-        if (box2d.c.B2_ID_EQUALS(visitorBodyId, state.bodyId)) continue;
+        if (visitorBelongsToBody(event.visitorShapeId, state.bodyId)) continue;
 
         if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.footSensorShapeId)) {
             state.groundState.footOverlapCount += 1;
@@ -367,8 +373,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
     for (0..@intCast(sensorEvents.endCount)) |i| {
         const event = sensorEvents.endEvents[i];
 
-        const visitorBodyId = box2d.c.b2Shape_GetBody(event.visitorShapeId);
-        if (box2d.c.B2_ID_EQUALS(visitorBodyId, state.bodyId)) continue;
+        if (visitorBelongsToBody(event.visitorShapeId, state.bodyId)) continue;
 
         if (box2d.c.B2_ID_EQUALS(event.sensorShapeId, state.footSensorShapeId) and state.groundState.footOverlapCount > 0) {
             state.groundState.footOverlapCount -= 1;
