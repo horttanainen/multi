@@ -42,7 +42,7 @@ fn markForSpawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
 }
 
 pub fn init() !void {
-    const spriteUuid = data.createSpriteFrom("gravestone") orelse {
+    const spriteUuid = data.createSpriteFrom("gravestone", .world_meters) orelse {
         std.log.err("gravestone.init: sprite data is missing", .{});
         return error.GravestoneSpriteMissing;
     };

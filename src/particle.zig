@@ -84,6 +84,7 @@ pub fn init(circleSpritePath: []const u8) !void {
         circleSpritePath,
         .{ .x = 1, .y = 1 },
         vec.izero,
+        .canvas_pixels,
     );
 }
 

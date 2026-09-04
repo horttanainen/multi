@@ -5,6 +5,7 @@ const sdl = @import("sdl.zig");
 const background = @import("background.zig");
 const camera = @import("camera.zig");
 const config = @import("config.zig");
+const conv = @import("conversion.zig");
 const state = @import("state.zig");
 const window = @import("window.zig");
 const ui = @import("ui.zig");
@@ -42,7 +43,7 @@ pub var zoom: f32 = 1.0;
 
 pub fn updateZoom() void {
     if (level.splitscreen) {
-        const cameraHeightPixels = level.cameraZoomMeters * @as(f32, @floatFromInt(level.defaultPixelsPerMeter));
+        const cameraHeightPixels = level.cameraZoomMeters * conv.met2pix;
         zoom = @as(f32, @floatFromInt(window.height)) / cameraHeightPixels;
         return;
     }

@@ -101,7 +101,7 @@ fn calcCrosshairPosition(p: Player) vec.IVec2 {
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        const crosshairPos = vec.iadd(vec.iadd(playerPos, getCrosshairOffset(p)), config.aimCircleOffset);
+        const crosshairPos = vec.iadd(playerPos, getCrosshairOffset(p));
 
         if (ent.spriteUuids.len > 0) {
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
@@ -129,7 +129,7 @@ fn calcProjectileSpawnPosition(p: Player) vec.IVec2 {
         const state = box2d.getInterpolatedState(ent.state, currentState);
         const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
 
-        const spawnPos = vec.iadd(playerPos, config.aimCircleOffset);
+        const spawnPos = playerPos;
 
         if (ent.spriteUuids.len > 0) {
             const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return spawnPos;
@@ -234,17 +234,17 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
 
     const playerSpriteBacking: sprite.Backing = .mutable;
 
-    const idleAnim = try data.createAnimationFromWithBacking("player_idle", playerSpriteBacking);
+    const idleAnim = try data.createAnimationFromWithBacking("player_idle", playerSpriteBacking, .world_meters);
     try animations.put("idle", idleAnim);
 
-    const runAnim = try data.createAnimationFromWithBacking("player_run", playerSpriteBacking);
+    const runAnim = try data.createAnimationFromWithBacking("player_run", playerSpriteBacking, .world_meters);
     runAnimationFrameCount = runAnim.frames.len;
     try animations.put("run", runAnim);
 
-    const fallAnim = try data.createAnimationFromWithBacking("player_fall", playerSpriteBacking);
+    const fallAnim = try data.createAnimationFromWithBacking("player_fall", playerSpriteBacking, .world_meters);
     try animations.put("fall", fallAnim);
 
-    const afterJumpAnim = try data.createAnimationFromWithBacking("player_afterjump", playerSpriteBacking);
+    const afterJumpAnim = try data.createAnimationFromWithBacking("player_afterjump", playerSpriteBacking, .world_meters);
     try animations.put("afterjump", afterJumpAnim);
 
     const rocketLauncher = try data.createWeaponFromWithSpriteBacking("rocket_launcher", playerSpriteBacking);
@@ -277,19 +277,19 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
         .enabled = true,
     };
 
-    const leftHandSpriteUuid = data.createSpriteFromWithBacking("arm_with_hook", playerSpriteBacking) orelse return error.SpriteNotFound;
-    const leftHandNoHookSpriteUuid = data.createSpriteFromWithBacking("arm_without_hook", playerSpriteBacking) orelse return error.SpriteNotFound;
+    const leftHandSpriteUuid = data.createSpriteFromWithBacking("arm_with_hook", playerSpriteBacking, .world_meters) orelse return error.SpriteNotFound;
+    const leftHandNoHookSpriteUuid = data.createSpriteFromWithBacking("arm_without_hook", playerSpriteBacking, .world_meters) orelse return error.SpriteNotFound;
 
     // Load spray paint sprite from data
     var sprayPaintSpriteUuid: ?u64 = null;
     {
         var keyBuf: [64]u8 = undefined;
         if (std.fmt.bufPrint(&keyBuf, "player_{d}_spray", .{playerId + 1})) |key| {
-            sprayPaintSpriteUuid = data.createSpriteFrom(key);
+            sprayPaintSpriteUuid = data.createSpriteFrom(key, .world_meters);
         } else |_| {}
     }
 
-    const crosshairUuid = data.createSpriteFromWithBacking("crosshair", playerSpriteBacking) orelse return error.SpriteNotFound;
+    const crosshairUuid = data.createSpriteFromWithBacking("crosshair", playerSpriteBacking, .world_meters) orelse return error.SpriteNotFound;
 
     // Create camera for this player (or reuse shared camera in non-splitscreen mode)
     const cameraId = if (existingCameraId) |id| id else blk: {
@@ -462,7 +462,6 @@ pub fn sprayPaint(p: *Player) !void {
 
     const crosshairOffset = getCrosshairOffset(p.*);
     var crosshairPixelPos = vec.iadd(playerPixelPos, crosshairOffset);
-    crosshairPixelPos = vec.iadd(crosshairPixelPos, config.aimCircleOffset);
     if (ent.spriteUuids.len > 0) {
         if (sprite.getSprite(ent.spriteUuids[0])) |firstSprite| {
             crosshairPixelPos = vec.iadd(crosshairPixelPos, firstSprite.offset);

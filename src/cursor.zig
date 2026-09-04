@@ -37,19 +37,19 @@ pub fn deinit() void {
 // Called on initial level editor entry: refresh sprite and reset cursor to level center.
 pub fn initSprite() void {
     if (crosshairUuid) |old| sprite.cleanupLater(old);
-    crosshairUuid = data.createSpriteFrom("crosshair");
+    crosshairUuid = data.createSpriteFrom("crosshair", .canvas_pixels);
     posPx = level.position;
 }
 
 // Called after editor reloads: refreshes sprites without moving the cursor.
 pub fn refreshSprite() void {
     if (crosshairUuid) |old| sprite.cleanupLater(old);
-    crosshairUuid = data.createSpriteFrom("crosshair");
+    crosshairUuid = data.createSpriteFrom("crosshair", .canvas_pixels);
 
     // Re-create pending sprite so its texture reference stays valid after atlas repack.
     if (pendingKey) |key| {
         if (pendingUuid) |old| sprite.cleanupLater(old);
-        pendingUuid = data.createSpriteFrom(key);
+        pendingUuid = data.createSpriteFrom(key, .canvas_pixels);
         if (data.getSpriteData(key)) |d| {
             pendingImgPath = d.path;
             pendingScale = .{ .x = d.scale, .y = d.scale };
@@ -69,7 +69,7 @@ pub fn cameraFollow() void {
 pub fn attachSprite(key: []const u8) void {
     detachSprite();
     const d = data.getSpriteData(key) orelse return;
-    pendingUuid = data.createSpriteFrom(key);
+    pendingUuid = data.createSpriteFrom(key, .canvas_pixels);
     pendingKey = key;
     pendingImgPath = d.path;
     pendingScale = .{ .x = d.scale, .y = d.scale };

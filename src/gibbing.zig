@@ -54,16 +54,19 @@ pub fn init() !void {
         "giblets/head",
         .{ .x = 0.2, .y = 0.2 },
         vec.izero,
+        .world_meters,
     );
     templateLegGiblets = try fs.loadSpritesFromFolder(
         "giblets/leg",
         .{ .x = 0.2, .y = 0.2 },
         vec.izero,
+        .world_meters,
     );
     templateMeatGiblets = try fs.loadSpritesFromFolder(
         "giblets/meat",
         .{ .x = 0.2, .y = 0.2 },
         vec.izero,
+        .world_meters,
     );
 
     playerGiblets = std.AutoHashMap(usize, GibletSet).init(allocator);

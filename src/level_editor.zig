@@ -235,7 +235,7 @@ fn cloneLevelData(src: level.Level) !level.Level {
         .cameraZoomMeters = level.sanitizeCameraZoomMeters(src.cameraZoomMeters),
         .aspectRatio = src.aspectRatio,
         .gravity = src.gravity,
-        .pixelsPerMeter = level.defaultPixelsPerMeter,
+        .pixelsPerMeter = src.pixelsPerMeter,
         .splitscreen = src.splitscreen,
         .movementFile = movementFile,
         .parallaxEntities = parallaxEntities,
@@ -1589,8 +1589,7 @@ fn applyConfig(newConfig: Config) !void {
     document.levelData.levelHeightMeters = newConfig.levelHeightMeters;
     document.levelData.cameraZoomMeters = level.sanitizeCameraZoomMeters(newConfig.cameraZoomMeters);
     document.levelData.aspectRatio = newConfig.aspectRatio;
-    document.levelData.pixelsPerMeter = level.defaultPixelsPerMeter;
-    document.levelData.size = level.sizeFromHeightAndAspect(newConfig.levelHeightMeters, newConfig.aspectRatio, level.defaultPixelsPerMeter);
+    document.levelData.size = level.sizeFromHeightAndAspect(newConfig.levelHeightMeters, newConfig.aspectRatio, document.levelData.pixelsPerMeter);
     document.levelData.splitscreen = newConfig.splitscreen;
     document.dirty = true;
 }

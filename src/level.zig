@@ -70,7 +70,7 @@ pub const AspectRatio = struct {
     height: i32,
 };
 
-pub const defaultPixelsPerMeter: i32 = 80;
+pub const defaultPixelsPerMeter = conv.defaultPixelsPerMeter;
 pub const defaultLevelHeightMeters: f32 = 12.0;
 pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
@@ -143,18 +143,28 @@ fn onGoalBegin(visitorShapeId: box2d.c.b2ShapeId) !void {
 }
 
 pub fn applyLevelSettings(lev: Level) !void {
+    if (lev.pixelsPerMeter <= 0) {
+        std.log.err("level.applyLevelSettings: pixelsPerMeter must be positive, got {d}", .{lev.pixelsPerMeter});
+        return error.InvalidPixelsPerMeter;
+    }
+    if (lev.size.x <= 0 or lev.size.y <= 0) {
+        std.log.err("level.applyLevelSettings: level size must be positive, got {d}x{d}", .{ lev.size.x, lev.size.y });
+        return error.InvalidLevelSize;
+    }
+
     const movementData = try data.loadMovementData(lev.movementFile);
     movement.configure(movementData);
     box2d.setGravity(lev.gravity);
-    conv.met2pix = @floatFromInt(defaultPixelsPerMeter);
+    conv.met2pix = @floatFromInt(lev.pixelsPerMeter);
+    sprite.applyPixelsPerMeter();
     spawn.locations.clearRetainingCapacity();
     cameraZoomMeters = sanitizeCameraZoomMeters(lev.cameraZoomMeters);
     splitscreen = lev.splitscreen;
-    size = sizeFromHeightAndAspect(lev.levelHeightMeters, lev.aspectRatio, defaultPixelsPerMeter);
+    size = lev.size;
 }
 
 pub fn spawnParallaxEntity(e: background.SerializableParallaxEntity) !void {
-    const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero);
+    const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero, .canvas_pixels);
     try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
 }
 
@@ -208,7 +218,7 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
         return error.BreakableRectangleCollider;
     }
 
-    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e));
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e), .canvas_pixels);
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
@@ -255,7 +265,8 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         return spawnStaticSerializableEntity(e, shapeDef);
     }
 
-    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, entitySpriteBacking(e));
+    const sizeBasis: sprite.SizeBasis = if (std.mem.eql(u8, e.type, "dynamic")) .world_meters else .canvas_pixels;
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, entitySpriteBacking(e), sizeBasis);
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);

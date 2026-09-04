@@ -824,27 +824,27 @@ fn initWeapons() !void {
     }
 }
 
-pub fn createSpriteFrom(key: []const u8) ?u64 {
-    return createSpriteFromWithBacking(key, .immutable);
+pub fn createSpriteFrom(key: []const u8, sizeBasis: sprite.SizeBasis) ?u64 {
+    return createSpriteFromWithBacking(key, .immutable, sizeBasis);
 }
 
-pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing) ?u64 {
+pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing, sizeBasis: sprite.SizeBasis) ?u64 {
     const d = spriteDataMap.get(key) orelse return null;
-    return sprite.createFromImgWithAtlasProfile(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing, d.atlasProfile) catch |err| {
+    return sprite.createFromImgWithAtlasProfile(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing, sizeBasis, d.atlasProfile) catch |err| {
         std.debug.print("Warning: Failed to create sprite for '{s}': {}\n", .{ key, err });
         return null;
     };
 }
 
-pub fn createAnimationFrom(key: []const u8) !animation.Animation {
-    return createAnimationFromWithBacking(key, .immutable);
+pub fn createAnimationFrom(key: []const u8, sizeBasis: sprite.SizeBasis) !animation.Animation {
+    return createAnimationFromWithBacking(key, .immutable, sizeBasis);
 }
 
-pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing) !animation.Animation {
+pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing, sizeBasis: sprite.SizeBasis) !animation.Animation {
     const d = animationDataMap.get(key) orelse return error.AnimationDataNotFound;
     const scale = vec.Vec2{ .x = d.scale, .y = d.scale };
     const offset = vec.IVec2{ .x = d.offsetX, .y = d.offsetY };
-    var anim = try animation.loadWithBacking(d.path, d.fps, scale, offset, d.loop, d.spriteIndex, backing);
+    var anim = try animation.loadWithBacking(d.path, d.fps, scale, offset, d.loop, d.spriteIndex, backing, sizeBasis);
     anim.switchDelay = d.switchDelay;
     return anim;
 }
@@ -892,13 +892,13 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
 
 pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
     const d = projectileDataMap.get(key) orelse return error.ProjectileDataNotFound;
-    const anim = try createAnimationFrom(d.animation);
+    const anim = try createAnimationFrom(d.animation, .world_meters);
     const explosion = if (d.explosion) |explosionKey|
         try createExplosionFrom(explosionKey)
     else
         null;
     const propAnim = if (d.propulsionAnimation) |paKey|
-        try createAnimationFrom(paKey)
+        try createAnimationFrom(paKey, .world_meters)
     else
         null;
     return weapon.Projectile{
@@ -945,7 +945,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         try createExplosionFrom(eKey)
     else
         null;
-    const spriteUuid = createSpriteFromWithBacking(d.sprite, spriteBacking) orelse 0;
+    const spriteUuid = createSpriteFromWithBacking(d.sprite, spriteBacking, .world_meters) orelse 0;
     return weapon.Weapon{
         .name = key,
         .delay = d.delay,

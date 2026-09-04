@@ -26,6 +26,11 @@ pub const Color = struct {
 pub const Sprite = struct {
     texture: *tex.Texture,
     surface: *sdl.Surface,
+    sizeBasis: SizeBasis,
+    authoredScale: vec.Vec2,
+    authoredOffset: vec.IVec2,
+    authoredAnchorPointLeft: ?vec.IVec2,
+    authoredAnchorPointRight: ?vec.IVec2,
     scale: vec.Vec2,
     sizeM: vec.Vec2,
     sizeP: vec.IVec2,
@@ -39,11 +44,15 @@ pub const Sprite = struct {
 };
 
 pub const ScalePreviewState = struct {
-    scale: vec.Vec2,
+    authoredScale: vec.Vec2,
     sizeM: vec.Vec2,
-    sizeP: vec.IVec2,
-    anchorPointLeft: ?vec.IVec2,
-    anchorPointRight: ?vec.IVec2,
+    authoredAnchorPointLeft: ?vec.IVec2,
+    authoredAnchorPointRight: ?vec.IVec2,
+};
+
+pub const SizeBasis = enum {
+    canvas_pixels,
+    world_meters,
 };
 
 pub const SerializableEntity = struct {
@@ -227,44 +236,97 @@ fn surfaceMatchesTexture(surface: *sdl.Surface, texture: *tex.Texture) bool {
     return surface.w == texture.width and surface.h == texture.height;
 }
 
-fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, scale: vec.Vec2, offset: vec.IVec2, atlasProfile: config.RuntimeAtlasProfile, geometryId: u64) !u64 {
+fn sizeBasisScale(sizeBasis: SizeBasis) f32 {
+    return switch (sizeBasis) {
+        .canvas_pixels => 1.0,
+        .world_meters => conv.met2pix / @as(f32, @floatFromInt(conv.defaultPixelsPerMeter)),
+    };
+}
+
+fn scaledPoint(value: vec.IVec2, scale: f32) vec.IVec2 {
+    return .{
+        .x = @intFromFloat(@round(@as(f32, @floatFromInt(value.x)) * scale)),
+        .y = @intFromFloat(@round(@as(f32, @floatFromInt(value.y)) * scale)),
+    };
+}
+
+fn scaledOptionalPoint(maybeValue: ?vec.IVec2, scale: f32) ?vec.IVec2 {
+    const value = maybeValue orelse return null;
+    return scaledPoint(value, scale);
+}
+
+fn updateRenderedGeometry(s: *Sprite) void {
+    const basisScale = sizeBasisScale(s.sizeBasis);
+    s.scale = .{
+        .x = s.authoredScale.x * basisScale,
+        .y = s.authoredScale.y * basisScale,
+    };
+    s.offset = scaledPoint(s.authoredOffset, basisScale);
+    s.sizeP = .{
+        .x = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(s.surface.w)) * s.scale.x)))),
+        .y = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(s.surface.h)) * s.scale.y)))),
+    };
+    s.anchorPointLeft = scaledOptionalPoint(s.authoredAnchorPointLeft, basisScale);
+    s.anchorPointRight = scaledOptionalPoint(s.authoredAnchorPointRight, basisScale);
+}
+
+pub fn applyPixelsPerMeter() void {
+    sprites.mutex.lockUncancelable(runtime.io());
+    defer sprites.mutex.unlock(runtime.io());
+
+    for (sprites.map.values()) |*s| {
+        if (s.sizeBasis == .canvas_pixels) {
+            s.sizeM = conv.pixel2M(s.sizeP);
+            continue;
+        }
+        updateRenderedGeometry(s);
+    }
+}
+
+fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, texture: *tex.Texture, authoredScale: vec.Vec2, authoredOffset: vec.IVec2, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, geometryId: u64) !u64 {
     const spriteUuid = uuid.generate();
 
     const imgPath = try allocator.dupe(u8, imagePath);
     errdefer allocator.free(imgPath);
 
-    const anchorPointLeft = findAndProcessAnchorPixel(surface, scale, isMagenta);
-    const anchorPointRight = findAndProcessAnchorPixel(surface, scale, isGreen);
+    const authoredAnchorPointLeft = findAndProcessAnchorPixel(surface, authoredScale, isMagenta);
+    const authoredAnchorPointRight = findAndProcessAnchorPixel(surface, authoredScale, isGreen);
 
     var size = sdl.Point{
         .x = surface.w,
         .y = surface.h,
     };
-    size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * scale.x);
-    size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * scale.y);
-    const sizeM = conv.p2m(.{ .x = size.x, .y = size.y });
+    size.x = @intFromFloat(@as(f32, @floatFromInt(size.x)) * authoredScale.x);
+    size.y = @intFromFloat(@as(f32, @floatFromInt(size.y)) * authoredScale.y);
+    const pixelsPerMeter = switch (sizeBasis) {
+        .canvas_pixels => conv.met2pix,
+        .world_meters => @as(f32, @floatFromInt(conv.defaultPixelsPerMeter)),
+    };
 
-    const sprite = Sprite{
+    var newSprite = Sprite{
         .surface = surface,
         .imgPath = imgPath,
         .atlasProfile = atlasProfile,
         .texture = texture,
-        .scale = scale,
-        .offset = offset,
+        .sizeBasis = sizeBasis,
+        .authoredScale = authoredScale,
+        .authoredOffset = authoredOffset,
+        .authoredAnchorPointLeft = authoredAnchorPointLeft,
+        .authoredAnchorPointRight = authoredAnchorPointRight,
+        .scale = undefined,
+        .offset = undefined,
         .geometryId = geometryId,
-        .anchorPointLeft = anchorPointLeft,
-        .anchorPointRight = anchorPointRight,
+        .anchorPointLeft = undefined,
+        .anchorPointRight = undefined,
         .sizeM = .{
-            .x = sizeM.x,
-            .y = sizeM.y,
+            .x = @as(f32, @floatFromInt(size.x)) / pixelsPerMeter,
+            .y = @as(f32, @floatFromInt(size.y)) / pixelsPerMeter,
         },
-        .sizeP = .{
-            .x = size.x,
-            .y = size.y,
-        },
+        .sizeP = undefined,
     };
+    updateRenderedGeometry(&newSprite);
 
-    try sprites.putLocking(spriteUuid, sprite);
+    try sprites.putLocking(spriteUuid, newSprite);
     return spriteUuid;
 }
 
@@ -377,54 +439,59 @@ pub fn drawGlow(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, maybeCo
     try tex.setTextureAlphaMod(s.texture, 255);
 }
 
-pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    return createFromImgWithBacking(imagePath, scale, offset, .immutable);
+pub fn createFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, sizeBasis: SizeBasis) !u64 {
+    return createFromImgWithBacking(imagePath, scale, offset, .immutable, sizeBasis);
 }
 
-pub fn createMutableFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    return createFromImgWithBacking(imagePath, scale, offset, .mutable);
+pub fn createMutableFromImg(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, sizeBasis: SizeBasis) !u64 {
+    return createFromImgWithBacking(imagePath, scale, offset, .mutable, sizeBasis);
 }
 
-pub fn createFromImgWithBacking(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
-    return createFromImgWithAtlasProfile(imagePath, scale, offset, backing, config.defaultRuntimeAtlasProfile);
+pub fn createFromImgWithBacking(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, sizeBasis: SizeBasis) !u64 {
+    return createFromImgWithAtlasProfile(imagePath, scale, offset, backing, sizeBasis, config.defaultRuntimeAtlasProfile);
 }
 
-pub fn createFromImgWithAtlasProfile(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile) !u64 {
+pub fn createFromImgWithAtlasProfile(imagePath: []const u8, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile) !u64 {
     const imgPathZ = try allocator.dupeZ(u8, imagePath);
     defer allocator.free(imgPathZ);
     const surface = try sdl.image.load(imgPathZ);
     errdefer sdl.destroySurface(surface);
 
     const atlasConfig = config.runtimeAtlasConfigForProfile(atlasProfile);
-    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing, atlasProfile, atlasConfig);
+    return createFromLoadedSurfaceWithBacking(imagePath, surface, scale, offset, backing, sizeBasis, atlasProfile, atlasConfig);
 }
 
-pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .immutable);
+pub fn createFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, sizeBasis: SizeBasis) !u64 {
+    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .immutable, sizeBasis);
 }
 
-pub fn createMutableFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2) !u64 {
-    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .mutable);
+pub fn createMutableFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, sizeBasis: SizeBasis) !u64 {
+    return createFromOwnedSurfaceWithBacking(imagePath, surface, scale, offset, .mutable, sizeBasis);
 }
 
-pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing) !u64 {
+pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, sizeBasis: SizeBasis) !u64 {
     errdefer sdl.destroySurface(surface);
+
+    const renderedScale = vec.Vec2{
+        .x = scale.x * sizeBasisScale(sizeBasis),
+        .y = scale.y * sizeBasisScale(sizeBasis),
+    };
 
     const texture = switch (backing) {
         .immutable => blk: {
-            const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, config.runtimeAtlas);
+            const runtimeSurface = try createRuntimeAtlasSurface(surface, renderedScale, config.runtimeAtlas);
             defer destroyRuntimeAtlasSurface(runtimeSurface);
             break :blk try tex.addToAtlas(runtimeSurface.surface);
         },
         .mutable => blk: {
-            const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, config.runtimeAtlas);
+            const runtimeSurface = try createRuntimeAtlasSurface(surface, renderedScale, config.runtimeAtlas);
             defer destroyRuntimeAtlasSurface(runtimeSurface);
             break :blk try tex.createMutableTexture(runtimeSurface.surface);
         },
     };
     errdefer tex.destroyTexture(texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, config.defaultRuntimeAtlasProfile, uuid.generate());
+    return createSpriteFromOwnedSurface(imagePath, surface, texture, scale, offset, sizeBasis, config.defaultRuntimeAtlasProfile, uuid.generate());
 }
 
 const TextureForImage = struct {
@@ -432,11 +499,15 @@ const TextureForImage = struct {
     geometryId: u64,
 };
 
-fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, atlasProfile: config.RuntimeAtlasProfile, atlasConfig: config.RuntimeAtlasConfig) !u64 {
-    const textureForImage = try createTextureForImage(imagePath, surface, scale, backing, atlasConfig);
+fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, offset: vec.IVec2, backing: Backing, sizeBasis: SizeBasis, atlasProfile: config.RuntimeAtlasProfile, atlasConfig: config.RuntimeAtlasConfig) !u64 {
+    const renderedScale = vec.Vec2{
+        .x = scale.x * sizeBasisScale(sizeBasis),
+        .y = scale.y * sizeBasisScale(sizeBasis),
+    };
+    const textureForImage = try createTextureForImage(imagePath, surface, renderedScale, backing, atlasConfig);
     errdefer tex.destroyTexture(textureForImage.texture);
 
-    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, atlasProfile, textureForImage.geometryId);
+    return createSpriteFromOwnedSurface(imagePath, surface, textureForImage.texture, scale, offset, sizeBasis, atlasProfile, textureForImage.geometryId);
 }
 
 fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, backing: Backing, atlasConfig: config.RuntimeAtlasConfig) !TextureForImage {
@@ -516,11 +587,10 @@ pub fn getScalePreviewState(spriteUuid: u64) ?ScalePreviewState {
     };
 
     return .{
-        .scale = s.scale,
+        .authoredScale = s.authoredScale,
         .sizeM = s.sizeM,
-        .sizeP = s.sizeP,
-        .anchorPointLeft = s.anchorPointLeft,
-        .anchorPointRight = s.anchorPointRight,
+        .authoredAnchorPointLeft = s.authoredAnchorPointLeft,
+        .authoredAnchorPointRight = s.authoredAnchorPointRight,
     };
 }
 
@@ -538,20 +608,17 @@ pub fn applyScalePreview(spriteUuid: u64, base: ScalePreviewState, ratio: vec.Ve
         return;
     };
 
-    s.scale = .{
-        .x = base.scale.x * ratio.x,
-        .y = base.scale.y * ratio.y,
+    s.authoredScale = .{
+        .x = base.authoredScale.x * ratio.x,
+        .y = base.authoredScale.y * ratio.y,
     };
     s.sizeM = .{
         .x = base.sizeM.x * ratio.x,
         .y = base.sizeM.y * ratio.y,
     };
-    s.sizeP = .{
-        .x = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(base.sizeP.x)) * ratio.x)))),
-        .y = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(base.sizeP.y)) * ratio.y)))),
-    };
-    s.anchorPointLeft = scaledAnchor(base.anchorPointLeft, ratio);
-    s.anchorPointRight = scaledAnchor(base.anchorPointRight, ratio);
+    s.authoredAnchorPointLeft = scaledAnchor(base.authoredAnchorPointLeft, ratio);
+    s.authoredAnchorPointRight = scaledAnchor(base.authoredAnchorPointRight, ratio);
+    updateRenderedGeometry(s);
 }
 
 pub fn restoreScalePreview(spriteUuid: u64, base: ScalePreviewState) void {
@@ -563,11 +630,11 @@ pub fn restoreScalePreview(spriteUuid: u64, base: ScalePreviewState) void {
         return;
     };
 
-    s.scale = base.scale;
+    s.authoredScale = base.authoredScale;
     s.sizeM = base.sizeM;
-    s.sizeP = base.sizeP;
-    s.anchorPointLeft = base.anchorPointLeft;
-    s.anchorPointRight = base.anchorPointRight;
+    s.authoredAnchorPointLeft = base.authoredAnchorPointLeft;
+    s.authoredAnchorPointRight = base.authoredAnchorPointRight;
+    updateRenderedGeometry(s);
 }
 
 fn scaledAnchor(anchor: ?vec.IVec2, ratio: vec.Vec2) ?vec.IVec2 {
@@ -669,6 +736,11 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
         .texture = copiedTexture,
         .imgPath = imgPathCopy,
         .atlasProfile = originalSprite.atlasProfile,
+        .sizeBasis = originalSprite.sizeBasis,
+        .authoredScale = originalSprite.authoredScale,
+        .authoredOffset = originalSprite.authoredOffset,
+        .authoredAnchorPointLeft = originalSprite.authoredAnchorPointLeft,
+        .authoredAnchorPointRight = originalSprite.authoredAnchorPointRight,
         .scale = originalSprite.scale,
         .sizeM = originalSprite.sizeM,
         .sizeP = originalSprite.sizeP,

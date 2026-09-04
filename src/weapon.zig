@@ -396,6 +396,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             "particles/circle.png",
             .{ .x = pel.spriteScale, .y = pel.spriteScale },
             .{ .x = 0, .y = 0 },
+            .world_meters,
         );
 
         var spriteUuids = try allocator.alloc(u64, 1);
