@@ -7,8 +7,8 @@ const damage = @import("damage.zig");
 const entity = @import("entity.zig");
 const collision = @import("collision.zig");
 const config = @import("config.zig");
+const data = @import("data.zig");
 const vec = @import("vector.zig");
-const fs = @import("fs.zig");
 const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
 const runtime = @import("runtime.zig");
@@ -49,25 +49,49 @@ var bloodParticleEffectId: ?particle_effect.Id = null;
 pub var pooledBodyCreationCount: u64 = 0;
 pub var poolRecycleCount: u64 = 0;
 
+fn loadTemplateGiblets(group: data.GibletGroup) ![]u64 {
+    var templates = std.array_list.Managed(u64).init(allocator);
+    defer templates.deinit();
+    errdefer cleanupSpriteUuids(templates.items);
+
+    for (data.gibletData) |giblet| {
+        if (giblet.group != group) continue;
+
+        const spriteUuid = try data.createGibletSprite(giblet);
+        templates.append(spriteUuid) catch |err| {
+            sprite.cleanupLater(spriteUuid);
+            return err;
+        };
+    }
+
+    if (templates.items.len == 0) {
+        std.log.err("loadTemplateGiblets: no giblets configured for group '{s}'", .{@tagName(group)});
+        return error.NoGibletsConfigured;
+    }
+
+    return templates.toOwnedSlice();
+}
+
 pub fn init() !void {
-    templateHeadGiblets = try fs.loadSpritesFromFolder(
-        "giblets/head",
-        .{ .x = 0.2, .y = 0.2 },
-        vec.izero,
-        .world_meters,
-    );
-    templateLegGiblets = try fs.loadSpritesFromFolder(
-        "giblets/leg",
-        .{ .x = 0.2, .y = 0.2 },
-        vec.izero,
-        .world_meters,
-    );
-    templateMeatGiblets = try fs.loadSpritesFromFolder(
-        "giblets/meat",
-        .{ .x = 0.2, .y = 0.2 },
-        vec.izero,
-        .world_meters,
-    );
+    const heads = try loadTemplateGiblets(.head);
+    errdefer {
+        cleanupSpriteUuids(heads);
+        allocator.free(heads);
+    }
+    const legs = try loadTemplateGiblets(.leg);
+    errdefer {
+        cleanupSpriteUuids(legs);
+        allocator.free(legs);
+    }
+    const meat = try loadTemplateGiblets(.meat);
+    errdefer {
+        cleanupSpriteUuids(meat);
+        allocator.free(meat);
+    }
+
+    templateHeadGiblets = heads;
+    templateLegGiblets = legs;
+    templateMeatGiblets = meat;
 
     playerGiblets = std.AutoHashMap(usize, GibletSet).init(allocator);
     bloodParticleEffectId = try blood.particleEffectId();

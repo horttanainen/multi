@@ -31,7 +31,7 @@ pub const Pellet = struct {
     density: f32 = 2.0,
     friction: f32 = 0.3,
     radius: f32 = 0.05,
-    spriteScale: f32 = 0.3,
+    spriteDiameterMeters: f32 = 0.12,
     count: u32 = 1,
     spreadAngle: f32 = 0,
     spawnRadius: f32 = 0.15,
@@ -392,12 +392,7 @@ fn shootPellets(w: Weapon, position: vec.IVec2, direction: vec.Vec2, initialVelo
             _ = box2d.c.b2CreateCircleShape(bodyId, &sensorShapeDef, &circleShape);
         }
 
-        const spriteUuid = try sprite.createFromImg(
-            "particles/circle.png",
-            .{ .x = pel.spriteScale, .y = pel.spriteScale },
-            .{ .x = 0, .y = 0 },
-            .world_meters,
-        );
+        const spriteUuid = try sprite.createFromImgWorldHeight("particles/circle.png", pel.spriteDiameterMeters, vec.zero);
 
         var spriteUuids = try allocator.alloc(u64, 1);
         spriteUuids[0] = spriteUuid;

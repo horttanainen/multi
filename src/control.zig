@@ -46,7 +46,7 @@ pub fn handleGameMouseInput() !void {
                 .x = x,
                 .y = y,
             });
-            const spriteUuid = data.createSpriteFrom("box", .world_meters) orelse return;
+            const spriteUuid = data.createSpriteFrom("box") orelse return;
             const pos = conv.pixel2M(position);
             const bodyDef = box2d.createDynamicBodyDef(pos);
             const spawnedBox = try entity.createFromImg(spriteUuid, shapeDef, bodyDef, "dynamic");

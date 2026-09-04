@@ -13,16 +13,27 @@ const config = @import("config.zig");
 
 pub const SpriteData = struct {
     path: []const u8,
-    scale: f32,
+    heightMeters: f32,
     atlasProfile: config.RuntimeAtlasProfile,
+};
+
+pub const GibletGroup = enum {
+    head,
+    leg,
+    meat,
+};
+
+pub const GibletData = struct {
+    group: GibletGroup,
+    path: []const u8,
+    heightMeters: f32,
 };
 
 pub const AnimationData = struct {
     path: []const u8,
     fps: i32,
-    scale: f32,
-    offsetX: i32,
-    offsetY: i32,
+    heightMeters: f32,
+    offsetMeters: vec.Vec2,
     loop: bool,
     spriteIndex: usize,
     switchDelay: f64,
@@ -65,7 +76,7 @@ pub const PelletData = struct {
     density: f32,
     friction: f32,
     radius: f32,
-    spriteScale: f32,
+    spriteDiameterMeters: f32,
     count: u32,
     spreadAngle: f32,
     spawnRadius: f32,
@@ -190,6 +201,7 @@ pub fn loadMovementData(path: []const u8) !MovementData {
 }
 
 pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
+pub var gibletData: []GibletData = &.{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
 var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
 var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
@@ -200,6 +212,7 @@ pub var explosionVisualDataMap: std.StringHashMapUnmanaged(explosion_visual.Pres
 
 pub fn init() !void {
     try initSprites();
+    try initGiblets();
     try initParticles();
     try initAnimations();
     try initSounds();
@@ -207,6 +220,46 @@ pub fn init() !void {
     try initExplosions();
     try initProjectiles();
     try initWeapons();
+}
+
+fn initGiblets() !void {
+    var jsonBuf: [16384]u8 = undefined;
+    const jsonData = fs.readFile("giblets.json", &jsonBuf) catch |err| {
+        std.log.err("data.initGiblets: failed to read giblets.json: {}", .{err});
+        return err;
+    };
+
+    const Entry = struct {
+        group: GibletGroup,
+        path: []const u8,
+        heightMeters: f32,
+    };
+
+    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
+        std.log.err("data.initGiblets: failed to parse giblets.json: {}", .{err});
+        return err;
+    };
+    defer parsed.deinit();
+
+    var entries = std.array_list.Managed(GibletData).init(allocator);
+    defer entries.deinit();
+    errdefer {
+        for (entries.items) |entry| allocator.free(entry.path);
+    }
+
+    for (parsed.value) |entry| {
+        const path = try allocator.dupe(u8, entry.path);
+        entries.append(.{
+            .group = entry.group,
+            .path = path,
+            .heightMeters = entry.heightMeters,
+        }) catch |err| {
+            allocator.free(path);
+            return err;
+        };
+    }
+
+    gibletData = try entries.toOwnedSlice();
 }
 
 fn initExplosionVisuals() !void {
@@ -333,7 +386,7 @@ fn initSprites() !void {
     const Entry = struct {
         key: []const u8,
         path: []const u8,
-        scale: f32 = 1.0,
+        heightMeters: f32,
         atlasProfile: ?[]const u8 = null,
     };
 
@@ -352,7 +405,7 @@ fn initSprites() !void {
 
         spriteDataMap.put(allocator, key, .{
             .path = path,
-            .scale = entry.scale,
+            .heightMeters = entry.heightMeters,
             .atlasProfile = runtimeAtlasProfileForSpriteEntry(entry.key, entry.atlasProfile),
         }) catch {
             allocator.free(key);
@@ -448,9 +501,8 @@ fn initAnimations() !void {
         key: []const u8,
         path: []const u8,
         fps: i32 = 8,
-        scale: f32 = 1.0,
-        offsetX: i32 = 0,
-        offsetY: i32 = 0,
+        heightMeters: f32,
+        offsetMeters: vec.Vec2 = vec.zero,
         loop: bool = true,
         spriteIndex: usize = 0,
         switchDelay: f64 = 0,
@@ -472,9 +524,8 @@ fn initAnimations() !void {
         animationDataMap.put(allocator, key, .{
             .path = path,
             .fps = entry.fps,
-            .scale = entry.scale,
-            .offsetX = entry.offsetX,
-            .offsetY = entry.offsetY,
+            .heightMeters = entry.heightMeters,
+            .offsetMeters = entry.offsetMeters,
             .loop = entry.loop,
             .spriteIndex = entry.spriteIndex,
             .switchDelay = entry.switchDelay,
@@ -703,7 +754,7 @@ fn initWeapons() !void {
         density: f32 = 2.0,
         friction: f32 = 0.3,
         radius: f32 = 0.05,
-        spriteScale: f32 = 0.3,
+        spriteDiameterMeters: f32 = 0.12,
         count: u32 = 1,
         spreadAngle: f32 = 0,
         spawnRadius: f32 = 0.15,
@@ -773,7 +824,7 @@ fn initWeapons() !void {
                 .density = pel.density,
                 .friction = pel.friction,
                 .radius = pel.radius,
-                .spriteScale = pel.spriteScale,
+                .spriteDiameterMeters = pel.spriteDiameterMeters,
                 .count = pel.count,
                 .spreadAngle = pel.spreadAngle,
                 .spawnRadius = pel.spawnRadius,
@@ -824,27 +875,25 @@ fn initWeapons() !void {
     }
 }
 
-pub fn createSpriteFrom(key: []const u8, sizeBasis: sprite.SizeBasis) ?u64 {
-    return createSpriteFromWithBacking(key, .immutable, sizeBasis);
+pub fn createSpriteFrom(key: []const u8) ?u64 {
+    return createSpriteFromWithBacking(key, .immutable);
 }
 
-pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing, sizeBasis: sprite.SizeBasis) ?u64 {
+pub fn createSpriteFromWithBacking(key: []const u8, backing: sprite.Backing) ?u64 {
     const d = spriteDataMap.get(key) orelse return null;
-    return sprite.createFromImgWithAtlasProfile(d.path, .{ .x = d.scale, .y = d.scale }, vec.izero, backing, sizeBasis, d.atlasProfile) catch |err| {
+    return sprite.createFromImgWorldHeightWithBacking(d.path, d.heightMeters, vec.zero, backing, d.atlasProfile) catch |err| {
         std.debug.print("Warning: Failed to create sprite for '{s}': {}\n", .{ key, err });
         return null;
     };
 }
 
-pub fn createAnimationFrom(key: []const u8, sizeBasis: sprite.SizeBasis) !animation.Animation {
-    return createAnimationFromWithBacking(key, .immutable, sizeBasis);
+pub fn createAnimationFrom(key: []const u8) !animation.Animation {
+    return createAnimationFromWithBacking(key, .immutable);
 }
 
-pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing, sizeBasis: sprite.SizeBasis) !animation.Animation {
+pub fn createAnimationFromWithBacking(key: []const u8, backing: sprite.Backing) !animation.Animation {
     const d = animationDataMap.get(key) orelse return error.AnimationDataNotFound;
-    const scale = vec.Vec2{ .x = d.scale, .y = d.scale };
-    const offset = vec.IVec2{ .x = d.offsetX, .y = d.offsetY };
-    var anim = try animation.loadWithBacking(d.path, d.fps, scale, offset, d.loop, d.spriteIndex, backing, sizeBasis);
+    var anim = try animation.loadWorldHeightWithBacking(d.path, d.fps, d.heightMeters, d.offsetMeters, d.loop, d.spriteIndex, backing);
     anim.switchDelay = d.switchDelay;
     return anim;
 }
@@ -892,13 +941,13 @@ pub fn createExplosionFrom(key: []const u8) !projectile.Explosion {
 
 pub fn createProjectileFrom(key: []const u8) !weapon.Projectile {
     const d = projectileDataMap.get(key) orelse return error.ProjectileDataNotFound;
-    const anim = try createAnimationFrom(d.animation, .world_meters);
+    const anim = try createAnimationFrom(d.animation);
     const explosion = if (d.explosion) |explosionKey|
         try createExplosionFrom(explosionKey)
     else
         null;
     const propAnim = if (d.propulsionAnimation) |paKey|
-        try createAnimationFrom(paKey, .world_meters)
+        try createAnimationFrom(paKey)
     else
         null;
     return weapon.Projectile{
@@ -929,7 +978,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
             .density = pelData.density,
             .friction = pelData.friction,
             .radius = pelData.radius,
-            .spriteScale = pelData.spriteScale,
+            .spriteDiameterMeters = pelData.spriteDiameterMeters,
             .count = pelData.count,
             .spreadAngle = pelData.spreadAngle,
             .spawnRadius = pelData.spawnRadius,
@@ -945,7 +994,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         try createExplosionFrom(eKey)
     else
         null;
-    const spriteUuid = createSpriteFromWithBacking(d.sprite, spriteBacking, .world_meters) orelse 0;
+    const spriteUuid = createSpriteFromWithBacking(d.sprite, spriteBacking) orelse 0;
     return weapon.Weapon{
         .name = key,
         .delay = d.delay,
@@ -971,6 +1020,16 @@ pub fn getSpriteData(key: []const u8) ?SpriteData {
     return spriteDataMap.get(key);
 }
 
+pub fn createGibletSprite(giblet: GibletData) !u64 {
+    return sprite.createFromImgWorldHeightWithBacking(
+        giblet.path,
+        giblet.heightMeters,
+        vec.zero,
+        .immutable,
+        config.defaultRuntimeAtlasProfile,
+    );
+}
+
 pub fn getParticleData(key: []const u8) ?ParticleData {
     return particleDataMap.get(key);
 }
@@ -982,6 +1041,10 @@ pub fn cleanup() void {
         allocator.free(entry.value_ptr.path);
     }
     spriteDataMap.deinit(allocator);
+
+    for (gibletData) |giblet| allocator.free(giblet.path);
+    allocator.free(gibletData);
+    gibletData = &.{};
 
     var particleIter = particleDataMap.iterator();
     while (particleIter.next()) |entry| {

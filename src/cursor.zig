@@ -18,6 +18,35 @@ var pendingKey: ?[]const u8 = null;
 var pendingUuid: ?u64 = null;
 var pendingImgPath: ?[]const u8 = null;
 var pendingScale: vec.Vec2 = .{ .x = 1, .y = 1 };
+const editorCrosshairPath = "images/crosshair.png";
+
+fn createEditorCrosshair() ?u64 {
+    return sprite.createFromImgWithAtlasProfile(editorCrosshairPath, .{ .x = 1, .y = 1 }, vec.zero, .immutable, .canvas_pixels, .preserve_detail) catch |err| {
+        std.log.warn("createEditorCrosshair: failed to create editor crosshair: {}", .{err});
+        return null;
+    };
+}
+
+fn createPendingSprite(key: []const u8) void {
+    const spriteData = data.getSpriteData(key) orelse {
+        std.log.warn("createPendingSprite: sprite data '{s}' is missing", .{key});
+        return;
+    };
+    const uuid = data.createSpriteFrom(key) orelse {
+        std.log.warn("createPendingSprite: failed to create sprite '{s}'", .{key});
+        return;
+    };
+    const pendingSprite = sprite.getSprite(uuid) orelse {
+        std.log.warn("createPendingSprite: created sprite {d} is missing", .{uuid});
+        sprite.cleanupLater(uuid);
+        return;
+    };
+
+    pendingUuid = uuid;
+    pendingKey = key;
+    pendingImgPath = spriteData.path;
+    pendingScale = pendingSprite.scale;
+}
 
 pub fn create() !void {
     if (created) return;
@@ -37,24 +66,23 @@ pub fn deinit() void {
 // Called on initial level editor entry: refresh sprite and reset cursor to level center.
 pub fn initSprite() void {
     if (crosshairUuid) |old| sprite.cleanupLater(old);
-    crosshairUuid = data.createSpriteFrom("crosshair", .canvas_pixels);
+    crosshairUuid = createEditorCrosshair();
     posPx = level.position;
 }
 
 // Called after editor reloads: refreshes sprites without moving the cursor.
 pub fn refreshSprite() void {
     if (crosshairUuid) |old| sprite.cleanupLater(old);
-    crosshairUuid = data.createSpriteFrom("crosshair", .canvas_pixels);
+    crosshairUuid = createEditorCrosshair();
 
     // Re-create pending sprite so its texture reference stays valid after atlas repack.
-    if (pendingKey) |key| {
-        if (pendingUuid) |old| sprite.cleanupLater(old);
-        pendingUuid = data.createSpriteFrom(key, .canvas_pixels);
-        if (data.getSpriteData(key)) |d| {
-            pendingImgPath = d.path;
-            pendingScale = .{ .x = d.scale, .y = d.scale };
-        }
-    }
+    const key = pendingKey orelse return;
+    if (pendingUuid) |old| sprite.cleanupLater(old);
+    pendingUuid = null;
+    pendingKey = null;
+    pendingImgPath = null;
+    pendingScale = .{ .x = 1, .y = 1 };
+    createPendingSprite(key);
 }
 
 pub fn cameraFollow() void {
@@ -68,11 +96,7 @@ pub fn cameraFollow() void {
 
 pub fn attachSprite(key: []const u8) void {
     detachSprite();
-    const d = data.getSpriteData(key) orelse return;
-    pendingUuid = data.createSpriteFrom(key, .canvas_pixels);
-    pendingKey = key;
-    pendingImgPath = d.path;
-    pendingScale = .{ .x = d.scale, .y = d.scale };
+    createPendingSprite(key);
 }
 
 pub fn detachSprite() void {

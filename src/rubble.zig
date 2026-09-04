@@ -301,7 +301,7 @@ fn generatePiece(source: sprite.Sprite, mask: PolygonMask, templateId: TemplateI
     const imagePath = try std.fmt.allocPrint(allocator, "generated/rubble/{d}/{d}", .{ templateId, pieceIndex });
     defer allocator.free(imagePath);
     outputSurfaceOwned = false;
-    const spriteUuid = try sprite.createFromOwnedSurface(imagePath, outputSurface, source.authoredScale, vec.izero, source.sizeBasis);
+    const spriteUuid = try sprite.createFromOwnedSurface(imagePath, outputSurface, source.sourceScale, vec.zero, source.sizeBasis);
 
     const cropCenterX = (@as(f32, @floatFromInt(mask.minX)) + @as(f32, @floatFromInt(width)) * 0.5) * source.scale.x;
     const cropCenterY = (@as(f32, @floatFromInt(mask.minY)) + @as(f32, @floatFromInt(height)) * 0.5) * source.scale.y;

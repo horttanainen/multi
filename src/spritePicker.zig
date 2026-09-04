@@ -16,7 +16,7 @@ pub fn open() !void {
         try list.append(.{
             .label = "",
             .kind = .{ .sprite_pick = key.* },
-            .image = data.createSpriteFrom(key.*, .canvas_pixels),
+            .image = data.createSpriteFrom(key.*),
         });
     }
 

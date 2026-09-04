@@ -20,6 +20,7 @@
         "pellet": {
             "count": 11,
             "spreadAngle": 11,
+            "spriteDiameterMeters": 0.12,
             "explosion": "pellet_impact",
             "color": { "r": 200, "g": 200, "b": 0 }
         }

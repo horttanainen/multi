@@ -31,8 +31,8 @@ var hookSpriteUuid: ?u64 = null;
 var segmentSpriteUuid: ?u64 = null;
 
 pub fn init() !void {
-    hookSpriteUuid = data.createSpriteFrom("rope_hook", .world_meters) orelse return error.SpriteNotFound;
-    segmentSpriteUuid = data.createSpriteFrom("rope_segment", .world_meters) orelse return error.SpriteNotFound;
+    hookSpriteUuid = data.createSpriteFrom("rope_hook") orelse return error.SpriteNotFound;
+    segmentSpriteUuid = data.createSpriteFrom("rope_segment") orelse return error.SpriteNotFound;
 }
 
 pub fn shootHook(playerId: usize, origin: vec.Vec2, direction: vec.Vec2) !void {

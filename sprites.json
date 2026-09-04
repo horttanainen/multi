@@ -2,58 +2,61 @@
     {
         "key": "player_1_spray",
         "path": "spray_paint/player_1.png",
-        "scale": 0.5,
+        "heightMeters": 0.8,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "player_2_spray",
         "path": "spray_paint/player_2.png",
-        "scale": 0.2,
+        "heightMeters": 6.4,
         "atlasProfile": "cap_512"
     },
     {
         "key": "crosshair",
         "path": "images/crosshair.png",
+        "heightMeters": 0.8,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "arm_with_hook",
         "path": "hook_hand/arm_with_hook.png",
-        "scale": 0.2,
+        "heightMeters": 1.56,
         "atlasProfile": "cap_512"
     },
     {
         "key": "arm_without_hook",
         "path": "hook_hand/arm_without_hook.png",
-        "scale": 0.2,
+        "heightMeters": 1.56,
         "atlasProfile": "cap_512"
     },
     {
         "key": "rope_hook",
         "path": "items/ninja_rope/item.png",
-        "scale": 0.3,
+        "heightMeters": 0.48,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "rope_segment",
         "path": "items/ninja_rope/segment.png",
+        "heightMeters": 0.8,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "box",
         "path": "images/box.png",
+        "heightMeters": 0.8,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "gravestone",
         "path": "gravestones/Untitled.png",
-        "scale": 0.3,
+        "heightMeters": 1.28625,
         "atlasProfile": "preserve_detail"
     },
     {
         "key": "rocket_launcher",
         "path": "weapons/rocket_launcher/weapon_with_arm.png",
-        "scale": 0.2,
+        "heightMeters": 1.56,
         "atlasProfile": "cap_512"
     }
 ]

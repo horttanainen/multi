@@ -1,0 +1,57 @@
+[
+    {
+        "group": "head",
+        "path": "giblets/head/head_1.png",
+        "heightMeters": 0.405
+    },
+    {
+        "group": "head",
+        "path": "giblets/head/torso_1.png",
+        "heightMeters": 0.76
+    },
+    {
+        "group": "head",
+        "path": "giblets/head/torso_head_1.png",
+        "heightMeters": 0.85
+    },
+    {
+        "group": "head",
+        "path": "giblets/head/torso_head_2.png",
+        "heightMeters": 0.5875
+    },
+    {
+        "group": "leg",
+        "path": "giblets/leg/leg_1.png",
+        "heightMeters": 0.525
+    },
+    {
+        "group": "leg",
+        "path": "giblets/leg/leg_2.png",
+        "heightMeters": 0.525
+    },
+    {
+        "group": "leg",
+        "path": "giblets/leg/leg_3.png",
+        "heightMeters": 0.6775
+    },
+    {
+        "group": "leg",
+        "path": "giblets/leg/leg_4.png",
+        "heightMeters": 0.28
+    },
+    {
+        "group": "meat",
+        "path": "giblets/meat/gib_1.png",
+        "heightMeters": 0.76
+    },
+    {
+        "group": "meat",
+        "path": "giblets/meat/gib_2.png",
+        "heightMeters": 0.405
+    },
+    {
+        "group": "meat",
+        "path": "giblets/meat/gib_3.png",
+        "heightMeters": 0.76
+    }
+]

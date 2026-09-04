@@ -58,7 +58,7 @@ pub const Level = struct {
     cameraZoomMeters: f32 = defaultCameraZoomMeters,
     aspectRatio: AspectRatio,
     gravity: f32 = 10.0,
-    pixelsPerMeter: i32 = defaultPixelsPerMeter,
+    pixelsPerMeter: i32,
     splitscreen: bool = false,
     movementFile: []const u8 = defaultMovementFile,
     parallaxEntities: []background.SerializableParallaxEntity,
@@ -70,7 +70,6 @@ pub const AspectRatio = struct {
     height: i32,
 };
 
-pub const defaultPixelsPerMeter = conv.defaultPixelsPerMeter;
 pub const defaultLevelHeightMeters: f32 = 12.0;
 pub const defaultCameraZoomMeters: f32 = defaultLevelHeightMeters;
 pub const defaultAspectRatio = AspectRatio{ .width = 16, .height = 9 };
@@ -88,7 +87,7 @@ pub fn sanitizeCameraZoomMeters(value: f32) f32 {
     return value;
 }
 
-pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio, pixelsPerMeter: i32) vec.IVec2 {
+pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio, pixelsPerMeter: i32) !vec.IVec2 {
     var safeHeightMeters = levelHeightMeters;
     if (safeHeightMeters <= 0) {
         std.log.warn("sizeFromHeightAndAspect: invalid level height {d}, using default", .{safeHeightMeters});
@@ -101,13 +100,12 @@ pub fn sizeFromHeightAndAspect(levelHeightMeters: f32, aspectRatio: AspectRatio,
         safeAspectRatio = defaultAspectRatio;
     }
 
-    var safePixelsPerMeter = pixelsPerMeter;
-    if (safePixelsPerMeter <= 0) {
-        std.log.warn("sizeFromHeightAndAspect: invalid pixels per meter {d}, using default", .{safePixelsPerMeter});
-        safePixelsPerMeter = defaultPixelsPerMeter;
+    if (pixelsPerMeter <= 0) {
+        std.log.err("sizeFromHeightAndAspect: pixels per meter must be positive, got {d}", .{pixelsPerMeter});
+        return error.InvalidPixelsPerMeter;
     }
 
-    const heightPixelsF = safeHeightMeters * @as(f32, @floatFromInt(safePixelsPerMeter));
+    const heightPixelsF = safeHeightMeters * @as(f32, @floatFromInt(pixelsPerMeter));
     const ratio = @as(f32, @floatFromInt(safeAspectRatio.width)) / @as(f32, @floatFromInt(safeAspectRatio.height));
 
     return .{
@@ -164,7 +162,7 @@ pub fn applyLevelSettings(lev: Level) !void {
 }
 
 pub fn spawnParallaxEntity(e: background.SerializableParallaxEntity) !void {
-    const s = try sprite.createFromImg(e.imgPath, e.scale, vec.izero, .canvas_pixels);
+    const s = try sprite.createFromImg(e.imgPath, e.scale, vec.zero, .canvas_pixels);
     try background.create(s, e.pos, e.parallaxDistance, e.scale, e.fog);
 }
 
@@ -218,7 +216,7 @@ fn spawnSingleStaticEntity(e: entity.SerializableEntity, shapeDef: box2d.c.b2Sha
         return error.BreakableRectangleCollider;
     }
 
-    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, staticSpriteBacking(e), .canvas_pixels);
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.zero, staticSpriteBacking(e), .canvas_pixels);
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
@@ -265,8 +263,13 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
         return spawnStaticSerializableEntity(e, shapeDef);
     }
 
-    const sizeBasis: sprite.SizeBasis = if (std.mem.eql(u8, e.type, "dynamic")) .world_meters else .canvas_pixels;
-    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, e.scale, vec.izero, entitySpriteBacking(e), sizeBasis);
+    const isDynamic = std.mem.eql(u8, e.type, "dynamic");
+    const sizeBasis: sprite.SizeBasis = if (isDynamic) .world_meters else .canvas_pixels;
+    const sourceScale = if (isDynamic)
+        vec.Vec2{ .x = e.scale.x / conv.met2pix, .y = e.scale.y / conv.met2pix }
+    else
+        e.scale;
+    const spriteUuid = try sprite.createFromImgWithBacking(e.imgPath, sourceScale, vec.zero, entitySpriteBacking(e), sizeBasis);
     errdefer sprite.cleanupLater(spriteUuid);
 
     var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
@@ -275,7 +278,7 @@ pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId
 
     const pos = conv.pixel2M(e.pos);
 
-    if (std.mem.eql(u8, e.type, "dynamic")) {
+    if (isDynamic) {
         const maximumHealth = e.health orelse defaultDynamicHealth;
         if (!std.math.isFinite(maximumHealth) or maximumHealth <= 0) {
             std.log.err("spawnSerializableEntity: dynamic entity {d} has invalid health {d}", .{ e.id, maximumHealth });

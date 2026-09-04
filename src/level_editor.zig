@@ -347,13 +347,19 @@ fn createEmptyLevelData() !level.Level {
     const entities = try allocator.alloc(entity.SerializableEntity, 0);
     errdefer allocator.free(entities);
 
+    const pixelsPerMeter: i32 = @intFromFloat(@round(conv.met2pix));
+    if (pixelsPerMeter <= 0) {
+        std.log.err("createEmptyLevelData: active pixels per meter must be positive, got {d}", .{pixelsPerMeter});
+        return error.InvalidPixelsPerMeter;
+    }
+
     return .{
-        .size = level.sizeFromHeightAndAspect(level.defaultLevelHeightMeters, level.defaultAspectRatio, level.defaultPixelsPerMeter),
+        .size = try level.sizeFromHeightAndAspect(level.defaultLevelHeightMeters, level.defaultAspectRatio, pixelsPerMeter),
         .levelHeightMeters = level.defaultLevelHeightMeters,
         .cameraZoomMeters = level.defaultCameraZoomMeters,
         .aspectRatio = level.defaultAspectRatio,
         .gravity = 10.0,
-        .pixelsPerMeter = level.defaultPixelsPerMeter,
+        .pixelsPerMeter = pixelsPerMeter,
         .splitscreen = false,
         .movementFile = movementFile,
         .parallaxEntities = parallaxEntities,
@@ -1589,7 +1595,7 @@ fn applyConfig(newConfig: Config) !void {
     document.levelData.levelHeightMeters = newConfig.levelHeightMeters;
     document.levelData.cameraZoomMeters = level.sanitizeCameraZoomMeters(newConfig.cameraZoomMeters);
     document.levelData.aspectRatio = newConfig.aspectRatio;
-    document.levelData.size = level.sizeFromHeightAndAspect(newConfig.levelHeightMeters, newConfig.aspectRatio, document.levelData.pixelsPerMeter);
+    document.levelData.size = try level.sizeFromHeightAndAspect(newConfig.levelHeightMeters, newConfig.aspectRatio, document.levelData.pixelsPerMeter);
     document.levelData.splitscreen = newConfig.splitscreen;
     document.dirty = true;
 }

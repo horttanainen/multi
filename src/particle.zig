@@ -83,7 +83,7 @@ pub fn init(circleSpritePath: []const u8) !void {
     circleSpriteUuid = try sprite.createFromImg(
         circleSpritePath,
         .{ .x = 1, .y = 1 },
-        vec.izero,
+        vec.zero,
         .canvas_pixels,
     );
 }

@@ -215,9 +215,9 @@ pub fn init(sourcePresets: std.StringHashMapUnmanaged(Preset)) !void {
         visualRandom.state = 0x9e3779b97f4a7c15;
     }
 
-    circleSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.izero, .canvas_pixels);
-    flashSpriteUuid = try sprite.createFromImg("particles/explosion-flash.png", .{ .x = 1, .y = 1 }, vec.izero, .canvas_pixels);
-    smokeSpriteUuid = try sprite.createFromImg("particles/smoke-puff.png", .{ .x = 1, .y = 1 }, vec.izero, .canvas_pixels);
+    circleSpriteUuid = try sprite.createFromImg("particles/circle.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
+    flashSpriteUuid = try sprite.createFromImg("particles/explosion-flash.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
+    smokeSpriteUuid = try sprite.createFromImg("particles/smoke-puff.png", .{ .x = 1, .y = 1 }, vec.zero, .canvas_pixels);
 
     var iterator = sourcePresets.iterator();
     while (iterator.next()) |entry| {
