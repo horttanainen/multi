@@ -1,5 +1,4 @@
 const std = @import("std");
-const sdl = @import("sdl.zig");
 
 const vec = @import("vector.zig");
 const allocator = @import("allocator.zig").allocator;
@@ -30,7 +29,7 @@ pub const AnimationSet = struct {
 
 var animationSets = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, AnimationSet).init(allocator);
 
-var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, bool).empty;
+var delayedSwitches = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
 
 pub fn register(bodyId: box2d.c.b2BodyId, anim: Animation) !void {
     // Create a single-animation AnimationSet for one-off effects
@@ -84,24 +83,17 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
             return;
         }
 
-        // Check if delay has elapsed (value == true means ready)
-        if (delayedSwitches.get(bodyId)) |ready| {
-            if (ready) {
-                // Delay elapsed, do the switch
-                _ = delayedSwitches.swapRemove(bodyId);
-                if (anim.spriteIndex < animSet.currentAnimations.len) {
-                    animSet.currentAnimations[anim.spriteIndex] = anim;
-                }
+        if (delayedSwitches.get(bodyId)) |switchAt| {
+            if (time.realNow() < switchAt) return;
+
+            _ = delayedSwitches.swapRemove(bodyId);
+            if (anim.spriteIndex < animSet.currentAnimations.len) {
+                animSet.currentAnimations[anim.spriteIndex] = anim;
             }
-            // Otherwise still waiting, do nothing
             return;
         }
 
-        // Start a new delay
-        const delayMs: u32 = @intFromFloat(anim.switchDelay * 1000.0);
-        delayedSwitches.put(allocator, bodyId, false) catch return;
-        const keyPtr = delayedSwitches.getPtr(bodyId).?;
-        _ = sdl.addTimer(delayMs, delayedSwitchCallback, @ptrCast(keyPtr));
+        try delayedSwitches.put(allocator, bodyId, time.realNow() + anim.switchDelay);
         return;
     }
 
@@ -111,12 +103,6 @@ pub fn switchAnimation(bodyId: box2d.c.b2BodyId, animationKey: []const u8) !void
     if (anim.spriteIndex < animSet.currentAnimations.len) {
         animSet.currentAnimations[anim.spriteIndex] = anim;
     }
-}
-
-fn delayedSwitchCallback(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
-    const ready: *bool = @ptrCast(@alignCast(param));
-    ready.* = true;
-    return 0;
 }
 
 pub fn animate() void {
@@ -241,12 +227,12 @@ pub fn cleanupOne(anim: Animation) void {
     allocator.free(anim.frames);
 }
 
-pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize) !Animation {
-    return loadWithBacking(pathToAnimationDir, fps, scale, offset, loop, spriteIndex, .immutable);
+pub fn load(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize, sizeBasis: sprite.SizeBasis) !Animation {
+    return loadWithBacking(pathToAnimationDir, fps, scale, offset, loop, spriteIndex, .immutable, sizeBasis);
 }
 
-pub fn loadWithBacking(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize, backing: sprite.Backing) !Animation {
-    const frameUuids = try fs.loadSpritesFromFolderWithBacking(pathToAnimationDir, scale, offset, backing);
+pub fn loadWithBacking(pathToAnimationDir: []const u8, fps: i32, scale: vec.Vec2, offset: vec.IVec2, loop: bool, spriteIndex: usize, backing: sprite.Backing, sizeBasis: sprite.SizeBasis) !Animation {
+    const frameUuids = try fs.loadSpritesFromFolderWithBacking(pathToAnimationDir, scale, offset, backing, sizeBasis);
 
     return .{
         .fps = fps,
