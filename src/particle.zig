@@ -209,8 +209,6 @@ pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
     box2d.c.b2Shape_EnableContactEvents(body.shapeId, spawn.behaviors.stain != null);
 
     box2d.c.b2Body_SetTransform(body.bodyId, vec.toBox2d(spawn.position), box2d.c.b2Rot_identity);
-    box2d.c.b2Body_SetLinearVelocity(body.bodyId, vec.toBox2d(spawn.velocity));
-    box2d.c.b2Body_SetAngularVelocity(body.bodyId, 0);
     box2d.c.b2Body_SetLinearDamping(body.bodyId, spawn.linear_damping);
     box2d.c.b2Body_SetGravityScale(body.bodyId, spawn.gravity_scale);
     box2d.c.b2Body_SetFixedRotation(body.bodyId, true);
@@ -227,7 +225,10 @@ pub fn spawnCircle(spawn: CircleSpawn) !box2d.c.b2BodyId {
         .behaviors = spawn.behaviors,
         .seed = spawn.seed,
     });
+    // Box2D ignores velocity setters while a pooled body is disabled.
     box2d.c.b2Body_Enable(body.bodyId);
+    box2d.c.b2Body_SetLinearVelocity(body.bodyId, vec.toBox2d(spawn.velocity));
+    box2d.c.b2Body_SetAngularVelocity(body.bodyId, 0);
 
     return body.bodyId;
 }
