@@ -254,6 +254,24 @@ fn moveTowards(current: f32, target: f32, maxChange: f32) f32 {
     return target;
 }
 
+fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *const State, velocity: *box2d.c.b2Vec2, dt: f32) void {
+    if (state.groundState.supported and velocity.y >= 0) {
+        velocity.y = 0;
+        return;
+    }
+
+    const controlSettings = towerfallSettings.control;
+    const fastFalling = inputState.movementDirection.y < 0 and velocity.y >= 0;
+    const acceleration = if (fastFalling) controlSettings.fastFallAcceleration else controlSettings.gravity;
+    const terminalSpeed = if (fastFalling) controlSettings.fastFallSpeed else controlSettings.maxFallSpeed;
+
+    if (velocity.y > terminalSpeed) {
+        velocity.y = moveTowards(velocity.y, terminalSpeed, controlSettings.excessFallSpeedDeceleration * dt);
+        return;
+    }
+    velocity.y = @min(velocity.y + acceleration * dt, terminalSpeed);
+}
+
 fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
     const inputState = player_input.playerInputs.get(playerId) orelse {
         std.log.warn("movement.applyTowerfallMovement: input state is missing for player {d}", .{playerId});
@@ -271,9 +289,7 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
 
     var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
     velocity.x = moveTowards(velocity.x, targetSpeed, acceleration * dt);
-    if (velocity.y < controlSettings.maxFallSpeed) {
-        velocity.y = @min(velocity.y + controlSettings.gravity * dt, controlSettings.maxFallSpeed);
-    }
+    applyTowerfallFalling(inputState, state, &velocity, dt);
     box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
 
     if (!inputState.buttons.get(.jump).pressed) return;

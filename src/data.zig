@@ -198,6 +198,9 @@ pub const TowerfallControlData = struct {
     airDeceleration: f32,
     gravity: f32,
     maxFallSpeed: f32,
+    fastFallAcceleration: f32,
+    fastFallSpeed: f32,
+    excessFallSpeedDeceleration: f32,
 };
 
 pub const TowerfallJumpData = struct {
