@@ -211,11 +211,17 @@ pub const TowerfallJumpData = struct {
     bufferTimeMs: u32,
 };
 
+pub const TowerfallWallSlideData = struct {
+    acceleration: f32,
+    maxFallSpeed: f32,
+};
+
 pub const TowerfallMovementData = struct {
     control: TowerfallControlData,
     bodyMotion: MovementBodyMotionData,
     surfaceResponse: MovementSurfaceResponseData,
     jump: TowerfallJumpData,
+    wallSlide: TowerfallWallSlideData,
 };
 
 pub const MovementData = struct {

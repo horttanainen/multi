@@ -29,6 +29,10 @@
       "heldGravity": 59.0,
       "coyoteTimeMs": 100,
       "bufferTimeMs": 100
+    },
+    "wallSlide": {
+      "acceleration": 3.8,
+      "maxFallSpeed": 9.0
     }
   },
   "grounding": {

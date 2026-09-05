@@ -39,6 +39,7 @@ pub const State = struct {
     groundState: GroundState = .{},
     leftWallContactCount: usize = 0,
     rightWallContactCount: usize = 0,
+    wallSliding: bool = false,
     lateralMovementIntent: i8 = 0,
     airJumpCounter: u32 = 0,
     bufferedJumpUntilMs: ?u64 = null,
@@ -94,6 +95,7 @@ fn clearRuntimeState(state: *State) void {
     state.groundState = .{};
     state.leftWallContactCount = 0;
     state.rightWallContactCount = 0;
+    state.wallSliding = false;
     state.lateralMovementIntent = 0;
     state.airJumpCounter = 0;
     state.bufferedJumpUntilMs = null;
@@ -257,10 +259,24 @@ fn moveTowards(current: f32, target: f32, maxChange: f32) f32 {
     return target;
 }
 
+fn isHoldingTowardsWall(inputState: player_input.PlayerInput, state: *const State) bool {
+    const horizontalDirection = inputState.movementDirection.x;
+    if (horizontalDirection < 0 and state.leftWallContactCount > 0) return true;
+    return horizontalDirection > 0 and state.rightWallContactCount > 0;
+}
+
 fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *State, velocity: *box2d.c.b2Vec2, dt: f32) void {
     if (state.groundState.supported and velocity.y >= 0) {
         velocity.y = 0;
         state.heldJumpGravityActive = false;
+        state.wallSliding = false;
+        return;
+    }
+
+    state.wallSliding = velocity.y >= 0 and isHoldingTowardsWall(inputState, state);
+    if (state.wallSliding) {
+        const wallSlide = towerfallSettings.wallSlide;
+        velocity.y = @min(velocity.y + wallSlide.acceleration * dt, wallSlide.maxFallSpeed);
         return;
     }
 
