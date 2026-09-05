@@ -165,7 +165,7 @@ pub fn applyPlayerInput(playerId: usize) void {
         executeAction(playerId, .brake);
     }
 
-    if (inputState.buttons.get(.jump).held) executeAction(playerId, .jump);
+    if (movement.mechanism == .liero and inputState.buttons.get(.jump).held) executeAction(playerId, .jump);
 
     if (movement.mechanism == .towerfall) {
         updateTowerfallAimState(playerId, inputState);

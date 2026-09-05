@@ -4,14 +4,15 @@
   "towerfall": {
     "control": {
       "maxRunSpeed": 9.0,
-      "groundAcceleration": 75.0,
+      "groundAcceleration": 55.0,
+      "groundReversalAcceleration": 90.0,
       "groundDeceleration": 90.0,
       "airAcceleration": 45.0,
       "airDeceleration": 30.0,
-      "gravity": 75.0,
-      "maxFallSpeed": 14.0,
-      "fastFallAcceleration": 216.0,
-      "fastFallSpeed": 22.5,
+      "gravity": 107.0,
+      "maxFallSpeed": 16.8,
+      "fastFallAcceleration": 129.0,
+      "fastFallSpeed": 21.0,
       "excessFallSpeedDeceleration": 60.0
     },
     "bodyMotion": {
@@ -24,7 +25,8 @@
       "restingFriction": 0.0
     },
     "jump": {
-      "speed": 22.5,
+      "speed": 20.0,
+      "heldGravity": 59.0,
       "coyoteTimeMs": 100,
       "bufferTimeMs": 100
     }

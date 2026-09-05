@@ -42,6 +42,7 @@ pub const State = struct {
     lateralMovementIntent: i8 = 0,
     airJumpCounter: u32 = 0,
     bufferedJumpUntilMs: ?u64 = null,
+    heldJumpGravityActive: bool = false,
     facingRight: bool = false,
 };
 
@@ -96,6 +97,7 @@ fn clearRuntimeState(state: *State) void {
     state.lateralMovementIntent = 0;
     state.airJumpCounter = 0;
     state.bufferedJumpUntilMs = null;
+    state.heldJumpGravityActive = false;
 }
 
 pub fn reset(playerId: usize) void {
@@ -226,6 +228,7 @@ fn executeTowerfallJump(state: *State, currentTimeMs: u64) bool {
     state.groundState.jumpAvailable = false;
     state.groundState.supportLostAtMs = null;
     state.bufferedJumpUntilMs = null;
+    state.heldJumpGravityActive = true;
     return true;
 }
 
@@ -254,15 +257,24 @@ fn moveTowards(current: f32, target: f32, maxChange: f32) f32 {
     return target;
 }
 
-fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *const State, velocity: *box2d.c.b2Vec2, dt: f32) void {
+fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *State, velocity: *box2d.c.b2Vec2, dt: f32) void {
     if (state.groundState.supported and velocity.y >= 0) {
         velocity.y = 0;
+        state.heldJumpGravityActive = false;
         return;
     }
 
     const controlSettings = towerfallSettings.control;
     const fastFalling = inputState.movementDirection.y < 0 and velocity.y >= 0;
-    const acceleration = if (fastFalling) controlSettings.fastFallAcceleration else controlSettings.gravity;
+    const holdingJump = inputState.buttons.get(.jump).held;
+    if (!holdingJump) state.heldJumpGravityActive = false;
+
+    const acceleration = if (fastFalling)
+        controlSettings.fastFallAcceleration
+    else if (state.heldJumpGravityActive)
+        towerfallSettings.jump.heldGravity
+    else
+        controlSettings.gravity;
     const terminalSpeed = if (fastFalling) controlSettings.fastFallSpeed else controlSettings.maxFallSpeed;
 
     if (velocity.y > terminalSpeed) {
@@ -280,20 +292,22 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
     const controlSettings = towerfallSettings.control;
     const movementDirection = std.math.clamp(inputState.movementDirection.x, -1, 1);
     const targetSpeed = movementDirection * controlSettings.maxRunSpeed;
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    const reversing = movementDirection != 0 and velocity.x * movementDirection < 0;
     const acceleration = if (movementDirection == 0)
         if (state.groundState.supported) controlSettings.groundDeceleration else controlSettings.airDeceleration
-    else if (state.groundState.supported)
-        controlSettings.groundAcceleration
+    else if (!state.groundState.supported)
+        controlSettings.airAcceleration
+    else if (reversing)
+        controlSettings.groundReversalAcceleration
     else
-        controlSettings.airAcceleration;
+        controlSettings.groundAcceleration;
 
-    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
     velocity.x = moveTowards(velocity.x, targetSpeed, acceleration * dt);
     applyTowerfallFalling(inputState, state, &velocity, dt);
     box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
 
-    if (!inputState.buttons.get(.jump).pressed) return;
-    requestTowerfallJump(state, time.nowMs());
+    if (inputState.buttons.get(.jump).pressed) requestTowerfallJump(state, time.nowMs());
 }
 
 fn applyMovement(playerId: usize, state: *State, dt: f32) void {

@@ -193,6 +193,7 @@ pub const LieroMovementData = struct {
 pub const TowerfallControlData = struct {
     maxRunSpeed: f32,
     groundAcceleration: f32,
+    groundReversalAcceleration: f32,
     groundDeceleration: f32,
     airAcceleration: f32,
     airDeceleration: f32,
@@ -205,6 +206,7 @@ pub const TowerfallControlData = struct {
 
 pub const TowerfallJumpData = struct {
     speed: f32,
+    heldGravity: f32,
     coyoteTimeMs: u32,
     bufferTimeMs: u32,
 };
