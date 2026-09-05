@@ -4,7 +4,7 @@
   "cameraZoomMeters": 20,
   "aspectRatio": { "width": 4, "height": 3 },
   "gravity": 10,
-  "pixelsPerMeter": 50,
+  "pixelsPerMeter": 55,
   "splitscreen": false,
   "movementFile": "movements/towerfall_keep.json",
   "parallaxEntities": [

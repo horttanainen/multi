@@ -8,10 +8,10 @@
       "groundDeceleration": 90.0,
       "airAcceleration": 45.0,
       "airDeceleration": 30.0,
-      "gravity": 108.0,
-      "maxFallSpeed": 18.0,
+      "gravity": 75.0,
+      "maxFallSpeed": 14.0,
       "fastFallAcceleration": 216.0,
-      "fastFallSpeed": 30.0,
+      "fastFallSpeed": 22.5,
       "excessFallSpeedDeceleration": 60.0
     },
     "bodyMotion": {
@@ -24,7 +24,7 @@
       "restingFriction": 0.0
     },
     "jump": {
-      "speed": 19.5,
+      "speed": 22.5,
       "coyoteTimeMs": 100,
       "bufferTimeMs": 100
     }
