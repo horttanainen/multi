@@ -40,6 +40,8 @@ pub const State = struct {
     leftWallContactCount: usize = 0,
     rightWallContactCount: usize = 0,
     wallSliding: bool = false,
+    wallJumpDirection: i8 = 0,
+    wallJumpMovementStepsRemaining: u32 = 0,
     lateralMovementIntent: i8 = 0,
     airJumpCounter: u32 = 0,
     bufferedJumpUntilMs: ?u64 = null,
@@ -96,6 +98,8 @@ fn clearRuntimeState(state: *State) void {
     state.leftWallContactCount = 0;
     state.rightWallContactCount = 0;
     state.wallSliding = false;
+    state.wallJumpDirection = 0;
+    state.wallJumpMovementStepsRemaining = 0;
     state.lateralMovementIntent = 0;
     state.airJumpCounter = 0;
     state.bufferedJumpUntilMs = null;
@@ -219,18 +223,68 @@ fn applyLieroMovement(state: *State, dt: f32) void {
     box2d.c.b2Body_ApplyForceToCenter(state.bodyId, force, true);
 }
 
-fn executeTowerfallJump(state: *State, currentTimeMs: u64) bool {
-    const towerfallJump = towerfallSettings.jump;
-    if (!canUseGroundJump(state, currentTimeMs, towerfallJump.coyoteTimeMs)) return false;
-
-    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
-    velocity.y = -towerfallJump.speed;
-    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
-
+fn finishTowerfallJump(state: *State) void {
     state.groundState.jumpAvailable = false;
     state.groundState.supportLostAtMs = null;
     state.bufferedJumpUntilMs = null;
     state.heldJumpGravityActive = true;
+    state.wallSliding = false;
+}
+
+fn executeTowerfallGroundJump(state: *State) void {
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    velocity.y = -towerfallSettings.jump.speed;
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
+
+    state.wallJumpDirection = 0;
+    state.wallJumpMovementStepsRemaining = 0;
+    finishTowerfallJump(state);
+}
+
+fn availableWallJumpDirection(state: *const State) i8 {
+    if (state.groundState.supported) return 0;
+
+    const touchesLeftWall = state.leftWallContactCount > 0;
+    const touchesRightWall = state.rightWallContactCount > 0;
+    if (touchesLeftWall and !touchesRightWall) return 1;
+    if (touchesRightWall and !touchesLeftWall) return -1;
+    if (!touchesLeftWall and !touchesRightWall) return 0;
+
+    if (state.lateralMovementIntent < 0) return 1;
+    if (state.lateralMovementIntent > 0) return -1;
+    return if (state.facingRight) -1 else 1;
+}
+
+fn executeTowerfallWallJump(state: *State, direction: i8) void {
+    const wallJump = towerfallSettings.wallJump;
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    velocity.x = @as(f32, @floatFromInt(direction)) * wallJump.horizontalSpeed;
+    velocity.y = -towerfallSettings.jump.speed;
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
+
+    state.wallJumpDirection = direction;
+    state.wallJumpMovementStepsRemaining = wallJump.forcedMovementSteps;
+    // The launch step is the first forced-movement step.
+    if (state.wallJumpMovementStepsRemaining > 0) state.wallJumpMovementStepsRemaining -= 1;
+    if (state.wallJumpMovementStepsRemaining == 0) state.wallJumpDirection = 0;
+    state.facingRight = direction > 0;
+    finishTowerfallJump(state);
+}
+
+fn executeTowerfallJump(state: *State, currentTimeMs: u64) bool {
+    if (state.groundState.supported and state.groundState.jumpAvailable) {
+        executeTowerfallGroundJump(state);
+        return true;
+    }
+
+    const wallDirection = availableWallJumpDirection(state);
+    if (wallDirection != 0) {
+        executeTowerfallWallJump(state, wallDirection);
+        return true;
+    }
+
+    if (!canUseGroundJump(state, currentTimeMs, towerfallSettings.jump.coyoteTimeMs)) return false;
+    executeTowerfallGroundJump(state);
     return true;
 }
 
@@ -248,8 +302,6 @@ fn processTowerfallBufferedJump(state: *State, currentTimeMs: u64) void {
         state.bufferedJumpUntilMs = null;
         return;
     }
-    if (!canUseGroundJump(state, currentTimeMs, towerfallSettings.jump.coyoteTimeMs)) return;
-
     _ = executeTowerfallJump(state, currentTimeMs);
 }
 
@@ -263,6 +315,21 @@ fn isHoldingTowardsWall(inputState: player_input.PlayerInput, state: *const Stat
     const horizontalDirection = inputState.movementDirection.x;
     if (horizontalDirection < 0 and state.leftWallContactCount > 0) return true;
     return horizontalDirection > 0 and state.rightWallContactCount > 0;
+}
+
+fn towerfallMovementDirection(inputState: player_input.PlayerInput, state: *State) f32 {
+    const inputDirection = std.math.clamp(inputState.movementDirection.x, -1, 1);
+    if (state.groundState.supported) {
+        state.wallJumpDirection = 0;
+        state.wallJumpMovementStepsRemaining = 0;
+        return inputDirection;
+    }
+    if (state.wallJumpMovementStepsRemaining == 0) return inputDirection;
+
+    const forcedDirection: f32 = @floatFromInt(state.wallJumpDirection);
+    state.wallJumpMovementStepsRemaining -= 1;
+    if (state.wallJumpMovementStepsRemaining == 0) state.wallJumpDirection = 0;
+    return forcedDirection;
 }
 
 fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *State, velocity: *box2d.c.b2Vec2, dt: f32) void {
@@ -306,7 +373,7 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
         return;
     };
     const controlSettings = towerfallSettings.control;
-    const movementDirection = std.math.clamp(inputState.movementDirection.x, -1, 1);
+    const movementDirection = towerfallMovementDirection(inputState, state);
     const targetSpeed = movementDirection * controlSettings.maxRunSpeed;
     var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
     const reversing = movementDirection != 0 and velocity.x * movementDirection < 0;
@@ -323,7 +390,9 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
     applyTowerfallFalling(inputState, state, &velocity, dt);
     box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
 
-    if (inputState.buttons.get(.jump).pressed) requestTowerfallJump(state, time.nowMs());
+    const currentTimeMs = time.nowMs();
+    if (inputState.buttons.get(.jump).pressed) requestTowerfallJump(state, currentTimeMs);
+    processTowerfallBufferedJump(state, currentTimeMs);
 }
 
 fn applyMovement(playerId: usize, state: *State, dt: f32) void {
@@ -547,10 +616,7 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
 
     state.groundState.supported = supported;
     state.groundState.groundContact = groundContact;
-    switch (mechanism) {
-        .liero => processLieroBufferedJump(playerId, state, currentTimeMs),
-        .towerfall => processTowerfallBufferedJump(state, currentTimeMs),
-    }
+    if (mechanism == .liero) processLieroBufferedJump(playerId, state, currentTimeMs);
 }
 
 pub fn processSensorEvents() !void {

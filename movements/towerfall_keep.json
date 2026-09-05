@@ -33,6 +33,10 @@
     "wallSlide": {
       "acceleration": 3.8,
       "maxFallSpeed": 9.0
+    },
+    "wallJump": {
+      "horizontalSpeed": 12.0,
+      "forcedMovementSteps": 12
     }
   },
   "grounding": {
