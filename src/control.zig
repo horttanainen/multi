@@ -113,6 +113,44 @@ pub fn applyAllPlayerInputs() void {
     }
 }
 
+pub fn applyFixedStepPlayerInputs() void {
+    for (player_input.playerInputs.keys(), player_input.playerInputs.values()) |playerId, *inputState| {
+        const shootButton = inputState.buttons.get(.shoot);
+        const shouldShoot = switch (movement.mechanism) {
+            .liero => shootButton.held,
+            .towerfall => shootButton.released,
+        };
+        if (!shouldShoot) continue;
+
+        executeAction(playerId, .shoot);
+    }
+}
+
+fn updateTowerfallAimState(playerId: usize, inputState: player_input.PlayerInput) void {
+    const shootButton = inputState.buttons.get(.shoot);
+    const hasDirection = !vec.equals(inputState.aimDirection, vec.zero);
+
+    if (shootButton.held) {
+        if (!hasDirection and !shootButton.pendingPressed) return;
+        executeAim(playerId, inputState.aimDirection);
+        return;
+    }
+
+    if (shootButton.pendingReleased) {
+        if (hasDirection) executeAim(playerId, inputState.aimDirection);
+        executeAimRelease(playerId);
+        return;
+    }
+
+    if (!hasDirection) {
+        executeAimRelease(playerId);
+        return;
+    }
+
+    executeAim(playerId, inputState.aimDirection);
+    executeAimRelease(playerId);
+}
+
 pub fn applyPlayerInput(playerId: usize) void {
     const inputState = player_input.playerInputs.get(playerId) orelse {
         std.log.warn("control.applyPlayerInput: input state is missing for player {d}", .{playerId});
@@ -129,13 +167,14 @@ pub fn applyPlayerInput(playerId: usize) void {
 
     if (inputState.buttons.get(.jump).held) executeAction(playerId, .jump);
 
-    if (inputState.aimDirection.x == 0 and inputState.aimDirection.y == 0) {
+    if (movement.mechanism == .towerfall) {
+        updateTowerfallAimState(playerId, inputState);
+    } else if (inputState.aimDirection.x == 0 and inputState.aimDirection.y == 0) {
         executeAimRelease(playerId);
     } else {
         executeAim(playerId, inputState.aimDirection);
     }
 
-    if (inputState.buttons.get(.shoot).held) executeAction(playerId, .shoot);
     if (inputState.buttons.get(.zoom).held) {
         executeZoom(playerId);
     } else {

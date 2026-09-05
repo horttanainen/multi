@@ -5,6 +5,7 @@ const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
+const movement = @import("movement.zig");
 const player_input = @import("player_input.zig");
 const vec = @import("vector.zig");
 
@@ -195,17 +196,21 @@ pub fn handle(ctrl: *const controller.Controller) void {
     if (key(keyStates, bindings.moveUp)) movementDirection.y = 1;
     if (key(keyStates, bindings.moveDown)) movementDirection.y = -1;
 
-    if (key(keyStates, bindings.aimLeft)) {
-        aimDirection = vec.add(aimDirection, vec.west);
-    }
-    if (key(keyStates, bindings.aimRight)) {
-        aimDirection = vec.add(aimDirection, vec.east);
-    }
-    if (key(keyStates, bindings.aimUp)) {
-        aimDirection = vec.add(aimDirection, vec.north);
-    }
-    if (key(keyStates, bindings.aimDown)) {
-        aimDirection = vec.add(aimDirection, vec.south);
+    if (movement.mechanism == .towerfall) {
+        aimDirection = movementDirection;
+    } else {
+        if (key(keyStates, bindings.aimLeft)) {
+            aimDirection = vec.add(aimDirection, vec.west);
+        }
+        if (key(keyStates, bindings.aimRight)) {
+            aimDirection = vec.add(aimDirection, vec.east);
+        }
+        if (key(keyStates, bindings.aimUp)) {
+            aimDirection = vec.add(aimDirection, vec.north);
+        }
+        if (key(keyStates, bindings.aimDown)) {
+            aimDirection = vec.add(aimDirection, vec.south);
+        }
     }
 
     var sample: player_input.Sample = .{

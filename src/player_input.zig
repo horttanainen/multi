@@ -53,12 +53,16 @@ pub fn submit(playerId: usize, sample: Sample) void {
 }
 
 pub fn neutralize(playerId: usize) void {
-    submit(playerId, .{});
+    const inputState = playerInputs.getPtr(playerId) orelse {
+        std.log.warn("player_input.neutralize: input state is missing for player {d}", .{playerId});
+        return;
+    };
+    inputState.* = .{};
 }
 
 pub fn neutralizeAll() void {
     for (playerInputs.values()) |*inputState| {
-        applySample(inputState, .{});
+        inputState.* = .{};
     }
 }
 

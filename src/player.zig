@@ -113,6 +113,8 @@ fn calcCrosshairPosition(p: Player) vec.IVec2 {
 }
 
 pub fn getCrosshairOffset(p: Player) vec.IVec2 {
+    if (movement.mechanism == .towerfall and !p.isAiming) return vec.izero;
+
     const baseDistance: f32 = if (p.isAiming) p.aimMagnitude * config.aimCircleRadius else config.aimRestingDistance;
     const distance: f32 = if (p.isZooming) baseDistance * 2 else baseDistance;
     const displacement = vec.mul(vec.normalize(p.aimDirection), distance);
@@ -438,7 +440,7 @@ pub fn aim(p: *Player, direction: vec.Vec2) void {
     // Update entity flip based on aim direction
     const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
     if (maybeEntity) |ent| {
-        ent.flipEntityHorizontally = dir.x > 0;
+        if (movement.mechanism == .liero or dir.x != 0) ent.flipEntityHorizontally = dir.x > 0;
     }
 }
 
@@ -689,6 +691,7 @@ pub fn drawAllCrosshairs() !void {
         if (p.isDead) {
             continue;
         }
+        if (movement.mechanism == .towerfall and !p.isAiming) continue;
         try drawCrosshair(p);
     }
 }

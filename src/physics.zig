@@ -9,6 +9,7 @@ const camera = @import("camera.zig");
 const particle = @import("particle.zig");
 const sensor = @import("sensor.zig");
 const player_input = @import("player_input.zig");
+const control = @import("control.zig");
 
 pub fn step() !usize {
     // Step box2d.c physics world
@@ -21,6 +22,7 @@ pub fn step() !usize {
             entity.updateStates();
             particle.updateStates();
             player.updateAllStates();
+            control.applyFixedStepPlayerInputs();
             movement.clampAllSpeeds();
             movement.applyAll(config.physics.dt);
             box2d.worldStep(config.physics.dt, config.physics.subStepCount);

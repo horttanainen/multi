@@ -7,6 +7,7 @@ const allocator = @import("allocator.zig").allocator;
 const sprite = @import("sprite.zig");
 const controller = @import("controller.zig");
 const control = @import("control.zig");
+const movement = @import("movement.zig");
 const player_input = @import("player_input.zig");
 const vec = @import("vector.zig");
 
@@ -288,17 +289,23 @@ pub fn handle(ctrl: *const controller.Controller) void {
         .y = -digitalAxis(moveY, bindings.moveThreshold),
     };
 
-    const rawAimX = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis);
-    const rawAimY = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis);
-    const aim = applyRadialDeadzone(rawAimX, rawAimY, stickDeadzone);
+    var aimDirection = movementDirection;
+    var shootHeld = sdl.getGamepadButton(sdlGamepad, .x);
+    var zoomHeld = false;
+    if (movement.mechanism == .liero) {
+        const rawAimX = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis);
+        const rawAimY = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis);
+        const aim = applyRadialDeadzone(rawAimX, rawAimY, stickDeadzone);
+        aimDirection = if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold)
+            .{ .x = aim.x, .y = -aim.y }
+        else
+            vec.zero;
 
-    const aimDirection: vec.Vec2 = if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold)
-        .{ .x = aim.x, .y = -aim.y }
-    else
-        vec.zero;
-
-    const shootValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.shootAxis));
-    const zoomValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, .triggerleft));
+        const shootValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.shootAxis));
+        shootHeld = shootValue > bindings.shootThreshold;
+        const zoomValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, .triggerleft));
+        zoomHeld = zoomValue > TRIGGER_THRESHOLD;
+    }
 
     var sample: player_input.Sample = .{
         .movementDirection = movementDirection,
@@ -306,8 +313,8 @@ pub fn handle(ctrl: *const controller.Controller) void {
     };
     sample.buttons.set(.jump, sdl.getGamepadButton(sdlGamepad, bindings.jumpButton));
     sample.buttons.set(.dodge, sdl.getGamepadButton(sdlGamepad, bindings.dodgeButton));
-    sample.buttons.set(.shoot, shootValue > bindings.shootThreshold);
-    sample.buttons.set(.zoom, zoomValue > TRIGGER_THRESHOLD);
+    sample.buttons.set(.shoot, shootHeld);
+    sample.buttons.set(.zoom, zoomHeld);
     sample.buttons.set(.rope, sdl.getGamepadButton(sdlGamepad, bindings.ropeButton));
     sample.buttons.set(.sprayPaint, sdl.getGamepadButton(sdlGamepad, bindings.sprayPaintButton));
     sample.buttons.set(.weaponNext, sdl.getGamepadButton(sdlGamepad, bindings.weaponNextButton));
