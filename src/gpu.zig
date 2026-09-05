@@ -2524,6 +2524,29 @@ pub fn renderDrawLine(x1: i32, y1: i32, x2: i32, y2: i32) !void {
     g.color_vertex_count += 2;
 }
 
+pub fn renderDrawGradientLine(start: [2]f32, end: [2]f32, startColor: sdl.Color, endColor: sdl.Color) !void {
+    const g = getGpu();
+    ensureColorPipeline(g, .colored_lines);
+
+    growColorVertexCapacity(g, g.color_vertex_count + 2) catch |err| {
+        std.log.warn("renderDrawGradientLine: failed to grow color vertex buffer: {}", .{err});
+        return;
+    };
+
+    const idx = g.color_vertex_count;
+    g.color_vertices[idx] = .{
+        .x = start[0],
+        .y = start[1],
+        .color = .{ .r = startColor.r, .g = startColor.g, .b = startColor.b, .a = startColor.a },
+    };
+    g.color_vertices[idx + 1] = .{
+        .x = end[0],
+        .y = end[1],
+        .color = .{ .r = endColor.r, .g = endColor.g, .b = endColor.b, .a = endColor.a },
+    };
+    g.color_vertex_count += 2;
+}
+
 pub fn renderFillRect(rect: sdl.Rect) !void {
     const g = getGpu();
     ensureColorPipeline(g, .colored_triangles);

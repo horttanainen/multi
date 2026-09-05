@@ -1,5 +1,6 @@
 {
   "mechanism": "liero",
+  "aimGuideLengthMeters": 2,
   "liero": {
     "control": {
       "lateralForce": 5.0,

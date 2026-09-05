@@ -48,6 +48,7 @@ pub const State = struct {
 pub var states: std.AutoArrayHashMapUnmanaged(usize, State) = .empty;
 
 pub var mechanism: data.MovementMechanism = undefined;
+pub var aimGuideLengthMeters: f32 = undefined;
 pub var control: data.MovementControlData = undefined;
 pub var bodyMotion: data.MovementBodyMotionData = undefined;
 pub var surfaceResponse: data.MovementSurfaceResponseData = undefined;
@@ -60,6 +61,7 @@ var contactDataScratch: std.ArrayListUnmanaged(box2d.c.b2ContactData) = .empty;
 
 pub fn configure(movementData: data.MovementData) !void {
     mechanism = movementData.mechanism;
+    aimGuideLengthMeters = movementData.aimGuideLengthMeters;
     grounding = movementData.grounding;
 
     switch (mechanism) {

@@ -1,5 +1,6 @@
 {
   "mechanism": "towerfall",
+  "aimGuideLengthMeters": 2,
   "towerfall": {
     "control": {
       "maxRunSpeed": 9.0,
@@ -8,7 +9,10 @@
       "airAcceleration": 45.0,
       "airDeceleration": 30.0,
       "gravity": 108.0,
-      "maxFallSpeed": 18.0
+      "maxFallSpeed": 18.0,
+      "fastFallAcceleration": 216.0,
+      "fastFallSpeed": 30.0,
+      "excessFallSpeedDeceleration": 60.0
     },
     "bodyMotion": {
       "maxLinearSpeed": null,

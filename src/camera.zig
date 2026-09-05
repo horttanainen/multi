@@ -99,10 +99,10 @@ pub fn followAllPlayers(zoom: f32) void {
                 var pos = conv.m2Pixel(state.pos);
 
                 const lerpFactor: f32 = 0.10;
-                const crosshairOffset = player.getCrosshairOffset(p.*);
+                const aimOffset = player.getAimOffset(p.*);
                 const target: vec.Vec2 = .{
-                    .x = @as(f32, @floatFromInt(crosshairOffset.x)) * 0.5,
-                    .y = @as(f32, @floatFromInt(crosshairOffset.y)) * 0.5,
+                    .x = @as(f32, @floatFromInt(aimOffset.x)) * 0.5,
+                    .y = @as(f32, @floatFromInt(aimOffset.y)) * 0.5,
                 };
 
                 p.zoomOffset.x += (target.x - p.zoomOffset.x) * lerpFactor;

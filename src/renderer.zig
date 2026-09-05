@@ -124,7 +124,7 @@ fn renderCamera(cameraId: usize) !void {
     try blast_pressure_visual.draw();
     try explosion_visual.draw();
     try visual_particle.draw();
-    try player.drawAllCrosshairs();
+    try player.drawAllAimGuides();
 
     if (config.debug) {
         try debug.draw();

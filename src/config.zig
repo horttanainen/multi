@@ -108,8 +108,8 @@ pub const physics = .{
     .subStepCount = 4,
 };
 
-pub const aimCircleRadius: f32 = 500;
-pub const aimRestingDistance: f32 = 100;
+pub const aimMaximumDistancePixels: f32 = 500;
+pub const aimRestingDistancePixels: f32 = 100;
 
 pub const runAnimationFps: i32 = 12;
 

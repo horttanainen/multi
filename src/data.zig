@@ -215,6 +215,7 @@ pub const TowerfallMovementData = struct {
 
 pub const MovementData = struct {
     mechanism: MovementMechanism,
+    aimGuideLengthMeters: f32 = 0.5,
     liero: ?LieroMovementData = null,
     towerfall: ?TowerfallMovementData = null,
     grounding: MovementGroundingData,

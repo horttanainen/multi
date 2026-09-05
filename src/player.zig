@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("sdl.zig");
 const tex = @import("texture.zig");
+const gpu = @import("gpu.zig");
 
 const camera = @import("camera.zig");
 const delay = @import("delay.zig");
@@ -44,7 +45,7 @@ pub const Player = struct {
     aimDirection: vec.Vec2,
     isAiming: bool,
     aimMagnitude: f32,
-    crosshairUuid: u64,
+    color: sprite.Color,
     health: f32,
     isDead: bool,
     respawnTimerId: sdl.TimerID,
@@ -78,6 +79,9 @@ const PlayerError = error{PlayerUnspawned};
 
 var runAnimationFrameCount: usize = 10;
 var playersToRespawn = thread_safe.ThreadSafeArrayList(usize).init(allocator);
+const aimGuideCoreAlpha: u8 = 230;
+const aimGuideGlowAlpha: u8 = 70;
+const aimGuideGlowOffsetPixels: f32 = 1.0;
 
 fn markPlayerForRespawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u32 {
     if (param) |p| {
@@ -88,34 +92,10 @@ fn markPlayerForRespawn(param: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c)
     return 0;
 }
 
-pub fn drawCrosshair(player: *Player) !void {
-    const crosshairSprite = sprite.getSprite(player.crosshairUuid) orelse return;
-    const pos = calcCrosshairPosition(player.*);
-    try sprite.drawWithOptions(crosshairSprite, pos, 0, false, false, 0, null, null);
-}
-
-fn calcCrosshairPosition(p: Player) vec.IVec2 {
-    const maybeEntity = entity.getEntity(p.bodyId);
-    if (maybeEntity) |ent| {
-        const currentState = box2d.getState(p.bodyId);
-        const state = box2d.getInterpolatedState(ent.state, currentState);
-        const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
-
-        const crosshairPos = vec.iadd(playerPos, getCrosshairOffset(p));
-
-        if (ent.spriteUuids.len > 0) {
-            const firstSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return crosshairPos;
-            return vec.iadd(crosshairPos, firstSprite.offset);
-        }
-        return crosshairPos;
-    }
-    return vec.izero;
-}
-
-pub fn getCrosshairOffset(p: Player) vec.IVec2 {
+pub fn getAimOffset(p: Player) vec.IVec2 {
     if (movement.mechanism == .towerfall and !p.isAiming) return vec.izero;
 
-    const baseDistance: f32 = if (p.isAiming) p.aimMagnitude * config.aimCircleRadius else config.aimRestingDistance;
+    const baseDistance: f32 = if (p.isAiming) p.aimMagnitude * config.aimMaximumDistancePixels else config.aimRestingDistancePixels;
     const distance: f32 = if (p.isZooming) baseDistance * 2 else baseDistance;
     const displacement = vec.mul(vec.normalize(p.aimDirection), distance);
     return .{
@@ -354,8 +334,6 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
         } else |_| {}
     }
 
-    const crosshairUuid = data.createSpriteFromWithBacking("crosshair", playerSpriteBacking) orelse return error.SpriteNotFound;
-
     // Create camera for this player (or reuse shared camera in non-splitscreen mode)
     const cameraId = if (existingCameraId) |id| id else blk: {
         const id = try camera.spawnForPlayer(playerId, position);
@@ -380,7 +358,7 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
         .aimDirection = vec.west,
         .isAiming = false,
         .aimMagnitude = 0,
-        .crosshairUuid = crosshairUuid,
+        .color = .{ .r = 255, .g = 255, .b = 255 },
         .cameraId = cameraId,
         .health = 100,
         .isDead = false,
@@ -528,7 +506,7 @@ pub fn sprayPaint(p: *Player) !void {
     const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_spray", .{p.id}) catch unreachable;
     if (delay.check(delayKey)) return;
 
-    // Get crosshair world position in meters
+    // Get aim target world position in meters
     const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity == null) return;
     const ent = maybeEntity.?;
@@ -536,15 +514,15 @@ pub fn sprayPaint(p: *Player) !void {
     const state = box2d.getInterpolatedState(ent.state, currentState);
     const playerPixelPos = conv.m2Pixel(state.pos);
 
-    const crosshairOffset = getCrosshairOffset(p.*);
-    var crosshairPixelPos = vec.iadd(playerPixelPos, crosshairOffset);
+    const aimOffset = getAimOffset(p.*);
+    var aimTargetPixelPos = vec.iadd(playerPixelPos, aimOffset);
     if (ent.spriteUuids.len > 0) {
         if (sprite.getSprite(ent.spriteUuids[0])) |firstSprite| {
-            crosshairPixelPos = vec.iadd(crosshairPixelPos, firstSprite.offset);
+            aimTargetPixelPos = vec.iadd(aimTargetPixelPos, firstSprite.offset);
         }
     }
 
-    const crosshairWorldPos = conv.pixel2M(crosshairPixelPos);
+    const aimTargetWorldPos = conv.pixel2M(aimTargetPixelPos);
 
     // Overlap query to find terrain entities
     const OverlapContext = struct {
@@ -563,7 +541,7 @@ pub fn sprayPaint(p: *Player) !void {
     };
 
     const transform = box2d.c.b2Transform{
-        .p = .{ .x = crosshairWorldPos.x, .y = crosshairWorldPos.y },
+        .p = .{ .x = aimTargetWorldPos.x, .y = aimTargetWorldPos.y },
         .q = box2d.c.b2Rot_identity,
     };
 
@@ -624,7 +602,7 @@ pub fn sprayPaint(p: *Player) !void {
             try sprite.paintSpriteOnSurface(
                 e.spriteUuids[0],
                 sprayPaintSpriteUuid,
-                crosshairWorldPos,
+                aimTargetWorldPos,
                 sizeWorldX,
                 sizeWorldY,
                 entityPos,
@@ -640,6 +618,7 @@ pub fn sprayPaint(p: *Player) !void {
 pub fn setColor(playerId: usize, color: sprite.Color) void {
     const maybePlayer = players.getPtr(playerId);
     if (maybePlayer) |player| {
+        player.color = color;
         animation.colorAllFrames(player.bodyId, color) catch |err| {
             std.debug.print("Warning: Failed to color animation frames for player {}: {}\n", .{ playerId, err });
         };
@@ -658,10 +637,6 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
 
         sprite.colorMatchingPixels(player.leftHandNoHookSpriteUuid, color, sprite.isWhite) catch |err| {
             std.debug.print("Warning: Failed to color left hand no-hook sprite for player {}: {}\n", .{ playerId, err });
-        };
-
-        sprite.colorMatchingPixels(player.crosshairUuid, color, sprite.isAny) catch |err| {
-            std.debug.print("Warning: Failed to color crosshair for player {}: {}\n", .{ playerId, err });
         };
 
         gibbing.prepareGibletsForPlayer(playerId, color) catch |err| {
@@ -686,13 +661,50 @@ pub fn updateAllAnimationStates() void {
     }
 }
 
-pub fn drawAllCrosshairs() !void {
+fn drawAimGuide(p: Player) !void {
+    if (p.weapons.len == 0) return;
+    const selectedWeapon = p.weapons[p.selectedWeaponIndex];
+    if (selectedWeapon.spriteUuid == 0) return;
+
+    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
+    const muzzle = calcWeaponMuzzlePosition(p, weaponSprite) orelse return;
+    const direction = vec.normalize(.{ .x = p.aimDirection.x, .y = -p.aimDirection.y });
+    const lengthPixels = movement.aimGuideLengthMeters * conv.met2pix;
+    const start = [2]f32{ @floatFromInt(muzzle.x), @floatFromInt(muzzle.y) };
+    const end = [2]f32{
+        start[0] + direction.x * lengthPixels,
+        start[1] + direction.y * lengthPixels,
+    };
+    const perpendicular = [2]f32{
+        -direction.y * aimGuideGlowOffsetPixels,
+        direction.x * aimGuideGlowOffsetPixels,
+    };
+    const coreStart = sdl.Color{ .r = p.color.r, .g = p.color.g, .b = p.color.b, .a = aimGuideCoreAlpha };
+    const glowStart = sdl.Color{ .r = p.color.r, .g = p.color.g, .b = p.color.b, .a = aimGuideGlowAlpha };
+    const transparent = sdl.Color{ .r = p.color.r, .g = p.color.g, .b = p.color.b, .a = 0 };
+
+    try gpu.renderDrawGradientLine(
+        .{ start[0] + perpendicular[0], start[1] + perpendicular[1] },
+        .{ end[0] + perpendicular[0], end[1] + perpendicular[1] },
+        glowStart,
+        transparent,
+    );
+    try gpu.renderDrawGradientLine(
+        .{ start[0] - perpendicular[0], start[1] - perpendicular[1] },
+        .{ end[0] - perpendicular[0], end[1] - perpendicular[1] },
+        glowStart,
+        transparent,
+    );
+    try gpu.renderDrawGradientLine(start, end, coreStart, transparent);
+}
+
+pub fn drawAllAimGuides() !void {
     for (players.values()) |*p| {
         if (p.isDead) {
             continue;
         }
         if (movement.mechanism == .towerfall and !p.isAiming) continue;
-        try drawCrosshair(p);
+        try drawAimGuide(p.*);
     }
 }
 
@@ -1022,7 +1034,6 @@ pub fn cleanup() void {
 
         // Cleanup player resources
         allocator.free(p.weapons);
-        sprite.cleanupLater(p.crosshairUuid);
         if (p.sprayPaintSpriteUuid) |sprayUuid| {
             sprite.cleanupLater(sprayUuid);
         }
