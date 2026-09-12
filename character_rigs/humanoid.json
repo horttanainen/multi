@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "id": "humanoid_v1",
+  "distance_unit": "meters",
+  "angle_unit": "radians",
+  "coordinates": "x_forward_y_up",
+  "root_from_body": {
+    "x": 0,
+    "y": 0.54
+  },
+  "joints": [
+    {
+      "id": "pelvis",
+      "parent": null,
+      "rest_offset": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "chest",
+      "parent": "pelvis",
+      "rest_offset": {
+        "x": 0,
+        "y": 0.43
+      }
+    },
+    {
+      "id": "neck",
+      "parent": "chest",
+      "rest_offset": {
+        "x": 0,
+        "y": 0.08
+      }
+    },
+    {
+      "id": "head",
+      "parent": "neck",
+      "rest_offset": {
+        "x": 0,
+        "y": 0.105
+      }
+    },
+    {
+      "id": "left_shoulder",
+      "parent": "chest",
+      "rest_offset": {
+        "x": 0.008,
+        "y": -0.02
+      }
+    },
+    {
+      "id": "left_elbow",
+      "parent": "left_shoulder",
+      "rest_offset": {
+        "x": 0,
+        "y": -0.29
+      }
+    },
+    {
+      "id": "left_hand",
+      "parent": "left_elbow",
+      "rest_offset": {
+        "x": 0.26,
+        "y": 0
+      }
+    },
+    {
+      "id": "left_knee",
+      "parent": "pelvis",
+      "rest_offset": {
+        "x": 0.3053816904640796,
+        "y": -0.3440087544370071
+      }
+    },
+    {
+      "id": "left_ankle",
+      "parent": "left_knee",
+      "rest_offset": {
+        "x": -0.1853816904640796,
+        "y": -0.4209912455629929
+      }
+    },
+    {
+      "id": "left_toe",
+      "parent": "left_ankle",
+      "rest_offset": {
+        "x": 0.15,
+        "y": -0.075
+      }
+    },
+    {
+      "id": "left_heel",
+      "parent": "left_toe",
+      "rest_offset": {
+        "x": -0.22,
+        "y": 0
+      }
+    },
+    {
+      "id": "right_shoulder",
+      "parent": "chest",
+      "rest_offset": {
+        "x": -0.008,
+        "y": -0.02
+      }
+    },
+    {
+      "id": "right_elbow",
+      "parent": "right_shoulder",
+      "rest_offset": {
+        "x": 0,
+        "y": -0.29
+      }
+    },
+    {
+      "id": "right_hand",
+      "parent": "right_elbow",
+      "rest_offset": {
+        "x": 0.26,
+        "y": 0
+      }
+    },
+    {
+      "id": "right_knee",
+      "parent": "pelvis",
+      "rest_offset": {
+        "x": 0.1853816904640796,
+        "y": -0.4209912455629929
+      }
+    },
+    {
+      "id": "right_ankle",
+      "parent": "right_knee",
+      "rest_offset": {
+        "x": -0.3053816904640796,
+        "y": -0.3440087544370071
+      }
+    },
+    {
+      "id": "right_toe",
+      "parent": "right_ankle",
+      "rest_offset": {
+        "x": 0.15,
+        "y": -0.075
+      }
+    },
+    {
+      "id": "right_heel",
+      "parent": "right_toe",
+      "rest_offset": {
+        "x": -0.22,
+        "y": 0
+      }
+    }
+  ],
+  "limbs": [
+    {
+      "id": "left_leg",
+      "root": "pelvis",
+      "middle": "left_knee",
+      "end": "left_ankle",
+      "bend_sign": 1,
+      "min_bend_radians": 0.001,
+      "max_bend_radians": 3.1405926535897932
+    },
+    {
+      "id": "left_arm",
+      "root": "left_shoulder",
+      "middle": "left_elbow",
+      "end": "left_hand",
+      "bend_sign": -1,
+      "min_bend_radians": 0.001,
+      "max_bend_radians": 3.1405926535897932
+    },
+    {
+      "id": "right_leg",
+      "root": "pelvis",
+      "middle": "right_knee",
+      "end": "right_ankle",
+      "bend_sign": 1,
+      "min_bend_radians": 0.001,
+      "max_bend_radians": 3.1405926535897932
+    },
+    {
+      "id": "right_arm",
+      "root": "right_shoulder",
+      "middle": "right_elbow",
+      "end": "right_hand",
+      "bend_sign": -1,
+      "min_bend_radians": 0.001,
+      "max_bend_radians": 3.1405926535897932
+    }
+  ],
+  "head_radius": 0.105,
+  "line_width": 0.032,
+  "attachments": [
+    {
+      "id": "weapon_hand",
+      "joint": "right_hand",
+      "local_offset": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "grapple_hand",
+      "joint": "left_hand",
+      "local_offset": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "neutral_controls": [
+    {
+      "binding": "pelvis_x",
+      "value": 0
+    },
+    {
+      "binding": "pelvis_y",
+      "value": 0
+    },
+    {
+      "binding": "torso_angle",
+      "value": 0
+    },
+    {
+      "binding": "left_foot_x",
+      "value": 0.12
+    },
+    {
+      "binding": "left_foot_y",
+      "value": -0.765
+    },
+    {
+      "binding": "left_foot_angle",
+      "value": 0
+    },
+    {
+      "binding": "left_hand_x",
+      "value": 0.10800000000000001
+    },
+    {
+      "binding": "left_hand_y",
+      "value": -0.09
+    },
+    {
+      "binding": "right_foot_x",
+      "value": -0.12
+    },
+    {
+      "binding": "right_foot_y",
+      "value": -0.765
+    },
+    {
+      "binding": "right_foot_angle",
+      "value": 0
+    },
+    {
+      "binding": "right_hand_x",
+      "value": 0.092
+    },
+    {
+      "binding": "right_hand_y",
+      "value": -0.09
+    }
+  ]
+}

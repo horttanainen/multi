@@ -47,6 +47,11 @@ pub fn readFile(path: []const u8, buf: []u8) ![]const u8 {
     return buf[0..bytesRead];
 }
 
+// The caller owns the returned bytes. Oversized files fail instead of truncating.
+pub fn readFileAlloc(path: []const u8, memory: std.mem.Allocator, maximum_bytes: usize) ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(runtime.io(), path, memory, .limited(maximum_bytes));
+}
+
 pub fn writeFile(path: []const u8, contents: []const u8) !void {
     const io_value = runtime.io();
     const file = try std.Io.Dir.cwd().createFile(io_value, path, .{ .truncate = true });

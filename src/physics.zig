@@ -10,6 +10,7 @@ const particle = @import("particle.zig");
 const sensor = @import("sensor.zig");
 const player_input = @import("player_input.zig");
 const control = @import("control.zig");
+const character_animation = @import("character_animation.zig");
 
 pub fn step() !usize {
     // Step box2d.c physics world
@@ -28,6 +29,7 @@ pub fn step() !usize {
             box2d.worldStep(config.physics.dt, config.physics.subStepCount);
             try movement.processSensorEvents();
             try sensor.processSensorEvents();
+            character_animation.fixedUpdate(config.physics.dt);
         }
         time.accumulator -= config.physics.dt;
         stepCount += 1;

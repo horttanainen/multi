@@ -31,6 +31,7 @@ const blast_pressure_visual = @import("blast_pressure_visual.zig");
 const explosion_visual = @import("explosion_visual.zig");
 const hot_rim_visual = @import("hot_rim_visual.zig");
 const visual_particle = @import("visual_particle.zig");
+const character_animation = @import("character_animation.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -45,15 +46,17 @@ pub fn updateZoom() void {
     if (level.splitscreen) {
         const cameraHeightPixels = level.cameraZoomMeters * conv.met2pix;
         zoom = @as(f32, @floatFromInt(window.height)) / cameraHeightPixels;
+        if (character_animation.close_view and !state.editingLevel) zoom *= 2.5;
         return;
     }
     const scaleX = @as(f32, @floatFromInt(window.width)) / @as(f32, @floatFromInt(level.size.x));
     const scaleY = @as(f32, @floatFromInt(window.height)) / @as(f32, @floatFromInt(level.size.y));
     zoom = @min(scaleX, scaleY);
+    if (character_animation.close_view and !state.editingLevel) zoom *= 2.5;
 }
 
 pub fn render() !void {
-    gpu.setCrtParams(if (menu.isOpen() and !menu.isMinimalEditing()) crtConfigMenu.menuCrtParams() else crtConfigMenu.gameCrtParams());
+    gpu.setCrtParams(if (menu.hidesScene() and !menu.isMinimalEditing()) crtConfigMenu.menuCrtParams() else crtConfigMenu.gameCrtParams());
     gpu.setLutParams(.{ .strength = settingsMenu.lutStrength() });
 
     // Clear to black then draw the paint-swirl background.
@@ -61,7 +64,7 @@ pub fn render() !void {
     try gpu.renderClear();
     background_paint.draw();
 
-    if (!menu.isOpen() and !state.editingBackground) {
+    if (!menu.hidesScene() and !state.editingBackground) {
         if (state.editingLevel) {
             levelEditor.updateCursorHover();
             try renderCamera(0);
@@ -81,6 +84,14 @@ pub fn render() !void {
 
     try menu.draw();
 
+    if (!menu.hidesScene() and character_animation.captureReady()) {
+        const captured = try gpu.renderPresentCapture();
+        defer sdl.destroySurface(captured);
+        try sdl.savePng(captured, character_animation.capture_path.?);
+        std.log.info("character_animation: captured {s}", .{character_animation.capture_path.?});
+        character_animation.capture_path = null;
+        return;
+    }
     gpu.renderPresent();
 }
 
@@ -108,6 +119,7 @@ pub fn renderOverview(layer: OverviewLayer) !*sdl.Surface {
 
 fn renderCamera(cameraId: usize) !void {
     try camera.setActiveCamera(cameraId);
+    if (character_animation.close_view and !state.editingLevel) character_animation.focusCamera(cameraId, zoom);
     gpu.setZoom(zoom);
 
     try background.draw();
@@ -115,6 +127,7 @@ fn renderCamera(cameraId: usize) !void {
     try player.drawAllWeaponsBehind();
     try player.drawAllLeftHandsBehind();
     try entity.drawAll();
+    try character_animation.drawAll();
     try hot_rim_visual.draw();
     try player.drawAllWeaponsFront();
     try player.drawAllLeftHandsFront();
@@ -140,6 +153,7 @@ fn renderCamera(cameraId: usize) !void {
     try ui.drawPlayerHealth(zoom);
     try ui.drawPlayerLocationsOnViewportBorder(zoom);
     try ui.drawScoreboard();
+    try character_animation.drawStatus();
 }
 
 fn drawLevelBorder() !void {

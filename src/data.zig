@@ -2,6 +2,7 @@ const std = @import("std");
 const sprite = @import("sprite.zig");
 const surface_cutout = @import("surface_cutout.zig");
 const animation = @import("animation.zig");
+const character_animation = @import("character_animation.zig");
 const allocator = @import("allocator.zig").allocator;
 const vec = @import("vector.zig");
 const fs = @import("fs.zig");
@@ -237,6 +238,175 @@ pub const MovementData = struct {
     towerfall: ?TowerfallMovementData = null,
     grounding: MovementGroundingData,
 };
+
+// Serialized character assets. Decoding owns one temporary arena; the animation
+// component validates these values before taking ownership for runtime playback.
+pub const characterRigPath = "character_rigs/humanoid.json";
+pub const characterMotionPath = "character_motions/run_reference.json";
+const maximumCharacterAssetBytes = 1024 * 1024;
+const CharacterControlValue = struct { binding: character_animation.Control, value: f32 };
+
+pub const CharacterRigData = struct {
+    schema_version: u32,
+    id: []const u8,
+    coordinates: enum { x_forward_y_up },
+    distance_unit: enum { meters },
+    angle_unit: enum { radians },
+    root_from_body: vec.Vec2,
+    joints: []const character_animation.JointDef,
+    limbs: []const character_animation.LimbDef,
+    attachments: []const character_animation.Attachment,
+    head_radius: f32,
+    line_width: f32,
+    neutral_controls: []const CharacterControlValue,
+};
+pub const CharacterMotionData = struct {
+    schema_version: u32,
+    id: []const u8,
+    rig_id: []const u8,
+    coordinates: enum { x_forward_y_up },
+    distance_unit: enum { meters },
+    angle_unit: enum { radians },
+    time_unit: enum { seconds },
+    cycle_seconds: f32,
+    reference_speed_mps: f32,
+    loop: bool,
+    tracks: []const character_animation.Track,
+    contacts: []const character_animation.Contact,
+};
+pub const CharacterAnimationData = struct {
+    arena: std.heap.ArenaAllocator,
+    rig: CharacterRigData,
+    motion: CharacterMotionData,
+};
+pub const CharacterAssetDiagnostic = struct {
+    file: []const u8 = "",
+    message: [512]u8 = @splat(0),
+    length: usize = 0,
+};
+
+pub fn invalidCharacterAsset(detail: *CharacterAssetDiagnostic, comptime format: []const u8, args: anytype) error{InvalidCharacterAsset} {
+    const message = std.fmt.bufPrint(&detail.message, format, args) catch fallback: {
+        const fallback_message = "asset diagnostic exceeded 512 bytes";
+        @memcpy(detail.message[0..fallback_message.len], fallback_message);
+        break :fallback detail.message[0..fallback_message.len];
+    };
+    detail.length = message.len;
+    std.log.warn("data.character_animation: {s}: {s}", .{ detail.file, message });
+    return error.InvalidCharacterAsset;
+}
+
+fn characterFieldPath(buffer: []u8, parent: []const u8, child: []const u8, detail: *CharacterAssetDiagnostic) ![]const u8 {
+    return std.fmt.bufPrint(buffer, "{s}.{s}", .{ parent, child }) catch {
+        return invalidCharacterAsset(detail, "{s}: field path is too long", .{parent});
+    };
+}
+
+fn validateCharacterJsonField(comptime T: type, value: ?std.json.Value, required: bool, path: []const u8, detail: *CharacterAssetDiagnostic) error{InvalidCharacterAsset}!void {
+    if (value == null) {
+        if (required) return invalidCharacterAsset(detail, "{s}: required field is missing", .{path});
+        return;
+    }
+    try validateCharacterJsonShape(T, value.?, path, detail);
+}
+
+// Validate the JSON shape before typed parsing so missing/wrong fields have paths.
+fn validateCharacterJsonShape(comptime T: type, value: std.json.Value, path: []const u8, detail: *CharacterAssetDiagnostic) error{InvalidCharacterAsset}!void {
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            if (value != .object) return invalidCharacterAsset(detail, "{s}: expected an object", .{path});
+            inline for (info.fields) |field| {
+                var buffer: [384]u8 = undefined;
+                const child_path = try characterFieldPath(&buffer, path, field.name, detail);
+                try validateCharacterJsonField(field.type, value.object.get(field.name), field.default_value_ptr == null, child_path, detail);
+            }
+            for (value.object.keys()) |name| {
+                var known = false;
+                inline for (info.fields) |field| {
+                    if (std.mem.eql(u8, name, field.name)) known = true;
+                }
+                if (!known) return invalidCharacterAsset(detail, "{s}.{s}: unsupported field", .{ path, name });
+            }
+        },
+        .pointer => |info| {
+            if (info.child == u8) {
+                if (value != .string) return invalidCharacterAsset(detail, "{s}: expected a string", .{path});
+                return;
+            }
+            if (value != .array) return invalidCharacterAsset(detail, "{s}: expected an array", .{path});
+            if (value.array.items.len > 2048) return invalidCharacterAsset(detail, "{s}: exceeds 2048 entries", .{path});
+            for (value.array.items, 0..) |child, index| {
+                var buffer: [384]u8 = undefined;
+                const child_path = std.fmt.bufPrint(&buffer, "{s}[{d}]", .{ path, index }) catch return invalidCharacterAsset(detail, "{s}: field path too long", .{path});
+                try validateCharacterJsonShape(info.child, child, child_path, detail);
+            }
+        },
+        .array => |info| {
+            if (value != .array or value.array.items.len != info.len) return invalidCharacterAsset(detail, "{s}: expected {d} array entries", .{ path, info.len });
+            for (value.array.items) |child| try validateCharacterJsonShape(info.child, child, path, detail);
+        },
+        .optional => |info| {
+            if (value == .null) return;
+            try validateCharacterJsonShape(info.child, value, path, detail);
+        },
+        .@"enum" => {
+            if (value != .string) return invalidCharacterAsset(detail, "{s}: expected a named value", .{path});
+            if (std.meta.stringToEnum(T, value.string) == null) return invalidCharacterAsset(detail, "{s}: unsupported value '{s}'", .{ path, value.string });
+        },
+        .float => {
+            const number: f64 = switch (value) {
+                .float => value.float,
+                .integer => @floatFromInt(value.integer),
+                .number_string => std.fmt.parseFloat(f64, value.number_string) catch return invalidCharacterAsset(detail, "{s}: expected a finite number", .{path}),
+                else => return invalidCharacterAsset(detail, "{s}: expected a number", .{path}),
+            };
+            if (!std.math.isFinite(number) or @abs(number) > 10000) return invalidCharacterAsset(detail, "{s}: number must be finite and within +/-10000", .{path});
+        },
+        .int => {
+            if (value != .integer) return invalidCharacterAsset(detail, "{s}: expected an integer", .{path});
+            if (value.integer < std.math.minInt(T) or value.integer > std.math.maxInt(T)) return invalidCharacterAsset(detail, "{s}: integer is out of range", .{path});
+        },
+        .bool => if (value != .bool) return invalidCharacterAsset(detail, "{s}: expected a boolean", .{path}),
+        else => @compileError("Unsupported character asset field type"),
+    }
+}
+
+fn parseCharacterAsset(comptime T: type, memory: std.mem.Allocator, bytes: []const u8, detail: *CharacterAssetDiagnostic) !T {
+    const value = std.json.parseFromSliceLeaky(std.json.Value, memory, bytes, .{ .allocate = .alloc_always }) catch |err| {
+        return invalidCharacterAsset(detail, "JSON syntax: {s}", .{@errorName(err)});
+    };
+    try validateCharacterJsonShape(T, value, "$", detail);
+    return std.json.parseFromValueLeaky(T, memory, value, .{ .allocate = .alloc_always }) catch |err| {
+        return invalidCharacterAsset(detail, "JSON conversion: {s}", .{@errorName(err)});
+    };
+}
+
+// Owns copies of every parsed string/slice independently of the source bytes.
+// The caller must deinit the arena or transfer ownership to character_animation.
+pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const u8, motion_bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
+    var arena = std.heap.ArenaAllocator.init(memory);
+    errdefer arena.deinit();
+    detail.* = .{ .file = characterRigPath };
+    const rig = try parseCharacterAsset(CharacterRigData, arena.allocator(), rig_bytes, detail);
+    detail.file = characterMotionPath;
+    const motion = try parseCharacterAsset(CharacterMotionData, arena.allocator(), motion_bytes, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion };
+}
+
+fn readCharacterAsset(path: []const u8, memory: std.mem.Allocator, detail: *CharacterAssetDiagnostic) ![]u8 {
+    detail.* = .{ .file = path };
+    return fs.readFileAlloc(path, memory, maximumCharacterAssetBytes) catch |err| {
+        return invalidCharacterAsset(detail, "read failed: {s}", .{@errorName(err)});
+    };
+}
+
+pub fn loadCharacterAnimationData(memory: std.mem.Allocator, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
+    const rig_bytes = try readCharacterAsset(characterRigPath, memory, detail);
+    defer memory.free(rig_bytes);
+    const motion_bytes = try readCharacterAsset(characterMotionPath, memory, detail);
+    defer memory.free(motion_bytes);
+    return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, detail);
+}
 
 pub fn loadMovementData(path: []const u8) !MovementData {
     var jsonBuf: [16384]u8 = undefined;

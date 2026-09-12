@@ -1,7 +1,6 @@
 const std = @import("std");
 const box2d = @import("box2d.zig");
 const sdl = @import("sdl.zig");
-const tex = @import("texture.zig");
 
 const config = @import("config.zig");
 const collision = @import("collision.zig");
@@ -89,20 +88,6 @@ pub fn handleGlobalHotkeys() void {
         if (!delay.check("menuToggle")) {
             gameMenu.openGameMenu();
             delay.action("menuToggle", 400);
-        }
-    }
-}
-
-pub fn handleAtlasDumpHotkey() void {
-    const currentKeyStates = sdl.getKeyboardState();
-
-    // § key - dump atlas textures to disk (try both grave and nonusbackslash for Nordic keyboards)
-    if (currentKeyStates[@intFromEnum(sdl.Scancode.grave)] or
-        currentKeyStates[@intFromEnum(sdl.Scancode.nonusbackslash)])
-    {
-        if (!delay.check("atlasDump")) {
-            tex.saveAtlasesToDisk();
-            delay.action("atlasDump", 1000);
         }
     }
 }

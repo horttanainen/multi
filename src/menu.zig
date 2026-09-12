@@ -35,6 +35,7 @@ pub const ItemKind = union(enum) {
 pub const Item = struct {
     label: [:0]const u8,
     kind: ItemKind,
+    shortcut: ?sdl.c.SDL_Scancode = null,
     font: text.Font = .large,
     disabled: bool = false,
     hidden: bool = false,
@@ -56,6 +57,10 @@ pub const OpenOptions = struct {
     item_height: i32 = BTN_H,
     minimal_edit: bool = false,
     back_fn: ?*const fn () anyerror!void = null,
+    overlay: bool = false,
+    title: ?[:0]const u8 = null,
+    hint: ?[:0]const u8 = null,
+    close_on_activate: bool = false,
 };
 
 const NavState = struct {
@@ -63,10 +68,7 @@ const NavState = struct {
     focused_index: usize,
     scroll_offset: usize,
     scroll_anim: f32,
-    layout: Layout,
-    item_height: i32,
-    minimal_edit: bool,
-    back_fn: ?*const fn () anyerror!void,
+    options: OpenOptions,
     close_fn: ?*const fn () void,
 };
 
@@ -84,10 +86,9 @@ var editing_value: f32 = 0.0;
 var pre_edit_value: f32 = 0.0;
 var pre_edit_cycle_index: u8 = 0;
 var close_fn: ?*const fn () void = null;
-var current_layout: Layout = .vertical;
-var current_item_height: i32 = BTN_H;
-var current_minimal_edit: bool = false;
-var current_back_fn: ?*const fn () anyerror!void = null;
+var current_options: OpenOptions = .{};
+var consumed_this_frame = false;
+var suppressed_keys: [sdl.c.SDL_SCANCODE_COUNT]bool = @splat(false);
 const NAV_STACK_CAPACITY: usize = 32;
 var nav_stack: [NAV_STACK_CAPACITY]NavState = undefined;
 var nav_stack_len: usize = 0;
@@ -96,6 +97,15 @@ const LERP_SPEED: f32 = 0.2;
 
 pub fn open(items: []Item, options: OpenOptions) void {
     openImpl(items, null, options, .replace);
+}
+
+// A menu opener can toggle its own items without replacing another open menu.
+pub fn toggle(items: []Item, options: OpenOptions) void {
+    if (!is_open) {
+        open(items, options);
+        return;
+    }
+    if (active_items.ptr == items.ptr) close();
 }
 
 pub fn openWithCleanup(items: []Item, cleanup: *const fn () void, options: OpenOptions) void {
@@ -119,15 +129,13 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions, mo
     }
 
     is_open = true;
+    consumed_this_frame = true;
     active_items = items;
     focused_index = firstVisibleIndex() orelse 0;
     scroll_offset = 0;
     scroll_anim = 0.0;
     editing_index = null;
-    current_layout = options.layout;
-    current_item_height = options.item_height;
-    current_minimal_edit = options.minimal_edit;
-    current_back_fn = options.back_fn;
+    current_options = options;
     close_fn = cleanup;
 }
 
@@ -135,6 +143,7 @@ pub fn close() void {
     if (!is_open and nav_stack_len == 0) return;
 
     is_open = false;
+    consumed_this_frame = true;
     active_items = &.{};
     focused_index = 0;
     scroll_offset = 0;
@@ -142,7 +151,7 @@ pub fn close() void {
     editing_index = null;
     const current_cleanup = close_fn;
     close_fn = null;
-    current_back_fn = null;
+    current_options = .{};
     if (current_cleanup) |fn_ptr| fn_ptr();
     clearNavStack();
 }
@@ -155,8 +164,12 @@ pub fn isOpen() bool {
     return is_open;
 }
 
+pub fn hidesScene() bool {
+    return is_open and !current_options.overlay;
+}
+
 pub fn isMinimalEditing() bool {
-    return is_open and current_minimal_edit and editing_index != null;
+    return is_open and current_options.minimal_edit and editing_index != null;
 }
 
 pub fn focusedIndex() usize {
@@ -197,11 +210,49 @@ pub fn ensureFocusedVisible() void {
 // Input handling
 // ============================================================
 
-pub fn handleInput() !void {
+pub fn beginFrame() void {
+    consumed_this_frame = false;
+}
+
+// Event-based shortcuts fire once, including a press/release within one frame.
+// Browse navigation still uses the existing repeat and controller handling.
+pub fn handleKey(scancode: sdl.c.SDL_Scancode, repeat: bool) !void {
+    if (!is_open or repeat or editing_index != null) return;
+    if (scancode == sdl.c.SDL_SCANCODE_ESCAPE) {
+        consumed_this_frame = true;
+        try goBack();
+        return;
+    }
+    for (active_items, 0..) |item, index| {
+        if (item.hidden or item.disabled or item.shortcut != scancode) continue;
+        focused_index = index;
+        adjustScrollForFocus();
+        try activate(index);
+        return;
+    }
+}
+
+// Keep menu input out of gameplay until the held keys have been released.
+// Call every frame, including while a menu is open, to track those releases.
+pub fn blocksGameplayInput(keys: []const bool) bool {
+    var blocked = is_open or consumed_this_frame;
+    for (keys, 0..) |held, index| {
+        if (!held) {
+            suppressed_keys[index] = false;
+            continue;
+        }
+        if (is_open or consumed_this_frame) suppressed_keys[index] = true;
+        if (suppressed_keys[index]) blocked = true;
+    }
+    return blocked;
+}
+
+pub fn handleInput(keys: []const bool) !void {
+    if (!is_open or consumed_this_frame) return;
     if (editing_index != null) {
         try handleEditInput();
     } else {
-        try handleBrowseInput();
+        try handleBrowseInput(keys);
     }
 }
 
@@ -263,16 +314,17 @@ fn adjustScrollForFocus() void {
         return;
     };
 
+    const slots = visibleSlots();
     if (ordinal < scroll_offset) {
         scroll_offset = ordinal;
-    } else if (ordinal >= scroll_offset + VISIBLE) {
-        scroll_offset = ordinal - (VISIBLE - 1);
+    } else if (ordinal >= scroll_offset + slots) {
+        scroll_offset = ordinal - (slots - 1);
     }
     const count = visibleCount();
-    if (count <= VISIBLE) {
+    if (count <= slots) {
         scroll_offset = 0;
-    } else if (scroll_offset + VISIBLE > count) {
-        scroll_offset = count - VISIBLE;
+    } else if (scroll_offset + slots > count) {
+        scroll_offset = count - slots;
     }
     scroll_anim = @floatFromInt(scroll_offset);
 }
@@ -289,24 +341,30 @@ fn navDown() void {
     adjustScrollForFocus();
 }
 
-fn handleBrowseInput() !void {
-    const keys = sdl.getKeyboardState();
+fn browseKey(keys: []const bool, scancode: sdl.c.SDL_Scancode) bool {
+    if (!keys[scancode]) return false;
+    for (active_items) |item| {
+        if (item.shortcut == scancode) return false;
+    }
+    return true;
+}
 
-    if (current_layout == .horizontal) {
-        if ((keys[@intFromEnum(sdl.Scancode.left)] or keys[@intFromEnum(sdl.Scancode.a)]) and !delay.check("menuNav")) {
+fn handleBrowseInput(keys: []const bool) !void {
+    if (current_options.layout == .horizontal) {
+        if ((keys[@intFromEnum(sdl.Scancode.left)] or browseKey(keys, sdl.c.SDL_SCANCODE_A)) and !delay.check("menuNav")) {
             navUp();
             delay.action("menuNav", 150);
         }
-        if ((keys[@intFromEnum(sdl.Scancode.right)] or keys[@intFromEnum(sdl.Scancode.d)]) and !delay.check("menuNav")) {
+        if ((keys[@intFromEnum(sdl.Scancode.right)] or browseKey(keys, sdl.c.SDL_SCANCODE_D)) and !delay.check("menuNav")) {
             navDown();
             delay.action("menuNav", 150);
         }
     } else {
-        if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
+        if ((keys[@intFromEnum(sdl.Scancode.up)] or browseKey(keys, sdl.c.SDL_SCANCODE_W)) and !delay.check("menuNav")) {
             navUp();
             delay.action("menuNav", 150);
         }
-        if ((keys[@intFromEnum(sdl.Scancode.down)] or keys[@intFromEnum(sdl.Scancode.s)]) and !delay.check("menuNav")) {
+        if ((keys[@intFromEnum(sdl.Scancode.down)] or browseKey(keys, sdl.c.SDL_SCANCODE_S)) and !delay.check("menuNav")) {
             navDown();
             delay.action("menuNav", 150);
         }
@@ -314,20 +372,19 @@ fn handleBrowseInput() !void {
     if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
         try activate(focused_index);
         delay.action("menuConfirm", 200);
+        return;
     }
-    if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
-        try goBack();
-        delay.action("menuToggle", 400);
-    }
-    if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
+    if (browseKey(keys, sdl.c.SDL_SCANCODE_T) and !delay.check("menuToggle")) {
         close();
         delay.action("menuToggle", 400);
+        return;
     }
 
+    if (consumed_this_frame) return;
     var it = gamepad.assignedGamepads.valueIterator();
     while (it.next()) |gp| {
         const sdlGp = gp.gamepad orelse continue;
-        if (current_layout == .horizontal) {
+        if (current_options.layout == .horizontal) {
             if (sdl.getGamepadButton(sdlGp, .dpad_left) and !delay.check("menuNav")) {
                 navUp();
                 delay.action("menuNav", 150);
@@ -349,10 +406,12 @@ fn handleBrowseInput() !void {
         if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
             try activate(focused_index);
             delay.action("menuConfirm", 200);
+            return;
         }
         if ((sdl.getGamepadButton(sdlGp, .start) or sdl.getGamepadButton(sdlGp, .b)) and !delay.check("menuToggle")) {
             try goBack();
             delay.action("menuToggle", 400);
+            return;
         }
         if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
             close();
@@ -367,11 +426,11 @@ fn goBack() !void {
         return;
     }
 
-    if (current_back_fn) |back_fn| {
-        try back_fn();
-    } else {
+    if (current_options.back_fn == null) {
         close();
+        return;
     }
+    try current_options.back_fn.?();
 }
 
 fn pushCurrentState() void {
@@ -390,10 +449,7 @@ fn pushCurrentState() void {
         .focused_index = focused_index,
         .scroll_offset = scroll_offset,
         .scroll_anim = scroll_anim,
-        .layout = current_layout,
-        .item_height = current_item_height,
-        .minimal_edit = current_minimal_edit,
-        .back_fn = current_back_fn,
+        .options = current_options,
         .close_fn = close_fn,
     };
     nav_stack_len += 1;
@@ -415,15 +471,13 @@ fn popState() void {
 
 fn restoreState(state: NavState) void {
     is_open = true;
+    consumed_this_frame = true;
     active_items = state.items;
     focused_index = state.focused_index;
     scroll_offset = state.scroll_offset;
     scroll_anim = state.scroll_anim;
     editing_index = null;
-    current_layout = state.layout;
-    current_item_height = state.item_height;
-    current_minimal_edit = state.minimal_edit;
-    current_back_fn = state.back_fn;
+    current_options = state.options;
     close_fn = state.close_fn;
     ensureFocusedVisible();
 }
@@ -446,7 +500,7 @@ fn resetNavigation() void {
     active_items = &.{};
     editing_index = null;
     close_fn = null;
-    current_back_fn = null;
+    current_options.back_fn = null;
     clearNavStack();
 }
 
@@ -632,6 +686,22 @@ fn decimalPlacesForStep(step: f32) u8 {
     return places;
 }
 
+fn itemLabel(buf: []u8, item: Item) ![:0]const u8 {
+    if (item.shortcut == null) {
+        return switch (item.kind) {
+            .button, .sprite_pick => item.label,
+            .config => |cfg| fmtConfigLabel(buf, item.label, cfg),
+        };
+    }
+    var value_buf: [64]u8 = undefined;
+    const label = switch (item.kind) {
+        .button, .sprite_pick => item.label,
+        .config => |cfg| fmtConfigLabel(&value_buf, item.label, cfg),
+    };
+    const key_name = std.mem.span(sdl.c.SDL_GetScancodeName(item.shortcut.?));
+    return std.fmt.bufPrintZ(buf, "{s}  {s}", .{ key_name, label });
+}
+
 fn cycleItem(item: *Item, direction: i2) void {
     const names = item.cycle_names orelse return;
     const idx = item.cycle_index orelse return;
@@ -646,12 +716,14 @@ fn cycleItem(item: *Item, direction: i2) void {
 }
 
 fn activate(idx: usize) !void {
+    if (active_items.len == 0) return;
     if (active_items[idx].hidden) return;
     if (active_items[idx].disabled) return;
+    consumed_this_frame = true;
 
     switch (active_items[idx].kind) {
         .button => |action| {
-            if (current_minimal_edit and active_items[idx].cycle_names != null) {
+            if (current_options.minimal_edit and active_items[idx].cycle_names != null) {
                 // Cycle buttons enter minimal edit view on first press;
                 // up/down cycling handled by handleEditButton.
                 editing_index = idx;
@@ -659,6 +731,7 @@ fn activate(idx: usize) !void {
                     pre_edit_cycle_index = ci.*;
                 }
             } else {
+                if (current_options.close_on_activate) close();
                 try action();
             }
         },
@@ -694,6 +767,12 @@ const SWATCH_MIN_SIZE: i32 = 18;
 const SWATCH_PAD: i32 = 8;
 const SWATCH_BORDER: i32 = 2;
 
+fn visibleSlots() usize {
+    if (!current_options.overlay or current_options.layout != .vertical) return VISIBLE;
+    const capacity: usize = @intCast(@max(1, @divFloor(window.height - 180, current_options.item_height + BTN_GAP)));
+    return @max(1, @min(visibleCount(), capacity));
+}
+
 pub fn draw() !void {
     if (!is_open) return;
 
@@ -707,15 +786,17 @@ pub fn draw() !void {
     try gpu.renderSetViewport(null);
 
     // In minimal edit mode, skip overlay and full menu when editing
-    if (current_minimal_edit and editing_index != null) {
+    if (current_options.minimal_edit and editing_index != null) {
         try drawMinimalEdit();
         return;
     }
 
-    try gpu.setRenderDrawColor(COLOR_OVERLAY);
-    try gpu.renderFillRect(sdl.Rect{ .x = 0, .y = 0, .w = window.width, .h = window.height });
+    if (!current_options.overlay) {
+        try gpu.setRenderDrawColor(COLOR_OVERLAY);
+        try gpu.renderFillRect(sdl.Rect{ .x = 0, .y = 0, .w = window.width, .h = window.height });
+    }
 
-    if (current_layout == .horizontal) {
+    if (current_options.layout == .horizontal) {
         try drawHorizontal();
     } else {
         try drawVertical();
@@ -723,12 +804,17 @@ pub fn draw() !void {
 }
 
 fn drawVertical() !void {
-    const btn_w: i32 = @divFloor(window.width * 5, 10);
-    const btn_x: i32 = @divFloor(window.width - btn_w, 2);
-    const step: f32 = @floatFromInt(BTN_H + BTN_GAP);
+    const btn_h = current_options.item_height;
+    const btn_w: i32 = if (current_options.overlay) @min(window.width - 24, 520) else @divFloor(window.width * 5, 10);
+    const btn_x: i32 = if (current_options.overlay) 12 else @divFloor(window.width - btn_w, 2);
+    const step: f32 = @floatFromInt(btn_h + BTN_GAP);
+    const slots = visibleSlots();
 
-    const center_item: f32 = scroll_anim + @as(f32, VISIBLE - 1) / 2.0;
-    const screen_cy: i32 = @divFloor(window.height, 2);
+    const center_item: f32 = scroll_anim + @as(f32, @floatFromInt(slots - 1)) / 2.0;
+    const screen_cy: i32 = if (current_options.overlay) 92 + @divFloor(btn_h + @as(i32, @intCast(slots - 1)) * (btn_h + BTN_GAP), 2) else @divFloor(window.height, 2);
+
+    const title_y = if (current_options.overlay) 48 else screen_cy - @as(i32, @intCast(slots)) * (btn_h + BTN_GAP);
+    try drawTitle(btn_x + 16, title_y);
 
     var hint_y: i32 = screen_cy;
 
@@ -737,13 +823,14 @@ fn drawVertical() !void {
         if (item.hidden) continue;
 
         const fi: f32 = @floatFromInt(visible_i);
-        const y: i32 = screen_cy - @divFloor(BTN_H, 2) + @as(i32, @intFromFloat(@round((fi - center_item) * step)));
+        const y: i32 = screen_cy - @divFloor(btn_h, 2) + @as(i32, @intFromFloat(@round((fi - center_item) * step)));
         visible_i += 1;
 
-        if (y + BTN_H < 0 or y > window.height) continue;
+        if (y + btn_h < 0 or y > window.height) continue;
 
         const ordinal = visible_i - 1;
-        const in_window = ordinal >= scroll_offset and ordinal < scroll_offset + VISIBLE;
+        const in_window = ordinal >= scroll_offset and ordinal < scroll_offset + slots;
+        if (current_options.overlay and !in_window) continue;
         const is_editing = if (editing_index) |ei| ei == i else false;
         const color = if (item.disabled)
             COLOR_DISABLED
@@ -757,14 +844,14 @@ fn drawVertical() !void {
             COLOR_SIDE;
 
         try gpu.setRenderDrawColor(color);
-        try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = BTN_H });
+        try gpu.renderFillRect(sdl.Rect{ .x = btn_x, .y = y, .w = btn_w, .h = btn_h });
 
         var preview_label: ?[:0]const u8 = null;
 
         if (item.image) |uuid| {
             if (sprite.getSprite(uuid)) |s| {
                 const inner_w = btn_w - IMG_PAD * 2;
-                const inner_h = BTN_H - IMG_PAD * 2;
+                const inner_h = btn_h - IMG_PAD * 2;
                 const sw: f32 = @floatFromInt(s.sizeP.x);
                 const sh: f32 = @floatFromInt(s.sizeP.y);
                 const scale = @min(
@@ -775,34 +862,31 @@ fn drawVertical() !void {
                 const dh: i32 = @intFromFloat(sh * scale);
                 try gpu.renderCopy(s.texture, null, &sdl.Rect{
                     .x = btn_x + @divFloor(btn_w - dw, 2),
-                    .y = y + @divFloor(BTN_H - dh, 2),
+                    .y = y + @divFloor(btn_h - dh, 2),
                     .w = dw,
                     .h = dh,
                 });
             }
         } else {
-            var label_buf: [64]u8 = undefined;
-            const label: [:0]const u8 = switch (item.kind) {
-                .button, .sprite_pick => item.label,
-                .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
-            };
+            var label_buf: [128]u8 = undefined;
+            const label = try itemLabel(&label_buf, item);
             preview_label = label;
             if (item.disabled) {
                 try text.writeCenterWithAlpha(item.font, label, .{
                     .x = btn_x + @divFloor(btn_w, 2),
-                    .y = y + @divFloor(BTN_H, 2),
+                    .y = y + @divFloor(btn_h, 2),
                 }, TEXT_ALPHA_DISABLED);
             } else {
                 try text.writeCenter(item.font, label, .{
                     .x = btn_x + @divFloor(btn_w, 2),
-                    .y = y + @divFloor(BTN_H, 2),
+                    .y = y + @divFloor(btn_h, 2),
                 });
             }
         }
 
-        try drawInlineColorPreview(item, preview_label, btn_x, y, btn_w, BTN_H);
+        try drawInlineColorPreview(item, preview_label, btn_x, y, btn_w, btn_h);
 
-        if (in_window) hint_y = y + BTN_H;
+        if (in_window) hint_y = y + btn_h;
     }
 
     if (editing_index != null) {
@@ -811,6 +895,16 @@ fn drawVertical() !void {
             .y = hint_y + BTN_GAP + 8,
         });
     }
+    if (current_options.hint == null) return;
+    try text.writeCenter(.small, current_options.hint.?, .{
+        .x = btn_x + @divFloor(btn_w, 2),
+        .y = hint_y + BTN_GAP + 20,
+    });
+}
+
+fn drawTitle(x: i32, y: i32) !void {
+    if (current_options.title == null) return;
+    try text.write(.small, current_options.title.?, .{ .x = x, .y = y });
 }
 
 fn drawMinimalEdit() !void {
@@ -879,7 +973,7 @@ fn drawMinimalEdit() !void {
 }
 
 fn drawHorizontal() !void {
-    const btn_h: i32 = current_item_height;
+    const btn_h: i32 = current_options.item_height;
     const btn_w: i32 = btn_h; // square items
     const step: f32 = @floatFromInt(btn_w + BTN_GAP);
 
@@ -933,11 +1027,8 @@ fn drawHorizontal() !void {
                 });
             }
         } else {
-            var label_buf: [64]u8 = undefined;
-            const label: [:0]const u8 = switch (item.kind) {
-                .button, .sprite_pick => item.label,
-                .config => |cfg| fmtConfigLabel(&label_buf, item.label, cfg),
-            };
+            var label_buf: [128]u8 = undefined;
+            const label = try itemLabel(&label_buf, item);
             preview_label = label;
             try text.writeCenter(item.font, label, .{
                 .x = x + @divFloor(btn_w, 2),

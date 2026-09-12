@@ -90,6 +90,23 @@ pub fn build(b: *std.Build) !void {
     const triangle_dep = b.dependency("triangle", .{ .target = target, .optimize = optimize });
     exe.root_module.linkLibrary(triangle_dep.artifact("triangle"));
 
+    const character_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("character_animation_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    character_tests.root_module.addOptions("build_options", build_options);
+    character_tests.root_module.linkLibrary(sdl);
+    character_tests.root_module.linkLibrary(sdl_image);
+    character_tests.root_module.linkLibrary(sdl_ttf);
+    character_tests.root_module.linkLibrary(box2d_lib);
+    character_tests.root_module.linkLibrary(triangle_dep.artifact("triangle"));
+    const test_character = b.step("test-character-animation", "Check character assets, curves, IK, and lifecycle");
+    test_character.dependOn(&b.addRunArtifact(character_tests).step);
+
     b.installArtifact(exe);
 
     const run = b.step("run", "Run the game");

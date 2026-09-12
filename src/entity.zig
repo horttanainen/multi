@@ -24,6 +24,7 @@ const animation = @import("animation.zig");
 const collision = @import("collision.zig");
 const damage = @import("damage.zig");
 const pool = @import("pool.zig");
+const character_animation = @import("character_animation.zig");
 
 pub const terrainColliderChunkSizeP: i32 = 64;
 
@@ -97,6 +98,8 @@ pub fn drawAll() !void {
     for (entities.map.values()) |*e| {
         // Skip drawing disabled entities
         if (!e.enabled) continue;
+
+        if (character_animation.hideSprites() and e.categoryBits & collision.CATEGORY_PLAYER != 0) continue;
 
         try drawWithOptions(e, e.flipEntityHorizontally);
     }

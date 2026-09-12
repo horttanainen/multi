@@ -11,6 +11,7 @@ const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
+const character_animation = @import("character_animation.zig");
 const time = @import("time.zig");
 
 const weapon = @import("weapon.zig");
@@ -377,6 +378,7 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
     try animation.registerAnimationSet(bodyId, animations, "idle", false);
 
     try score.registerPlayer(playerId);
+    try character_animation.register(playerId);
 
     return playerId;
 }
@@ -880,6 +882,7 @@ fn calcShoulderPos(ps: sprite.Sprite, playerPos: vec.IVec2, pAnchor: vec.IVec2, 
 }
 
 pub fn drawAllLeftHandsBehind() !void {
+    if (character_animation.hideSprites()) return;
     for (players.values()) |*p| {
         if (p.isDead) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
@@ -890,6 +893,7 @@ pub fn drawAllLeftHandsBehind() !void {
 }
 
 pub fn drawAllLeftHandsFront() !void {
+    if (character_animation.hideSprites()) return;
     for (players.values()) |*p| {
         if (p.isDead) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
@@ -957,6 +961,7 @@ pub fn kill(p: *Player, killerId: ?usize) !void {
     rope.releaseRope(p.id);
 
     movement.reset(p.id);
+    character_animation.resetPlayer(p.id);
     p.isDead = true;
 
     score.recordKill(killerId, p.id);
@@ -988,6 +993,7 @@ pub fn processRespawns() !void {
         if (maybePlayer) |p| {
             p.health = 100;
             movement.reset(playerId);
+            character_animation.resetPlayer(playerId);
 
             const spawnPosition = try spawn_points.positionForPlayer(playerId);
             const spawnPosM = conv.p2m(spawnPosition);
@@ -1001,6 +1007,8 @@ pub fn processRespawns() !void {
             const maybeEntity = entity.entities.getPtrLocking(p.bodyId);
             if (maybeEntity) |ent| {
                 ent.enabled = true;
+                // Respawn is a teleport: both sprite and rig interpolation start here.
+                ent.state = box2d.getState(p.bodyId);
             }
 
             p.isDead = false;
@@ -1012,6 +1020,7 @@ pub fn processRespawns() !void {
 }
 
 pub fn cleanup() void {
+    character_animation.clearPlayers();
     for (players.values()) |*p| {
         if (p.respawnTimerId != 0) {
             _ = sdl.removeTimer(p.respawnTimerId);

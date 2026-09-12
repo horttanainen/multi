@@ -16,6 +16,8 @@ const input = @import("input.zig");
 const camera = @import("camera.zig");
 const camera_shake = @import("camera_shake.zig");
 const animation = @import("animation.zig");
+const character_animation = @import("character_animation.zig");
+const debug_menu = @import("debug_menu.zig");
 
 const audio = @import("audio.zig");
 const music = @import("music.zig");
@@ -187,6 +189,8 @@ pub fn main(init: std.process.Init) !void {
         const args = try init.minimal.args.toSlice(argsArena.allocator());
         try explosion_benchmark.configure(args);
         try level_overview.configure(args);
+        try character_animation.configure(args);
+        debug_menu.configure(args);
     }
 
     try window.init();
@@ -199,6 +203,7 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    character_animation.init();
     try explosion_visual.init(data.explosionVisualDataMap);
     try gravestone.init();
     try particle.init("particles/circle.png");
@@ -310,6 +315,7 @@ pub fn main(init: std.process.Init) !void {
     visual_particle.cleanup();
     particle_effect.cleanup();
     level.cleanup();
+    character_animation.cleanup();
     gravestone.cleanup();
     gibbing.cleanup();
     damage.cleanup();

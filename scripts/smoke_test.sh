@@ -1,7 +1,7 @@
 #!/bin/bash
 set -m  # job control: background jobs get their own process group, enabling kill -- -$PID
 # Smoke test: run the game, wait for the 5-second sentinel log line, then kill it.
-zig build run > /tmp/game_run.log 2>&1 &
+zig build run -- "$@" > /tmp/game_run.log 2>&1 &
 PID=$!
 i=0
 while [ $i -lt 150 ]; do

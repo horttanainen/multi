@@ -12,17 +12,24 @@ const menu = @import("menu.zig");
 const gameMenu = @import("gameMenu.zig");
 const backgroundConfigMenu = @import("backgroundConfigMenu.zig");
 const delay = @import("delay.zig");
+const debug_menu = @import("debug_menu.zig");
 
 pub fn handle() !void {
+    menu.beginFrame();
     // Event handling
     var event: sdl.Event = undefined;
     while (sdl.pollEvent(&event)) {
         switch (event.type) {
+            sdl.c.SDL_EVENT_KEY_DOWN => {
+                if (debug_menu.handleKey(event.key.scancode, event.key.key, event.key.repeat)) continue;
+                try menu.handleKey(event.key.scancode, event.key.repeat);
+            },
             sdl.EventType.quit => {
                 state.quitGame = true;
             },
             sdl.EventType.window_resized => {
                 try window.handleResize(event.window.data1, event.window.data2);
+                menu.ensureFocusedVisible();
             },
             sdl.EventType.gamepad_added => {
                 try gamepad.handleDeviceAdded(event.gdevice.which);
@@ -35,17 +42,24 @@ pub fn handle() !void {
     }
 
     movement.clearAllMovementIntents();
-    control.handleAtlasDumpHotkey();
 
     if (state.quitGame) {
         neutralizeGameplayInput();
         return;
     }
 
-    // Any open menu (game menu or config menu) takes priority
+    const key_states = sdl.getKeyboardState();
+    const menu_blocks_input = menu.blocksGameplayInput(key_states);
+
+    // All menus, including overlays, use the shared input handling.
     if (menu.isOpen()) {
         neutralizeGameplayInput();
-        try menu.handleInput();
+        try menu.handleInput(key_states);
+        return;
+    }
+
+    if (menu_blocks_input) {
+        neutralizeGameplayInput();
         return;
     }
 
