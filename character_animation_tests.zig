@@ -15,6 +15,8 @@ const collision = @import("src/collision.zig");
 const player = @import("src/player.zig");
 const movement = @import("src/movement.zig");
 const player_input = @import("src/player_input.zig");
+const sprite = @import("src/sprite.zig");
+const weapon = @import("src/weapon.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -479,6 +481,10 @@ test "character invalid assets report field paths and failed replacement preserv
         .{ "\"id\": \"right_elbow\"", "\"id\": \"left_elbow\"", "duplicate" },
         .{ "\"id\": \"grapple_hand\"", "\"id\": \"weapon_hand\"", "attachments.weapon_hand: duplicate id" },
         .{ "\"head_radius\": 0.105", "\"head_radius\": 1e999", "finite" },
+        .{ "\"angle_offset_radians\": 0", "\"angle_offset_radians\": 4", "attachments.weapon_hand.angle_offset_radians" },
+        .{ "\"angle_offset_radians\": 0", "\"angle_offset_radians\": 1e999", "finite" },
+        .{ "\"id\": \"weapon_hand\"", "\"id\": \"unused_hand\"", "attachments.weapon_hand" },
+        .{ "\"joint\": \"right_hand\"", "\"joint\": \"head\"", "attachments.weapon_hand.joint" },
         .{ "\"y\": 0.43", "\"y\": 0", "bone length" },
     };
     for (cases) |case| {
@@ -1276,4 +1282,106 @@ test "held crouch keeps the hips low while standing and moving, and releases int
     defer std.testing.allocator.free(bytes);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
     try fs.writeFile("artifacts/character_animation/crouch_samples.json", bytes);
+}
+
+test "blaster source loads through SDL and its grip and muzzle markers are extracted" {
+    const surface = try sdl.image.load("weapons/alien_blaster/weapon.svg");
+    defer sdl.destroySurface(surface);
+    try std.testing.expectEqual(@as(c_int, 160), surface.w);
+    try std.testing.expectEqual(@as(c_int, 96), surface.h);
+    const points = sprite.extractMarkerPoints(surface, .{ .x = 1, .y = 1 }, .{ .anchorLeft = true, .muzzle = true });
+    try std.testing.expect(points.anchorPointLeft != null);
+    try std.testing.expect(points.muzzlePoint != null);
+    try nearPoint(.{ .x = 49, .y = 64 }, points.anchorPointLeft.?, 0.00001);
+    try nearPoint(.{ .x = 151, .y = 35 }, points.muzzlePoint.?, 0.00001);
+    // Extraction replaces the grip marker and removes the transparent muzzle marker.
+    const second = sprite.extractMarkerPoints(surface, .{ .x = 1, .y = 1 }, .{ .anchorLeft = true, .muzzle = true });
+    try std.testing.expect(second.anchorPointLeft == null and second.muzzlePoint == null);
+    const original = try sdl.image.load("weapons/rocket_launcher/weapon_with_arm.png");
+    defer sdl.destroySurface(original);
+    const original_points = sprite.extractMarkerPoints(original, .{ .x = 1, .y = 1 }, .{ .anchorLeft = true, .muzzle = true });
+    try std.testing.expect(original_points.anchorPointLeft != null and original_points.muzzlePoint != null);
+}
+
+test "anchored sprite keeps its grip fixed and mirrors the muzzle across both facings" {
+    var image: sprite.Sprite = undefined; // Pure placement only consumes rendered dimensions.
+    image.sizeP = .{ .x = 161, .y = 97 };
+    const grip: vec.IVec2 = .{ .x = 49, .y = 64 };
+    const muzzle: vec.IVec2 = .{ .x = 151, .y = 35 };
+    const position: vec.IVec2 = .{ .x = -131, .y = 277 };
+    try std.testing.expectEqual(vec.IVec2{ .x = -29, .y = 248 }, sprite.placedPoint(image, sprite.placeAtAnchor(image, grip, position, 0, false), muzzle));
+    try std.testing.expectEqual(vec.IVec2{ .x = -233, .y = 248 }, sprite.placedPoint(image, sprite.placeAtAnchor(image, grip, position, 0, true), muzzle));
+    for (0..73) |frame| {
+        const angle = @as(f32, @floatFromInt(frame)) * std.math.tau / 72;
+        const right = sprite.placeAtAnchor(image, grip, position, angle, false);
+        const left = sprite.placeAtAnchor(image, grip, position, -angle, true);
+        for ([_]sprite.AnchoredPlacement{ right, left }) |placement| {
+            try std.testing.expectEqual(position, sprite.placedPoint(image, placement, grip));
+            try std.testing.expectEqual(position.x, placement.centerPosition.x - @divTrunc(image.sizeP.x, 2) + placement.pivot.x);
+            try std.testing.expectEqual(position.y, placement.centerPosition.y - @divTrunc(image.sizeP.y, 2) + placement.pivot.y);
+        }
+        const a = sprite.placedPoint(image, right, muzzle);
+        const b = sprite.placedPoint(image, left, muzzle);
+        try std.testing.expectEqual(2 * position.x, a.x + b.x);
+        try std.testing.expectEqual(a.y, b.y);
+    }
+}
+
+test "carried attachment uses solved wrist rotation through running crouching and airborne interpolation" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const set = &animation.assets.?;
+    const attachment = set.rig.attachments.getPtr("weapon_hand").?;
+    attachment.angle_offset_radians = 0.3;
+    attachment.local_offset = .{ .x = 0.025, .y = -0.01 };
+    var x: f32 = 0;
+    for (0..240) |tick| {
+        const speed: f32 = if (tick < 120) 3.2 else -3.2;
+        x += speed / 60;
+        const in_air = tick >= 60 and tick < 110;
+        const vertical: f32 = if (tick < 85) -6 else 8;
+        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = if (in_air) -0.2 else 0 }, .supported = !in_air, .ground_y = if (in_air) null else 0.3, .vertical_speed_mps = if (in_air) vertical else 0, .separation_speed_mps = if (in_air) -vertical else 0, .facing_right = speed > 0, .crouch_requested = tick >= 150 and tick < 200 }, 1.0 / 60.0);
+        const sample = animation.states.get(7).?;
+        for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+            const pose = animation.interpolatedPose(set, sample, alpha);
+            const local = animation.attachmentTransform(set.rig, pose, "weapon_hand").?;
+            const hand = pose.joints[@intFromEnum(animation.Joint.right_hand)];
+            const elbow = pose.joints[@intFromEnum(animation.Joint.right_elbow)];
+            const direction = vec.normalize(vec.subtract(hand, elbow));
+            const offset = vec.subtract(local.position, hand);
+            try std.testing.expectApproxEqAbs(@as(f32, 0.025), offset.x * direction.x + offset.y * direction.y, 0.00001);
+            try std.testing.expectApproxEqAbs(@as(f32, -0.01), -offset.x * direction.y + offset.y * direction.x, 0.00001);
+            try std.testing.expectApproxEqAbs(@as(f32, 0.3), local.angle - std.math.atan2(direction.y, direction.x), 0.00001);
+            const right = animation.attachmentToWorld(set.rig, local, sample.body, true);
+            const left = animation.attachmentToWorld(set.rig, local, sample.body, false);
+            try std.testing.expectApproxEqAbs(sample.body.x * 2, right.position.x + left.position.x, 0.00001);
+            try std.testing.expectEqual(right.position.y, left.position.y);
+            try std.testing.expectEqual(-right.angle, left.angle);
+        }
+    }
+}
+
+test "carried weapon selection respects view aiming and optional weapon visuals" {
+    animation.installAssets(try load());
+    defer animation.cleanup();
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var weapons = [_]weapon.Weapon{std.mem.zeroes(weapon.Weapon)};
+    weapons[0].carriedSpriteUuid = 123;
+    var p = std.mem.zeroes(player.Player);
+    p.weapons = &weapons;
+    for ([_]animation.View{ .stick, .overlay }) |mode| {
+        animation.view = mode;
+        p.isAiming = false;
+        try std.testing.expect(player.usesCarriedWeapon(p));
+        p.isAiming = true;
+        try std.testing.expect(!player.usesCarriedWeapon(p));
+    }
+    animation.view = .sprites;
+    p.isAiming = false;
+    try std.testing.expect(!player.usesCarriedWeapon(p));
+    animation.view = .stick;
+    weapons[0].carriedSpriteUuid = 0;
+    try std.testing.expect(!player.usesCarriedWeapon(p));
 }

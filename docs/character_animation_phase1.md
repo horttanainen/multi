@@ -237,10 +237,13 @@ Each of the four `limbs` names its `root`, `middle`, and `end`, its `bend_sign`
 means fully folded. Valid limits avoid those singular endpoints. Unreachable and
 coincident targets yield bounded solutions; the resulting pose reports clamping.
 
-`attachments` have unique string IDs, a joint, and a `local_offset`. Attachment
+`attachments` have unique string IDs, a joint, a `local_offset`, and optional
+`angle_offset_radians` (default zero, within -pi..pi). Attachment
 local +X follows the joint's incoming bone; +Y is counterclockwise perpendicular.
-At the pelvis, offsets use the canonical axes. `weapon_hand` and `grapple_hand`
-are present for later integration. They do not yet drive existing weapon placement.
+At the pelvis, offsets use the canonical axes. The angle offset rotates the held
+item relative to the incoming bone, without moving the attachment point.
+The carried-blaster phase requires `weapon_hand` on either hand joint and uses
+its transform for procedural carrying. `grapple_hand` remains for later integration.
 
 ### Controls and curves
 

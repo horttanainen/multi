@@ -86,7 +86,8 @@ pub const LimbDef = struct {
     min_bend_radians: f32,
     max_bend_radians: f32,
 };
-pub const Attachment = struct { id: []const u8, joint: Joint, local_offset: vec.Vec2 };
+pub const Attachment = struct { id: []const u8, joint: Joint, local_offset: vec.Vec2, angle_offset_radians: f32 = 0 };
+pub const AttachmentTransform = struct { position: vec.Vec2, angle: f32 };
 pub const Contact = struct { limb: Limb, start: f32, end: f32 };
 pub const Rig = struct {
     id: []const u8,
@@ -258,10 +259,13 @@ fn validateRig(file: data.CharacterRigData, memory: std.mem.Allocator, detail: *
     for (file.attachments, 0..) |attachment, index| {
         if (attachment.id.len == 0 or attachment.id.len > 64) return invalid(detail, "attachments[{d}].id: expected 1..64 bytes", .{index});
         if (vec.magnitude(attachment.local_offset) > 5) return invalid(detail, "attachments.{s}.local_offset: exceeds 5 meters", .{attachment.id});
+        if (@abs(attachment.angle_offset_radians) > std.math.pi) return invalid(detail, "attachments.{s}.angle_offset_radians: expected -pi..pi", .{attachment.id});
         const entry = try rig.attachments.getOrPut(memory, attachment.id);
         if (entry.found_existing) return invalid(detail, "attachments.{s}: duplicate id", .{attachment.id});
         entry.value_ptr.* = attachment;
     }
+    const weapon_attachment = rig.attachments.get("weapon_hand") orelse return invalid(detail, "attachments.weapon_hand: required hand attachment is missing", .{});
+    if (weapon_attachment.joint != .left_hand and weapon_attachment.joint != .right_hand) return invalid(detail, "attachments.weapon_hand.joint: expected left_hand or right_hand", .{});
     return rig;
 }
 
@@ -503,15 +507,29 @@ pub fn evaluatePose(set: *const Assets, phase: f64, mode: Playback) Pose {
 
 // Attachment offsets use +X along the incoming bone and +Y counterclockwise.
 pub fn attachmentPosition(rig: Rig, pose: Pose, name: []const u8) ?vec.Vec2 {
+    const transform = attachmentTransform(rig, pose, name) orelse return null;
+    return transform.position;
+}
+
+pub fn attachmentTransform(rig: Rig, pose: Pose, name: []const u8) ?AttachmentTransform {
     const attachment = rig.attachments.get(name) orelse {
-        std.log.warn("character_animation.attachmentPosition: attachment '{s}' is missing", .{name});
+        std.log.warn("character_animation.attachmentTransform: attachment '{s}' is missing", .{name});
         return null;
     };
     const index = @intFromEnum(attachment.joint);
     const parent = rig.joints[index].parent;
-    if (parent == null) return vec.add(pose.joints[index], attachment.local_offset);
+    if (parent == null) return .{ .position = vec.add(pose.joints[index], attachment.local_offset), .angle = attachment.angle_offset_radians };
     const direction = vec.subtract(pose.joints[index], pose.joints[@intFromEnum(parent.?)]);
-    return vec.add(pose.joints[index], rotate(attachment.local_offset, std.math.atan2(direction.y, direction.x)));
+    const angle = std.math.atan2(direction.y, direction.x);
+    return .{ .position = vec.add(pose.joints[index], rotate(attachment.local_offset, angle)), .angle = angle + attachment.angle_offset_radians };
+}
+
+// World is Y-down; a left-facing sprite is also mirrored horizontally at draw time.
+pub fn attachmentToWorld(rig: Rig, transform: AttachmentTransform, body: vec.Vec2, facing_right: bool) AttachmentTransform {
+    return .{
+        .position = toWorld(rig, transform.position, body, facing_right),
+        .angle = if (facing_right) -transform.angle else transform.angle,
+    };
 }
 
 pub fn installAssets(replacement: Assets) void {
@@ -1044,8 +1062,16 @@ pub fn drawAll() !void {
         var points: [jointCount][2]f32 = undefined;
         for (pose.joints, 0..) |point, index| points[index] = toScreen(toWorld(set.rig, point, vec.fromBox2d(body.pos), state.facing_right));
         const width = @max(1.25 / renderer.zoom, set.rig.line_width * conv.met2pix);
+        const carrying = player.usesCarriedWeapon(p);
+        const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint; // Validated at load.
         // Fixed limb identity: right is the far limb even when movement faces left.
         for ([_]bool{ true, false }) |far| {
+            // Insert the weapon under its hand, using the same solved render pose.
+            const weapon_layer = far == (weapon_joint == .right_hand);
+            if (carrying and weapon_layer) {
+                const attachment = attachmentTransform(set.rig, pose, "weapon_hand").?;
+                try player.drawCarriedWeapon(player_id, attachmentToWorld(set.rig, attachment, vec.fromBox2d(body.pos), state.facing_right), state.facing_right);
+            }
             try gpu.setRenderDrawColor(limbColor(p.color, far));
             for (set.rig.joints) |joint| {
                 if (joint.id == .pelvis or joint.id == .head) continue;
@@ -1056,6 +1082,7 @@ pub fn drawAll() !void {
             const ankle: Joint = if (far) .right_ankle else .left_ankle;
             const heel: Joint = if (far) .right_heel else .left_heel;
             try drawSegment(points[@intFromEnum(ankle)], points[@intFromEnum(heel)], width * 0.6);
+            if (carrying and weapon_layer) try drawRing(points[@intFromEnum(weapon_joint)], width * 0.6, width * 0.55);
         }
         try gpu.setRenderDrawColor(limbColor(p.color, false));
         try drawRing(points[@intFromEnum(Joint.head)], set.rig.head_radius * conv.met2pix, width * 0.75);

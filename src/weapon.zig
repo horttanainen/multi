@@ -53,6 +53,7 @@ pub const Weapon = struct {
     projectile: ?Projectile = null,
     pellet: ?Pellet = null,
     spriteUuid: u64 = 0,
+    carriedSpriteUuid: u64 = 0,
     hitscanExplosion: ?projectile.Explosion = null,
     range: f32 = 50,
     trailDurationMs: u32 = 0,

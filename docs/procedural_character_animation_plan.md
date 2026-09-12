@@ -7,7 +7,11 @@ Phase two is accepted by the user, including the profile rename to `run.json`;
 independent review, corrections and validation are complete.
 Phase 3A is accepted by the user: jumping, falling, landing and the shared crouch
 pose (held with Down while grounded). Independent review and validation passed.
-Next step: agree on the next commit-sized phase before implementing it.
+The standalone alien blaster and procedural carried grip are accepted by the
+user; independent review and validation passed. See
+[character_animation_blaster.md](character_animation_blaster.md).
+The following phase will connect aiming to arm IK and suppress movement input
+while aiming, preserving existing velocity and physics. Grappling follows later.
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -241,12 +245,17 @@ Validate transitions with the real movement controller. Keep gameplay collision 
 
 Split this work into independently reviewed commits:
 
-- **3A (current):** JSON-authored jump, fall and shared crouch/landing clips; movement-driven
+- **3A (accepted):** JSON-authored jump, fall and shared crouch/landing clips; movement-driven
   transitions, impact-scaled landing compression, foot release/reacquisition, and
   interruption/reset coverage. Extend `data.zig`, the existing character component,
   curve evaluator, IK, contact solver, diagnostics and validation script.
-- **3B:** Aiming/grappling and wall poses, with explicit control priorities and
-  attachment handling. Agree on the precise scope before implementation.
+- **3B, carried weapon (accepted):** Standalone alien blaster, existing sprite grip
+  and muzzle markers, and a grip transform driven by the solved animated hand.
+- **3B, aiming (next commit):** Aim drives the gun and arm IK. Holding aim consumes
+  directional input for aiming, without cancelling velocity or normal physics.
+  Share muzzle placement between drawing, aim guide and release-to-fire shots.
+- **3B, later:** Grappling and wall poses, with explicit control priorities.
+  Agree on each commit-sized scope before implementation.
 - **3C:** Static slopes and steps, followed by a separately reviewed moving and
   destructible rubble phase. Plan the terrain-query/contact changes first.
 

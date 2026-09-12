@@ -53,7 +53,7 @@ pub const ScalePreviewState = struct {
     basisMuzzlePoint: ?vec.Vec2,
 };
 
-const MarkerPoints = struct {
+pub const MarkerPoints = struct {
     anchorPointLeft: ?vec.Vec2,
     anchorPointRight: ?vec.Vec2,
     muzzlePoint: ?vec.Vec2,
@@ -346,6 +346,43 @@ fn createSpriteFromOwnedSurface(imagePath: []const u8, surface: *sdl.Surface, te
 
     try sprites.putLocking(spriteUuid, newSprite);
     return spriteUuid;
+}
+
+pub const AnchoredPlacement = struct {
+    anchorPosition: vec.IVec2,
+    centerPosition: vec.IVec2,
+    pivot: sdl.Point,
+    angle: f32,
+    flip: bool,
+};
+
+// Sprite marker coordinates and the draw pivot use the same rendered pixel scale.
+pub fn placeAtAnchor(s: Sprite, anchor: vec.IVec2, position: vec.IVec2, angle: f32, flip: bool) AnchoredPlacement {
+    const pivot: sdl.Point = .{ .x = if (flip) s.sizeP.x - anchor.x else anchor.x, .y = anchor.y };
+    return .{
+        .anchorPosition = position,
+        .centerPosition = .{ .x = position.x - pivot.x + @divTrunc(s.sizeP.x, 2), .y = position.y - pivot.y + @divTrunc(s.sizeP.y, 2) },
+        .pivot = pivot,
+        .angle = angle,
+        .flip = flip,
+    };
+}
+
+pub fn placedPoint(s: Sprite, placement: AnchoredPlacement, point: vec.IVec2) vec.IVec2 {
+    const x: f32 = @floatFromInt((if (placement.flip) s.sizeP.x - point.x else point.x) - placement.pivot.x);
+    const y: f32 = @floatFromInt(point.y - placement.pivot.y);
+    return .{
+        .x = placement.anchorPosition.x + @as(i32, @intFromFloat(x * @cos(placement.angle) - y * @sin(placement.angle))),
+        .y = placement.anchorPosition.y + @as(i32, @intFromFloat(x * @sin(placement.angle) + y * @cos(placement.angle))),
+    };
+}
+
+pub fn drawPlaced(s: Sprite, placement: AnchoredPlacement) !void {
+    // Anchor placement already determines the origin; sprite.offset applies to
+    // center-based drawing, not to marker-based drawing.
+    var anchored = s;
+    anchored.offset = .{ .x = 0, .y = 0 };
+    try drawWithOptions(anchored, placement.centerPosition, placement.angle, false, placement.flip, 0, null, placement.pivot);
 }
 
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
@@ -815,7 +852,7 @@ pub fn isGreen(r: u8, g: u8, b: u8) bool {
     return r <= 5 and g >= 250 and b <= 5;
 }
 
-fn extractMarkerPoints(surface: *sdl.Surface, scale: vec.Vec2, markerExtraction: MarkerExtraction) MarkerPoints {
+pub fn extractMarkerPoints(surface: *sdl.Surface, scale: vec.Vec2, markerExtraction: MarkerExtraction) MarkerPoints {
     return .{
         .anchorPointLeft = if (markerExtraction.anchorLeft) findAndProcessAnchorPixel(surface, scale, isMagenta) else null,
         .anchorPointRight = if (markerExtraction.anchorRight) findAndProcessAnchorPixel(surface, scale, isGreen) else null,
@@ -879,7 +916,16 @@ fn findAndClearMuzzleMarker(surface: *sdl.Surface, scale: vec.Vec2) ?vec.Vec2 {
         while (x < width) : (x += 1) {
             const pixelIndex = y * pitch + x * bytesPerPixel;
             if (pixels[pixelIndex + 3] != 1) continue;
-            if (pixels[pixelIndex + 2] != 0 or pixels[pixelIndex + 1] != 255 or pixels[pixelIndex + 0] != 255) continue;
+            // SVG and PNG decoders can return different RGBA/BGRA byte orders.
+            // Decode the rare alpha-1 candidates through SDL's format metadata.
+            var r: u8 = undefined;
+            var g: u8 = undefined;
+            var b: u8 = undefined;
+            if (!sdl.c.SDL_ReadSurfacePixel(surface, @intCast(x), @intCast(y), &r, &g, &b, null)) {
+                std.log.warn("findAndClearMuzzleMarker: cannot read marker candidate at {d},{d}", .{ x, y });
+                return null;
+            }
+            if (r != 0 or g != 255 or b != 255) continue;
 
             pixels[pixelIndex + 0] = 0;
             pixels[pixelIndex + 1] = 0;

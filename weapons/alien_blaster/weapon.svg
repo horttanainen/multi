@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="96" viewBox="0 0 160 96">
+  <!-- Canonical facing: right. No character pixels are baked into this sprite. -->
+  <!-- Dark grip, exposed trigger guard, pale shell, and oversized cyan muzzle. -->
+  <path d="M43 45 L68 46 L61 84 Q58 89 47 86 L35 81 Z" fill="#152638" stroke="#091321" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M47 55 L58 57 M44 65 L56 67 M42 75 L54 77" fill="none" stroke="#537581" stroke-width="4"/>
+  <path d="M65 49 L87 48 L86 65 L63 67" fill="none" stroke="#091321" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M70 48 L73 57" stroke="#91b8bf" stroke-width="4"/>
+  <path d="M15 24 L36 16 L98 19 L111 26 L107 49 L38 53 L17 45 Z" fill="#83a8ad" stroke="#091321" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M22 26 L40 21 L91 23 L97 30 L34 32 Z" fill="#d9e8da"/>
+  <path d="M21 36 L44 38 L96 35 L94 45 L39 48 L22 42 Z" fill="#436978"/>
+  <path d="M51 20 L67 21 L66 32 L50 32 Z" fill="#182f40"/>
+  <path d="M54 23 L64 24 L63 29 L54 29 Z" fill="#66edc7"/>
+  <path d="M87 22 L102 20 L107 48 L90 49 Z" fill="#192f42" stroke="#091321" stroke-width="3"/>
+  <path d="M102 16 L129 10 L143 19 L145 50 L133 61 L105 54 Z" fill="#547f91" stroke="#091321" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M106 19 L129 15 L133 20 L112 25 L113 47 L107 47 Z" fill="#c1ddd6"/>
+  <path d="M133 17 L143 23 L144 47 L135 55 L127 48 L126 24 Z" fill="#102c40" stroke="#091321" stroke-width="4"/>
+  <path d="M135 24 L138 27 L139 44 L135 48 L132 44 L131 28 Z" fill="#58eddf"/>
+  <!-- Existing sprite marker convention: magenta grip at (49,64),
+       alpha-1 cyan muzzle at (151,35). Loader replaces/clears these pixels. -->
+  <rect x="49" y="64" width="1" height="1" fill="#ff00ff"/>
+  <rect x="151" y="35" width="1" height="1" fill="#00ffff" fill-opacity="0.003921568627451"/>
+</svg>

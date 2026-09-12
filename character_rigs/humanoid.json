@@ -198,6 +198,7 @@
     {
       "id": "weapon_hand",
       "joint": "right_hand",
+      "angle_offset_radians": 0,
       "local_offset": {
         "x": 0,
         "y": 0

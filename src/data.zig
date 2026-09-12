@@ -94,6 +94,7 @@ pub const PelletData = struct {
 
 pub const WeaponData = struct {
     sprite: []const u8,
+    carriedSprite: ?[]const u8 = null,
     delay: u32,
     sound: []const u8,
     impulse: f32,
@@ -1056,6 +1057,7 @@ fn initWeapons() !void {
     const Entry = struct {
         key: []const u8,
         sprite: []const u8,
+        carriedSprite: ?[]const u8 = null,
         delay: u32 = 500,
         sound: []const u8,
         impulse: f32 = 10,
@@ -1137,8 +1139,19 @@ fn initWeapons() !void {
         else
             null;
 
+        const carriedSpriteKey: ?[]const u8 = if (entry.carriedSprite == null) null else allocator.dupe(u8, entry.carriedSprite.?) catch |err| {
+            std.log.err("initWeapons: cannot copy carried sprite for '{s}': {}", .{ key, err });
+            allocator.free(key);
+            allocator.free(spriteKey);
+            allocator.free(soundKey);
+            if (projKey != null) allocator.free(projKey.?);
+            if (pelletData != null and pelletData.?.explosion != null) allocator.free(pelletData.?.explosion.?);
+            if (explosionKey != null) allocator.free(explosionKey.?);
+            continue;
+        };
         weaponDataMap.put(allocator, key, .{
             .sprite = spriteKey,
+            .carriedSprite = carriedSpriteKey,
             .delay = entry.delay,
             .sound = soundKey,
             .impulse = entry.impulse,
@@ -1159,6 +1172,7 @@ fn initWeapons() !void {
                 if (pd.explosion) |explosion| allocator.free(explosion);
             }
             if (explosionKey) |ek| allocator.free(ek);
+            if (carriedSpriteKey != null) allocator.free(carriedSpriteKey.?);
             continue;
         };
 
@@ -1266,6 +1280,8 @@ pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
 pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.Backing) !weapon.Weapon {
     const d = weaponDataMap.get(key) orelse return error.WeaponDataNotFound;
     const sound = createAudioFrom(d.sound) orelse return error.SoundDataNotFound;
+    const carriedSpriteUuid = try createCarriedWeaponSprite(d.carriedSprite);
+    errdefer if (carriedSpriteUuid != 0) sprite.cleanupLater(carriedSpriteUuid);
     const proj = if (d.projectile) |projKey|
         try createProjectileFrom(projKey)
     else
@@ -1301,6 +1317,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         .projectile = proj,
         .pellet = pel,
         .spriteUuid = spriteUuid,
+        .carriedSpriteUuid = carriedSpriteUuid,
         .hitscanExplosion = hitscanExp,
         .range = d.range,
         .trailDurationMs = d.trailDurationMs,
@@ -1308,6 +1325,21 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         .directDamage = d.directDamage,
         .penetration = d.penetration,
     };
+}
+
+fn createCarriedWeaponSprite(key: ?[]const u8) !u64 {
+    if (key == null) return 0; // Weapons without a carried visual use their legacy sprite.
+    const id = createSpriteFrom(key.?) orelse {
+        std.log.err("createCarriedWeaponSprite: cannot load '{s}'", .{key.?});
+        return error.CarriedWeaponSpriteMissing;
+    };
+    errdefer sprite.cleanupLater(id);
+    const loaded = sprite.getSprite(id).?; // The sprite owner just installed this ID.
+    if (loaded.anchorPointLeft == null or loaded.muzzlePoint == null) {
+        std.log.err("createCarriedWeaponSprite: '{s}' needs grip and muzzle markers", .{key.?});
+        return error.CarriedWeaponMarkersMissing;
+    }
+    return id;
 }
 
 pub fn getAnimationData(key: []const u8) ?AnimationData {
@@ -1392,6 +1424,7 @@ pub fn cleanup() void {
     while (weaponIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         allocator.free(entry.value_ptr.sprite);
+        if (entry.value_ptr.carriedSprite != null) allocator.free(entry.value_ptr.carriedSprite.?);
         allocator.free(entry.value_ptr.sound);
         if (entry.value_ptr.projectile) |p| allocator.free(p);
         if (entry.value_ptr.pellet) |pel| {

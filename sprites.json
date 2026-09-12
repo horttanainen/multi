@@ -56,6 +56,13 @@
         "atlasProfile": "preserve_detail"
     },
     {
+        "key": "alien_blaster",
+        "path": "weapons/alien_blaster/weapon.svg",
+        "heightMeters": 0.36,
+        "atlasProfile": "cap_512",
+        "markers": { "anchorLeft": true, "muzzle": true }
+    },
+    {
         "key": "rocket_launcher",
         "path": "weapons/rocket_launcher/weapon_with_arm.png",
         "heightMeters": 1.56,

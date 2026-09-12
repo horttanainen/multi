@@ -123,16 +123,7 @@ fn calcPlayerSpritePosition(p: Player) vec.IVec2 {
     return vec.izero;
 }
 
-const WeaponPlacement = struct {
-    shoulderPos: vec.IVec2,
-    centerPos: vec.IVec2,
-    anchor: vec.IVec2,
-    effectiveAnchorX: i32,
-    flip: bool,
-    angle: f32,
-};
-
-fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite) ?WeaponPlacement {
+fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite) ?sprite.AnchoredPlacement {
     const maybeEntity = entity.getEntity(p.bodyId);
     if (maybeEntity == null) return null;
     const ent = maybeEntity.?;
@@ -152,36 +143,15 @@ fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite) ?WeaponPlacement 
     const state = box2d.getInterpolatedState(ent.state, currentState);
     const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
     const shoulderPos = calcShoulderPos(playerSprite, playerPos, playerAnchor.?, playerFlip);
-    const effectiveAnchorX: i32 = if (weaponFlip) weaponSprite.sizeP.x - weaponAnchor.x else weaponAnchor.x;
-    const centerPos = vec.IVec2{
-        .x = shoulderPos.x - effectiveAnchorX + @divTrunc(weaponSprite.sizeP.x, 2),
-        .y = shoulderPos.y - weaponAnchor.y + @divTrunc(weaponSprite.sizeP.y, 2),
-    };
     const aimAngle = std.math.atan2(-p.aimDirection.y, p.aimDirection.x);
-
-    return .{
-        .shoulderPos = shoulderPos,
-        .centerPos = centerPos,
-        .anchor = weaponAnchor,
-        .effectiveAnchorX = effectiveAnchorX,
-        .flip = weaponFlip,
-        .angle = if (weaponFlip) std.math.pi + aimAngle else aimAngle,
-    };
+    const angle = if (weaponFlip) std.math.pi + aimAngle else aimAngle;
+    return sprite.placeAtAnchor(weaponSprite, weaponAnchor, shoulderPos, angle, weaponFlip);
 }
 
 fn calcWeaponMuzzlePosition(p: Player, weaponSprite: sprite.Sprite) ?vec.IVec2 {
     const muzzlePoint = weaponSprite.muzzlePoint orelse return null;
     const placement = calcWeaponPlacement(p, weaponSprite) orelse return null;
-    const effectiveMuzzleX: i32 = if (placement.flip) weaponSprite.sizeP.x - muzzlePoint.x else muzzlePoint.x;
-    const relativeX = @as(f32, @floatFromInt(effectiveMuzzleX - placement.effectiveAnchorX));
-    const relativeY = @as(f32, @floatFromInt(muzzlePoint.y - placement.anchor.y));
-    const cosAngle = @cos(placement.angle);
-    const sinAngle = @sin(placement.angle);
-
-    return .{
-        .x = placement.shoulderPos.x + @as(i32, @intFromFloat(relativeX * cosAngle - relativeY * sinAngle)),
-        .y = placement.shoulderPos.y + @as(i32, @intFromFloat(relativeX * sinAngle + relativeY * cosAngle)),
-    };
+    return sprite.placedPoint(weaponSprite, placement, muzzlePoint);
 }
 
 pub fn spawnWithSharedCamera(cameraId: usize) !usize {
@@ -710,6 +680,28 @@ pub fn drawAllAimGuides() !void {
     }
 }
 
+pub fn usesCarriedWeapon(p: Player) bool {
+    if (character_animation.assets == null or character_animation.view == .sprites or p.isAiming or p.weapons.len == 0) return false;
+    return p.weapons[p.selectedWeaponIndex].carriedSpriteUuid != 0;
+}
+
+pub fn drawCarriedWeapon(playerId: usize, attachment: character_animation.AttachmentTransform, facingRight: bool) !void {
+    const p = players.get(playerId) orelse {
+        std.log.warn("drawCarriedWeapon: player {d} is missing", .{playerId});
+        return;
+    };
+    const id = p.weapons[p.selectedWeaponIndex].carriedSpriteUuid;
+    const carried = sprite.getSprite(id) orelse {
+        std.log.warn("drawCarriedWeapon: sprite {d} is missing for player {d}", .{ id, playerId });
+        return;
+    };
+    // Creation validates the grip and muzzle markers. The animated hand drives
+    // this transform; aiming continues to use the legacy placement in this phase.
+    const position = camera.relativePosition(conv.m2Pixel(vec.toBox2d(attachment.position)));
+    const placement = sprite.placeAtAnchor(carried, carried.anchorPointLeft.?, position, attachment.angle, !facingRight);
+    try sprite.drawPlaced(carried, placement);
+}
+
 pub fn drawWeapon(player: *Player) !void {
     if (player.weapons.len == 0) return;
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
@@ -721,13 +713,12 @@ pub fn drawWeapon(player: *Player) !void {
         try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, weaponFlip, 0, null, null);
         return;
     };
-    const pivotPoint: sdl.Point = .{ .x = placement.effectiveAnchorX, .y = placement.anchor.y };
-    try sprite.drawWithOptions(weaponSprite, placement.centerPos, placement.angle, false, placement.flip, 0, null, pivotPoint);
+    try sprite.drawPlaced(weaponSprite, placement);
 }
 
 pub fn drawAllWeaponsBehind() !void {
     for (players.values()) |*p| {
-        if (p.isDead) continue;
+        if (p.isDead or usesCarriedWeapon(p.*)) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             // Draw behind when facing left (flipEntityHorizontally == false)
@@ -738,7 +729,7 @@ pub fn drawAllWeaponsBehind() !void {
 
 pub fn drawAllWeaponsFront() !void {
     for (players.values()) |*p| {
-        if (p.isDead) continue;
+        if (p.isDead or usesCarriedWeapon(p.*)) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             // Draw in front when facing right (flipEntityHorizontally == true)
@@ -1039,6 +1030,7 @@ pub fn cleanup() void {
             if (w.spriteUuid != 0) {
                 sprite.cleanupLater(w.spriteUuid);
             }
+            if (w.carriedSpriteUuid != 0) sprite.cleanupLater(w.carriedSpriteUuid);
         }
 
         // Cleanup player resources
