@@ -10,19 +10,22 @@ const allocator = @import("src/allocator.zig");
 const data = @import("src/data.zig");
 const fs = @import("src/fs.zig");
 const runtime = @import("src/runtime.zig");
+const box2d = @import("src/box2d.zig");
+const collision = @import("src/collision.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
+const locomotion_json = @embedFile("character_locomotion/run.json");
 const motion_json = @embedFile("character_motions/run_reference.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 
 fn load() !animation.Assets {
     var detail: animation.Diagnostic = .{};
-    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, &detail), &detail);
+    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, &detail), &detail);
 }
 
 fn replaceFromJson(rig_bytes: []const u8, motion_bytes: []const u8, detail: *data.CharacterAssetDiagnostic) !void {
-    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, detail), detail);
+    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, detail), detail);
 }
 
 test "bounded file reading loads the complete motion and rejects oversized or missing files" {
@@ -47,7 +50,7 @@ test "decoded character data owns its strings and curves after the source buffer
         defer std.testing.allocator.free(rig_bytes);
         const motion_bytes = try std.testing.allocator.dupe(u8, motion_json);
         defer std.testing.allocator.free(motion_bytes);
-        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, &detail);
+        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, &detail);
     };
     defer files.arena.deinit();
     try std.testing.expectEqualStrings("humanoid_v1", files.rig.id);
@@ -343,7 +346,7 @@ test "compact Bezier run preserves dense controls, solved poses, and contact int
     var compact = try load();
     defer compact.arena.deinit();
     var detail: animation.Diagnostic = .{};
-    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, &detail), &detail);
+    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, &detail), &detail);
     defer dense.arena.deinit();
     try std.testing.expectEqual(dense.motion.cycle_seconds, compact.motion.cycle_seconds);
     try std.testing.expectEqual(dense.motion.reference_speed_mps, compact.motion.reference_speed_mps);
@@ -584,7 +587,7 @@ test "character asset array order does not define joint, limb, control, contact,
     const reordered_motion = try std.json.Stringify.valueAlloc(std.testing.allocator, motion.value, .{});
     defer std.testing.allocator.free(reordered_motion);
     var detail: animation.Diagnostic = .{};
-    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, &detail), &detail);
+    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, &detail), &detail);
     defer reordered.arena.deinit();
     for (0..12) |index| {
         const phase = @as(f64, @floatFromInt(index)) / 12;
@@ -594,6 +597,280 @@ test "character asset array order does not define joint, limb, control, contact,
         try std.testing.expectEqual(a.contact_intent, b.contact_intent);
         for ([_][]const u8{ "weapon_hand", "grapple_hand" }) |name| {
             try nearPoint(animation.attachmentPosition(original.rig, a, name).?, animation.attachmentPosition(reordered.rig, b, name).?, 0.000001);
+        }
+    }
+}
+
+fn beginLocomotion() !box2d.c.b2BodyId {
+    box2d.initWorld();
+    errdefer box2d.destroyWorld();
+    animation.installAssets(try load());
+    errdefer animation.cleanup();
+    animation.playback = .locomotion;
+    try animation.register(7);
+    const floor = try box2d.createBody(box2d.createStaticBodyDef(.{ .x = 0, .y = 0.8 }));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+    shape.filter.maskBits = collision.MASK_TERRAIN;
+    const polygon = box2d.c.b2MakeBox(100, 0.5);
+    _ = box2d.c.b2CreatePolygonShape(floor, &shape, &polygon);
+    return floor;
+}
+
+fn advanceRun(x: f32, supported: bool) void {
+    animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = supported, .ground_y = if (supported) 0.3 else null, .facing_right = true }, 1.0 / 60.0);
+}
+
+fn checkBones(rig: animation.Rig, pose: animation.Pose) !void {
+    for (rig.joints, 0..) |joint, index| {
+        if (joint.parent == null) continue;
+        try std.testing.expectApproxEqAbs(rig.lengths[index], vec.magnitude(vec.subtract(pose.joints[index], pose.joints[@intFromEnum(joint.parent.?)])), 0.00002);
+    }
+}
+
+test "locomotion stands still against a wall and adapts cadence with planted toes at slow, reference, and game run speeds" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    for (0..120) |_| advanceRun(0, true);
+    try std.testing.expectEqual(@as(f64, 0), animation.states.get(7).?.phase);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.run_weight);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
+    var previous_cadence: f64 = 0;
+    for ([_]f32{ 0.5, 3.2, 9 }) |speed| {
+        animation.resetPlayer(7);
+        advanceRun(0, true);
+        var x: f32 = 0;
+        var locked_samples: usize = 0;
+        for (0..240) |tick| {
+            x += speed / 60;
+            advanceRun(x, true);
+            const sample = animation.states.get(7).?;
+            for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+                try checkBones(animation.assets.?.rig, pose);
+                const body: vec.Vec2 = .{ .x = std.math.lerp(sample.previous_body.x, sample.body.x, @as(f32, @floatCast(alpha))), .y = 0 };
+                for ([_]animation.Joint{ .left_toe, .right_toe }, 0..) |toe, index| {
+                    if (!sample.feet[index].locked or !sample.previous_feet[index].locked or !std.meta.eql(sample.feet[index].anchor, sample.previous_feet[index].anchor)) continue;
+                    if (tick > 60) locked_samples += 1;
+                    try nearPoint(sample.feet[index].anchor, animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(toe)], body, sample.facing_right), 0.00003);
+                }
+                for ([_]animation.Joint{ .left_toe, .right_toe, .left_heel, .right_heel }) |joint| {
+                    const point = animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(joint)], body, sample.facing_right);
+                    try std.testing.expect(point.y <= 0.3002);
+                }
+            }
+        }
+        try std.testing.expect(locked_samples > 50);
+        const sample = animation.states.get(7).?;
+        const cadence = (sample.phase - sample.previous_phase) * 60;
+        try std.testing.expect(cadence > previous_cadence);
+        const expected = speed / (animation.assets.?.motion.reference_speed_mps * animation.assets.?.motion.cycle_seconds * sample.stride_scale);
+        try std.testing.expectApproxEqAbs(@as(f64, expected), cadence, 0.0001);
+        previous_cadence = cadence;
+    }
+}
+
+test "locomotion settles a stopped swing, turns using actual displacement, and releases on support loss or teleport" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    var x: f32 = 0;
+    for (0..49) |_| {
+        x += 3.2 / 60.0;
+        advanceRun(x, true);
+    }
+    const stopped_phase = animation.states.get(7).?.phase;
+    for (0..90) |_| advanceRun(x, true);
+    const stopped = animation.states.get(7).?;
+    try std.testing.expectEqual(stopped_phase, stopped.phase);
+    try std.testing.expect(stopped.run_weight < 0.00001);
+    const rest = animation.solvePose(animation.assets.?.rig, animation.assets.?.rig.neutral);
+    const settled = animation.interpolatedPose(&animation.assets.?, stopped, 1);
+    // Idle retains the final settled footholds instead of sliding them the last
+    // few millimeters to the exact neutral targets after planting.
+    for (rest.joints, settled.joints) |a, b| try nearPoint(a, b, 0.015);
+    for (stopped.feet) |foot| try std.testing.expect(foot.locked);
+    for (0..60) |_| advanceRun(x, true);
+    const later = animation.interpolatedPose(&animation.assets.?, animation.states.get(7).?, 1);
+    for (settled.joints, later.joints) |a, b| try nearPoint(a, b, 0.00002);
+    // The supplied facing intent points right throughout; displacement goes left.
+    for (0..120) |_| {
+        x -= 3.2 / 60.0;
+        advanceRun(x, true);
+        const sample = animation.states.get(7).?;
+        try std.testing.expect(!sample.facing_right);
+        try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+    }
+    advanceRun(x, false);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
+    advanceRun(x + 10, true);
+    try std.testing.expectEqual(@as(f64, 0), animation.states.get(7).?.phase);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.speed_mps);
+}
+
+test "flat foot queries release removed support even with stale grounded input and ignore moving floors" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
+    box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
+    advanceRun(0, true);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
+    box2d.c.b2Body_SetType(floor, box2d.c.b2_staticBody);
+    animation.resetPlayer(7);
+    advanceRun(0, true);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
+    box2d.c.b2DestroyBody(floor);
+    advanceRun(0, true);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
+}
+
+test "invalid locomotion JSON preserves the complete installed pose and contacts; valid reload clears transient state" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    const before = animation.states.get(7).?;
+    const old_id = animation.assets.?.locomotion.id.ptr;
+    const previous_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = previous_log_level;
+    var detail: animation.Diagnostic = .{};
+    const cases = [_][2][]const u8{
+        .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"run_reference_v1\"", "\"missing_clip\"" },
+        .{ "\"stride_max\": 1.15", "\"stride_max\": 0.1" },
+        .{ "\"start_seconds\": 0.08", "\"start_seconds\": 0" },
+        .{ "\"release_seconds\": 0.055", "\"release_seconds\": 1e999" },
+        .{ "\"full_run_speed_mps\": 1.8", "\"full_run_speed_mps\": 0.01" },
+        .{ "\"plant_distance_m\": 0.035,", "" },
+    };
+    for (cases) |case| {
+        const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, locomotion_json, case[0], case[1]);
+        defer std.testing.allocator.free(malformed);
+        const result = replacement: {
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, &detail) catch |err| break :replacement err;
+            break :replacement animation.replaceAssets(files, &detail);
+        };
+        try std.testing.expectError(error.InvalidCharacterAsset, result);
+        try std.testing.expectEqualStrings(data.characterLocomotionPath, detail.file);
+        try std.testing.expect(detail.length > 0);
+        try std.testing.expectEqualDeep(before, animation.states.get(7).?);
+        try std.testing.expect(old_id == animation.assets.?.locomotion.id.ptr);
+    }
+    try replaceFromJson(rig_json, motion_json, &detail);
+    const cleared = animation.states.get(7).?;
+    try std.testing.expect(!cleared.initialized);
+    for (cleared.feet) |foot| try std.testing.expect(!foot.locked);
+    try std.testing.expectEqual(before.facing_right, cleared.facing_right);
+}
+
+const LocomotionSample = struct {
+    speed: f32,
+    phase: f32,
+    weight: f32,
+    facing_right: bool,
+    body: vec.Vec2,
+    planted: [2]bool,
+    joints: [std.meta.fields(animation.Joint).len]vec.Vec2,
+};
+
+test "running reversals preserve control positions and export exact solved poses for visual review" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    runtime.init(std.testing.io);
+    var samples: std.ArrayList(LocomotionSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    var x: f32 = 0;
+    var speed: f32 = 0;
+    advanceRun(x, true);
+    var turns: usize = 0;
+    var slow_restart_contacts: usize = 0;
+    // Stand, accelerate, brake, reverse at running speed, stop, slow run.
+    for (0..600) |tick| {
+        errdefer std.log.err("locomotion reversal regression failed at tick {d}", .{tick});
+        const target: f32 = if (tick < 30) 0 else if (tick < 150) 3.2 else if (tick < 270) 9 else if (tick < 390) -9 else if (tick < 480) 0 else 0.5;
+        speed += std.math.clamp(target - speed, -1.5, 1.5);
+        const before = animation.states.get(7).?;
+        x += speed / 60;
+        advanceRun(x, true);
+        const sample = animation.states.get(7).?;
+        if (tick >= 510 and tick < 540 and (sample.feet[0].locked or sample.feet[1].locked)) slow_restart_contacts += 1;
+        const set = &animation.assets.?;
+        const pose = animation.interpolatedPose(set, sample, 1);
+        try checkBones(set.rig, pose);
+        for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+            errdefer std.log.err("locomotion reversal clearance failed at alpha {d}", .{alpha});
+            const between = animation.interpolatedPose(set, sample, alpha);
+            try checkBones(set.rig, between);
+            const body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+            for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                const point = animation.toWorld(set.rig, between.joints[@intFromEnum(joint)], body, sample.facing_right);
+                try std.testing.expectApproxEqAbs(@as(f32, 0), @max(0, point.y - 0.3), 0.0002);
+            }
+        }
+        if (sample.facing_right != before.facing_right) {
+            turns += 1;
+            const earlier = animation.interpolatedPose(set, before, 1);
+            for (pose.desired_targets, earlier.desired_targets) |a, b| {
+                const current_world = animation.toWorld(set.rig, a, sample.body, sample.facing_right);
+                const previous_world = animation.toWorld(set.rig, b, before.body, before.facing_right);
+                errdefer std.log.err("turn target displacement {d}", .{vec.magnitude(vec.subtract(current_world, previous_world))});
+                try std.testing.expect(vec.magnitude(vec.subtract(current_world, previous_world)) < 0.06);
+            }
+            for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }, 0..) |joint, index| {
+                const current_world = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], sample.body, sample.facing_right);
+                const previous_world = animation.toWorld(set.rig, earlier.joints[@intFromEnum(joint)], before.body, before.facing_right);
+                errdefer std.log.err("turn {s} displacement {d}", .{ @tagName(joint), vec.magnitude(vec.subtract(current_world, previous_world)) });
+                // At 60 Hz the eased turn can move a free toe up to 8 cm, but
+                // cannot introduce the former 30+ cm instantaneous mirror jump.
+                try std.testing.expect(vec.magnitude(vec.subtract(current_world, previous_world)) < @as(f32, if (index % 2 == 0) 0.08 else 0.13));
+                if (index % 2 != 0 or !sample.feet[index / 2].locked or !before.feet[index / 2].locked) continue;
+                try nearPoint(before.feet[index / 2].anchor, current_world, 0.00003);
+            }
+        }
+        var joints = pose.joints;
+        for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
+        try samples.append(std.testing.allocator, .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints });
+    }
+    try std.testing.expectEqual(@as(usize, 2), turns);
+    try std.testing.expect(slow_restart_contacts > 5);
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/locomotion_samples.json", bytes);
+}
+
+test "toe planting uses the actual heel geometry and preserves interpolated floor clearance for a tilted heel" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const tilted_rig = try std.mem.replaceOwned(u8, std.testing.allocator, rig_json, "\"x\": -0.22,\n        \"y\": 0", "\"x\": -0.22,\n        \"y\": -0.01");
+    defer std.testing.allocator.free(tilted_rig);
+    var detail: animation.Diagnostic = .{};
+    try replaceFromJson(tilted_rig, motion_json, &detail);
+    try std.testing.expectEqual(@as(f32, -0.01), animation.assets.?.rig.joints[@intFromEnum(animation.Joint.left_heel)].rest_offset.y);
+    var x: f32 = 0;
+    for (0..150) |tick| {
+        errdefer std.log.err("tilted heel regression failed at tick {d}", .{tick});
+        if (tick >= 60) x -= 3.2 / 60.0;
+        advanceRun(x, true);
+        const sample = animation.states.get(7).?;
+        if (tick < 60) for (sample.feet) |foot| {
+            try std.testing.expect(!foot.locked);
+        };
+        for ([_]f64{ 0.25, 0.5, 0.75, 1 }) |alpha| {
+            const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+            try checkBones(animation.assets.?.rig, pose);
+            const body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+            for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                const point = animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(joint)], body, sample.facing_right);
+                try std.testing.expect(point.y <= 0.3002);
+            }
         }
     }
 }

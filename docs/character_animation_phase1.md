@@ -3,6 +3,12 @@
 Status: phase one accepted by the user on 2026-09-12, including the compact run
 motion; full independent review and corrections completed.
 
+Phase two adds movement-driven playback and a third JSON asset. Current testing
+instructions are in [character_animation_phase2.md](character_animation_phase2.md).
+The reference command below explicitly selects the original continuous cycle.
+The remaining review record describes phase-one behavior at acceptance; use the
+phase-two instructions for the current menu and complete asset set.
+
 ## Run and review
 
 From the repository root:
@@ -20,7 +26,7 @@ The capture is taken before the screen postprocessing effects.
 For a persistent interactive session:
 
 ```sh
-zig build run -- --character-animation
+zig build run -- --character-animation --character-animation-reference
 ```
 
 Normal startup retains sprites. The diagnostic run plays continuously, including

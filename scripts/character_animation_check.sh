@@ -1,5 +1,5 @@
 #!/bin/bash
-# Phase-one validation. Use --unit-only while working on the solver/assets.
+# Character animation validation. Use --unit-only while working on the solver/assets.
 # Extra arguments after -- are passed to the existing game smoke-test script.
 set -euo pipefail
 
@@ -40,7 +40,7 @@ CHARACTER_DEFAULT_CAPTURE=false
 if [[ $# -eq 0 ]]; then
   CHARACTER_DEFAULT_CAPTURE=true
   bash scripts/smoke_test.sh --character-animation --character-animation-close \
-    --character-animation-capture "$CHARACTER_LOG_DIR/phase1.png" 2>&1 | tee "$CHARACTER_LOG_DIR/smoke.log"
+    --character-animation-capture "$CHARACTER_LOG_DIR/preview.png" 2>&1 | tee "$CHARACTER_LOG_DIR/smoke.log"
 else
   bash scripts/smoke_test.sh "$@" 2>&1 | tee "$CHARACTER_LOG_DIR/smoke.log"
 fi
@@ -53,7 +53,7 @@ if grep -Eq '(^|[[:space:]])(error:|warn:|panic:|thread .* panic)' "$CHARACTER_L
   echo "Smoke test logged a warning, error, or panic; inspect $CHARACTER_LOG_DIR/smoke.log" >&2
   exit 1
 fi
-if [[ "$CHARACTER_DEFAULT_CAPTURE" == true ]] && ! grep -Fq "info: character_animation: captured $CHARACTER_LOG_DIR/phase1.png" "$CHARACTER_LOG_DIR/smoke.log"; then
+if [[ "$CHARACTER_DEFAULT_CAPTURE" == true ]] && ! grep -Fq "info: character_animation: captured $CHARACTER_LOG_DIR/preview.png" "$CHARACTER_LOG_DIR/smoke.log"; then
   echo "Smoke test failed: the character review image was not captured" >&2
   exit 1
 fi

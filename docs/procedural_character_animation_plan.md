@@ -3,7 +3,11 @@
 Status: Phase one accepted by the user on 2026-09-12, including the compact Bezier
 control tracks; full independent review and corrections completed. The exact
 dense run JSON remains as a regression reference.
-Next step: agree on the phase-two plan before implementing it.
+Phase two is accepted by the user, including the profile rename to `run.json`;
+independent review, corrections and validation are complete.
+Next step: agree on the next commit-sized phase before implementing it.
+The current scope and test instructions are in
+[character_animation_phase2.md](character_animation_phase2.md).
 Run instructions, the schema specification, and the acceptance checklist are in
 [character_animation_phase1.md](character_animation_phase1.md).
 
@@ -215,6 +219,13 @@ Acceptance checks for this phase:
 Create and tune a complete initial running profile in JSON: foot trajectories, contact intent, pelvis movement, torso lean, and arm motion. Integrate cadence/stride response and flat-ground foot planting.
 
 Tune at normal gameplay size and in slow motion across slow/normal/fast running. Include starts, stops, reversals, and movement against a wall. The coding agent is responsible for producing a usable initial result before asking the user to tune animation.
+
+Implementation boundary: retain the accepted run control tracks and introduce
+`character_locomotion/run.json`. Consume actual fixed-step body displacement
+and existing movement contacts. Plant on verified static, flat surfaces using
+world-space toe anchors; defer body-local moving-support anchors, planned terrain
+landings, and action-specific poses to phase three. Re-solve interpolated targets
+for rendering, with stance constraints reapplied after interpolation.
 
 ### 3. Actions and terrain adaptation
 

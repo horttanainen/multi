@@ -15,6 +15,7 @@ const text = @import("text.zig");
 const viewport = @import("viewport.zig");
 const renderer = @import("renderer.zig");
 const sprite = @import("sprite.zig");
+const collision = @import("collision.zig");
 
 pub const Joint = enum(u8) {
     pelvis,
@@ -53,12 +54,17 @@ pub const Control = enum(u8) {
     right_hand_y,
 };
 pub const View = enum { sprites, stick, overlay };
-pub const Playback = enum { neutral, run };
+pub const Playback = enum { locomotion, neutral, run };
 pub const ReviewAction = enum { view, pose, diagnostics, reload, slow_motion, zoom };
 pub const Interpolation = enum { step, linear, bezier };
 const jointCount = std.meta.fields(Joint).len;
 const limbCount = std.meta.fields(Limb).len;
 const controlCount = std.meta.fields(Control).len;
+const target_x = [limbCount]Control{ .left_foot_x, .right_foot_x, .left_hand_x, .right_hand_x };
+const target_y = [limbCount]Control{ .left_foot_y, .right_foot_y, .left_hand_y, .right_hand_y };
+const foot_angles = [2]Control{ .left_foot_angle, .right_foot_angle };
+const toes = [2]Joint{ .left_toe, .right_toe };
+const foot_joints = [4]Joint{ .left_toe, .left_heel, .right_toe, .right_heel };
 
 pub const Key = struct {
     phase: f32,
@@ -99,12 +105,42 @@ pub const Motion = struct {
     reference_speed_mps: f32,
     loop: bool,
 };
-pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion };
+pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData };
 pub const Diagnostic = data.CharacterAssetDiagnostic;
+pub const FootState = struct {
+    locked: bool = false,
+    blocked: bool = false,
+    anchor: vec.Vec2 = vec.zero,
+    correction: vec.Vec2 = vec.zero,
+};
+pub const LocomotionInput = struct {
+    body: vec.Vec2,
+    supported: bool,
+    // Only an upward-facing static contact provides a flat planting plane.
+    ground_y: ?f32,
+    facing_right: bool,
+};
 pub const PlayerState = struct {
     previous_phase: f64 = 0,
     phase: f64 = 0,
     facing_right: bool = false,
+    initialized: bool = false,
+    body: vec.Vec2 = vec.zero,
+    previous_body: vec.Vec2 = vec.zero,
+    speed_mps: f32 = 0,
+    run_weight: f32 = 0,
+    intensity: f32 = 0,
+    stride_scale: f32 = 1,
+    feet: [2]FootState = .{ .{}, .{} },
+    previous_feet: [2]FootState = .{ .{}, .{} },
+    foot_heading: f32 = 0,
+    previous_foot_heading: f32 = 0,
+    sole_floors: [4]?f32 = @splat(null),
+    previous_sole_floors: [4]?f32 = @splat(null),
+    previous_controls: [controlCount]f32 = @splat(0),
+    controls: [controlCount]f32 = @splat(0),
+    previous_facing_right: bool = false,
+    turn_offsets: [controlCount]f32 = @splat(0),
 };
 pub const Pose = struct {
     joints: [jointCount]vec.Vec2,
@@ -117,7 +153,7 @@ pub const LimbSolution = struct { middle: vec.Vec2, end: vec.Vec2, clamped: bool
 pub var assets: ?Assets = null;
 pub var states: std.AutoArrayHashMapUnmanaged(usize, PlayerState) = .empty;
 pub var view: View = .sprites;
-pub var playback: Playback = .run;
+pub var playback: Playback = .locomotion;
 pub var show_diagnostics = false;
 pub var diagnostic: Diagnostic = .{};
 var slow_motion = false;
@@ -266,6 +302,22 @@ fn validateMotion(file: data.CharacterMotionData, rig: Rig, detail: *Diagnostic)
     return motion;
 }
 
+fn validateLocomotion(file: data.CharacterLocomotionData, rig: Rig, motion: Motion, detail: *Diagnostic) !void {
+    if (file.schema_version != 1) return invalid(detail, "schema_version: expected 1", .{});
+    if (file.id.len == 0 or file.id.len > 64) return invalid(detail, "id: expected 1..64 bytes", .{});
+    if (!std.mem.eql(u8, file.rig_id, rig.id)) return invalid(detail, "rig_id: does not match loaded rig", .{});
+    if (!std.mem.eql(u8, file.motion_id, motion.id)) return invalid(detail, "motion_id: does not match loaded motion", .{});
+    if (!motion.loop or motion.reference_speed_mps <= 0) return invalid(detail, "motion_id: locomotion requires a looping clip with positive reference speed", .{});
+    if (file.stop_speed_mps < 0.001 or file.full_run_speed_mps <= file.stop_speed_mps or file.full_run_speed_mps > 100) return invalid(detail, "full_run_speed_mps: expected stop_speed_mps >= 0.001 < full_run_speed_mps <= 100", .{});
+    if (file.stride_min < 0.1 or file.stride_max < file.stride_min or file.stride_max > 2) return invalid(detail, "stride_min/stride_max: expected 0.1 <= min <= max <= 2", .{});
+    inline for (.{ "start_seconds", "stop_seconds", "turn_seconds", "release_seconds" }) |field| {
+        if (@field(file, field) < 0.01 or @field(file, field) > 2) return invalid(detail, "{s}: expected 0.01..2 seconds", .{field});
+    }
+    inline for (.{ "plant_distance_m", "max_anchor_error_m", "flat_height_tolerance_m" }) |field| {
+        if (@field(file, field) < 0.001 or @field(file, field) > 0.5) return invalid(detail, "{s}: expected 0.001..0.5 meters", .{field});
+    }
+}
+
 // Consumes the decoded data on both success and failure. Successful preparation
 // transfers its arena to the runtime assets; failed validation releases it here.
 pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !Assets {
@@ -275,7 +327,9 @@ pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !A
     const rig = try validateRig(files.rig, arena.allocator(), detail);
     detail.file = data.characterMotionPath;
     const motion = try validateMotion(files.motion, rig, detail);
-    return .{ .arena = arena, .rig = rig, .motion = motion };
+    detail.file = data.characterLocomotionPath;
+    try validateLocomotion(files.locomotion, rig, motion, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = files.locomotion };
 }
 
 fn cubic(a: f32, b: f32, c: f32, d: f32, t: f32) f32 {
@@ -368,6 +422,14 @@ pub fn solveLimb(root: vec.Vec2, target: vec.Vec2, upper: f32, lower: f32, bend_
 }
 
 pub fn solvePose(rig: Rig, controls: [controlCount]f32) Pose {
+    var offsets: [4]vec.Vec2 = undefined;
+    for (foot_joints, &offsets, 0..) |joint, *offset, index| {
+        offset.* = rotate(rig.joints[@intFromEnum(joint)].rest_offset, controls[@intFromEnum(foot_angles[index / 2])]);
+    }
+    return solvePoseWithFeet(rig, controls, offsets);
+}
+
+fn solvePoseWithFeet(rig: Rig, controls: [controlCount]f32, offsets: [4]vec.Vec2) Pose {
     var pose: Pose = .{ .joints = @splat(vec.zero), .desired_targets = undefined, .clamped = undefined, .contact_intent = .{ false, false } };
     pose.joints[@intFromEnum(Joint.pelvis)] = .{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
     const torso_rotation = -controls[@intFromEnum(Control.torso_angle)];
@@ -375,8 +437,6 @@ pub fn solvePose(rig: Rig, controls: [controlCount]f32) Pose {
         const joint = rig.joints[@intFromEnum(joint_id)];
         pose.joints[@intFromEnum(joint_id)] = vec.add(pose.joints[@intFromEnum(joint.parent.?)], rotate(joint.rest_offset, torso_rotation));
     }
-    const target_x = [limbCount]Control{ .left_foot_x, .right_foot_x, .left_hand_x, .right_hand_x };
-    const target_y = [limbCount]Control{ .left_foot_y, .right_foot_y, .left_hand_y, .right_hand_y };
     for (rig.limbs, 0..) |limb, index| {
         const target = vec.Vec2{ .x = controls[@intFromEnum(target_x[index])], .y = controls[@intFromEnum(target_y[index])] };
         const upper = rig.lengths[@intFromEnum(limb.middle)];
@@ -387,10 +447,9 @@ pub fn solvePose(rig: Rig, controls: [controlCount]f32) Pose {
         pose.desired_targets[index] = target;
         pose.clamped[index] = solution.clamped;
     }
-    for ([_]Joint{ .left_toe, .left_heel, .right_toe, .right_heel }, 0..) |joint_id, index| {
+    for (foot_joints, offsets) |joint_id, offset| {
         const joint = rig.joints[@intFromEnum(joint_id)];
-        const angle = controls[@intFromEnum(if (index < 2) Control.left_foot_angle else Control.right_foot_angle)];
-        pose.joints[@intFromEnum(joint_id)] = vec.add(pose.joints[@intFromEnum(joint.parent.?)], rotate(joint.rest_offset, angle));
+        pose.joints[@intFromEnum(joint_id)] = vec.add(pose.joints[@intFromEnum(joint.parent.?)], offset);
     }
     return pose;
 }
@@ -422,8 +481,7 @@ pub fn installAssets(replacement: Assets) void {
     if (assets != null) assets.?.arena.deinit();
     assets = replacement;
     for (states.values()) |*state| {
-        state.phase = 0;
-        state.previous_phase = 0;
+        state.* = .{ .facing_right = state.facing_right };
     }
     reload_failed = false;
 }
@@ -460,6 +518,7 @@ pub fn configure(args: []const []const u8) !void {
             review_enabled = true;
         }
         if (std.mem.eql(u8, arg, "--character-animation-neutral")) playback = .neutral;
+        if (std.mem.eql(u8, arg, "--character-animation-reference")) playback = .run;
         if (std.mem.eql(u8, arg, "--character-animation-diagnostics")) show_diagnostics = true;
         if (std.mem.eql(u8, arg, "--character-animation-close")) close_view = true;
         if (!std.mem.eql(u8, arg, "--character-animation-capture")) continue;
@@ -489,8 +548,7 @@ pub fn resetPlayer(player_id: usize) void {
         std.log.warn("character_animation.resetPlayer: state missing for player {d}", .{player_id});
         return;
     };
-    state.phase = 0;
-    state.previous_phase = 0;
+    state.* = .{ .facing_right = state.facing_right };
 }
 
 pub fn clearPlayers() void {
@@ -504,9 +562,253 @@ pub fn cleanup() void {
     if (slow_motion) time.setSimulationScale(1);
 }
 
+fn mirrorControls(rig: Rig, controls: [controlCount]f32) [controlCount]f32 {
+    var result = controls;
+    for (target_x ++ .{Control.pelvis_x}) |binding| result[@intFromEnum(binding)] = -result[@intFromEnum(binding)] - 2 * rig.root_from_body.x;
+    for (foot_angles ++ .{Control.torso_angle}) |binding| result[@intFromEnum(binding)] *= -1;
+    return result;
+}
+
+fn locomotionControls(set: *const Assets, state: *const PlayerState) [controlCount]f32 {
+    const phase = clipPhase(set.motion, state.phase);
+    const strength = state.run_weight * state.intensity;
+    var controls: [controlCount]f32 = undefined;
+    for (set.motion.tracks, set.rig.neutral, 0..) |track, neutral, index| {
+        controls[index] = std.math.lerp(neutral, evaluateTrack(track, phase), strength);
+    }
+    // Horizontal travel follows stride length even at low speed. Bob, lift, lean
+    // and arm swing have a separate intensity so a slow step still covers ground.
+    for (toes, 0..) |toe, index| {
+        const x = @intFromEnum(target_x[index]);
+        const y = @intFromEnum(target_y[index]);
+        const angle = @intFromEnum(foot_angles[index]);
+        const rest = set.rig.joints[@intFromEnum(toe)].rest_offset;
+        const authored_offset = rotate(rest, evaluateTrack(set.motion.tracks[angle], phase));
+        const neutral_offset = rotate(rest, set.rig.neutral[angle]);
+        const offset = rotate(rest, controls[angle]);
+        const toe_x = evaluateTrack(set.motion.tracks[x], phase) + authored_offset.x;
+        const toe_y = evaluateTrack(set.motion.tracks[y], phase) + authored_offset.y;
+        controls[x] = std.math.lerp(set.rig.neutral[x] + neutral_offset.x, toe_x * state.stride_scale, state.run_weight) - offset.x;
+        controls[y] = std.math.lerp(set.rig.neutral[y] + neutral_offset.y, toe_y, strength) - offset.y;
+    }
+    return controls;
+}
+
+fn flatGroundAt(x: f32, floor_y: f32, profile: data.CharacterLocomotionData) ?f32 {
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = collision.CATEGORY_SENSOR;
+    filter.maskBits = collision.MASK_SENSOR_FOOT;
+    const tolerance = profile.flat_height_tolerance_m;
+    const result = box2d.castRayClosest(.{ .x = x, .y = floor_y - tolerance * 2 }, .{ .x = 0, .y = tolerance * 4 }, filter);
+    if (!result.hit or result.normal.y > -0.999 or @abs(result.point.y - floor_y) > tolerance) return null;
+    if (box2d.c.b2Body_GetType(box2d.c.b2Shape_GetBody(result.shapeId)) != box2d.c.b2_staticBody) return null;
+    return result.point.y;
+}
+
+fn turnedFootOffsets(rig: Rig, controls: [controlCount]f32, heading: f32, facing_right: bool) [4]vec.Vec2 {
+    const sign: f32 = if (facing_right) 1 else -1;
+    var offsets: [4]vec.Vec2 = undefined;
+    for (foot_joints, &offsets, 0..) |joint, *offset, index| {
+        const rest = rig.joints[@intFromEnum(joint)].rest_offset;
+        var start = std.math.atan2(-rest.y, rest.x);
+        if (start < 0) start += std.math.tau;
+        var end = std.math.pi - start;
+        if (end < start) end += std.math.tau;
+        // Foot links turn continuously in world space. The heel takes the upper
+        // arc around the toe; fixed lengths are retained throughout the turn.
+        const angle = std.math.lerp(start, end, heading) - controls[@intFromEnum(foot_angles[index / 2])] * sign;
+        const length = rig.lengths[@intFromEnum(joint)];
+        offset.* = .{ .x = @cos(angle) * length * sign, .y = -@sin(angle) * length };
+    }
+    return offsets;
+}
+
+fn clearSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, floors: [4]?f32, body: vec.Vec2, facing_right: bool) void {
+    for (0..2) |index| {
+        const x = @intFromEnum(target_x[index]);
+        const y = @intFromEnum(target_y[index]);
+        const toe_offset = offsets[index * 2];
+        const heel_offset = vec.add(toe_offset, offsets[index * 2 + 1]);
+        for ([_]vec.Vec2{ toe_offset, heel_offset }, floors[index * 2 ..][0..2]) |offset, floor| {
+            if (floor == null) continue;
+            const point = toWorld(rig, .{ .x = controls[x] + offset.x, .y = controls[y] + offset.y }, body, facing_right);
+            controls[y] += @max(0, point.y - floor.?);
+        }
+    }
+}
+
+fn reachableFoot(rig: Rig, controls: [controlCount]f32, index: usize, ankle: vec.Vec2) bool {
+    const limb = rig.limbs[index];
+    const limits = reachLimits(rig.lengths[@intFromEnum(limb.middle)], rig.lengths[@intFromEnum(limb.end)], limb.min_bend_radians, limb.max_bend_radians);
+    const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
+    const distance = vec.magnitude(vec.subtract(ankle, pelvis));
+    return distance >= limits[0] and distance <= limits[1] - 0.002;
+}
+
+fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) void {
+    const profile = set.locomotion;
+    const sign: f32 = if (state.facing_right) 1 else -1;
+    const phase = clipPhase(set.motion, state.phase);
+    const moving = @abs(state.speed_mps) > profile.stop_speed_mps;
+    const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
+    state.sole_floors = @splat(null);
+    for (&state.feet, 0..) |*foot, index| {
+        const x = @intFromEnum(target_x[index]);
+        const y = @intFromEnum(target_y[index]);
+        const toe_offset = offsets[index * 2];
+        const toe_can_support = offsets[index * 2 + 1].y >= -0.000001;
+        const desired = vec.Vec2{ .x = state.controls[x], .y = state.controls[y] };
+        const desired_toe = toWorld(set.rig, vec.add(desired, toe_offset), input.body, state.facing_right);
+        const intent = if (moving) contactIntent(set.motion, @enumFromInt(index), phase) else state.run_weight < 0.02;
+        if (!intent or !moving) foot.blocked = false;
+        const supported = input.ground_y != null and input.supported;
+        if (foot.locked) {
+            const correction = vec.subtract(foot.anchor, desired_toe);
+            const ankle = vec.add(desired, .{ .x = correction.x * sign, .y = -correction.y });
+            const anchor_floor = if (supported) flatGroundAt(foot.anchor.x, foot.anchor.y, profile) else null;
+            const valid = supported and intent and toe_can_support and anchor_floor != null and
+                @abs(anchor_floor.? - foot.anchor.y) <= 0.00001 and
+                @abs(foot.anchor.y - input.ground_y.?) <= profile.flat_height_tolerance_m and
+                vec.magnitude(correction) <= profile.max_anchor_error_m and
+                reachableFoot(set.rig, state.controls, index, ankle);
+            if (!valid) {
+                foot.locked = false;
+                foot.blocked = intent;
+            } else {
+                foot.correction = correction;
+            }
+        }
+        const candidate_floor = if (!foot.locked and !foot.blocked and supported and intent and toe_can_support) flatGroundAt(desired_toe.x, input.ground_y.?, profile) else null;
+        acquire: {
+            if (candidate_floor == null) break :acquire;
+            const anchor = vec.Vec2{ .x = desired_toe.x, .y = candidate_floor.? };
+            const correction = vec.subtract(anchor, desired_toe);
+            const ankle = vec.add(desired, .{ .x = correction.x * sign, .y = -correction.y });
+            foot.locked = @abs(correction.y) <= profile.plant_distance_m and reachableFoot(set.rig, state.controls, index, ankle);
+            if (!foot.locked) break :acquire;
+            foot.anchor = anchor;
+            foot.correction = correction;
+        }
+        if (!foot.locked) foot.correction = vec.mul(foot.correction, @exp(-dt / profile.release_seconds));
+        state.controls[x] += foot.correction.x * sign;
+        state.controls[y] -= foot.correction.y;
+        // Blending an airborne foot toward rest must not drag its sole below a
+        // real flat surface. Both ends are queried; ledges are not infinite planes.
+        if (!supported) continue;
+        const heel_offset = vec.add(toe_offset, offsets[index * 2 + 1]);
+        for ([_]vec.Vec2{ toe_offset, heel_offset }, 0..) |offset, end| {
+            const point = toWorld(set.rig, .{ .x = state.controls[x] + offset.x, .y = state.controls[y] + offset.y }, input.body, state.facing_right);
+            state.sole_floors[index * 2 + end] = flatGroundAt(point.x, input.ground_y.?, profile);
+        }
+    }
+    const before_clearance = state.controls;
+    clearSoles(set.rig, &state.controls, offsets, state.sole_floors, input.body, state.facing_right);
+    for (&state.feet, 0..) |*foot, index| {
+        if (!foot.locked) continue;
+        const y = @intFromEnum(target_y[index]);
+        if (state.controls[y] - before_clearance[y] <= 0.00001) continue;
+        foot.locked = false;
+        foot.blocked = moving;
+    }
+}
+
+// The fixed-step caller provides physical position and fresh grounding. Tests
+// use this same entry point with a Box2D floor and repeatable movement samples.
+pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
+    if (assets == null) return; // Sprite fallback after an initial loading failure.
+    const state = states.getPtr(player_id) orelse {
+        std.log.warn("character_animation.updatePlayer: state missing for player {d}", .{player_id});
+        return;
+    };
+    const set = &assets.?;
+    const profile = set.locomotion;
+    const step: f32 = @floatCast(dt);
+    // Respawn/reload initializes from the current position. A discontinuous
+    // relocation cannot carry a planted foot or count as a running stride.
+    const initialize = !state.initialized or vec.magnitude(vec.subtract(input.body, state.body)) > 2;
+    if (initialize) {
+        state.* = .{ .facing_right = input.facing_right, .previous_facing_right = input.facing_right, .body = input.body, .initialized = true, .controls = set.rig.neutral, .previous_controls = set.rig.neutral };
+        state.foot_heading = if (input.facing_right) 0 else 1;
+    }
+    state.previous_phase = state.phase;
+    state.previous_controls = state.controls;
+    state.previous_facing_right = state.facing_right;
+    state.previous_feet = state.feet;
+    state.previous_body = state.body;
+    state.previous_foot_heading = state.foot_heading;
+    state.previous_sole_floors = state.sole_floors;
+    state.speed_mps = (input.body.x - state.body.x) / step;
+    state.body = input.body;
+    if (playback != .locomotion) {
+        state.facing_right = input.facing_right;
+        if (playback == .run) state.phase += dt / set.motion.cycle_seconds;
+        return;
+    }
+    const speed = @abs(state.speed_mps);
+    if (speed > profile.stop_speed_mps) state.facing_right = state.speed_mps > 0;
+    const turning = state.facing_right != state.previous_facing_right;
+    state.foot_heading = std.math.lerp(state.foot_heading, if (state.facing_right) @as(f32, 0) else 1, 1 - @exp(-step / profile.turn_seconds));
+    const target_weight: f32 = if (input.supported and speed > profile.stop_speed_mps) 1 else 0;
+    const response = if (target_weight > state.run_weight) profile.start_seconds else profile.stop_seconds;
+    state.run_weight = std.math.lerp(state.run_weight, target_weight, 1 - @exp(-step / response));
+    const target_intensity = std.math.clamp(speed / profile.full_run_speed_mps, 0, 1);
+    state.intensity = std.math.lerp(state.intensity, target_intensity, 1 - @exp(-step / response));
+    const stride = if (target_weight == 0) 1 else std.math.clamp(@sqrt(speed / set.motion.reference_speed_mps), profile.stride_min, profile.stride_max);
+    state.stride_scale = std.math.lerp(state.stride_scale, stride, 1 - @exp(-step / response));
+    if (input.supported and speed > profile.stop_speed_mps) {
+        state.phase += speed * dt / (set.motion.reference_speed_mps * set.motion.cycle_seconds * state.stride_scale);
+    }
+    state.controls = locomotionControls(set, state);
+    if (turning) {
+        const previous = mirrorControls(set.rig, state.previous_controls);
+        for (&state.turn_offsets, previous, state.controls) |*offset, before, after| offset.* = before - after;
+        // Existing valid contacts survive a turn. Their corrections are already
+        // included in the mirrored controls; plantFeet recomputes them once.
+        for (&state.feet) |*foot| foot.correction = vec.zero;
+    }
+    for (&state.controls, &state.turn_offsets) |*control, *offset| {
+        control.* += offset.*;
+        offset.* *= @exp(-step / profile.turn_seconds);
+    }
+    plantFeet(set, state, input, step);
+    if (initialize) {
+        state.previous_controls = state.controls;
+        state.previous_feet = state.feet;
+        state.previous_sole_floors = state.sole_floors;
+    }
+}
+
+pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
+    if (!state.initialized) return solvePose(set.rig, set.rig.neutral);
+    const previous = if (state.previous_facing_right == state.facing_right) state.previous_controls else mirrorControls(set.rig, state.previous_controls);
+    var controls: [controlCount]f32 = undefined;
+    for (&controls, previous, state.controls) |*control, a, b| control.* = std.math.lerp(a, b, @as(f32, @floatCast(alpha)));
+    const fraction: f32 = @floatCast(alpha);
+    const body = vec.add(state.previous_body, vec.mul(vec.subtract(state.body, state.previous_body), fraction));
+    const sign: f32 = if (state.facing_right) 1 else -1;
+    const offsets = turnedFootOffsets(set.rig, controls, std.math.lerp(state.previous_foot_heading, state.foot_heading, fraction), state.facing_right);
+    for (state.previous_feet, state.feet, 0..) |before, foot, index| {
+        if (!before.locked or !foot.locked or !std.meta.eql(before.anchor, foot.anchor)) continue;
+        const offset = offsets[index * 2];
+        controls[@intFromEnum(target_x[index])] = (foot.anchor.x - body.x) * sign - set.rig.root_from_body.x - offset.x;
+        controls[@intFromEnum(target_y[index])] = body.y - set.rig.root_from_body.y - foot.anchor.y - offset.y;
+    }
+    var floors: [4]?f32 = @splat(null);
+    for (&floors, state.previous_sole_floors, state.sole_floors) |*floor, before, after| {
+        if (before == null or after == null) continue;
+        if (@abs(before.? - after.?) > set.locomotion.flat_height_tolerance_m) continue;
+        floor.* = std.math.lerp(before.?, after.?, fraction);
+    }
+    clearSoles(set.rig, &controls, offsets, floors, body, state.facing_right);
+    var pose = solvePoseWithFeet(set.rig, controls, offsets);
+    const phase = clipPhase(set.motion, state.previous_phase + (state.phase - state.previous_phase) * alpha);
+    pose.contact_intent = .{ contactIntent(set.motion, .left_leg, phase), contactIntent(set.motion, .right_leg, phase) };
+    return pose;
+}
+
 pub fn fixedUpdate(dt: f64) void {
     if (assets == null) return; // Initial asset failure leaves sprite gameplay available.
-    for (states.keys(), states.values()) |player_id, *state| {
+    for (states.keys()) |player_id| {
         const p = player.players.get(player_id) orelse {
             std.log.warn("character_animation.fixedUpdate: player {d} is missing", .{player_id});
             continue;
@@ -516,9 +818,15 @@ pub fn fixedUpdate(dt: f64) void {
             std.log.warn("character_animation.fixedUpdate: movement state missing for player {d}", .{player_id});
             continue;
         };
-        state.facing_right = movement_state.facingRight;
-        state.previous_phase = state.phase;
-        if (playback == .run) state.phase += dt / assets.?.motion.cycle_seconds;
+        var ground_y: ?f32 = null;
+        const contact = movement_state.groundState.groundContact;
+        if (contact != null and contact.?.normal.y < -0.999 and box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody) ground_y = contact.?.worldPoint.y;
+        updatePlayer(player_id, .{
+            .body = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId)),
+            .supported = movement_state.groundState.supported,
+            .ground_y = ground_y,
+            .facing_right = movement_state.facingRight,
+        }, dt);
     }
 }
 
@@ -533,10 +841,13 @@ pub fn reviewAction(action: ReviewAction) void {
             };
         },
         .pose => {
-            playback = if (playback == .neutral) .run else .neutral;
+            playback = switch (playback) {
+                .locomotion => .neutral,
+                .neutral => .run,
+                .run => .locomotion,
+            };
             for (states.values()) |*state| {
-                state.phase = 0;
-                state.previous_phase = 0;
+                state.* = .{ .facing_right = state.facing_right };
             }
         },
         .diagnostics => show_diagnostics = !show_diagnostics,
@@ -626,7 +937,7 @@ pub fn drawAll() !void {
         };
         const body = box2d.getInterpolatedState(ent.state, box2d.getState(p.bodyId));
         const phase = state.previous_phase + (state.phase - state.previous_phase) * time.alpha;
-        const pose = evaluatePose(set, phase, playback);
+        const pose = if (playback == .locomotion) interpolatedPose(set, state, time.alpha) else evaluatePose(set, phase, playback);
         var points: [jointCount][2]f32 = undefined;
         for (pose.joints, 0..) |point, index| points[index] = toScreen(toWorld(set.rig, point, vec.fromBox2d(body.pos), state.facing_right));
         const width = @max(1.25 / renderer.zoom, set.rig.line_width * conv.met2pix);
@@ -650,6 +961,12 @@ pub fn drawAll() !void {
         try drawSegment(.{ eye[0] - width * 0.2, eye[1] }, .{ eye[0] + width * 0.2, eye[1] }, width * 0.6);
         if (!show_diagnostics) continue;
         try drawDiagnostics(set.rig, pose, points, vec.fromBox2d(body.pos), state.facing_right, width);
+        if (playback != .locomotion) continue;
+        try gpu.setRenderDrawColor(.{ .r = 70, .g = 255, .b = 120, .a = 255 });
+        for (state.feet) |foot| {
+            if (!foot.locked) continue;
+            try drawRing(toScreen(foot.anchor), width * 3, width * 0.6);
+        }
     }
 }
 
@@ -684,6 +1001,15 @@ pub fn drawStatus() !void {
     const height = viewport.activeViewport.height;
     try text.write(.small, status, .{ .x = 12, .y = height - 62 });
     try text.write(.small, "§ Debug options", .{ .x = 12, .y = height - 32 });
+    if (show_diagnostics and playback == .locomotion) {
+        const cam = camera.cameras.get(camera.activeCameraId) orelse {
+            std.log.warn("character_animation.drawStatus: active camera {d} is missing", .{camera.activeCameraId});
+            return;
+        };
+        const state = states.get(cam.playerId) orelse return; // The startup camera can precede player creation.
+        const motion_status = try std.fmt.bufPrintZ(&buffer, "{d:.1} m/s  run {d:.2}  stride {d:.2}  feet {s}/{s}", .{ state.speed_mps, state.run_weight, state.stride_scale, if (state.feet[0].locked) "planted" else "free", if (state.feet[1].locked) "planted" else "free" });
+        try text.write(.small, motion_status, .{ .x = 12, .y = height - 122 });
+    }
     if (!reload_failed) return;
     try text.write(.small, "RIG RELOAD FAILED - see log", .{ .x = 12, .y = height - 92 });
 }

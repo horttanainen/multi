@@ -8,7 +8,7 @@ const character_animation = @import("character_animation.zig");
 var items = [_]menu.Item{
     .{ .label = "Close-up zoom", .shortcut = sdl.c.SDL_SCANCODE_Z, .font = .small, .kind = .{ .button = actionZoom } },
     .{ .label = "Sprites / stick / overlay", .shortcut = sdl.c.SDL_SCANCODE_V, .font = .small, .kind = .{ .button = actionView } },
-    .{ .label = "Standing / running pose", .shortcut = sdl.c.SDL_SCANCODE_P, .font = .small, .kind = .{ .button = actionPose } },
+    .{ .label = "Movement / standing / reference run", .shortcut = sdl.c.SDL_SCANCODE_P, .font = .small, .kind = .{ .button = actionPose } },
     .{ .label = "Joints and targets", .shortcut = sdl.c.SDL_SCANCODE_D, .font = .small, .kind = .{ .button = actionDiagnostics } },
     .{ .label = "Reload animation JSON", .shortcut = sdl.c.SDL_SCANCODE_R, .font = .small, .kind = .{ .button = actionReload } },
     .{ .label = "Slow motion", .shortcut = sdl.c.SDL_SCANCODE_S, .font = .small, .kind = .{ .button = actionSlowMotion } },

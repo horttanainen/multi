@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "run_v1",
+  "rig_id": "humanoid_v1",
+  "motion_id": "run_reference_v1",
+  "distance_unit": "meters",
+  "time_unit": "seconds",
+  "stop_speed_mps": 0.08,
+  "full_run_speed_mps": 1.8,
+  "start_seconds": 0.08,
+  "stop_seconds": 0.10,
+  "turn_seconds": 0.14,
+  "stride_min": 0.3,
+  "stride_max": 1.15,
+  "release_seconds": 0.055,
+  "plant_distance_m": 0.035,
+  "max_anchor_error_m": 0.3,
+  "flat_height_tolerance_m": 0.025
+}
