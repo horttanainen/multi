@@ -123,35 +123,92 @@ fn calcPlayerSpritePosition(p: Player) vec.IVec2 {
     return vec.izero;
 }
 
-fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite) ?sprite.AnchoredPlacement {
-    const maybeEntity = entity.getEntity(p.bodyId);
-    if (maybeEntity == null) return null;
-    const ent = maybeEntity.?;
-    if (ent.spriteUuids.len == 0) return null;
-
-    const playerSprite = sprite.getSprite(ent.spriteUuids[0]) orelse return null;
-    const weaponAnchor = weaponSprite.anchorPointLeft orelse return null;
+fn calcWeaponPlacement(p: Player, weaponSprite: sprite.Sprite, sampling: character_animation.Sampling, forcedAim: ?vec.Vec2) ?sprite.AnchoredPlacement {
+    const ent = entity.getEntity(p.bodyId) orelse {
+        std.log.warn("calcWeaponPlacement: entity missing for player {d}", .{p.id});
+        return null;
+    };
+    if (ent.spriteUuids.len == 0) {
+        std.log.warn("calcWeaponPlacement: body sprite missing for player {d}", .{p.id});
+        return null;
+    }
+    const playerSprite = sprite.getSprite(ent.spriteUuids[0]) orelse {
+        std.log.warn("calcWeaponPlacement: body sprite {d} is missing", .{ent.spriteUuids[0]});
+        return null;
+    };
+    const weaponAnchor = weaponSprite.anchorPointLeft orelse {
+        std.log.warn("calcWeaponPlacement: weapon '{s}' has no anchor", .{weaponSprite.imgPath});
+        return null;
+    };
+    const aimDirection = forcedAim orelse p.aimDirection;
     const playerFlip = ent.flipEntityHorizontally;
-    const weaponFlip = !playerFlip;
+    const weaponFlip = if (forcedAim != null and aimDirection.x != 0) aimDirection.x < 0 else !playerFlip;
     const playerAnchor = if (playerFlip)
         playerSprite.anchorPointLeft
     else
         playerSprite.anchorPointRight orelse playerSprite.anchorPointLeft;
-    if (playerAnchor == null) return null;
+    if (playerAnchor == null) {
+        std.log.warn("calcWeaponPlacement: shoulder anchor missing for player {d}", .{p.id});
+        return null;
+    }
 
     const currentState = box2d.getState(p.bodyId);
-    const state = box2d.getInterpolatedState(ent.state, currentState);
-    const playerPos = camera.relativePosition(conv.m2Pixel(state.pos));
+    const bodyState = if (sampling == .render) box2d.getInterpolatedState(ent.state, currentState) else currentState;
+    const playerPos = conv.m2Pixel(bodyState.pos);
     const shoulderPos = calcShoulderPos(playerSprite, playerPos, playerAnchor.?, playerFlip);
-    const aimAngle = std.math.atan2(-p.aimDirection.y, p.aimDirection.x);
+    const aimAngle = std.math.atan2(-aimDirection.y, aimDirection.x);
     const angle = if (weaponFlip) std.math.pi + aimAngle else aimAngle;
     return sprite.placeAtAnchor(weaponSprite, weaponAnchor, shoulderPos, angle, weaponFlip);
 }
 
-fn calcWeaponMuzzlePosition(p: Player, weaponSprite: sprite.Sprite) ?vec.IVec2 {
-    const muzzlePoint = weaponSprite.muzzlePoint orelse return null;
-    const placement = calcWeaponPlacement(p, weaponSprite) orelse return null;
-    return sprite.placedPoint(weaponSprite, placement, muzzlePoint);
+pub const WeaponFrame = struct { visual: sprite.Sprite, placement: sprite.AnchoredPlacement };
+
+fn placeWeaponAtAttachment(visual: sprite.Sprite, attachment: character_animation.AttachmentTransform, facingRight: bool) WeaponFrame {
+    const position = conv.m2Pixel(vec.toBox2d(attachment.position));
+    return .{ .visual = visual, .placement = sprite.placeAtAnchor(visual, visual.anchorPointLeft.?, position, attachment.angle, !facingRight) };
+}
+
+// World-pixel geometry is shared by rendering, the guide and shot creation.
+// Physics sampling never depends on the camera or render interpolation alpha.
+pub fn weaponFrame(playerId: usize, sampling: character_animation.Sampling, forcedAim: ?vec.Vec2) ?WeaponFrame {
+    const p = players.get(playerId) orelse {
+        std.log.warn("weaponFrame: player {d} is missing", .{playerId});
+        return null;
+    };
+    if (p.weapons.len == 0) return null;
+    const procedural = usesProceduralWeapon(p);
+    const selected = p.weapons[p.selectedWeaponIndex];
+    const id = if (procedural) selected.standaloneSpriteUuid else selected.spriteUuid;
+    const visual = sprite.getSprite(id) orelse {
+        std.log.warn("weaponFrame: weapon sprite {d} is missing for player {d}", .{ id, playerId });
+        return null;
+    };
+    if (!procedural) {
+        const placement = calcWeaponPlacement(p, visual, sampling, forcedAim) orelse return null;
+        return .{ .visual = visual, .placement = placement };
+    }
+    const frame = character_animation.playerFrame(playerId, sampling, forcedAim) orelse return null;
+    return placeWeaponAtAttachment(visual, frame.weapon, frame.weapon_facing_right);
+}
+
+pub fn weaponMuzzle(frame: WeaponFrame) ?vec.IVec2 {
+    const marker = frame.visual.muzzlePoint orelse {
+        std.log.warn("weaponMuzzle: sprite '{s}' has no muzzle marker", .{frame.visual.imgPath});
+        return null;
+    };
+    return sprite.placedPoint(frame.visual, frame.placement, marker);
+}
+
+pub fn weaponDirection(frame: WeaponFrame) vec.Vec2 {
+    const sign: f32 = if (frame.placement.flip) -1 else 1;
+    return .{ .x = @cos(frame.placement.angle) * sign, .y = -@sin(frame.placement.angle) * sign };
+}
+
+fn drawWeaponFrame(frame: WeaponFrame) !void {
+    var placement = frame.placement;
+    placement.anchorPosition = camera.relativePosition(placement.anchorPosition);
+    placement.centerPosition = camera.relativePosition(placement.centerPosition);
+    try sprite.drawPlaced(frame.visual, placement);
 }
 
 pub fn spawnWithSharedCamera(cameraId: usize) !usize {
@@ -381,7 +438,10 @@ pub fn aim(p: *Player, direction: vec.Vec2) void {
     };
     var dir = direction;
     if (vec.equals(dir, vec.zero)) {
-        dir = vec.add(dir, if (movementState.facingRight) vec.east else vec.west);
+        // A new aim press without direction uses the visible character facing,
+        // including a previous aim turn. Spawn registers animation before input.
+        const facingRight = if (usesProceduralWeapon(p.*)) character_animation.states.get(p.id).?.facing_right else movementState.facingRight;
+        dir = if (facingRight) vec.east else vec.west;
     }
     p.isAiming = true;
     p.aimMagnitude = std.math.clamp(vec.magnitude(dir), 0, 1);
@@ -417,8 +477,12 @@ pub fn cycleWeapon(p: *Player, direction: i32) void {
     delay.action(delayKey, 300);
 }
 
-pub fn shoot(player: *Player) !void {
-    if (player.weapons.len == 0) return;
+pub fn shoot(playerId: usize, requestedDirection: vec.Vec2) !void {
+    const player = players.getPtr(playerId) orelse {
+        std.log.err("shoot: player {d} is missing", .{playerId});
+        return PlayerError.PlayerUnspawned;
+    };
+    if (player.isDead or player.weapons.len == 0) return;
 
     var buf: [64:0]u8 = undefined;
     const delayKey = std.fmt.bufPrintZ(&buf, "p{d}_{s}", .{ player.id, "shoot" }) catch unreachable;
@@ -428,26 +492,20 @@ pub fn shoot(player: *Player) !void {
     }
 
     const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-    if (selectedWeapon.spriteUuid == 0) {
-        std.log.err("shoot: weapon '{s}' has no sprite", .{selectedWeapon.name});
-        return error.WeaponSpriteNotFound;
-    }
-    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse {
-        std.log.err("shoot: sprite for weapon '{s}' is missing", .{selectedWeapon.name});
-        return error.WeaponSpriteNotFound;
-    };
-    const spawnPos = calcWeaponMuzzlePosition(player.*, weaponSprite) orelse {
+    const direction = if (vec.equals(requestedDirection, vec.zero)) player.aimDirection else vec.normalize(requestedDirection);
+    const frame = weaponFrame(playerId, .physics, direction) orelse return error.WeaponSpriteNotFound;
+    const position = weaponMuzzle(frame) orelse {
         std.log.err("shoot: weapon '{s}' has no usable muzzle point", .{selectedWeapon.name});
         return error.WeaponMuzzleNotFound;
     };
-    const position = camera.relativePositionForCreating(spawnPos);
-
     const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(player.bodyId));
-    try weapon.shoot(selectedWeapon, position, player.aimDirection, playerVelocity, player.id);
+    const shotDirection = weaponDirection(frame);
+    try weapon.shoot(selectedWeapon, position, shotDirection, playerVelocity, player.id);
+    if (usesProceduralWeapon(player.*)) character_animation.holdShotPose(playerId, direction);
 
     const recoilImpulse = vec.mul(vec.normalize(.{
-        .x = player.aimDirection.x,
-        .y = -player.aimDirection.y,
+        .x = shotDirection.x,
+        .y = -shotDirection.y,
     }), selectedWeapon.impulse * -0.1);
 
     box2d.c.b2Body_ApplyLinearImpulseToCenter(player.bodyId, vec.toBox2d(recoilImpulse), true);
@@ -634,13 +692,10 @@ pub fn updateAllAnimationStates() void {
 }
 
 fn drawAimGuide(p: Player) !void {
-    if (p.weapons.len == 0) return;
-    const selectedWeapon = p.weapons[p.selectedWeaponIndex];
-    if (selectedWeapon.spriteUuid == 0) return;
-
-    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
-    const muzzle = calcWeaponMuzzlePosition(p, weaponSprite) orelse return;
-    const direction = vec.normalize(.{ .x = p.aimDirection.x, .y = -p.aimDirection.y });
+    const frame = weaponFrame(p.id, .render, null) orelse return;
+    const muzzle = camera.relativePosition(weaponMuzzle(frame) orelse return);
+    const aimDirection = weaponDirection(frame);
+    const direction: vec.Vec2 = .{ .x = aimDirection.x, .y = -aimDirection.y };
     const lengthPixels = movement.aimGuideLengthMeters * conv.met2pix;
     const start = [2]f32{ @floatFromInt(muzzle.x), @floatFromInt(muzzle.y) };
     const end = [2]f32{
@@ -680,60 +735,47 @@ pub fn drawAllAimGuides() !void {
     }
 }
 
-pub fn usesCarriedWeapon(p: Player) bool {
-    if (character_animation.assets == null or character_animation.view == .sprites or p.isAiming or p.weapons.len == 0) return false;
-    return p.weapons[p.selectedWeaponIndex].carriedSpriteUuid != 0;
+pub fn usesProceduralWeapon(p: Player) bool {
+    if (character_animation.assets == null or character_animation.view == .sprites or p.weapons.len == 0) return false;
+    return p.weapons[p.selectedWeaponIndex].standaloneSpriteUuid != 0;
 }
 
-pub fn drawCarriedWeapon(playerId: usize, attachment: character_animation.AttachmentTransform, facingRight: bool) !void {
+pub fn drawProceduralWeapon(playerId: usize, attachment: character_animation.AttachmentTransform, facingRight: bool) !void {
     const p = players.get(playerId) orelse {
-        std.log.warn("drawCarriedWeapon: player {d} is missing", .{playerId});
+        std.log.warn("drawProceduralWeapon: player {d} is missing", .{playerId});
         return;
     };
-    const id = p.weapons[p.selectedWeaponIndex].carriedSpriteUuid;
+    const id = p.weapons[p.selectedWeaponIndex].standaloneSpriteUuid;
     const carried = sprite.getSprite(id) orelse {
-        std.log.warn("drawCarriedWeapon: sprite {d} is missing for player {d}", .{ id, playerId });
+        std.log.warn("drawProceduralWeapon: sprite {d} is missing for player {d}", .{ id, playerId });
         return;
     };
-    // Creation validates the grip and muzzle markers. The animated hand drives
-    // this transform; aiming continues to use the legacy placement in this phase.
-    const position = camera.relativePosition(conv.m2Pixel(vec.toBox2d(attachment.position)));
-    const placement = sprite.placeAtAnchor(carried, carried.anchorPointLeft.?, position, attachment.angle, !facingRight);
-    try sprite.drawPlaced(carried, placement);
+    try drawWeaponFrame(placeWeaponAtAttachment(carried, attachment, facingRight));
 }
 
-pub fn drawWeapon(player: *Player) !void {
-    if (player.weapons.len == 0) return;
-    const selectedWeapon = player.weapons[player.selectedWeaponIndex];
-    if (selectedWeapon.spriteUuid == 0) return;
-    const weaponSprite = sprite.getSprite(selectedWeapon.spriteUuid) orelse return;
-    const placement = calcWeaponPlacement(player.*, weaponSprite) orelse {
-        const weaponPos = vec.iadd(calcPlayerSpritePosition(player.*), weaponSprite.offset);
-        const weaponFlip = !(entity.getEntity(player.bodyId) orelse return).flipEntityHorizontally;
-        try sprite.drawWithOptions(weaponSprite, weaponPos, 0, false, weaponFlip, 0, null, null);
-        return;
-    };
-    try sprite.drawPlaced(weaponSprite, placement);
+pub fn drawWeapon(playerId: usize) !void {
+    const frame = weaponFrame(playerId, .render, null) orelse return;
+    try drawWeaponFrame(frame);
 }
 
 pub fn drawAllWeaponsBehind() !void {
     for (players.values()) |*p| {
-        if (p.isDead or usesCarriedWeapon(p.*)) continue;
+        if (p.isDead or usesProceduralWeapon(p.*)) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             // Draw behind when facing left (flipEntityHorizontally == false)
-            if (!ent.flipEntityHorizontally) try drawWeapon(p);
+            if (!ent.flipEntityHorizontally) try drawWeapon(p.id);
         }
     }
 }
 
 pub fn drawAllWeaponsFront() !void {
     for (players.values()) |*p| {
-        if (p.isDead or usesCarriedWeapon(p.*)) continue;
+        if (p.isDead or usesProceduralWeapon(p.*)) continue;
         const maybeEntity = entity.getEntity(p.bodyId);
         if (maybeEntity) |ent| {
             // Draw in front when facing right (flipEntityHorizontally == true)
-            if (ent.flipEntityHorizontally) try drawWeapon(p);
+            if (ent.flipEntityHorizontally) try drawWeapon(p.id);
         }
     }
 }
@@ -1030,7 +1072,7 @@ pub fn cleanup() void {
             if (w.spriteUuid != 0) {
                 sprite.cleanupLater(w.spriteUuid);
             }
-            if (w.carriedSpriteUuid != 0) sprite.cleanupLater(w.carriedSpriteUuid);
+            if (w.standaloneSpriteUuid != 0) sprite.cleanupLater(w.standaloneSpriteUuid);
         }
 
         // Cleanup player resources

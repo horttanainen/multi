@@ -2,6 +2,11 @@
 
 Accepted by the user after implementation, independent review and validation.
 
+This is the accepted carried-weapon phase record. The following
+[aiming phase](character_animation_aiming.md) supersedes its aiming fallback and
+renames the optional weapon field from `carriedSprite` to `standaloneSprite`,
+because the same arm-free sprite is now used while carrying and aiming.
+
 ## Result and scope
 
 The procedural stick/overlay character carries a standalone alien blaster with a

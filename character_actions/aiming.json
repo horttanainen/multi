@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "aiming_v1",
+  "rig_id": "humanoid_v1",
+  "distance_unit": "meters",
+  "time_unit": "seconds",
+  "hand_distance_m": 0.545,
+  "raise_seconds": 0.09,
+  "lower_seconds": 0.14,
+  "shot_hold_seconds": 0.06
+}

@@ -34,6 +34,11 @@ pub const Sample = struct {
 pub const PlayerInput = struct {
     movementDirection: vec.Vec2 = vec.zero,
     aimDirection: vec.Vec2 = vec.zero,
+    heldAimDirection: vec.Vec2 = vec.zero,
+    releasedAimDirection: vec.Vec2 = vec.zero,
+    // Horizontal input immediately before this aim hold. Movement cancels it
+    // when grounded; release and input neutralization also clear it.
+    aimMovementDirection: f32 = 0,
     buttons: ButtonStates = ButtonStates.initFill(.{}),
 };
 
@@ -89,6 +94,17 @@ pub fn cleanup() void {
 }
 
 fn applySample(inputState: *PlayerInput, sample: Sample) void {
+    const wasAiming = inputState.buttons.get(.shoot).held;
+    const aiming = sample.buttons.get(.shoot);
+    const hasDirection = !vec.equals(sample.aimDirection, vec.zero);
+    if (!aiming) inputState.aimMovementDirection = 0;
+    if (aiming and !wasAiming) inputState.aimMovementDirection = inputState.movementDirection.x;
+    if (aiming and (!wasAiming or hasDirection)) inputState.heldAimDirection = sample.aimDirection;
+    if (wasAiming and !aiming) {
+        // Keep the release direction until the fixed step consumes the edge.
+        // Subsequent movement or a new aim press must not redirect this shot.
+        inputState.releasedAimDirection = if (hasDirection) sample.aimDirection else inputState.heldAimDirection;
+    }
     inputState.movementDirection = sample.movementDirection;
     inputState.aimDirection = sample.aimDirection;
 

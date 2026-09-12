@@ -94,7 +94,7 @@ pub const PelletData = struct {
 
 pub const WeaponData = struct {
     sprite: []const u8,
-    carriedSprite: ?[]const u8 = null,
+    standaloneSprite: ?[]const u8 = null,
     delay: u32,
     sound: []const u8,
     impulse: f32,
@@ -246,6 +246,7 @@ pub const characterRigPath = "character_rigs/humanoid.json";
 pub const characterMotionPath = "character_motions/run_reference.json";
 pub const characterLocomotionPath = "character_locomotion/run.json";
 pub const characterActionsPath = "character_actions/airborne.json";
+pub const characterAimingPath = "character_actions/aiming.json";
 const maximumCharacterAssetBytes = 1024 * 1024;
 const CharacterControlValue = struct { binding: character_animation.Control, value: f32 };
 
@@ -283,6 +284,18 @@ pub const CharacterAnimationData = struct {
     motion: CharacterMotionData,
     locomotion: CharacterLocomotionData,
     actions: CharacterActionsData,
+    aiming: CharacterAimingData,
+};
+pub const CharacterAimingData = struct {
+    schema_version: u32,
+    id: []const u8,
+    rig_id: []const u8,
+    distance_unit: enum { meters },
+    time_unit: enum { seconds },
+    hand_distance_m: f32,
+    raise_seconds: f32,
+    lower_seconds: f32,
+    shot_hold_seconds: f32,
 };
 pub const CharacterActionsData = struct {
     schema_version: u32,
@@ -421,7 +434,7 @@ fn parseCharacterAsset(comptime T: type, memory: std.mem.Allocator, bytes: []con
 
 // Owns copies of every parsed string/slice independently of the source bytes.
 // The caller must deinit the arena or transfer ownership to character_animation.
-pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const u8, motion_bytes: []const u8, locomotion_bytes: []const u8, actions_bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
+pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const u8, motion_bytes: []const u8, locomotion_bytes: []const u8, actions_bytes: []const u8, aiming_bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
     var arena = std.heap.ArenaAllocator.init(memory);
     errdefer arena.deinit();
     detail.* = .{ .file = characterRigPath };
@@ -432,7 +445,9 @@ pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const
     const locomotion = try parseCharacterAsset(CharacterLocomotionData, arena.allocator(), locomotion_bytes, detail);
     detail.file = characterActionsPath;
     const actions = try parseCharacterAsset(CharacterActionsData, arena.allocator(), actions_bytes, detail);
-    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = locomotion, .actions = actions };
+    detail.file = characterAimingPath;
+    const aiming = try parseCharacterAsset(CharacterAimingData, arena.allocator(), aiming_bytes, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = locomotion, .actions = actions, .aiming = aiming };
 }
 
 fn readCharacterAsset(path: []const u8, memory: std.mem.Allocator, detail: *CharacterAssetDiagnostic) ![]u8 {
@@ -451,7 +466,9 @@ pub fn loadCharacterAnimationData(memory: std.mem.Allocator, detail: *CharacterA
     defer memory.free(locomotion_bytes);
     const actions_bytes = try readCharacterAsset(characterActionsPath, memory, detail);
     defer memory.free(actions_bytes);
-    return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, locomotion_bytes, actions_bytes, detail);
+    const aiming_bytes = try readCharacterAsset(characterAimingPath, memory, detail);
+    defer memory.free(aiming_bytes);
+    return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, locomotion_bytes, actions_bytes, aiming_bytes, detail);
 }
 
 pub fn loadMovementData(path: []const u8) !MovementData {
@@ -1057,7 +1074,7 @@ fn initWeapons() !void {
     const Entry = struct {
         key: []const u8,
         sprite: []const u8,
-        carriedSprite: ?[]const u8 = null,
+        standaloneSprite: ?[]const u8 = null,
         delay: u32 = 500,
         sound: []const u8,
         impulse: f32 = 10,
@@ -1139,8 +1156,8 @@ fn initWeapons() !void {
         else
             null;
 
-        const carriedSpriteKey: ?[]const u8 = if (entry.carriedSprite == null) null else allocator.dupe(u8, entry.carriedSprite.?) catch |err| {
-            std.log.err("initWeapons: cannot copy carried sprite for '{s}': {}", .{ key, err });
+        const standaloneSpriteKey: ?[]const u8 = if (entry.standaloneSprite == null) null else allocator.dupe(u8, entry.standaloneSprite.?) catch |err| {
+            std.log.err("initWeapons: cannot copy standalone sprite for '{s}': {}", .{ key, err });
             allocator.free(key);
             allocator.free(spriteKey);
             allocator.free(soundKey);
@@ -1151,7 +1168,7 @@ fn initWeapons() !void {
         };
         weaponDataMap.put(allocator, key, .{
             .sprite = spriteKey,
-            .carriedSprite = carriedSpriteKey,
+            .standaloneSprite = standaloneSpriteKey,
             .delay = entry.delay,
             .sound = soundKey,
             .impulse = entry.impulse,
@@ -1172,7 +1189,7 @@ fn initWeapons() !void {
                 if (pd.explosion) |explosion| allocator.free(explosion);
             }
             if (explosionKey) |ek| allocator.free(ek);
-            if (carriedSpriteKey != null) allocator.free(carriedSpriteKey.?);
+            if (standaloneSpriteKey != null) allocator.free(standaloneSpriteKey.?);
             continue;
         };
 
@@ -1280,8 +1297,8 @@ pub fn createWeaponFrom(key: []const u8) !weapon.Weapon {
 pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.Backing) !weapon.Weapon {
     const d = weaponDataMap.get(key) orelse return error.WeaponDataNotFound;
     const sound = createAudioFrom(d.sound) orelse return error.SoundDataNotFound;
-    const carriedSpriteUuid = try createCarriedWeaponSprite(d.carriedSprite);
-    errdefer if (carriedSpriteUuid != 0) sprite.cleanupLater(carriedSpriteUuid);
+    const standaloneSpriteUuid = try createStandaloneWeaponSprite(d.standaloneSprite);
+    errdefer if (standaloneSpriteUuid != 0) sprite.cleanupLater(standaloneSpriteUuid);
     const proj = if (d.projectile) |projKey|
         try createProjectileFrom(projKey)
     else
@@ -1317,7 +1334,7 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
         .projectile = proj,
         .pellet = pel,
         .spriteUuid = spriteUuid,
-        .carriedSpriteUuid = carriedSpriteUuid,
+        .standaloneSpriteUuid = standaloneSpriteUuid,
         .hitscanExplosion = hitscanExp,
         .range = d.range,
         .trailDurationMs = d.trailDurationMs,
@@ -1327,17 +1344,17 @@ pub fn createWeaponFromWithSpriteBacking(key: []const u8, spriteBacking: sprite.
     };
 }
 
-fn createCarriedWeaponSprite(key: ?[]const u8) !u64 {
-    if (key == null) return 0; // Weapons without a carried visual use their legacy sprite.
+fn createStandaloneWeaponSprite(key: ?[]const u8) !u64 {
+    if (key == null) return 0; // Weapons without a standalone visual use their legacy sprite.
     const id = createSpriteFrom(key.?) orelse {
-        std.log.err("createCarriedWeaponSprite: cannot load '{s}'", .{key.?});
-        return error.CarriedWeaponSpriteMissing;
+        std.log.err("createStandaloneWeaponSprite: cannot load '{s}'", .{key.?});
+        return error.StandaloneWeaponSpriteMissing;
     };
     errdefer sprite.cleanupLater(id);
     const loaded = sprite.getSprite(id).?; // The sprite owner just installed this ID.
     if (loaded.anchorPointLeft == null or loaded.muzzlePoint == null) {
-        std.log.err("createCarriedWeaponSprite: '{s}' needs grip and muzzle markers", .{key.?});
-        return error.CarriedWeaponMarkersMissing;
+        std.log.err("createStandaloneWeaponSprite: '{s}' needs grip and muzzle markers", .{key.?});
+        return error.StandaloneWeaponMarkersMissing;
     }
     return id;
 }
@@ -1424,7 +1441,7 @@ pub fn cleanup() void {
     while (weaponIter.next()) |entry| {
         allocator.free(entry.key_ptr.*);
         allocator.free(entry.value_ptr.sprite);
-        if (entry.value_ptr.carriedSprite != null) allocator.free(entry.value_ptr.carriedSprite.?);
+        if (entry.value_ptr.standaloneSprite != null) allocator.free(entry.value_ptr.standaloneSprite.?);
         allocator.free(entry.value_ptr.sound);
         if (entry.value_ptr.projectile) |p| allocator.free(p);
         if (entry.value_ptr.pellet) |pel| {

@@ -112,6 +112,11 @@ pub fn reset(playerId: usize) void {
         return;
     };
     clearRuntimeState(state);
+    const inputState = player_input.playerInputs.getPtr(playerId) orelse {
+        std.log.warn("movement.reset: input state is missing for player {d}", .{playerId});
+        return;
+    };
+    inputState.aimMovementDirection = 0;
 }
 
 fn canUseGroundJump(state: *const State, currentTimeMs: u64, coyoteTimeMs: u32) bool {
@@ -367,11 +372,30 @@ fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *State, ve
     velocity.y = @min(velocity.y + acceleration * dt, terminalSpeed);
 }
 
+// Raw direction remains available to aiming. During an airborne aim hold,
+// retain the horizontal input that shaped the jump. Cancel on ground before
+// any jump/buffer processing, including fixed steps without a new input poll.
+pub fn locomotionDirection(playerId: usize) vec.Vec2 {
+    const inputState = player_input.playerInputs.getPtr(playerId) orelse {
+        std.log.warn("movement.locomotionDirection: input state is missing for player {d}", .{playerId});
+        return vec.zero;
+    };
+    if (mechanism != .towerfall or !inputState.buttons.get(.shoot).held) return inputState.movementDirection;
+    const state = states.get(playerId) orelse {
+        std.log.warn("movement.locomotionDirection: movement state is missing for player {d}", .{playerId});
+        return vec.zero;
+    };
+    if (state.groundState.supported) inputState.aimMovementDirection = 0;
+    return .{ .x = inputState.aimMovementDirection, .y = 0 };
+}
+
 fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
-    const inputState = player_input.playerInputs.get(playerId) orelse {
+    var inputState = player_input.playerInputs.get(playerId) orelse {
         std.log.warn("movement.applyTowerfallMovement: input state is missing for player {d}", .{playerId});
         return;
     };
+    inputState.movementDirection = locomotionDirection(playerId);
+    state.lateralMovementIntent = if (inputState.movementDirection.x < 0) -1 else if (inputState.movementDirection.x > 0) @as(i8, 1) else 0;
     const controlSettings = towerfallSettings.control;
     const movementDirection = towerfallMovementDirection(inputState, state);
     const targetSpeed = movementDirection * controlSettings.maxRunSpeed;
@@ -616,6 +640,14 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
 
     state.groundState.supported = supported;
     state.groundState.groundContact = groundContact;
+    if (mechanism == .towerfall and supported) {
+        const inputState = player_input.playerInputs.getPtr(playerId) orelse {
+            std.log.warn("movement.processStateSensorEvents: input state is missing for player {d}", .{playerId});
+            return;
+        };
+        inputState.aimMovementDirection = 0;
+        if (inputState.buttons.get(.shoot).held) state.lateralMovementIntent = 0;
+    }
     if (mechanism == .liero) processLieroBufferedJump(playerId, state, currentTimeMs);
 }
 
@@ -645,6 +677,9 @@ pub fn clearAllMovementIntents() void {
 }
 
 pub fn cleanup() void {
+    // Level changes preserve controllers/input while replacing movement bodies.
+    // A continued aim hold must not carry a previous level's jump input forward.
+    for (player_input.playerInputs.values()) |*inputState| inputState.aimMovementDirection = 0;
     states.clearAndFree(allocator);
     contactDataScratch.deinit(allocator);
     contactDataScratch = .empty;

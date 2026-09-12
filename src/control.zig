@@ -107,33 +107,42 @@ pub fn applyFixedStepPlayerInputs() void {
         };
         if (!shouldShoot) continue;
 
-        executeAction(playerId, .shoot);
+        const p = player.players.get(playerId) orelse {
+            std.log.warn("control.applyFixedStepPlayerInputs: player {d} is missing", .{playerId});
+            continue;
+        };
+        const direction = if (movement.mechanism == .towerfall) inputState.releasedAimDirection else p.aimDirection;
+        player.shoot(playerId, direction) catch |err| {
+            std.log.err("control.applyFixedStepPlayerInputs: player {d} could not shoot: {}", .{ playerId, err });
+        };
     }
 }
 
 fn updateTowerfallAimState(playerId: usize, inputState: player_input.PlayerInput) void {
+    const p = player.players.getPtr(playerId) orelse {
+        std.log.warn("control.updateTowerfallAimState: player {d} is missing", .{playerId});
+        return;
+    };
+    if (p.isDead) return;
     const shootButton = inputState.buttons.get(.shoot);
     const hasDirection = !vec.equals(inputState.aimDirection, vec.zero);
-
+    // applyPlayerInput just looked up this input; no input collection changes
+    // occur here. Remember the resolved default facing along with explicit aim.
+    const liveInput = player_input.playerInputs.getPtr(playerId).?;
     if (shootButton.held) {
-        if (!hasDirection and !shootButton.pendingPressed) return;
-        executeAim(playerId, inputState.aimDirection);
+        if (hasDirection or shootButton.pendingPressed or !p.isAiming) player.aim(p, inputState.aimDirection);
+        liveInput.heldAimDirection = p.aimDirection;
         return;
     }
-
     if (shootButton.pendingReleased) {
-        if (hasDirection) executeAim(playerId, inputState.aimDirection);
-        executeAimRelease(playerId);
+        const direction = if (vec.equals(inputState.releasedAimDirection, vec.zero)) p.aimDirection else inputState.releasedAimDirection;
+        player.aim(p, direction);
+        liveInput.releasedAimDirection = p.aimDirection;
+        player.aimRelease(p);
         return;
     }
-
-    if (!hasDirection) {
-        executeAimRelease(playerId);
-        return;
-    }
-
-    executeAim(playerId, inputState.aimDirection);
-    executeAimRelease(playerId);
+    if (hasDirection) player.aim(p, inputState.aimDirection);
+    player.aimRelease(p);
 }
 
 pub fn applyPlayerInput(playerId: usize) void {
@@ -142,9 +151,10 @@ pub fn applyPlayerInput(playerId: usize) void {
         return;
     };
 
-    if (inputState.movementDirection.x < 0) {
+    const direction = movement.locomotionDirection(playerId);
+    if (direction.x < 0) {
         executeAction(playerId, .move_left);
-    } else if (inputState.movementDirection.x > 0) {
+    } else if (direction.x > 0) {
         executeAction(playerId, .move_right);
     } else {
         executeAction(playerId, .brake);
@@ -182,8 +192,8 @@ pub fn executeAction(playerId: usize, action: controller.GameAction) void {
             .move_right => movement.moveRight(playerId),
             .brake => movement.brake(playerId),
             .jump => movement.jump(playerId),
-            .shoot => player.shoot(p) catch |err| {
-                std.debug.print("Error shooting: {}\n", .{err});
+            .shoot => player.shoot(playerId, p.aimDirection) catch |err| {
+                std.log.err("control.executeAction: player {d} could not shoot: {}", .{ playerId, err });
             },
             .rope => player.toggleRope(p) catch |err| {
                 std.debug.print("Error toggling rope: {}\n", .{err});

@@ -178,6 +178,14 @@ acceptance checks. This review does not constitute the user's acceptance.
 
 ## Runtime JSON version 1
 
+This section documents the original rig/clip contract. The current loader also
+loads `character_locomotion/run.json`, `character_actions/airborne.json`, and
+`character_actions/aiming.json` into the same replacement arena. All five files
+must validate before replacement; failures preserve the live assets and animation
+state. Later profiles are documented in [phase two](character_animation_phase2.md),
+[airborne/crouch](character_animation_phase3a.md), and
+[aiming](character_animation_aiming.md).
+
 Files loaded together:
 
 - `character_rigs/humanoid.json`: rig ID `humanoid_v1`.

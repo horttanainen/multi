@@ -53,7 +53,7 @@ pub const Weapon = struct {
     projectile: ?Projectile = null,
     pellet: ?Pellet = null,
     spriteUuid: u64 = 0,
-    carriedSpriteUuid: u64 = 0,
+    standaloneSpriteUuid: u64 = 0,
     hitscanExplosion: ?projectile.Explosion = null,
     range: f32 = 50,
     trailDurationMs: u32 = 0,
@@ -75,7 +75,7 @@ pub fn warmProjectileCollider(proj: Projectile) !void {
     _ = try polygon.triangulateCached(projectileSprite);
 }
 
-const Trail = struct {
+pub const Trail = struct {
     startPos: vec.Vec2,
     endPos: vec.Vec2,
     color: sprite.Color,
@@ -83,7 +83,7 @@ const Trail = struct {
     durationMs: u32,
 };
 
-var activeTrails: std.ArrayListUnmanaged(Trail) = .empty;
+pub var activeTrails: std.ArrayListUnmanaged(Trail) = .empty;
 
 const maxHitscanPlayers: usize = 64;
 

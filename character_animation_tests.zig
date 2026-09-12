@@ -17,9 +17,16 @@ const movement = @import("src/movement.zig");
 const player_input = @import("src/player_input.zig");
 const sprite = @import("src/sprite.zig");
 const weapon = @import("src/weapon.zig");
+const control = @import("src/control.zig");
+const entity = @import("src/entity.zig");
+const camera = @import("src/camera.zig");
+const time = @import("src/time.zig");
+const audio = @import("src/audio.zig");
+const conv = @import("src/conversion.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
+const aiming_json = @embedFile("character_actions/aiming.json");
 const actions_json = @embedFile("character_actions/airborne.json");
 const motion_json = @embedFile("character_motions/run_reference.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
@@ -27,11 +34,11 @@ const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 
 fn load() !animation.Assets {
     var detail: animation.Diagnostic = .{};
-    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, &detail), &detail);
+    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, aiming_json, &detail), &detail);
 }
 
 fn replaceFromJson(rig_bytes: []const u8, motion_bytes: []const u8, detail: *data.CharacterAssetDiagnostic) !void {
-    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_json, detail), detail);
+    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_json, aiming_json, detail), detail);
 }
 
 test "bounded file reading loads the complete motion and rejects oversized or missing files" {
@@ -58,7 +65,7 @@ test "decoded character data owns its strings and curves after the source buffer
         defer std.testing.allocator.free(motion_bytes);
         const actions_bytes = try std.testing.allocator.dupe(u8, actions_json);
         defer std.testing.allocator.free(actions_bytes);
-        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_bytes, &detail);
+        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_bytes, aiming_json, &detail);
     };
     defer files.arena.deinit();
     try std.testing.expectEqualStrings("humanoid_v1", files.rig.id);
@@ -357,7 +364,7 @@ test "compact Bezier run preserves dense controls, solved poses, and contact int
     var compact = try load();
     defer compact.arena.deinit();
     var detail: animation.Diagnostic = .{};
-    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, &detail), &detail);
+    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, aiming_json, &detail), &detail);
     defer dense.arena.deinit();
     try std.testing.expectEqual(dense.motion.cycle_seconds, compact.motion.cycle_seconds);
     try std.testing.expectEqual(dense.motion.reference_speed_mps, compact.motion.reference_speed_mps);
@@ -602,7 +609,7 @@ test "character asset array order does not define joint, limb, control, contact,
     const reordered_motion = try std.json.Stringify.valueAlloc(std.testing.allocator, motion.value, .{});
     defer std.testing.allocator.free(reordered_motion);
     var detail: animation.Diagnostic = .{};
-    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, actions_json, &detail), &detail);
+    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, actions_json, aiming_json, &detail), &detail);
     defer reordered.arena.deinit();
     for (0..12) |index| {
         const phase = @as(f64, @floatFromInt(index)) / 12;
@@ -767,7 +774,7 @@ test "invalid locomotion JSON preserves the complete installed pose and contacts
         const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, locomotion_json, case[0], case[1]);
         defer std.testing.allocator.free(malformed);
         const result = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, actions_json, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, actions_json, aiming_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -923,7 +930,7 @@ test "airborne clips retain bone lengths and reach their authored controls witho
     for ([_]animation.Motion{ set.actions.jump, set.actions.fall, set.actions.crouch }) |clip| {
         for (0..241) |tick| {
             var controls = set.rig.neutral;
-            for (&controls, clip.tracks) |*control, track| control.* = animation.evaluateTrack(track, @as(f32, @floatFromInt(tick)) / 240);
+            for (&controls, clip.tracks) |*value, track| value.* = animation.evaluateTrack(track, @as(f32, @floatFromInt(tick)) / 240);
             const pose = animation.solvePose(set.rig, controls);
             try checkBones(set.rig, pose);
             for (pose.clamped) |clamped| try std.testing.expect(!clamped);
@@ -1092,7 +1099,7 @@ test "invalid action assets preserve live airborne state and successful reload r
         defer std.testing.allocator.free(malformed);
         try std.testing.expect(!std.mem.eql(u8, malformed, actions_json));
         const result = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, malformed, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, malformed, aiming_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -1201,7 +1208,7 @@ test "landing compression lowers the hips while preserving walking and running f
             const baseline = animation.states.get(8).?;
             const pelvis_y = @intFromEnum(animation.Control.pelvis_y);
             if (sample.controls[pelvis_y] < baseline.controls[pelvis_y] - 0.07) saw_compression = true;
-            for ([_]animation.Control{ .left_foot_x, .left_foot_y, .left_foot_angle, .right_foot_x, .right_foot_y, .right_foot_angle }) |control| try std.testing.expectApproxEqAbs(baseline.controls[@intFromEnum(control)], sample.controls[@intFromEnum(control)], 0.000002);
+            for ([_]animation.Control{ .left_foot_x, .left_foot_y, .left_foot_angle, .right_foot_x, .right_foot_y, .right_foot_angle }) |binding| try std.testing.expectApproxEqAbs(baseline.controls[@intFromEnum(binding)], sample.controls[@intFromEnum(binding)], 0.000002);
             const phase = animation.clipPhase(animation.assets.?.motion, sample.phase);
             for (sample.contact_intent, 0..) |intent, index| try std.testing.expectEqual(animation.contactIntent(animation.assets.?.motion, @enumFromInt(index), phase), intent);
             try checkAirPose(sample);
@@ -1368,20 +1375,602 @@ test "carried weapon selection respects view aiming and optional weapon visuals"
     const old_view = animation.view;
     defer animation.view = old_view;
     var weapons = [_]weapon.Weapon{std.mem.zeroes(weapon.Weapon)};
-    weapons[0].carriedSpriteUuid = 123;
+    weapons[0].standaloneSpriteUuid = 123;
     var p = std.mem.zeroes(player.Player);
     p.weapons = &weapons;
     for ([_]animation.View{ .stick, .overlay }) |mode| {
         animation.view = mode;
         p.isAiming = false;
-        try std.testing.expect(player.usesCarriedWeapon(p));
+        try std.testing.expect(player.usesProceduralWeapon(p));
         p.isAiming = true;
-        try std.testing.expect(!player.usesCarriedWeapon(p));
+        try std.testing.expect(player.usesProceduralWeapon(p));
     }
     animation.view = .sprites;
     p.isAiming = false;
-    try std.testing.expect(!player.usesCarriedWeapon(p));
+    try std.testing.expect(!player.usesProceduralWeapon(p));
     animation.view = .stick;
-    weapons[0].carriedSpriteUuid = 0;
-    try std.testing.expect(!player.usesCarriedWeapon(p));
+    weapons[0].standaloneSpriteUuid = 0;
+    try std.testing.expect(!player.usesProceduralWeapon(p));
+}
+
+const AimSample = struct { action: []const u8, direction: vec.Vec2, frame: animation.FramePose };
+
+test "aim IK preserves legs and grip while the barrel points in every direction on either facing" {
+    runtime.init(std.testing.io);
+    var set = try load();
+    defer set.arena.deinit();
+    var samples: std.ArrayListUnmanaged(AimSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    const body: vec.Vec2 = .{ .x = 2, .y = 3 };
+    for ([_][]const u8{ "neutral", "run", "crouch", "jump", "fall" }) |action| {
+        var base = animation.evaluatePose(&set, 0.25, .neutral);
+        if (std.mem.eql(u8, action, "run")) base = animation.evaluatePose(&set, 0.25, .run);
+        if (!std.mem.eql(u8, action, "run") and !std.mem.eql(u8, action, "neutral")) {
+            const clip = if (std.mem.eql(u8, action, "jump")) set.actions.jump else if (std.mem.eql(u8, action, "fall")) set.actions.fall else set.actions.crouch;
+            var controls = set.rig.neutral;
+            const phase: f32 = if (std.mem.eql(u8, action, "crouch")) set.actions.settings.crouch_hold_phase else 1;
+            for (&controls, clip.tracks) |*value, track| value.* = animation.evaluateTrack(track, phase);
+            base = animation.solvePose(set.rig, controls);
+        }
+        for ([_]bool{ true, false }) |facing| {
+            for ([_]vec.Vec2{ vec.east, .{ .x = 1, .y = 1 }, vec.north, .{ .x = -1, .y = 1 }, vec.west, .{ .x = -1, .y = -1 }, vec.south, .{ .x = 1, .y = -1 } }) |raw| {
+                const direction = vec.normalize(raw);
+                for ([_]f32{ 0, 0.25, 0.5, 0.75, 1 }) |weight| {
+                    const frame = animation.solveAimedPose(&set, base, body, facing, direction, weight, null);
+                    try checkBones(set.rig, frame.pose);
+                    try std.testing.expectEqual(base.contact_intent, frame.pose.contact_intent);
+                    for (base.joints, frame.pose.joints, 0..) |before, after, joint| {
+                        if (joint == @intFromEnum(animation.Joint.right_elbow) or joint == @intFromEnum(animation.Joint.right_hand)) continue;
+                        try nearPoint(before, after, 0.000001);
+                    }
+                    const grip = animation.attachmentPosition(set.rig, frame.pose, "weapon_hand").?;
+                    try nearPoint(animation.toWorld(set.rig, grip, body, facing), frame.weapon.position, 0.000001);
+                    if (weight != 1) continue;
+                    const sign: f32 = if (frame.weapon_facing_right) 1 else -1;
+                    try nearPoint(direction, .{ .x = @cos(frame.weapon.angle) * sign, .y = -@sin(frame.weapon.angle) * sign }, 0.000002);
+                    try std.testing.expect(!frame.pose.clamped[@intFromEnum(animation.Limb.right_arm)]);
+                    const shoulder = frame.pose.joints[@intFromEnum(animation.Joint.right_shoulder)];
+                    const elbow = frame.pose.joints[@intFromEnum(animation.Joint.right_elbow)];
+                    const wrist = frame.pose.joints[@intFromEnum(animation.Joint.right_hand)];
+                    const upper_direction = vec.normalize(vec.subtract(elbow, shoulder));
+                    const lower_direction = vec.normalize(vec.subtract(wrist, elbow));
+                    const alignment = upper_direction.x * lower_direction.x + upper_direction.y * lower_direction.y;
+                    // Nearly straight, with a small visible bend instead of a
+                    // locked elbow: between 5 and 25 degrees from full extension.
+                    try std.testing.expect(alignment > @cos(@as(f32, 25 * std.math.pi / 180.0)));
+                    try std.testing.expect(alignment < @cos(@as(f32, 5 * std.math.pi / 180.0)));
+                    var world = frame;
+                    for (&world.pose.joints) |*joint| joint.* = animation.toWorld(set.rig, joint.*, body, facing);
+                    try samples.append(std.testing.allocator, .{ .action = action, .direction = direction, .frame = world });
+                }
+            }
+        }
+    }
+    // Nonzero authored grip offsets and the other hand use the same solver path.
+    const attachment = set.rig.attachments.getPtr("weapon_hand").?;
+    attachment.joint = .left_hand;
+    attachment.local_offset = .{ .x = 0.02, .y = 0.01 };
+    attachment.angle_offset_radians = 0.4;
+    const base = animation.evaluatePose(&set, 0.25, .run);
+    const other = animation.solveAimedPose(&set, base, body, false, vec.east, 1, null);
+    try checkBones(set.rig, other.pose);
+    try nearPoint(base.joints[@intFromEnum(animation.Joint.right_hand)], other.pose.joints[@intFromEnum(animation.Joint.right_hand)], 0.000001);
+    try nearPoint(animation.toWorld(set.rig, animation.attachmentPosition(set.rig, other.pose, "weapon_hand").?, body, false), other.weapon.position, 0.000001);
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try fs.writeFile("artifacts/character_animation/aim_samples.json", bytes);
+}
+
+const aiming_sprite_id: u64 = 900017;
+
+// A real movement body/input/player with CPU-only sprite metadata. No GPU is
+// needed to exercise the production world-space placement and shooting paths.
+fn beginAimingPlayer() !box2d.c.b2BodyId {
+    runtime.init(std.testing.io);
+    _ = try beginLocomotion();
+    errdefer box2d.destroyWorld();
+    errdefer animation.cleanup();
+    const body = try box2d.createBody(box2d.createNonRotatingDynamicBodyDef(vec.zero));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_PLAYER;
+    shape.filter.maskBits = collision.MASK_PLAYER;
+    shape.material.friction = 0;
+    const circle = box2d.c.b2Circle{ .center = .{ .x = 0, .y = 0 }, .radius = player.lowerBodyColliderRadius };
+    const body_shape = box2d.c.b2CreateCircleShape(body, &shape, &circle);
+    var p = std.mem.zeroes(player.Player);
+    p.id = 7;
+    p.bodyId = body;
+    p.aimDirection = vec.east;
+    p.weapons = try std.testing.allocator.alloc(weapon.Weapon, 2);
+    errdefer std.testing.allocator.free(p.weapons);
+    for (p.weapons, 0..) |*w, index| {
+        w.* = .{ .name = "aim_test", .delay = 0, .sound = .{ .file = "sounds/cannon_fire.wav", .durationMs = 10000, .volume = 0 }, .impulse = 0, .spriteUuid = aiming_sprite_id, .standaloneSpriteUuid = aiming_sprite_id, .range = if (index == 0) 3 else 5, .trailDurationMs = 1000 };
+    }
+    try player.players.put(allocator.allocator, 7, p);
+    errdefer _ = player.players.swapRemove(7);
+    try player_input.register(7);
+    errdefer _ = player_input.playerInputs.swapRemove(7);
+    try movement.states.put(allocator.allocator, 7, .{ .bodyId = body, .footSensorShapeId = body_shape, .leftWallSensorId = body_shape, .rightWallSensorId = body_shape, .facingRight = true });
+    errdefer _ = movement.states.swapRemove(7);
+    try movement.configure(try data.loadMovementData("movements/towerfall_keep.json"));
+    var ent = std.mem.zeroes(entity.Entity);
+    ent.spriteUuids = try std.testing.allocator.alloc(u64, 1);
+    errdefer std.testing.allocator.free(ent.spriteUuids);
+    ent.spriteUuids[0] = aiming_sprite_id;
+    ent.bodyId = body;
+    ent.state = box2d.getState(body);
+    ent.flipEntityHorizontally = true;
+    try entity.entities.putLocking(body, ent);
+    errdefer _ = entity.entities.fetchSwapRemoveLocking(body);
+    var visual: sprite.Sprite = undefined;
+    visual.sizeP = .{ .x = 48, .y = 29 };
+    visual.offset = vec.izero;
+    visual.anchorPointLeft = .{ .x = 15, .y = 19 };
+    visual.anchorPointRight = .{ .x = 33, .y = 19 };
+    visual.muzzlePoint = .{ .x = 45, .y = 11 };
+    visual.imgPath = "aim fixture";
+    try sprite.sprites.putLocking(aiming_sprite_id, visual);
+    errdefer _ = sprite.sprites.fetchSwapRemoveLocking(aiming_sprite_id);
+    animation.view = .stick;
+    for (0..5) |_| {
+        movement.applyAll(1.0 / 60.0);
+        box2d.worldStep(1.0 / 60.0, 4);
+        try movement.processSensorEvents();
+        animation.fixedUpdate(1.0 / 60.0);
+    }
+    return body;
+}
+
+fn endAimingPlayer(body: box2d.c.b2BodyId) void {
+    const ent = entity.entities.fetchSwapRemoveLocking(body).?.value;
+    std.testing.allocator.free(ent.spriteUuids);
+    _ = sprite.sprites.fetchSwapRemoveLocking(aiming_sprite_id);
+    const p = player.players.fetchSwapRemove(7).?.value;
+    std.testing.allocator.free(p.weapons);
+    _ = movement.states.swapRemove(7);
+    _ = player_input.playerInputs.swapRemove(7);
+    animation.cleanup();
+    box2d.destroyWorld();
+}
+
+fn submitAim(direction: vec.Vec2, held: bool) void {
+    var sample: player_input.Sample = .{ .movementDirection = direction, .aimDirection = direction };
+    sample.buttons.set(.shoot, held);
+    player_input.submit(7, sample);
+    control.applyPlayerInput(7);
+}
+
+test "aiming removes directional locomotion while momentum gravity and independent jumping continue" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    try std.testing.expect(movement.states.get(7).?.groundState.supported);
+    submitAim(vec.east, true);
+    try std.testing.expectEqual(@as(i8, 0), movement.states.get(7).?.lateralMovementIntent);
+    movement.applyAll(1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 0), box2d.c.b2Body_GetLinearVelocity(body).x);
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 6, .y = 0 });
+    submitAim(.{ .x = -1, .y = -1 }, true);
+    movement.applyAll(1.0 / 60.0);
+    try std.testing.expectApproxEqAbs(6 - movement.towerfallSettings.control.groundDeceleration / 60, box2d.c.b2Body_GetLinearVelocity(body).x, 0.00001);
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expect(animation.states.get(7).?.action != .crouch);
+    const moving = movement.states.getPtr(7).?;
+    moving.groundState = .{};
+    moving.leftWallContactCount = 1;
+    box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -2 }, box2d.c.b2MakeRot(0));
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 6, .y = 1 });
+    movement.applyAll(1.0 / 60.0);
+    var velocity = box2d.c.b2Body_GetLinearVelocity(body);
+    try std.testing.expectApproxEqAbs(6 - movement.towerfallSettings.control.airDeceleration / 60, velocity.x, 0.00001);
+    try std.testing.expectApproxEqAbs(1 + movement.towerfallSettings.control.gravity / 60, velocity.y, 0.00001);
+    try std.testing.expect(!moving.wallSliding);
+    moving.leftWallContactCount = 0;
+    submitAim(.{ .x = -1, .y = -1 }, false);
+    movement.applyAll(1.0 / 60.0);
+    const after_release = box2d.c.b2Body_GetLinearVelocity(body);
+    try std.testing.expect(after_release.x < velocity.x);
+    try std.testing.expectApproxEqAbs(velocity.y + movement.towerfallSettings.control.fastFallAcceleration / 60, after_release.y, 0.00001);
+    moving.groundState = .{ .supported = true, .jumpAvailable = true };
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+    var sample: player_input.Sample = .{ .movementDirection = vec.east, .aimDirection = vec.east };
+    sample.buttons.set(.shoot, true);
+    sample.buttons.set(.jump, true);
+    player_input.submit(7, sample);
+    control.applyPlayerInput(7);
+    player_input.beginPhysicsStep();
+    defer player_input.endPhysicsStep();
+    movement.applyAll(1.0 / 60.0);
+    velocity = box2d.c.b2Body_GetLinearVelocity(body);
+    try std.testing.expect(velocity.y < 0);
+    try std.testing.expectEqual(@as(f32, 0), velocity.x);
+    // The policy is specific to Towerfall; Liero retains independent direction.
+    movement.mechanism = .liero;
+    defer movement.mechanism = .towerfall;
+    try nearPoint(vec.east, movement.locomotionDirection(7), 0.00001);
+}
+
+test "airborne aim preserves the same trajectory as continuing the previous horizontal input" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    const moving = movement.states.getPtr(7).?;
+    box2d.c.b2Body_SetGravityScale(body, movement.bodyMotion.gravityScale);
+    box2d.c.b2Body_SetLinearDamping(body, movement.bodyMotion.linearDamping);
+    var expected_positions: [90]vec.Vec2 = undefined;
+    var expected_velocities: [90]vec.Vec2 = undefined;
+    for ([_]f32{ -1, -0.35, 0, 0.4, 1 }) |horizontal| {
+        var landing_tick: usize = 90;
+        for ([_]bool{ false, true }) |aiming| {
+            movement.reset(7);
+            player_input.neutralize(7);
+            box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -2 }, box2d.c.b2MakeRot(0));
+            box2d.c.b2Body_SetLinearVelocity(body, .{ .x = if (horizontal == 0) 6 else horizontal * 2, .y = -8 });
+            moving.heldJumpGravityActive = true;
+            var landed = false;
+            for (0..90) |tick| {
+                const holding_aim = aiming and tick >= 5;
+                // Poll less often than physics after the press. Turning the
+                // aim immediately and later must not replace the earlier input.
+                if (tick <= 5 or tick % 3 == 0) {
+                    const direction: vec.Vec2 = if (holding_aim) .{ .x = if (tick % 2 == 0) 1 else -1, .y = -1 } else .{ .x = horizontal, .y = 0 };
+                    var input: player_input.Sample = .{ .movementDirection = direction, .aimDirection = direction };
+                    input.buttons.set(.shoot, holding_aim);
+                    input.buttons.set(.jump, tick < 12);
+                    player_input.submit(7, input);
+                    control.applyPlayerInput(7);
+                }
+                player_input.beginPhysicsStep();
+                movement.applyAll(1.0 / 60.0);
+                box2d.worldStep(1.0 / 60.0, 4);
+                try movement.processSensorEvents();
+                player_input.endPhysicsStep();
+                const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+                const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+                if (aiming) {
+                    try std.testing.expect(tick <= landing_tick);
+                    try nearPoint(expected_positions[tick], position, 0.00002);
+                    try nearPoint(expected_velocities[tick], velocity, 0.00002);
+                } else {
+                    expected_positions[tick] = position;
+                    expected_velocities[tick] = velocity;
+                }
+                if (!moving.groundState.supported) continue;
+                landed = true;
+                if (!aiming) {
+                    landing_tick = tick;
+                    break;
+                }
+                try std.testing.expectEqual(landing_tick, tick);
+                try std.testing.expectEqual(@as(f32, 0), player_input.playerInputs.get(7).?.aimMovementDirection);
+                try std.testing.expectEqual(@as(i8, 0), moving.lateralMovementIntent);
+                // Another jump while aim stays held must not resurrect the
+                // direction captured for the completed jump.
+                var jump: player_input.Sample = .{ .movementDirection = vec.west, .aimDirection = vec.west };
+                jump.buttons.set(.shoot, true);
+                jump.buttons.set(.jump, true);
+                player_input.submit(7, jump);
+                control.applyPlayerInput(7);
+                player_input.beginPhysicsStep();
+                movement.applyAll(1.0 / 60.0);
+                player_input.endPhysicsStep();
+                try std.testing.expect(box2d.c.b2Body_GetLinearVelocity(body).y < 0);
+                try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+                break;
+            }
+            try std.testing.expect(landed);
+        }
+    }
+}
+
+test "airborne aim capture clears on release neutralization reset level cleanup and grounded aiming" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    const moving = movement.states.getPtr(7).?;
+    moving.groundState = .{};
+    submitAim(vec.east, false);
+    submitAim(vec.west, true);
+    try nearPoint(vec.east, movement.locomotionDirection(7), 0.00001);
+    submitAim(vec.west, false);
+    try nearPoint(vec.west, movement.locomotionDirection(7), 0.00001);
+    try std.testing.expectEqual(@as(f32, 0), player_input.playerInputs.get(7).?.aimMovementDirection);
+    submitAim(vec.east, true);
+    try nearPoint(vec.west, movement.locomotionDirection(7), 0.00001);
+    submitAim(vec.south, true);
+    try nearPoint(vec.west, movement.locomotionDirection(7), 0.00001);
+    player_input.neutralize(7);
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+    submitAim(vec.east, false);
+    submitAim(vec.west, true);
+    movement.reset(7);
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+    // Reset/respawn cannot reactivate a pre-reset hold on the next input poll.
+    submitAim(vec.west, true);
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+    moving.groundState.supported = true;
+    submitAim(vec.east, false);
+    submitAim(vec.west, true);
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+    moving.groundState.supported = false;
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+    submitAim(vec.east, false);
+    submitAim(vec.west, true);
+    try nearPoint(vec.east, movement.locomotionDirection(7), 0.00001);
+    // Level reloads recreate movement bodies/states while retaining controller
+    // input registrations. Exercise that boundary with a fresh unsupported state.
+    const replacement: movement.State = .{ .bodyId = body, .footSensorShapeId = moving.footSensorShapeId, .leftWallSensorId = moving.leftWallSensorId, .rightWallSensorId = moving.rightWallSensorId };
+    movement.cleanup();
+    try std.testing.expect(player_input.playerInputs.get(7).?.buttons.get(.shoot).held);
+    try std.testing.expectEqual(@as(f32, 0), player_input.playerInputs.get(7).?.aimMovementDirection);
+    try movement.states.put(allocator.allocator, 7, replacement);
+    submitAim(vec.west, true);
+    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+}
+
+test "shot geometry is independent of camera and render alpha and returns to carrying" {
+    const old_view = animation.view;
+    const old_alpha = time.alpha;
+    defer animation.view = old_view;
+    defer time.alpha = old_alpha;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    submitAim(vec.east, true);
+    for (0..10) |_| animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 1), animation.states.get(7).?.aim_weight);
+    const expected = player.weaponFrame(7, .physics, vec.west).?;
+    const muzzle = player.weaponMuzzle(expected).?;
+    const cameraId = try camera.spawnForPlayer(7, .{ .x = 900, .y = -500 });
+    defer camera.destroyCamera(cameraId);
+    const old_camera = camera.activeCameraId;
+    defer camera.activeCameraId = old_camera;
+    camera.activeCameraId = cameraId;
+    for ([_]f64{ 0, 0.25, 0.75, 1 }) |alpha| {
+        time.alpha = alpha;
+        const actual = player.weaponFrame(7, .physics, vec.west).?;
+        try std.testing.expectEqual(muzzle, player.weaponMuzzle(actual).?);
+        try nearPoint(vec.west, player.weaponDirection(actual), 0.00001);
+    }
+    player_input.neutralize(7);
+    control.applyPlayerInput(7);
+    animation.holdShotPose(7, vec.west);
+    for (0..2) |_| animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 1), animation.states.get(7).?.aim_weight);
+    for (0..20) |_| animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.aim_weight);
+    time.alpha = 1;
+    const frame = animation.playerFrame(7, .render, null).?;
+    const carry = animation.attachmentToWorld(animation.assets.?.rig, animation.attachmentTransform(animation.assets.?.rig, frame.pose, "weapon_hand").?, frame.body, frame.facing_right);
+    try nearPoint(carry.position, frame.weapon.position, 0.00001);
+    try std.testing.expectApproxEqAbs(carry.angle, frame.weapon.angle, 0.00001);
+}
+
+test "aim turns the character with stable foot targets and backpedals against residual travel" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    const set = &animation.assets.?;
+    for ([_]bool{ true, false }) |facing| {
+        animation.resetPlayer(7);
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = facing };
+        for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        const before = animation.states.get(7).?;
+        const old_pose = animation.interpolatedPose(set, before, 1);
+        input.aiming = true;
+        input.aim_direction = if (facing) vec.west else vec.east;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        var sample = animation.states.get(7).?;
+        try std.testing.expectEqual(!facing, sample.facing_right);
+        const turn_start = animation.interpolatedPose(set, sample, 0);
+        for (0..2) |leg| {
+            const old_target = animation.toWorld(set.rig, old_pose.desired_targets[leg], before.body, before.facing_right);
+            const new_target = animation.toWorld(set.rig, turn_start.desired_targets[leg], sample.body, sample.facing_right);
+            try nearPoint(old_target, new_target, 0.0001);
+        }
+        for (0..30) |tick| {
+            // Small horizontal noise around straight up/down must not undo
+            // the requested turn, even with opposite movement-facing input.
+            input.aim_direction = vec.normalize(.{ .x = if (tick % 2 == 0) -0.02 else 0.02, .y = if (tick < 15) 1 else -1 });
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            sample = animation.states.get(7).?;
+            try std.testing.expectEqual(!facing, sample.facing_right);
+            const pose = animation.interpolatedPose(set, sample, 1);
+            try checkBones(set.rig, pose);
+        }
+        input.aiming = false;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(!facing, animation.states.get(7).?.facing_right);
+        player_input.neutralize(7);
+        submitAim(vec.zero, true);
+        try nearPoint(if (facing) vec.west else vec.east, player.players.get(7).?.aimDirection, 0.00001);
+
+        // Ground momentum can carry the player opposite the new facing. The
+        // same authored stride/contact intervals run in reverse until release.
+        input.aiming = true;
+        input.aim_direction = if (facing) vec.west else vec.east;
+        const speed: f32 = if (facing) 3.2 else -3.2;
+        var contacts: usize = 0;
+        for (0..120) |_| {
+            const phase = animation.states.get(7).?.phase;
+            input.body.x += speed / 60;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            sample = animation.states.get(7).?;
+            try std.testing.expectEqual(!facing, sample.facing_right);
+            try std.testing.expect(sample.phase < phase);
+            for (sample.previous_feet, sample.feet) |previous, foot| {
+                if (previous.locked and foot.locked and std.meta.eql(previous.anchor, foot.anchor)) contacts += 1;
+            }
+            // Reuse the transition checks for bone lengths, sole clearance
+            // and toe-to-anchor stability at interpolated render positions.
+            try checkAirPose(sample);
+        }
+        try std.testing.expect(contacts > 10);
+        input.aiming = false;
+        const phase = sample.phase;
+        input.body.x += speed / 60;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        sample = animation.states.get(7).?;
+        try std.testing.expectEqual(facing, sample.facing_right);
+        try std.testing.expect(sample.phase > phase);
+
+        input.aiming = true;
+        input.supported = false;
+        input.ground_y = null;
+        input.vertical_speed_mps = -3;
+        input.separation_speed_mps = 3;
+        input.body.y -= 0.05;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(!facing, animation.states.get(7).?.facing_right);
+        try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+    }
+}
+
+test "lowering from backwards aim stays continuous throughout the running cycle" {
+    const old_view = animation.view;
+    const old_alpha = time.alpha;
+    defer animation.view = old_view;
+    defer time.alpha = old_alpha;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    for ([_]f32{ 3.2, 9, -3.2, -9 }) |speed| {
+        for (0..24) |release_phase| {
+            animation.resetPlayer(7);
+            var x: f32 = 0;
+            const direction = if (speed > 0) vec.west else vec.east;
+            const release_tick = 60 + release_phase;
+            var before: ?f32 = null;
+            for (0..release_tick + 20) |tick| {
+                x += speed / 60;
+                animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = speed > 0, .aiming = tick < release_tick, .aim_direction = direction }, 1.0 / 60.0);
+                if (tick < release_tick - 1) continue;
+                for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                    time.alpha = alpha;
+                    const frame = animation.playerFrame(7, .render, null).?;
+                    const angle = frame.weapon.angle + (if (frame.weapon_facing_right) @as(f32, 0) else std.math.pi);
+                    const delta = angle - (before orelse angle);
+                    // A quarter of a physics step must not jump across the
+                    // +/-pi seam when the moving wrist passes the aim's opposite.
+                    try std.testing.expect(@abs(std.math.atan2(@sin(delta), @cos(delta))) < 0.5);
+                    before = angle;
+                }
+            }
+            try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.aim_weight);
+        }
+    }
+}
+
+test "release-to-fire captures direction once across quick taps re-presses switching and cancellation" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    defer {
+        delay.cleanup();
+        delay.delayedActions = .init(allocator.allocator);
+    }
+    defer weapon.activeTrails.clearAndFree(allocator.allocator);
+    try std.testing.expect(sdl.c.SDL_SetHint(sdl.c.SDL_HINT_AUDIO_DRIVER, "dummy"));
+    defer _ = sdl.c.SDL_ResetHint(sdl.c.SDL_HINT_AUDIO_DRIVER);
+    try std.testing.expect(sdl.c.SDL_InitSubSystem(sdl.c.SDL_INIT_AUDIO));
+    defer sdl.c.SDL_QuitSubSystem(sdl.c.SDL_INIT_AUDIO);
+    try audio.init();
+    defer audio.cleanup();
+    // A tap before the first animation update must still fire from the aimed pose.
+    animation.resetPlayer(7);
+    submitAim(vec.east, true);
+    submitAim(vec.east, false);
+    const expected_east = player.weaponMuzzle(player.weaponFrame(7, .physics, vec.east).?).?;
+    // A new hold changes live aim without redirecting the queued eastward shot.
+    submitAim(vec.north, true);
+    try nearPoint(vec.east, player_input.playerInputs.get(7).?.releasedAimDirection, 0.00001);
+    player_input.beginPhysicsStep();
+    control.applyFixedStepPlayerInputs();
+    player_input.endPhysicsStep();
+    try std.testing.expectEqual(@as(usize, 1), weapon.activeTrails.items.len);
+    try nearPoint(conv.pixel2M(expected_east), weapon.activeTrails.items[0].startPos, 0.00001);
+    try nearPoint(.{ .x = 3, .y = 0 }, vec.subtract(weapon.activeTrails.items[0].endPos, weapon.activeTrails.items[0].startPos), 0.00001);
+    try std.testing.expect(player.players.get(7).?.isAiming);
+    try nearPoint(vec.north, player.players.get(7).?.aimDirection, 0.00001);
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 1), animation.states.get(7).?.aim_weight);
+    for (0..3) |_| {
+        player_input.beginPhysicsStep();
+        control.applyFixedStepPlayerInputs();
+        player_input.endPhysicsStep();
+    }
+    try std.testing.expectEqual(@as(usize, 1), weapon.activeTrails.items.len);
+    // Direction is retained even when controls return to neutral on release and
+    // another movement sample arrives before the next fixed step.
+    submitAim(vec.zero, false);
+    submitAim(vec.west, false);
+    try nearPoint(vec.north, player_input.playerInputs.get(7).?.releasedAimDirection, 0.00001);
+    player.cycleWeapon(player.players.getPtr(7).?, 1);
+    try std.testing.expectEqual(@as(usize, 1), player.players.get(7).?.selectedWeaponIndex);
+    const expected_north = player.weaponMuzzle(player.weaponFrame(7, .physics, vec.north).?).?;
+    player_input.beginPhysicsStep();
+    control.applyFixedStepPlayerInputs();
+    player_input.endPhysicsStep();
+    try std.testing.expectEqual(@as(usize, 2), weapon.activeTrails.items.len);
+    try nearPoint(conv.pixel2M(expected_north), weapon.activeTrails.items[1].startPos, 0.00001);
+    try nearPoint(.{ .x = 0, .y = -5 }, vec.subtract(weapon.activeTrails.items[1].endPos, weapon.activeTrails.items[1].startPos), 0.00001);
+    try std.testing.expectEqual(@as(f32, 1), animation.states.get(7).?.aim_weight);
+    // Menu/focus neutralization cancels queued edges; death also prevents shots.
+    submitAim(vec.east, true);
+    submitAim(vec.east, false);
+    player_input.neutralize(7);
+    control.applyPlayerInput(7);
+    player_input.beginPhysicsStep();
+    control.applyFixedStepPlayerInputs();
+    player_input.endPhysicsStep();
+    try std.testing.expectEqual(@as(usize, 2), weapon.activeTrails.items.len);
+    submitAim(vec.east, true);
+    submitAim(vec.east, false);
+    player.players.getPtr(7).?.isDead = true;
+    player_input.beginPhysicsStep();
+    control.applyFixedStepPlayerInputs();
+    player_input.endPhysicsStep();
+    try std.testing.expectEqual(@as(usize, 2), weapon.activeTrails.items.len);
+}
+
+test "invalid aiming settings preserve live pose and successful reload clears transient aiming" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    animation.holdShotPose(7, vec.west);
+    const before = animation.states.get(7).?;
+    const old_id = animation.assets.?.aiming.id.ptr;
+    const previous_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = previous_log_level;
+    var detail: animation.Diagnostic = .{};
+    const cases = [_][2][]const u8{
+        .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"humanoid_v1\"", "\"missing_rig\"" },
+        .{ "\"hand_distance_m\": 0.545", "\"hand_distance_m\": 3" },
+        .{ "\"hand_distance_m\": 0.545", "\"hand_distance_m\": 0" },
+        .{ "\"raise_seconds\": 0.09", "\"raise_seconds\": 0" },
+        .{ "\"lower_seconds\": 0.14", "\"lower_seconds\": 1e999" },
+        .{ "\"shot_hold_seconds\": 0.06", "\"shot_hold_seconds\": -1" },
+        .{ "\"time_unit\": \"seconds\",", "" },
+    };
+    for (cases) |case| {
+        const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, aiming_json, case[0], case[1]);
+        defer std.testing.allocator.free(malformed);
+        const result: anyerror!void = replacement: {
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, malformed, &detail) catch |err| break :replacement err;
+            break :replacement animation.replaceAssets(files, &detail);
+        };
+        try std.testing.expectError(error.InvalidCharacterAsset, result);
+        try std.testing.expectEqualStrings(data.characterAimingPath, detail.file);
+        try std.testing.expectEqual(old_id, animation.assets.?.aiming.id.ptr);
+        try std.testing.expectEqualDeep(before, animation.states.get(7).?);
+    }
+    animation.installAssets(try load());
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.aim_weight);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.shot_hold_seconds);
 }

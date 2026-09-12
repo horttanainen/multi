@@ -10,8 +10,13 @@ pose (held with Down while grounded). Independent review and validation passed.
 The standalone alien blaster and procedural carried grip are accepted by the
 user; independent review and validation passed. See
 [character_animation_blaster.md](character_animation_blaster.md).
-The following phase will connect aiming to arm IK and suppress movement input
-while aiming, preserving existing velocity and physics. Grappling follows later.
+The aiming phase is accepted by the user: arm IK points the
+standalone blaster, Towerfall aim consumes directional movement input, and
+drawing/guide/shots share weapon geometry. Airborne aiming retains the horizontal
+input from before the aim press until release or landing, preserving the jump's
+trajectory. Existing momentum and physics continue.
+See [character_animation_aiming.md](character_animation_aiming.md) for the data,
+validation and acceptance checks. Grappling follows in a separately planned phase.
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -58,7 +63,11 @@ Separate the following responsibilities:
 - The pose solver applies bounded pelvis corrections and solves arms and legs.
 - Rendering displays the resulting segments as colored lines, then later as artwork.
 
-Keep limb identities and movement facing separate from aim direction. Aiming behind the player must not instantly mirror planted feet or flip knee bend directions.
+Keep limb identities stable. Horizontal aiming now requests a character turn
+through the existing locomotion transition, as requested during aiming review.
+Preserve valid world-space foot contacts and let residual travel opposite the
+aim-facing direction play the stride backwards. Aim-driven turning changes the
+visual pose; it does not change physical velocity.
 
 ## Game-side architecture
 
@@ -90,6 +99,7 @@ Use the following asset types, with stable IDs and explicit schema versions:
 | Motion clip | Named control tracks, reference cycle duration/speed, looping policy, contact intervals, and optional named phase cues. |
 | Locomotion profile | Clip references, speed-to-cadence/stride relationships, transition settings, ground-query rules, and limits on procedural adjustments. |
 | Action bundle | Named non-looping motion clips plus transition and impact-response settings. Reuses the motion clip schema. |
+| Aiming profile | Rig reference, shoulder-to-hand aiming distance and raise/lower/shot-hold times. Runtime aim direction remains player input. |
 
 The implemented locations are `character_rigs/`, `character_motions/`,
 `character_locomotion/`, and `character_actions/`.
@@ -251,8 +261,9 @@ Split this work into independently reviewed commits:
   curve evaluator, IK, contact solver, diagnostics and validation script.
 - **3B, carried weapon (accepted):** Standalone alien blaster, existing sprite grip
   and muzzle markers, and a grip transform driven by the solved animated hand.
-- **3B, aiming (next commit):** Aim drives the gun and arm IK. Holding aim consumes
+- **3B, aiming (accepted):** Aim drives the gun and arm IK. Holding aim consumes
   directional input for aiming, without cancelling velocity or normal physics.
+  In the air, retain pre-aim horizontal input until release or landing.
   Share muzzle placement between drawing, aim guide and release-to-fire shots.
 - **3B, later:** Grappling and wall poses, with explicit control priorities.
   Agree on each commit-sized scope before implementation.

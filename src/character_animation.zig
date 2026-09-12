@@ -5,7 +5,6 @@ const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const player = @import("player.zig");
 const movement = @import("movement.zig");
-const player_input = @import("player_input.zig");
 const entity = @import("entity.zig");
 const time = @import("time.zig");
 const gpu = @import("gpu.zig");
@@ -109,7 +108,7 @@ pub const Motion = struct {
     loop: bool,
 };
 pub const Actions = struct { settings: data.CharacterActionsData, jump: Motion, fall: Motion, crouch: Motion };
-pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData, actions: Actions };
+pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData, actions: Actions, aiming: data.CharacterAimingData };
 pub const Diagnostic = data.CharacterAssetDiagnostic;
 pub const FootState = struct {
     locked: bool = false,
@@ -128,6 +127,8 @@ pub const LocomotionInput = struct {
     // Positive along the support normal means moving away from the surface.
     separation_speed_mps: f32,
     crouch_requested: bool = false,
+    aiming: bool = false,
+    aim_direction: vec.Vec2 = vec.east,
 };
 pub const PlayerState = struct {
     previous_phase: f64 = 0,
@@ -156,6 +157,20 @@ pub const PlayerState = struct {
     previous_facing_right: bool = false,
     transition_offsets: [controlCount]f32 = @splat(0),
     transition_seconds: f32 = 0.14,
+    aim_weight: f32 = 0,
+    previous_aim_weight: f32 = 0,
+    aim_direction: vec.Vec2 = vec.east,
+    shot_hold_seconds: f32 = 0,
+    weapon_angle: ?f32 = null,
+    previous_weapon_angle: ?f32 = null,
+};
+pub const Sampling = enum { render, physics };
+pub const FramePose = struct {
+    pose: Pose,
+    body: vec.Vec2,
+    facing_right: bool,
+    weapon: AttachmentTransform,
+    weapon_facing_right: bool,
 };
 pub const Pose = struct {
     joints: [jointCount]vec.Vec2,
@@ -357,6 +372,20 @@ fn validateActions(file: data.CharacterActionsData, rig: Rig, detail: *Diagnosti
     return actions;
 }
 
+fn validateAiming(file: data.CharacterAimingData, rig: Rig, detail: *Diagnostic) !void {
+    if (file.schema_version != 1) return invalid(detail, "schema_version: expected 1", .{});
+    if (file.id.len == 0 or file.id.len > 64) return invalid(detail, "id: expected 1..64 bytes", .{});
+    if (!std.mem.eql(u8, file.rig_id, rig.id)) return invalid(detail, "rig_id: does not match loaded rig", .{});
+    const attachment = rig.attachments.get("weapon_hand").?;
+    const limb = rig.limbs[@intFromEnum(if (attachment.joint == .right_hand) Limb.right_arm else Limb.left_arm)];
+    const limits = reachLimits(rig.lengths[@intFromEnum(limb.middle)], rig.lengths[@intFromEnum(limb.end)], limb.min_bend_radians, limb.max_bend_radians);
+    if (file.hand_distance_m <= limits[0] or file.hand_distance_m >= limits[1]) return invalid(detail, "hand_distance_m: must be inside the weapon arm's reachable range", .{});
+    inline for (.{ "raise_seconds", "lower_seconds" }) |field| {
+        if (@field(file, field) < 0.01 or @field(file, field) > 1) return invalid(detail, "{s}: expected 0.01..1 seconds", .{field});
+    }
+    if (file.shot_hold_seconds < 0 or file.shot_hold_seconds > 0.5) return invalid(detail, "shot_hold_seconds: expected 0..0.5 seconds", .{});
+}
+
 // Consumes the decoded data on both success and failure. Successful preparation
 // transfers its arena to the runtime assets; failed validation releases it here.
 pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !Assets {
@@ -370,7 +399,9 @@ pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !A
     try validateLocomotion(files.locomotion, rig, motion, detail);
     detail.file = data.characterActionsPath;
     const actions = try validateActions(files.actions, rig, detail);
-    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = files.locomotion, .actions = actions };
+    detail.file = data.characterAimingPath;
+    try validateAiming(files.aiming, rig, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = files.locomotion, .actions = actions, .aiming = files.aiming };
 }
 
 fn cubic(a: f32, b: f32, c: f32, d: f32, t: f32) f32 {
@@ -834,7 +865,12 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     // relocation cannot carry a planted foot or count as a running stride.
     const initialize = !state.initialized or vec.magnitude(vec.subtract(input.body, state.body)) > 2;
     if (initialize) {
-        state.* = .{ .facing_right = input.facing_right, .previous_facing_right = input.facing_right, .body = input.body, .initialized = true, .controls = set.rig.neutral, .previous_controls = set.rig.neutral };
+        // A quick shot can precede the first animation update after registration.
+        // Preserve that shot pose, but discard old holds across a teleport.
+        const initial_hold = if (state.initialized) 0 else state.shot_hold_seconds;
+        const initial_direction = state.aim_direction;
+        const initial_angle = if (initial_hold > 0) state.weapon_angle else null;
+        state.* = .{ .facing_right = input.facing_right, .previous_facing_right = input.facing_right, .body = input.body, .initialized = true, .controls = set.rig.neutral, .previous_controls = set.rig.neutral, .shot_hold_seconds = initial_hold, .aim_direction = initial_direction, .aim_weight = if (initial_hold > 0) 1 else 0, .weapon_angle = initial_angle };
         state.foot_heading = if (input.facing_right) 0 else 1;
     }
     state.previous_phase = state.phase;
@@ -846,13 +882,26 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.previous_sole_floors = state.sole_floors;
     state.speed_mps = (input.body.x - state.body.x) / step;
     state.body = input.body;
-    if (playback != .locomotion) {
+    state.previous_aim_weight = state.aim_weight;
+    if (input.aiming) state.aim_direction = input.aim_direction;
+    const raising = input.aiming or state.shot_hold_seconds > 0;
+    state.shot_hold_seconds = @max(0, state.shot_hold_seconds - step);
+    state.aim_weight = if (raising) @min(1, state.aim_weight + step / set.aiming.raise_seconds) else @max(0, state.aim_weight - step / set.aiming.lower_seconds);
+    const speed = @abs(state.speed_mps);
+    if (raising) {
+        // Keep the current facing near vertical aim so stick noise cannot
+        // repeatedly reverse the character. Use the normal planted-foot turn.
+        if (@abs(state.aim_direction.x) > 0.1) state.facing_right = state.aim_direction.x > 0;
+    } else if (playback != .locomotion) {
         state.facing_right = input.facing_right;
+    } else if (speed > profile.stop_speed_mps) {
+        state.facing_right = state.speed_mps > 0;
+    }
+    if (playback != .locomotion) {
         if (playback == .run) state.phase += dt / set.motion.cycle_seconds;
+        updateWeaponAngle(set, state, raising);
         return;
     }
-    const speed = @abs(state.speed_mps);
-    if (speed > profile.stop_speed_mps) state.facing_right = state.speed_mps > 0;
     const turning = state.facing_right != state.previous_facing_right;
     const action_changed = updateAction(set, state, input, step);
     const supported = state.action != .jump and state.action != .fall;
@@ -865,7 +914,10 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     const stride = if (target_weight == 0) 1 else std.math.clamp(@sqrt(speed / set.motion.reference_speed_mps), profile.stride_min, profile.stride_max);
     state.stride_scale = std.math.lerp(state.stride_scale, stride, 1 - @exp(-step / response));
     if (supported and speed > profile.stop_speed_mps) {
-        state.phase += speed * dt / (set.motion.reference_speed_mps * set.motion.cycle_seconds * state.stride_scale);
+        // Residual travel opposite the aim-facing direction plays the stride
+        // backwards, keeping stance feet moving against the actual displacement.
+        const forward: f64 = if (state.facing_right == (state.speed_mps > 0)) 1 else -1;
+        state.phase += forward * speed * dt / (set.motion.reference_speed_mps * set.motion.cycle_seconds * state.stride_scale);
     }
     state.controls = locomotionControls(set, state);
     actionControls(set, state);
@@ -887,6 +939,7 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
         state.previous_feet = state.feet;
         state.previous_sole_floors = state.sole_floors;
     }
+    updateWeaponAngle(set, state, raising);
 }
 
 pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
@@ -916,6 +969,107 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     return pose;
 }
 
+fn basePlayerPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
+    if (playback == .locomotion) return interpolatedPose(set, state, alpha);
+    const phase = state.previous_phase + (state.phase - state.previous_phase) * alpha;
+    return evaluatePose(set, phase, playback);
+}
+
+fn updateWeaponAngle(set: *const Assets, state: *PlayerState, raising: bool) void {
+    const pose = basePlayerPose(set, state.*, 1);
+    const carry = attachmentTransform(set.rig, pose, "weapon_hand").?;
+    const sign: f32 = if (state.facing_right) 1 else -1;
+    const carry_angle = std.math.atan2(-@sin(carry.angle), @cos(carry.angle) * sign);
+    const before = state.weapon_angle orelse carry_angle;
+    const target = if (raising) std.math.atan2(-state.aim_direction.y, state.aim_direction.x) else carry_angle;
+    const remaining = if (raising) 1 - state.previous_aim_weight else state.previous_aim_weight;
+    const fraction = if (remaining == 0) 1 else @abs(state.aim_weight - state.previous_aim_weight) / remaining;
+    const delta = std.math.atan2(@sin(target - before), @cos(target - before));
+    state.previous_weapon_angle = before;
+    state.weapon_angle = before + delta * fraction;
+}
+
+// Only the weapon arm is overridden. Contact planning and the solved legs are
+// preserved, even when aiming behind the direction of travel.
+pub fn solveAimedPose(set: *const Assets, base: Pose, body: vec.Vec2, facing_right: bool, aim_direction: vec.Vec2, weight: f32, barrel_angle: ?f32) FramePose {
+    const carry = attachmentTransform(set.rig, base, "weapon_hand").?;
+    var result: FramePose = .{
+        .pose = base,
+        .body = body,
+        .facing_right = facing_right,
+        .weapon = attachmentToWorld(set.rig, carry, body, facing_right),
+        .weapon_facing_right = facing_right,
+    };
+    if (weight == 0) return result;
+    const attachment = set.rig.attachments.get("weapon_hand").?;
+    const limb_index = @intFromEnum(if (attachment.joint == .right_hand) Limb.right_arm else Limb.left_arm);
+    const limb = set.rig.limbs[limb_index];
+    const root = base.joints[@intFromEnum(limb.root)];
+    const sign: f32 = if (facing_right) 1 else -1;
+    const local_direction: vec.Vec2 = .{ .x = aim_direction.x * sign, .y = aim_direction.y };
+    const target = vec.add(root, vec.mul(local_direction, set.aiming.hand_distance_m));
+    const blend = weight * weight * (3 - 2 * weight);
+    const hand = base.joints[@intFromEnum(limb.end)];
+    const blended_target = vec.add(hand, vec.mul(vec.subtract(target, hand), blend));
+    const upper = set.rig.lengths[@intFromEnum(limb.middle)];
+    const lower = set.rig.lengths[@intFromEnum(limb.end)];
+    const solution = solveLimb(root, blended_target, upper, lower, limb.bend_sign, reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians));
+    result.pose.joints[@intFromEnum(limb.middle)] = solution.middle;
+    result.pose.joints[@intFromEnum(limb.end)] = solution.end;
+    result.pose.desired_targets[limb_index] = blended_target;
+    result.pose.clamped[limb_index] = solution.clamped;
+    const grip = attachmentTransform(set.rig, result.pose, "weapon_hand").?;
+    result.weapon.position = toWorld(set.rig, grip.position, body, facing_right);
+    // Rotation is tracked continuously by the fixed step: recomputing a shortest
+    // arc between two moving endpoints would jump when they cross +/-pi.
+    const angle = barrel_angle orelse std.math.atan2(-aim_direction.y, aim_direction.x);
+    const horizontal = if (barrel_angle == null or weight == 1) aim_direction.x else @cos(angle);
+    result.weapon_facing_right = if (@abs(horizontal) < 0.000001) facing_right else horizontal > 0;
+    result.weapon.angle = angle + (if (result.weapon_facing_right) @as(f32, 0) else std.math.pi);
+    return result;
+}
+
+pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) ?FramePose {
+    if (assets == null) return null; // The normal sprite fallback remains available.
+    const set = &assets.?;
+    const state = states.get(player_id) orelse {
+        std.log.warn("character_animation.playerFrame: state missing for player {d}", .{player_id});
+        return null;
+    };
+    const p = player.players.get(player_id) orelse {
+        std.log.warn("character_animation.playerFrame: player {d} is missing", .{player_id});
+        return null;
+    };
+    var body = box2d.getState(p.bodyId);
+    const alpha: f64 = if (sampling == .render) time.alpha else 1;
+    if (sampling == .render) {
+        const ent = entity.getEntity(p.bodyId) orelse {
+            std.log.warn("character_animation.playerFrame: entity missing for player {d}", .{player_id});
+            return null;
+        };
+        body = box2d.getInterpolatedState(ent.state, body);
+    }
+    const pose = basePlayerPose(set, state, alpha);
+    const direction = forced_aim orelse state.aim_direction;
+    const weight = if (!player.usesProceduralWeapon(p)) 0 else if (forced_aim != null) 1 else std.math.lerp(state.previous_aim_weight, state.aim_weight, @as(f32, @floatCast(alpha)));
+    const angle = if (forced_aim != null or state.weapon_angle == null) null else std.math.lerp(state.previous_weapon_angle orelse state.weapon_angle.?, state.weapon_angle.?, @as(f32, @floatCast(alpha)));
+    return solveAimedPose(set, pose, vec.fromBox2d(body.pos), state.facing_right, direction, weight, angle);
+}
+
+pub fn holdShotPose(player_id: usize, direction: vec.Vec2) void {
+    if (assets == null) return;
+    const state = states.getPtr(player_id) orelse {
+        std.log.warn("character_animation.holdShotPose: state missing for player {d}", .{player_id});
+        return;
+    };
+    state.aim_direction = direction;
+    state.aim_weight = 1;
+    state.previous_aim_weight = 1;
+    state.shot_hold_seconds = assets.?.aiming.shot_hold_seconds;
+    state.weapon_angle = std.math.atan2(-direction.y, direction.x);
+    state.previous_weapon_angle = state.weapon_angle;
+}
+
 pub fn fixedUpdate(dt: f64) void {
     if (assets == null) return; // Initial asset failure leaves sprite gameplay available.
     for (states.keys()) |player_id| {
@@ -926,10 +1080,6 @@ pub fn fixedUpdate(dt: f64) void {
         if (p.isDead) continue;
         const movement_state = movement.states.get(player_id) orelse {
             std.log.warn("character_animation.fixedUpdate: movement state missing for player {d}", .{player_id});
-            continue;
-        };
-        const input_state = player_input.playerInputs.get(player_id) orelse {
-            std.log.warn("character_animation.fixedUpdate: input state missing for player {d}", .{player_id});
             continue;
         };
         var ground_y: ?f32 = null;
@@ -946,7 +1096,9 @@ pub fn fixedUpdate(dt: f64) void {
             .facing_right = movement_state.facingRight,
             .vertical_speed_mps = relative_velocity.y,
             .separation_speed_mps = if (contact == null) 0 else vec.dot(relative_velocity, contact.?.normal),
-            .crouch_requested = input_state.movementDirection.y < 0,
+            .crouch_requested = movement.locomotionDirection(player_id).y < 0,
+            .aiming = p.isAiming,
+            .aim_direction = p.aimDirection,
         }, dt);
     }
 }
@@ -1052,45 +1204,48 @@ pub fn drawAll() !void {
             continue;
         };
         if (p.isDead) continue;
-        const ent = entity.getEntity(p.bodyId) orelse {
-            std.log.warn("character_animation.drawAll: entity missing for player {d}", .{player_id});
-            continue;
-        };
-        const body = box2d.getInterpolatedState(ent.state, box2d.getState(p.bodyId));
-        const phase = state.previous_phase + (state.phase - state.previous_phase) * time.alpha;
-        const pose = if (playback == .locomotion) interpolatedPose(set, state, time.alpha) else evaluatePose(set, phase, playback);
+        const frame = playerFrame(player_id, .render, null) orelse continue;
+        const pose = frame.pose;
         var points: [jointCount][2]f32 = undefined;
-        for (pose.joints, 0..) |point, index| points[index] = toScreen(toWorld(set.rig, point, vec.fromBox2d(body.pos), state.facing_right));
+        for (pose.joints, 0..) |point, index| points[index] = toScreen(toWorld(set.rig, point, frame.body, state.facing_right));
         const width = @max(1.25 / renderer.zoom, set.rig.line_width * conv.met2pix);
-        const carrying = player.usesCarriedWeapon(p);
+        const carrying = player.usesProceduralWeapon(p);
         const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint; // Validated at load.
-        // Fixed limb identity: right is the far limb even when movement faces left.
+        // Left/right identify anatomical limbs. Turning exchanges their depth,
+        // while the weapon remains attached to the same named hand.
         for ([_]bool{ true, false }) |far| {
+            const right = far == state.facing_right;
+            // Keep the torso between far and near limbs, in the player's color.
+            if (!far) {
+                try gpu.setRenderDrawColor(limbColor(p.color, false));
+                for ([_]Joint{ .chest, .neck }) |joint| {
+                    const parent = set.rig.joints[@intFromEnum(joint)].parent.?;
+                    try drawSegment(points[@intFromEnum(parent)], points[@intFromEnum(joint)], width);
+                }
+                try drawRing(points[@intFromEnum(Joint.head)], set.rig.head_radius * conv.met2pix, width * 0.75);
+                const head = pose.joints[@intFromEnum(Joint.head)];
+                const eye = toScreen(toWorld(set.rig, vec.add(head, .{ .x = set.rig.head_radius * 0.43, .y = set.rig.head_radius * 0.15 }), frame.body, state.facing_right));
+                try drawSegment(.{ eye[0] - width * 0.2, eye[1] }, .{ eye[0] + width * 0.2, eye[1] }, width * 0.6);
+            }
             // Insert the weapon under its hand, using the same solved render pose.
-            const weapon_layer = far == (weapon_joint == .right_hand);
+            const weapon_layer = right == (weapon_joint == .right_hand);
             if (carrying and weapon_layer) {
-                const attachment = attachmentTransform(set.rig, pose, "weapon_hand").?;
-                try player.drawCarriedWeapon(player_id, attachmentToWorld(set.rig, attachment, vec.fromBox2d(body.pos), state.facing_right), state.facing_right);
+                try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
             }
             try gpu.setRenderDrawColor(limbColor(p.color, far));
             for (set.rig.joints) |joint| {
-                if (joint.id == .pelvis or joint.id == .head) continue;
-                const right = @intFromEnum(joint.id) >= @intFromEnum(Joint.right_shoulder);
-                if (right != far) continue;
+                if (joint.id == .pelvis or joint.id == .chest or joint.id == .neck or joint.id == .head) continue;
+                const right_joint = @intFromEnum(joint.id) >= @intFromEnum(Joint.right_shoulder);
+                if (right_joint != right) continue;
                 try drawSegment(points[@intFromEnum(joint.parent.?)], points[@intFromEnum(joint.id)], width);
             }
-            const ankle: Joint = if (far) .right_ankle else .left_ankle;
-            const heel: Joint = if (far) .right_heel else .left_heel;
+            const ankle: Joint = if (right) .right_ankle else .left_ankle;
+            const heel: Joint = if (right) .right_heel else .left_heel;
             try drawSegment(points[@intFromEnum(ankle)], points[@intFromEnum(heel)], width * 0.6);
             if (carrying and weapon_layer) try drawRing(points[@intFromEnum(weapon_joint)], width * 0.6, width * 0.55);
         }
-        try gpu.setRenderDrawColor(limbColor(p.color, false));
-        try drawRing(points[@intFromEnum(Joint.head)], set.rig.head_radius * conv.met2pix, width * 0.75);
-        const head = pose.joints[@intFromEnum(Joint.head)];
-        const eye = toScreen(toWorld(set.rig, vec.add(head, .{ .x = set.rig.head_radius * 0.43, .y = set.rig.head_radius * 0.15 }), vec.fromBox2d(body.pos), state.facing_right));
-        try drawSegment(.{ eye[0] - width * 0.2, eye[1] }, .{ eye[0] + width * 0.2, eye[1] }, width * 0.6);
         if (!show_diagnostics) continue;
-        try drawDiagnostics(set.rig, pose, points, vec.fromBox2d(body.pos), state.facing_right, width);
+        try drawDiagnostics(set.rig, pose, points, frame.body, state.facing_right, width);
         if (playback != .locomotion) continue;
         try gpu.setRenderDrawColor(.{ .r = 70, .g = 255, .b = 120, .a = 255 });
         for (state.feet) |foot| {
