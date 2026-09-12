@@ -7,6 +7,7 @@ __pycache__/
 *.pyc
 .codex_pdf_tools/
 
+videos/
 drafts/
 
 # Generated music/reference outputs
