@@ -5,6 +5,7 @@ const vec = @import("vector.zig");
 const box2d = @import("box2d.zig");
 const player = @import("player.zig");
 const movement = @import("movement.zig");
+const player_input = @import("player_input.zig");
 const entity = @import("entity.zig");
 const time = @import("time.zig");
 const gpu = @import("gpu.zig");
@@ -55,6 +56,7 @@ pub const Control = enum(u8) {
 };
 pub const View = enum { sprites, stick, overlay };
 pub const Playback = enum { locomotion, neutral, run };
+pub const Action = enum { grounded, jump, fall, land, crouch };
 pub const ReviewAction = enum { view, pose, diagnostics, reload, slow_motion, zoom };
 pub const Interpolation = enum { step, linear, bezier };
 const jointCount = std.meta.fields(Joint).len;
@@ -105,7 +107,8 @@ pub const Motion = struct {
     reference_speed_mps: f32,
     loop: bool,
 };
-pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData };
+pub const Actions = struct { settings: data.CharacterActionsData, jump: Motion, fall: Motion, crouch: Motion };
+pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData, actions: Actions };
 pub const Diagnostic = data.CharacterAssetDiagnostic;
 pub const FootState = struct {
     locked: bool = false,
@@ -119,6 +122,11 @@ pub const LocomotionInput = struct {
     // Only an upward-facing static contact provides a flat planting plane.
     ground_y: ?f32,
     facing_right: bool,
+    // Box2D convention: positive is downward; relative to support when present.
+    vertical_speed_mps: f32,
+    // Positive along the support normal means moving away from the surface.
+    separation_speed_mps: f32,
+    crouch_requested: bool = false,
 };
 pub const PlayerState = struct {
     previous_phase: f64 = 0,
@@ -128,6 +136,11 @@ pub const PlayerState = struct {
     body: vec.Vec2 = vec.zero,
     previous_body: vec.Vec2 = vec.zero,
     speed_mps: f32 = 0,
+    vertical_speed_mps: f32 = 0,
+    action: Action = .grounded,
+    action_seconds: f32 = 0,
+    landing_strength: f32 = 0,
+    contact_intent: [2]bool = .{ false, false },
     run_weight: f32 = 0,
     intensity: f32 = 0,
     stride_scale: f32 = 1,
@@ -140,7 +153,8 @@ pub const PlayerState = struct {
     previous_controls: [controlCount]f32 = @splat(0),
     controls: [controlCount]f32 = @splat(0),
     previous_facing_right: bool = false,
-    turn_offsets: [controlCount]f32 = @splat(0),
+    transition_offsets: [controlCount]f32 = @splat(0),
+    transition_seconds: f32 = 0.14,
 };
 pub const Pose = struct {
     joints: [jointCount]vec.Vec2,
@@ -318,6 +332,27 @@ fn validateLocomotion(file: data.CharacterLocomotionData, rig: Rig, motion: Moti
     }
 }
 
+fn validateActions(file: data.CharacterActionsData, rig: Rig, detail: *Diagnostic) !Actions {
+    if (file.schema_version != 1) return invalid(detail, "schema_version: expected 1", .{});
+    if (file.id.len == 0 or file.id.len > 64) return invalid(detail, "id: expected 1..64 bytes", .{});
+    if (file.blend_seconds < 0.01 or file.blend_seconds > 0.5) return invalid(detail, "blend_seconds: expected 0.01..0.5 seconds", .{});
+    if (file.takeoff_speed_mps < 0.01 or file.takeoff_speed_mps > 2) return invalid(detail, "takeoff_speed_mps: expected 0.01..2", .{});
+    if (file.min_landing_speed_mps < 0 or file.full_landing_speed_mps <= file.min_landing_speed_mps or file.full_landing_speed_mps > 100) return invalid(detail, "full_landing_speed_mps: expected 0 <= min_landing_speed_mps < full_landing_speed_mps <= 100", .{});
+    if (file.crouch_hold_phase <= 0 or file.crouch_hold_phase >= 1) return invalid(detail, "crouch_hold_phase: expected a phase strictly between 0 and 1", .{});
+    var actions: Actions = .{ .settings = file, .jump = undefined, .fall = undefined, .crouch = undefined };
+    inline for (.{ "jump", "fall", "crouch" }) |name| {
+        const clip = @field(file, name);
+        @field(actions, name) = validateMotion(clip, rig, detail) catch {
+            const message = detail.message;
+            return invalid(detail, "{s}.{s}", .{ name, message[0..detail.length] });
+        };
+        if (clip.loop or clip.reference_speed_mps != 0) return invalid(detail, "{s}: action clips must be non-looping with reference_speed_mps = 0", .{name});
+        if (!std.mem.eql(u8, name, "crouch") and clip.contacts.len != 0) return invalid(detail, "{s}.contacts: airborne clips cannot plant feet", .{name});
+    }
+    if (std.mem.eql(u8, file.jump.id, file.fall.id) or std.mem.eql(u8, file.jump.id, file.crouch.id) or std.mem.eql(u8, file.fall.id, file.crouch.id)) return invalid(detail, "jump/fall/crouch.id: expected distinct clip IDs", .{});
+    return actions;
+}
+
 // Consumes the decoded data on both success and failure. Successful preparation
 // transfers its arena to the runtime assets; failed validation releases it here.
 pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !Assets {
@@ -329,7 +364,9 @@ pub fn prepareAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !A
     const motion = try validateMotion(files.motion, rig, detail);
     detail.file = data.characterLocomotionPath;
     try validateLocomotion(files.locomotion, rig, motion, detail);
-    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = files.locomotion };
+    detail.file = data.characterActionsPath;
+    const actions = try validateActions(files.actions, rig, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = files.locomotion, .actions = actions };
 }
 
 fn cubic(a: f32, b: f32, c: f32, d: f32, t: f32) f32 {
@@ -645,10 +682,62 @@ fn reachableFoot(rig: Rig, controls: [controlCount]f32, index: usize, ankle: vec
     return distance >= limits[0] and distance <= limits[1] - 0.002;
 }
 
+fn updateAction(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) bool {
+    const settings = set.actions.settings;
+    const previous = state.action;
+    const airborne = previous == .jump or previous == .fall;
+    const supported = input.supported and input.separation_speed_mps <= settings.takeoff_speed_mps;
+    const impact_speed = @max(state.vertical_speed_mps, input.vertical_speed_mps);
+    state.vertical_speed_mps = input.vertical_speed_mps;
+    state.action_seconds += dt;
+    if (!supported) {
+        state.action = if (input.vertical_speed_mps < 0) .jump else .fall;
+        state.landing_strength = 0;
+    } else if (input.crouch_requested) {
+        state.action = .crouch;
+        state.landing_strength = 0;
+    } else if (airborne) {
+        state.landing_strength = std.math.clamp((impact_speed - settings.min_landing_speed_mps) / (settings.full_landing_speed_mps - settings.min_landing_speed_mps), 0, 1);
+        state.action = if (state.landing_strength > 0) .land else .grounded;
+    } else if (previous == .crouch or (previous == .land and state.action_seconds >= set.actions.crouch.cycle_seconds)) {
+        state.action = .grounded;
+        state.landing_strength = 0;
+    }
+    if (state.action == previous) return false;
+    state.action_seconds = 0;
+    // Airborne transitions discard stance state. Finishing a grounded landing
+    // preserves the running/standing contacts that are already in progress.
+    if (airborne or state.action == .jump or state.action == .fall) state.feet = .{ .{}, .{} };
+    return true;
+}
+
+fn actionControls(set: *const Assets, state: *PlayerState) void {
+    const moving = @abs(state.speed_mps) > set.locomotion.stop_speed_mps;
+    const run_phase = clipPhase(set.motion, state.phase);
+    for (&state.contact_intent, 0..) |*intent, index| intent.* = if (moving) contactIntent(set.motion, @enumFromInt(index), run_phase) else state.run_weight < 0.02;
+    if (state.action == .grounded) return;
+    const clip = switch (state.action) {
+        .jump => set.actions.jump,
+        .fall => set.actions.fall,
+        .land, .crouch => set.actions.crouch,
+        .grounded => unreachable,
+    };
+    const phase = if (state.action == .crouch) set.actions.settings.crouch_hold_phase else clipPhase(clip, state.action_seconds / clip.cycle_seconds);
+    const compression = state.action == .land or state.action == .crouch;
+    const strength = if (state.action == .land) state.landing_strength else 1;
+    // Landing adds compression relative to the rig's neutral pose. Locomotion
+    // continues underneath it, including foot trajectories and stance timing.
+    for (&state.controls, clip.tracks, set.rig.neutral) |*control, track, neutral| {
+        const value = evaluateTrack(track, phase);
+        control.* = if (compression) control.* + (value - neutral) * strength else value;
+    }
+    if (compression and moving) return;
+    state.contact_intent = .{ contactIntent(clip, .left_leg, phase), contactIntent(clip, .right_leg, phase) };
+}
+
 fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) void {
     const profile = set.locomotion;
     const sign: f32 = if (state.facing_right) 1 else -1;
-    const phase = clipPhase(set.motion, state.phase);
     const moving = @abs(state.speed_mps) > profile.stop_speed_mps;
     const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
     state.sole_floors = @splat(null);
@@ -659,9 +748,9 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
         const toe_can_support = offsets[index * 2 + 1].y >= -0.000001;
         const desired = vec.Vec2{ .x = state.controls[x], .y = state.controls[y] };
         const desired_toe = toWorld(set.rig, vec.add(desired, toe_offset), input.body, state.facing_right);
-        const intent = if (moving) contactIntent(set.motion, @enumFromInt(index), phase) else state.run_weight < 0.02;
+        const intent = state.contact_intent[index];
         if (!intent or !moving) foot.blocked = false;
-        const supported = input.ground_y != null and input.supported;
+        const supported = input.ground_y != null and input.supported and state.action != .jump and state.action != .fall;
         if (foot.locked) {
             const correction = vec.subtract(foot.anchor, desired_toe);
             const ankle = vec.add(desired, .{ .x = correction.x * sign, .y = -correction.y });
@@ -747,28 +836,32 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     const speed = @abs(state.speed_mps);
     if (speed > profile.stop_speed_mps) state.facing_right = state.speed_mps > 0;
     const turning = state.facing_right != state.previous_facing_right;
+    const action_changed = updateAction(set, state, input, step);
+    const supported = state.action != .jump and state.action != .fall;
     state.foot_heading = std.math.lerp(state.foot_heading, if (state.facing_right) @as(f32, 0) else 1, 1 - @exp(-step / profile.turn_seconds));
-    const target_weight: f32 = if (input.supported and speed > profile.stop_speed_mps) 1 else 0;
+    const target_weight: f32 = if (supported and speed > profile.stop_speed_mps) 1 else 0;
     const response = if (target_weight > state.run_weight) profile.start_seconds else profile.stop_seconds;
     state.run_weight = std.math.lerp(state.run_weight, target_weight, 1 - @exp(-step / response));
     const target_intensity = std.math.clamp(speed / profile.full_run_speed_mps, 0, 1);
     state.intensity = std.math.lerp(state.intensity, target_intensity, 1 - @exp(-step / response));
     const stride = if (target_weight == 0) 1 else std.math.clamp(@sqrt(speed / set.motion.reference_speed_mps), profile.stride_min, profile.stride_max);
     state.stride_scale = std.math.lerp(state.stride_scale, stride, 1 - @exp(-step / response));
-    if (input.supported and speed > profile.stop_speed_mps) {
+    if (supported and speed > profile.stop_speed_mps) {
         state.phase += speed * dt / (set.motion.reference_speed_mps * set.motion.cycle_seconds * state.stride_scale);
     }
     state.controls = locomotionControls(set, state);
-    if (turning) {
-        const previous = mirrorControls(set.rig, state.previous_controls);
-        for (&state.turn_offsets, previous, state.controls) |*offset, before, after| offset.* = before - after;
+    actionControls(set, state);
+    if (!initialize and (turning or action_changed)) {
+        const previous = if (turning) mirrorControls(set.rig, state.previous_controls) else state.previous_controls;
+        for (&state.transition_offsets, previous, state.controls) |*offset, before, after| offset.* = before - after;
+        state.transition_seconds = if (turning) profile.turn_seconds else set.actions.settings.blend_seconds;
         // Existing valid contacts survive a turn. Their corrections are already
         // included in the mirrored controls; plantFeet recomputes them once.
         for (&state.feet) |*foot| foot.correction = vec.zero;
     }
-    for (&state.controls, &state.turn_offsets) |*control, *offset| {
+    for (&state.controls, &state.transition_offsets) |*control, *offset| {
         control.* += offset.*;
-        offset.* *= @exp(-step / profile.turn_seconds);
+        offset.* *= @exp(-step / state.transition_seconds);
     }
     plantFeet(set, state, input, step);
     if (initialize) {
@@ -801,8 +894,7 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     }
     clearSoles(set.rig, &controls, offsets, floors, body, state.facing_right);
     var pose = solvePoseWithFeet(set.rig, controls, offsets);
-    const phase = clipPhase(set.motion, state.previous_phase + (state.phase - state.previous_phase) * alpha);
-    pose.contact_intent = .{ contactIntent(set.motion, .left_leg, phase), contactIntent(set.motion, .right_leg, phase) };
+    pose.contact_intent = state.contact_intent;
     return pose;
 }
 
@@ -818,14 +910,25 @@ pub fn fixedUpdate(dt: f64) void {
             std.log.warn("character_animation.fixedUpdate: movement state missing for player {d}", .{player_id});
             continue;
         };
+        const input_state = player_input.playerInputs.get(player_id) orelse {
+            std.log.warn("character_animation.fixedUpdate: input state missing for player {d}", .{player_id});
+            continue;
+        };
         var ground_y: ?f32 = null;
         const contact = movement_state.groundState.groundContact;
         if (contact != null and contact.?.normal.y < -0.999 and box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody) ground_y = contact.?.worldPoint.y;
+        const velocity = box2d.c.b2Body_GetLinearVelocity(p.bodyId);
+        // A rising platform should not look like a jump away from its support.
+        const support_velocity = if (contact == null or !movement_state.groundState.supported) vec.zero else vec.fromBox2d(box2d.c.b2Body_GetWorldPointVelocity(contact.?.bodyId, vec.toBox2d(contact.?.worldPoint)));
+        const relative_velocity = vec.subtract(vec.fromBox2d(velocity), support_velocity);
         updatePlayer(player_id, .{
             .body = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId)),
             .supported = movement_state.groundState.supported,
             .ground_y = ground_y,
             .facing_right = movement_state.facingRight,
+            .vertical_speed_mps = relative_velocity.y,
+            .separation_speed_mps = if (contact == null) 0 else vec.dot(relative_velocity, contact.?.normal),
+            .crouch_requested = input_state.movementDirection.y < 0,
         }, dt);
     }
 }
@@ -1007,7 +1110,7 @@ pub fn drawStatus() !void {
             return;
         };
         const state = states.get(cam.playerId) orelse return; // The startup camera can precede player creation.
-        const motion_status = try std.fmt.bufPrintZ(&buffer, "{d:.1} m/s  run {d:.2}  stride {d:.2}  feet {s}/{s}", .{ state.speed_mps, state.run_weight, state.stride_scale, if (state.feet[0].locked) "planted" else "free", if (state.feet[1].locked) "planted" else "free" });
+        const motion_status = try std.fmt.bufPrintZ(&buffer, "{s}  x {d:.1} y {d:.1} m/s  run {d:.2}  stride {d:.2}  feet {s}/{s}", .{ @tagName(state.action), state.speed_mps, state.vertical_speed_mps, state.run_weight, state.stride_scale, if (state.feet[0].locked) "planted" else "free", if (state.feet[1].locked) "planted" else "free" });
         try text.write(.small, motion_status, .{ .x = 12, .y = height - 122 });
     }
     if (!reload_failed) return;

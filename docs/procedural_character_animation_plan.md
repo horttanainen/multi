@@ -5,8 +5,12 @@ control tracks; full independent review and corrections completed. The exact
 dense run JSON remains as a regression reference.
 Phase two is accepted by the user, including the profile rename to `run.json`;
 independent review, corrections and validation are complete.
+Phase 3A is accepted by the user: jumping, falling, landing and the shared crouch
+pose (held with Down while grounded). Independent review and validation passed.
 Next step: agree on the next commit-sized phase before implementing it.
-The current scope and test instructions are in
+The accepted phase's scope and test instructions are in
+[character_animation_phase3a.md](character_animation_phase3a.md).
+The accepted running implementation is documented in
 [character_animation_phase2.md](character_animation_phase2.md).
 Run instructions, the schema specification, and the acceptance checklist are in
 [character_animation_phase1.md](character_animation_phase1.md).
@@ -74,15 +78,17 @@ The first implementation establishes a small supported format and validates it. 
 
 ### Asset responsibilities
 
-Use three logically distinct asset types, with stable IDs and explicit schema versions:
+Use the following asset types, with stable IDs and explicit schema versions:
 
 | Asset | Contents |
 | --- | --- |
 | Rig | Named joints/bones, hierarchy, reference offsets, lengths, bend conventions, limits, and named attachment points. |
 | Motion clip | Named control tracks, reference cycle duration/speed, looping policy, contact intervals, and optional named phase cues. |
 | Locomotion profile | Clip references, speed-to-cadence/stride relationships, transition settings, ground-query rules, and limits on procedural adjustments. |
+| Action bundle | Named non-looping motion clips plus transition and impact-response settings. Reuses the motion clip schema. |
 
-Proposed locations are `character_rigs/`, `character_motions/`, and `character_locomotion/`. Create real assets during implementation, once the minimal loader and first pose work together.
+The implemented locations are `character_rigs/`, `character_motions/`,
+`character_locomotion/`, and `character_actions/`.
 
 Separate rig proportions from the running clip so later artwork or a changed character size does not require silently changing the meaning of its animation data. Locomotion parameters must remain editable data even when they are not naturally represented as animation curves.
 
@@ -232,6 +238,17 @@ for rendering, with stance constraints reapplied after interpolation.
 Add jump, fall, landing, aiming/grappling, and wall-slide pose behavior. Add slope/step adaptation and then moving/destructible rubble, using the same control tracks and bounded corrections.
 
 Validate transitions with the real movement controller. Keep gameplay collision behavior independent from cosmetic pose corrections.
+
+Split this work into independently reviewed commits:
+
+- **3A (current):** JSON-authored jump, fall and shared crouch/landing clips; movement-driven
+  transitions, impact-scaled landing compression, foot release/reacquisition, and
+  interruption/reset coverage. Extend `data.zig`, the existing character component,
+  curve evaluator, IK, contact solver, diagnostics and validation script.
+- **3B:** Aiming/grappling and wall poses, with explicit control priorities and
+  attachment handling. Agree on the precise scope before implementation.
+- **3C:** Static slopes and steps, followed by a separately reviewed moving and
+  destructible rubble phase. Plan the terrain-query/contact changes first.
 
 ### 4. Blender authoring after the setup works
 

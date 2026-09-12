@@ -12,20 +12,24 @@ const fs = @import("src/fs.zig");
 const runtime = @import("src/runtime.zig");
 const box2d = @import("src/box2d.zig");
 const collision = @import("src/collision.zig");
+const player = @import("src/player.zig");
+const movement = @import("src/movement.zig");
+const player_input = @import("src/player_input.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
+const actions_json = @embedFile("character_actions/airborne.json");
 const motion_json = @embedFile("character_motions/run_reference.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 
 fn load() !animation.Assets {
     var detail: animation.Diagnostic = .{};
-    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, &detail), &detail);
+    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, &detail), &detail);
 }
 
 fn replaceFromJson(rig_bytes: []const u8, motion_bytes: []const u8, detail: *data.CharacterAssetDiagnostic) !void {
-    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, detail), detail);
+    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_json, detail), detail);
 }
 
 test "bounded file reading loads the complete motion and rejects oversized or missing files" {
@@ -50,7 +54,9 @@ test "decoded character data owns its strings and curves after the source buffer
         defer std.testing.allocator.free(rig_bytes);
         const motion_bytes = try std.testing.allocator.dupe(u8, motion_json);
         defer std.testing.allocator.free(motion_bytes);
-        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, &detail);
+        const actions_bytes = try std.testing.allocator.dupe(u8, actions_json);
+        defer std.testing.allocator.free(actions_bytes);
+        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_bytes, &detail);
     };
     defer files.arena.deinit();
     try std.testing.expectEqualStrings("humanoid_v1", files.rig.id);
@@ -61,6 +67,9 @@ test "decoded character data owns its strings and curves after the source buffer
         try std.testing.expect(track.keys.len >= 2);
         try std.testing.expectEqual(@as(f32, 1), track.keys[track.keys.len - 1].phase);
     }
+    try std.testing.expectEqualStrings("airborne_v1", files.actions.id);
+    try std.testing.expectEqualStrings("jump_reference_v1", files.actions.jump.id);
+    try std.testing.expectEqual(@as(f32, 1), files.actions.crouch.tracks[0].keys[2].phase);
 }
 
 test "data file loading transfers ownership to runtime assets and reproduces the reference poses" {
@@ -346,7 +355,7 @@ test "compact Bezier run preserves dense controls, solved poses, and contact int
     var compact = try load();
     defer compact.arena.deinit();
     var detail: animation.Diagnostic = .{};
-    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, &detail), &detail);
+    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, &detail), &detail);
     defer dense.arena.deinit();
     try std.testing.expectEqual(dense.motion.cycle_seconds, compact.motion.cycle_seconds);
     try std.testing.expectEqual(dense.motion.reference_speed_mps, compact.motion.reference_speed_mps);
@@ -587,7 +596,7 @@ test "character asset array order does not define joint, limb, control, contact,
     const reordered_motion = try std.json.Stringify.valueAlloc(std.testing.allocator, motion.value, .{});
     defer std.testing.allocator.free(reordered_motion);
     var detail: animation.Diagnostic = .{};
-    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, &detail), &detail);
+    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, actions_json, &detail), &detail);
     defer reordered.arena.deinit();
     for (0..12) |index| {
         const phase = @as(f64, @floatFromInt(index)) / 12;
@@ -618,7 +627,7 @@ fn beginLocomotion() !box2d.c.b2BodyId {
 }
 
 fn advanceRun(x: f32, supported: bool) void {
-    animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = supported, .ground_y = if (supported) 0.3 else null, .facing_right = true }, 1.0 / 60.0);
+    animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = supported, .vertical_speed_mps = 0, .separation_speed_mps = 0, .ground_y = if (supported) 0.3 else null, .facing_right = true }, 1.0 / 60.0);
 }
 
 fn checkBones(rig: animation.Rig, pose: animation.Pose) !void {
@@ -752,7 +761,7 @@ test "invalid locomotion JSON preserves the complete installed pose and contacts
         const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, locomotion_json, case[0], case[1]);
         defer std.testing.allocator.free(malformed);
         const result = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, actions_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -873,4 +882,398 @@ test "toe planting uses the actual heel geometry and preserves interpolated floo
             }
         }
     }
+}
+
+fn advanceAir(body: vec.Vec2, vertical_speed: f32, supported: bool) animation.PlayerState {
+    animation.updatePlayer(7, .{ .body = body, .vertical_speed_mps = vertical_speed, .separation_speed_mps = -vertical_speed, .supported = supported, .ground_y = if (supported) 0.3 else null, .facing_right = true }, 1.0 / 60.0);
+    return animation.states.get(7).?;
+}
+
+fn checkAirPose(sample: animation.PlayerState) !void {
+    const set = &animation.assets.?;
+    for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+        errdefer std.log.err("air pose failed in {s} at alpha {d}, body ({d}, {d})", .{ @tagName(sample.action), alpha, sample.body.x, sample.body.y });
+        const pose = animation.interpolatedPose(set, sample, alpha);
+        try checkBones(set.rig, pose);
+        const body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+        for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+            const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], body, sample.facing_right);
+            errdefer std.log.err("{s} floor depth {d}", .{ @tagName(joint), point.y - 0.3 });
+            try std.testing.expect(point.y <= 0.3002);
+        }
+        for (sample.previous_feet, sample.feet, [_]animation.Joint{ .left_toe, .right_toe }) |before, foot, toe| {
+            if (!before.locked or !foot.locked or !std.meta.eql(before.anchor, foot.anchor)) continue;
+            try nearPoint(foot.anchor, animation.toWorld(set.rig, pose.joints[@intFromEnum(toe)], body, sample.facing_right), 0.00003);
+        }
+    }
+    if (sample.action != .jump and sample.action != .fall) return;
+    try std.testing.expectEqual([2]bool{ false, false }, sample.contact_intent);
+    for (sample.feet) |foot| try std.testing.expect(!foot.locked);
+}
+
+test "airborne clips retain bone lengths and reach their authored controls without clamping" {
+    var set = try load();
+    defer set.arena.deinit();
+    for ([_]animation.Motion{ set.actions.jump, set.actions.fall, set.actions.crouch }) |clip| {
+        for (0..241) |tick| {
+            var controls = set.rig.neutral;
+            for (&controls, clip.tracks) |*control, track| control.* = animation.evaluateTrack(track, @as(f32, @floatFromInt(tick)) / 240);
+            const pose = animation.solvePose(set.rig, controls);
+            try checkBones(set.rig, pose);
+            for (pose.clamped) |clamped| try std.testing.expect(!clamped);
+        }
+    }
+}
+
+test "takeoff ignores lingering support and falling, air jumps, landing interruptions and resets recover" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    const planted = animation.states.get(7).?;
+    var sample = advanceAir(.{ .x = 0, .y = -0.08 }, -5, true);
+    try std.testing.expectEqual(animation.Action.jump, sample.action);
+    try std.testing.expectEqual(planted.phase, sample.phase);
+    try checkAirPose(sample);
+    // The first action frame retains the previous controls, releasing anchors
+    // without snapping the feet to the authored takeoff pose.
+    for (planted.controls, sample.controls) |before, after| try std.testing.expectApproxEqAbs(before, after, 0.000001);
+    for (0..15) |_| sample = advanceAir(.{ .x = 0, .y = -1 }, -2, false);
+    sample = advanceAir(.{ .x = 0, .y = -1 }, 0, false);
+    try std.testing.expectEqual(animation.Action.fall, sample.action);
+    try checkAirPose(sample);
+    sample = advanceAir(.{ .x = 0, .y = -1.1 }, -6, false);
+    try std.testing.expectEqual(animation.Action.jump, sample.action);
+    try std.testing.expectEqual(@as(f32, 0), sample.action_seconds);
+    sample = advanceAir(.{ .x = 0, .y = -0.2 }, 12, false);
+    sample = advanceAir(vec.zero, 0, true);
+    try std.testing.expectEqual(animation.Action.land, sample.action);
+    try std.testing.expect(sample.landing_strength > 0.7);
+    try checkAirPose(sample);
+    sample = advanceAir(.{ .x = 0, .y = -0.1 }, -8, true);
+    try std.testing.expectEqual(animation.Action.jump, sample.action);
+    try std.testing.expectEqual(@as(f32, 0), sample.landing_strength);
+    try checkAirPose(sample);
+    // Spawning/teleporting directly into support must not invent an impact.
+    sample = advanceAir(.{ .x = 10, .y = 0 }, 0, true);
+    try std.testing.expectEqual(animation.Action.grounded, sample.action);
+    try std.testing.expectEqual(@as(f32, 0), sample.landing_strength);
+    animation.resetPlayer(7);
+    sample = advanceAir(.{ .x = 0, .y = -1 }, 12, false);
+    try std.testing.expectEqual(animation.Action.fall, sample.action);
+    try std.testing.expectEqual(@as(f32, 0), sample.landing_strength);
+    try checkAirPose(sample);
+    // A small step down gets an airborne pose but no hard landing recoil.
+    animation.resetPlayer(7);
+    advanceRun(0, true);
+    sample = advanceAir(.{ .x = 0, .y = -0.01 }, 0.5, false);
+    try std.testing.expectEqual(animation.Action.fall, sample.action);
+    sample = advanceAir(vec.zero, 0, true);
+    try std.testing.expectEqual(animation.Action.grounded, sample.action);
+    for (0..90) |_| sample = advanceAir(vec.zero, 0, true);
+    for (sample.feet) |foot| try std.testing.expect(foot.locked);
+    try checkAirPose(sample);
+}
+
+const AirSample = struct {
+    action: animation.Action,
+    seconds: f32,
+    strength: f32,
+    pose: LocomotionSample,
+};
+
+test "real physics and movement grounding drive jump fall and landing through fixedUpdate" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    runtime.init(std.testing.io);
+    box2d.setGravity(80);
+    const body = try box2d.createBody(box2d.createNonRotatingDynamicBodyDef(vec.zero));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_PLAYER;
+    shape.filter.maskBits = collision.MASK_PLAYER;
+    shape.material.friction = 0;
+    const circle = box2d.c.b2Circle{ .center = .{ .x = 0, .y = 0 }, .radius = player.lowerBodyColliderRadius };
+    const body_shape = box2d.c.b2CreateCircleShape(body, &shape, &circle);
+    var p = std.mem.zeroes(player.Player);
+    p.id = 7;
+    p.bodyId = body;
+    try player.players.put(allocator.allocator, 7, p);
+    defer _ = player.players.swapRemove(7);
+    try player_input.register(7);
+    defer _ = player_input.playerInputs.swapRemove(7);
+    try movement.states.put(allocator.allocator, 7, .{ .bodyId = body, .footSensorShapeId = body_shape, .leftWallSensorId = body_shape, .rightWallSensorId = body_shape, .facingRight = true });
+    defer _ = movement.states.swapRemove(7);
+    try movement.configure(try data.loadMovementData("movements/towerfall_keep.json"));
+    var samples: std.ArrayList(AirSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    var seen: [std.meta.fields(animation.Action).len]bool = @splat(false);
+    var landing_contacts: usize = 0;
+    var early_landing_contacts: usize = 0;
+    for (0..150) |tick| {
+        errdefer std.log.err("physics jump regression failed at tick {d}", .{tick});
+        if (tick == 30) box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 3.2, .y = -12 });
+        if (tick == 95) box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+        box2d.worldStep(1.0 / 60.0, 4);
+        try movement.processSensorEvents();
+        animation.fixedUpdate(1.0 / 60.0);
+        const sample = animation.states.get(7).?;
+        seen[@intFromEnum(sample.action)] = true;
+        if (sample.action == .land and (sample.feet[0].locked or sample.feet[1].locked)) {
+            landing_contacts += 1;
+            if (sample.action_seconds <= 0.1) early_landing_contacts += 1;
+        }
+        try checkAirPose(sample);
+        const set = &animation.assets.?;
+        var joints = animation.interpolatedPose(set, sample, 1).joints;
+        for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
+        try samples.append(std.testing.allocator, .{ .action = sample.action, .seconds = sample.action_seconds, .strength = sample.landing_strength, .pose = .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints } });
+    }
+    for (seen[0..@intFromEnum(animation.Action.crouch)]) |visited| try std.testing.expect(visited);
+    try std.testing.expect(landing_contacts > 0);
+    try std.testing.expect(early_landing_contacts > 0);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/airborne_samples.json", bytes);
+    // Existing moving support remains grounded. Foot anchoring to that support
+    // is a later phase, but its upward velocity must not select the jump clip.
+    box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
+    box2d.c.b2Body_SetLinearVelocity(floor, .{ .x = 0, .y = -3 });
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = -3 });
+    for (0..12) |_| {
+        box2d.worldStep(1.0 / 60.0, 4);
+        try movement.processSensorEvents();
+        animation.fixedUpdate(1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+    }
+    player_input.submit(7, .{ .movementDirection = .{ .x = 0, .y = -1 } });
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(animation.Action.crouch, animation.states.get(7).?.action);
+    player_input.neutralize(7);
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+}
+
+test "invalid action assets preserve live airborne state and successful reload resets it" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const before = advanceAir(.{ .x = 0, .y = -1 }, 8, false);
+    const old_id = animation.assets.?.actions.jump.id.ptr;
+    const previous_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = previous_log_level;
+    var detail: animation.Diagnostic = .{};
+    const cases = [_][2][]const u8{
+        .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"humanoid_v1\"", "\"missing_rig\"" },
+        .{ "\"blend_seconds\": 0.045", "\"blend_seconds\": 0" },
+        .{ "\"takeoff_speed_mps\": 0.2", "\"takeoff_speed_mps\": -1" },
+        .{ "\"full_landing_speed_mps\": 12.0", "\"full_landing_speed_mps\": 0.5" },
+        .{ "\"crouch_hold_phase\": 0.22", "\"crouch_hold_phase\": 1" },
+        .{ "\"loop\": false", "\"loop\": true" },
+        .{ "\"cycle_seconds\": 0.18", "\"cycle_seconds\": 0" },
+        .{ "\"jump_reference_v1\"", "\"fall_reference_v1\"" },
+        .{ "\"contacts\": []", "\"contacts\": [{\"limb\": \"left_leg\", \"start\": 0, \"end\": 1}]" },
+        .{ "\"binding\": \"pelvis_x\"", "\"binding\": \"pelvis_y\"" },
+        .{ "\"value\": 0.04", "\"value\": 1e999" },
+        .{ "\"phase\": 1", "\"phase\": 0.9" },
+    };
+    for (cases) |case| {
+        const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, actions_json, case[0], case[1]);
+        defer std.testing.allocator.free(malformed);
+        try std.testing.expect(!std.mem.eql(u8, malformed, actions_json));
+        const result = replacement: {
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, malformed, &detail) catch |err| break :replacement err;
+            break :replacement animation.replaceAssets(files, &detail);
+        };
+        try std.testing.expectError(error.InvalidCharacterAsset, result);
+        try std.testing.expectEqualStrings(data.characterActionsPath, detail.file);
+        try std.testing.expect(detail.length > 0);
+        try std.testing.expectEqualDeep(before, animation.states.get(7).?);
+        try std.testing.expect(old_id == animation.assets.?.actions.jump.id.ptr);
+    }
+    try replaceFromJson(rig_json, motion_json, &detail);
+    const cleared = animation.states.get(7).?;
+    try std.testing.expect(!cleared.initialized);
+    try std.testing.expectEqual(animation.Action.grounded, cleared.action);
+    try std.testing.expectEqual(@as(f32, 0), cleared.action_seconds);
+    try std.testing.expectEqual(@as(f32, 0), cleared.landing_strength);
+    try std.testing.expectEqual(before.facing_right, cleared.facing_right);
+}
+
+test "hard landings crouch and settle on both feet in either facing, including an airborne turn" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    for ([_]f32{ 0, -0.03 }) |horizontal_step| {
+        animation.resetPlayer(7);
+        var x: f32 = 0;
+        var sample = advanceAir(.{ .x = x, .y = -1 }, 16, false);
+        for (0..24) |_| {
+            x += horizontal_step;
+            sample = advanceAir(.{ .x = x, .y = -1 }, 16, false);
+            try checkAirPose(sample);
+        }
+        try std.testing.expectEqual(horizontal_step == 0, sample.facing_right);
+        sample = advanceAir(.{ .x = x, .y = 0 }, 0, true);
+        try std.testing.expectEqual(animation.Action.land, sample.action);
+        try std.testing.expectEqual(@as(f32, 1), sample.landing_strength);
+        var lowest_pelvis: f32 = 0;
+        var contact_frames: usize = 0;
+        for (0..90) |_| {
+            sample = advanceAir(.{ .x = x, .y = 0 }, 0, true);
+            lowest_pelvis = @min(lowest_pelvis, sample.controls[@intFromEnum(animation.Control.pelvis_y)]);
+            if (sample.action == .land and (sample.feet[0].locked or sample.feet[1].locked)) contact_frames += 1;
+            try checkAirPose(sample);
+        }
+        // In the canonical frame lower pelvis_y increases world Y, putting the
+        // hips closer to the actual floor rather than only leaning the torso.
+        const rig = animation.assets.?.rig;
+        const neutral_hip_height = 0.3 - animation.toWorld(rig, .{ .x = 0, .y = 0 }, .{ .x = x, .y = 0 }, sample.facing_right).y;
+        const compressed_hip_height = 0.3 - animation.toWorld(rig, .{ .x = 0, .y = lowest_pelvis }, .{ .x = x, .y = 0 }, sample.facing_right).y;
+        try std.testing.expect(compressed_hip_height < neutral_hip_height - 0.28);
+        try std.testing.expect(contact_frames > 5);
+        try std.testing.expectEqual(animation.Action.grounded, sample.action);
+        try std.testing.expectEqual(@as(f32, 0), sample.landing_strength);
+        for (sample.feet) |foot| try std.testing.expect(foot.locked);
+        const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+        const neutral = animation.solvePose(animation.assets.?.rig, animation.assets.?.rig.neutral);
+        // Keep the acquired landing stance; only the upper body returns to the
+        // neutral coordinates. Both foot anchors must remain stable afterward.
+        for ([_]animation.Joint{ .pelvis, .chest, .neck, .head, .left_hand, .right_hand }) |joint| try nearPoint(pose.joints[@intFromEnum(joint)], neutral.joints[@intFromEnum(joint)], 0.001);
+        for (0..60) |_| sample = advanceAir(.{ .x = x, .y = 0 }, 0, true);
+        const settled = animation.interpolatedPose(&animation.assets.?, sample, 1);
+        for (pose.joints, settled.joints) |a, b| try nearPoint(a, b, 0.00002);
+    }
+}
+
+test "uphill travel stays grounded until velocity separates from the support normal" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    var input: animation.LocomotionInput = .{ .body = .{ .x = 0.05, .y = -0.05 }, .vertical_speed_mps = -3, .separation_speed_mps = 0, .supported = true, .ground_y = null, .facing_right = true };
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+    input.body = .{ .x = 0.1, .y = -0.15 };
+    input.vertical_speed_mps = -6;
+    input.separation_speed_mps = 3;
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    const sample = animation.states.get(7).?;
+    try std.testing.expectEqual(animation.Action.jump, sample.action);
+    try checkAirPose(sample);
+}
+
+test "landing compression lowers the hips while preserving walking and running foot paths and contacts" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    try animation.register(8);
+    for ([_]f32{ 0.5, 9 }) |speed| {
+        animation.resetPlayer(7);
+        _ = advanceAir(.{ .x = 0, .y = -1 }, 16, false);
+        for (0..24) |_| _ = advanceAir(.{ .x = 0, .y = -1 }, 16, false);
+        var sample = advanceAir(vec.zero, 0, true);
+        try std.testing.expectEqual(@as(f32, 1), sample.landing_strength);
+        // A matching player with zero compression provides the locomotion pose.
+        // Their feet should follow the same paths even at full impact strength.
+        animation.states.getPtr(8).?.* = sample;
+        animation.states.getPtr(8).?.landing_strength = 0;
+        var x: f32 = 0;
+        var saw_compression = false;
+        var minimum_ankle_x: f32 = 20;
+        var maximum_ankle_x: f32 = -20;
+        for (0..24) |_| {
+            x += speed / 60;
+            const input: animation.LocomotionInput = .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true };
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            animation.updatePlayer(8, input, 1.0 / 60.0);
+            sample = animation.states.get(7).?;
+            const baseline = animation.states.get(8).?;
+            const pelvis_y = @intFromEnum(animation.Control.pelvis_y);
+            if (sample.controls[pelvis_y] < baseline.controls[pelvis_y] - 0.07) saw_compression = true;
+            for ([_]animation.Control{ .left_foot_x, .left_foot_y, .left_foot_angle, .right_foot_x, .right_foot_y, .right_foot_angle }) |control| try std.testing.expectApproxEqAbs(baseline.controls[@intFromEnum(control)], sample.controls[@intFromEnum(control)], 0.000002);
+            const phase = animation.clipPhase(animation.assets.?.motion, sample.phase);
+            for (sample.contact_intent, 0..) |intent, index| try std.testing.expectEqual(animation.contactIntent(animation.assets.?.motion, @enumFromInt(index), phase), intent);
+            try checkAirPose(sample);
+            if (sample.action != .land) continue;
+            minimum_ankle_x = @min(minimum_ankle_x, sample.controls[@intFromEnum(animation.Control.left_foot_x)]);
+            maximum_ankle_x = @max(maximum_ankle_x, sample.controls[@intFromEnum(animation.Control.left_foot_x)]);
+        }
+        try std.testing.expect(saw_compression);
+        try std.testing.expect(maximum_ankle_x - minimum_ankle_x > 0.03);
+    }
+}
+
+test "ascent keeps both hands above the head and descent lowers them" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    var sample: animation.PlayerState = undefined;
+    for (0..30) |tick| {
+        sample = advanceAir(.{ .x = 0, .y = -1 }, -4, false);
+        try checkAirPose(sample);
+        if (tick < 8) continue;
+        const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+        for ([_]animation.Joint{ .left_hand, .right_hand }) |hand| try std.testing.expect(pose.joints[@intFromEnum(hand)].y > pose.joints[@intFromEnum(animation.Joint.head)].y + 0.08);
+    }
+    const rising = animation.interpolatedPose(&animation.assets.?, sample, 1);
+    for (0..24) |_| sample = advanceAir(.{ .x = 0, .y = -1 }, 4, false);
+    const falling = animation.interpolatedPose(&animation.assets.?, sample, 1);
+    for ([_]animation.Joint{ .left_hand, .right_hand }, [_]animation.Joint{ .left_shoulder, .right_shoulder }) |hand, shoulder| {
+        try std.testing.expect(falling.joints[@intFromEnum(hand)].y < rising.joints[@intFromEnum(hand)].y - 0.15);
+        try std.testing.expect(falling.joints[@intFromEnum(hand)].y > falling.joints[@intFromEnum(shoulder)].y + 0.05);
+    }
+    try checkAirPose(sample);
+}
+
+test "held crouch keeps the hips low while standing and moving, and releases into standing or jumping" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    runtime.init(std.testing.io);
+    var samples: std.ArrayList(AirSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ 0, 0.5, 3.2, 9, -3.2 }) |speed| {
+        animation.resetPlayer(7);
+        advanceRun(0, true);
+        var x: f32 = 0;
+        var sample: animation.PlayerState = undefined;
+        var contact_frames: usize = 0;
+        for (0..120) |tick| {
+            x += speed / 60;
+            animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
+            sample = animation.states.get(7).?;
+            try std.testing.expectEqual(animation.Action.crouch, sample.action);
+            try checkAirPose(sample);
+            if (tick < 30) continue;
+            try std.testing.expect(sample.controls[@intFromEnum(animation.Control.pelvis_y)] < -0.26);
+            if (sample.feet[0].locked or sample.feet[1].locked) contact_frames += 1;
+            const set = &animation.assets.?;
+            var joints = animation.interpolatedPose(set, sample, 1).joints;
+            for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
+            try samples.append(std.testing.allocator, .{ .action = sample.action, .seconds = sample.action_seconds, .strength = 1, .pose = .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints } });
+        }
+        try std.testing.expect(contact_frames > 10);
+        try std.testing.expectEqual(speed == 0, sample.phase == 0);
+        for (0..60) |_| sample = advanceAir(.{ .x = x, .y = 0 }, 0, true);
+        try std.testing.expectEqual(animation.Action.grounded, sample.action);
+        try std.testing.expectApproxEqAbs(@as(f32, 0), sample.controls[@intFromEnum(animation.Control.pelvis_y)], 0.0001);
+        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = -0.1 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = -6, .separation_speed_mps = 6, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
+        sample = animation.states.get(7).?;
+        try std.testing.expectEqual(animation.Action.jump, sample.action);
+        try checkAirPose(sample);
+        _ = advanceAir(.{ .x = x, .y = -0.2 }, 12, false);
+        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.crouch, animation.states.get(7).?.action);
+        try checkAirPose(animation.states.get(7).?);
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/crouch_samples.json", bytes);
 }
