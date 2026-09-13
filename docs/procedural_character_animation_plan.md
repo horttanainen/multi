@@ -16,7 +16,11 @@ drawing/guide/shots share weapon geometry. Airborne aiming retains the horizonta
 input from before the aim press until release or landing, preserving the jump's
 trajectory. Existing momentum and physics continue.
 See [character_animation_aiming.md](character_animation_aiming.md) for the data,
-validation and acceptance checks. Grappling follows in a separately planned phase.
+validation and acceptance checks. Grappling and rope animation are deferred.
+Wall bracing, pushing, sliding and jump push-off are accepted by the user,
+including the leg-extension correction; see
+[character_animation_walls.md](character_animation_walls.md). A wall-slide pose
+revision follows as a separately planned and reviewed phase.
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -139,6 +143,8 @@ Keep source/editor metadata optional and separate from runtime-required data. Wh
 ### Contact timing and transitions
 
 Represent planned stance as explicit per-foot phase intervals, with a defined half-open interval convention. Split an interval that crosses the loop boundary. This allows contact intent to be evaluated at any phase, including when starting playback halfway through a clip.
+Non-looping clips held at phase 1 retain contacts whose intervals end at 1; this
+supports sustained poses such as pushing against a wall.
 
 Named touchdown/lift-off cues can support export and debugging, but one-time event delivery must not be the only way to determine whether a foot should be planted. Actual contact acquisition/release remains a runtime decision. Footstep effects should follow actual accepted contacts.
 
@@ -265,8 +271,11 @@ Split this work into independently reviewed commits:
   directional input for aiming, without cancelling velocity or normal physics.
   In the air, retain pre-aim horizontal input until release or landing.
   Share muzzle placement between drawing, aim guide and release-to-fire shots.
-- **3B, later:** Grappling and wall poses, with explicit control priorities.
-  Agree on each commit-sized scope before implementation.
+- **3B, walls (accepted):** Anticipatory bracing, impact
+  compression, sustained two-hand pushing, wall slides and wall-jump push-off.
+  Reuse movement signals, surface probes, action curves, IK and shared weapon
+  placement; aiming has priority over the weapon hand.
+- **3B, deferred:** Grappling and rope animation, with explicit control priorities.
 - **3C:** Static slopes and steps, followed by a separately reviewed moving and
   destructible rubble phase. Plan the terrain-query/contact changes first.
 

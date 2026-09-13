@@ -247,6 +247,7 @@ pub const characterMotionPath = "character_motions/run_reference.json";
 pub const characterLocomotionPath = "character_locomotion/run.json";
 pub const characterActionsPath = "character_actions/airborne.json";
 pub const characterAimingPath = "character_actions/aiming.json";
+pub const characterWallsPath = "character_actions/walls.json";
 const maximumCharacterAssetBytes = 1024 * 1024;
 const CharacterControlValue = struct { binding: character_animation.Control, value: f32 };
 
@@ -285,6 +286,25 @@ pub const CharacterAnimationData = struct {
     locomotion: CharacterLocomotionData,
     actions: CharacterActionsData,
     aiming: CharacterAimingData,
+    walls: CharacterWallsData,
+};
+pub const CharacterWallsData = struct {
+    schema_version: u32,
+    id: []const u8,
+    rig_id: []const u8,
+    distance_unit: enum { meters },
+    time_unit: enum { seconds },
+    anticipation_seconds: f32,
+    probe_distance_m: f32,
+    contact_distance_m: f32,
+    blend_seconds: f32,
+    push_delay_seconds: f32,
+    full_impact_speed_mps: f32,
+    impact_compression_m: f32,
+    brace: CharacterMotionData,
+    push: CharacterMotionData,
+    slide: CharacterMotionData,
+    jump: CharacterMotionData,
 };
 pub const CharacterAimingData = struct {
     schema_version: u32,
@@ -434,7 +454,7 @@ fn parseCharacterAsset(comptime T: type, memory: std.mem.Allocator, bytes: []con
 
 // Owns copies of every parsed string/slice independently of the source bytes.
 // The caller must deinit the arena or transfer ownership to character_animation.
-pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const u8, motion_bytes: []const u8, locomotion_bytes: []const u8, actions_bytes: []const u8, aiming_bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
+pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const u8, motion_bytes: []const u8, locomotion_bytes: []const u8, actions_bytes: []const u8, aiming_bytes: []const u8, walls_bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterAnimationData {
     var arena = std.heap.ArenaAllocator.init(memory);
     errdefer arena.deinit();
     detail.* = .{ .file = characterRigPath };
@@ -447,7 +467,9 @@ pub fn parseCharacterAnimationData(memory: std.mem.Allocator, rig_bytes: []const
     const actions = try parseCharacterAsset(CharacterActionsData, arena.allocator(), actions_bytes, detail);
     detail.file = characterAimingPath;
     const aiming = try parseCharacterAsset(CharacterAimingData, arena.allocator(), aiming_bytes, detail);
-    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = locomotion, .actions = actions, .aiming = aiming };
+    detail.file = characterWallsPath;
+    const walls = try parseCharacterAsset(CharacterWallsData, arena.allocator(), walls_bytes, detail);
+    return .{ .arena = arena, .rig = rig, .motion = motion, .locomotion = locomotion, .actions = actions, .aiming = aiming, .walls = walls };
 }
 
 fn readCharacterAsset(path: []const u8, memory: std.mem.Allocator, detail: *CharacterAssetDiagnostic) ![]u8 {
@@ -468,7 +490,9 @@ pub fn loadCharacterAnimationData(memory: std.mem.Allocator, detail: *CharacterA
     defer memory.free(actions_bytes);
     const aiming_bytes = try readCharacterAsset(characterAimingPath, memory, detail);
     defer memory.free(aiming_bytes);
-    return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, locomotion_bytes, actions_bytes, aiming_bytes, detail);
+    const walls_bytes = try readCharacterAsset(characterWallsPath, memory, detail);
+    defer memory.free(walls_bytes);
+    return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, locomotion_bytes, actions_bytes, aiming_bytes, walls_bytes, detail);
 }
 
 pub fn loadMovementData(path: []const u8) !MovementData {

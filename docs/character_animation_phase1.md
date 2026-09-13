@@ -180,11 +180,12 @@ acceptance checks. This review does not constitute the user's acceptance.
 
 This section documents the original rig/clip contract. The current loader also
 loads `character_locomotion/run.json`, `character_actions/airborne.json`, and
-`character_actions/aiming.json` into the same replacement arena. All five files
+`character_actions/aiming.json` and `character_actions/walls.json` into the same
+replacement arena. All six files
 must validate before replacement; failures preserve the live assets and animation
 state. Later profiles are documented in [phase two](character_animation_phase2.md),
 [airborne/crouch](character_animation_phase3a.md), and
-[aiming](character_animation_aiming.md).
+[aiming](character_animation_aiming.md), and [wall poses](character_animation_walls.md).
 
 Files loaded together:
 
@@ -277,6 +278,8 @@ playback clamps at the endpoints. Matching endpoint derivatives are the author's
 responsibility. No renderer frame count is part of this contract.
 
 `contacts` hold non-overlapping, half-open `[start,end)` phase intervals per leg.
+For a non-looping action held at phase 1, an interval ending at 1 retains contact
+in that final pose. Looping clips keep the half-open convention.
 Split intervals crossing phase 1 into two entries. They describe authored intent;
 surface anchors and actual contact acquisition will be runtime state in phase two.
 

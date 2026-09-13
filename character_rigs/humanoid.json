@@ -211,6 +211,15 @@
         "x": 0,
         "y": 0
       }
+    },
+    {
+      "id": "weapon_holster",
+      "joint": "pelvis",
+      "local_offset": {
+        "x": -0.14,
+        "y": -0.04
+      },
+      "angle_offset_radians": -1.57079633
     }
   ],
   "neutral_controls": [

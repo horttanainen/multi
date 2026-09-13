@@ -41,6 +41,8 @@ pub const State = struct {
     rightWallContactCount: usize = 0,
     wallSliding: bool = false,
     wallJumpDirection: i8 = 0,
+    // One fixed-step event, independent of the configurable forced-movement timer.
+    wallJumpedDirection: i8 = 0,
     wallJumpMovementStepsRemaining: u32 = 0,
     lateralMovementIntent: i8 = 0,
     airJumpCounter: u32 = 0,
@@ -99,6 +101,7 @@ fn clearRuntimeState(state: *State) void {
     state.rightWallContactCount = 0;
     state.wallSliding = false;
     state.wallJumpDirection = 0;
+    state.wallJumpedDirection = 0;
     state.wallJumpMovementStepsRemaining = 0;
     state.lateralMovementIntent = 0;
     state.airJumpCounter = 0;
@@ -268,6 +271,7 @@ fn executeTowerfallWallJump(state: *State, direction: i8) void {
     box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
 
     state.wallJumpDirection = direction;
+    state.wallJumpedDirection = direction;
     state.wallJumpMovementStepsRemaining = wallJump.forcedMovementSteps;
     // The launch step is the first forced-movement step.
     if (state.wallJumpMovementStepsRemaining > 0) state.wallJumpMovementStepsRemaining -= 1;
@@ -420,6 +424,7 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
 }
 
 fn applyMovement(playerId: usize, state: *State, dt: f32) void {
+    state.wallJumpedDirection = 0;
     if (!box2d.c.b2Body_IsEnabled(state.bodyId)) return;
 
     switch (mechanism) {

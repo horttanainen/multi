@@ -26,6 +26,7 @@ const conv = @import("src/conversion.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
+const walls_json = @embedFile("character_actions/walls.json");
 const aiming_json = @embedFile("character_actions/aiming.json");
 const actions_json = @embedFile("character_actions/airborne.json");
 const motion_json = @embedFile("character_motions/run_reference.json");
@@ -34,11 +35,11 @@ const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 
 fn load() !animation.Assets {
     var detail: animation.Diagnostic = .{};
-    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, aiming_json, &detail), &detail);
+    return animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
 }
 
 fn replaceFromJson(rig_bytes: []const u8, motion_bytes: []const u8, detail: *data.CharacterAssetDiagnostic) !void {
-    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_json, aiming_json, detail), detail);
+    try animation.replaceAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_json, aiming_json, walls_json, detail), detail);
 }
 
 test "bounded file reading loads the complete motion and rejects oversized or missing files" {
@@ -65,7 +66,7 @@ test "decoded character data owns its strings and curves after the source buffer
         defer std.testing.allocator.free(motion_bytes);
         const actions_bytes = try std.testing.allocator.dupe(u8, actions_json);
         defer std.testing.allocator.free(actions_bytes);
-        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_bytes, aiming_json, &detail);
+        break :parsed try data.parseCharacterAnimationData(std.testing.allocator, rig_bytes, motion_bytes, locomotion_json, actions_bytes, aiming_json, walls_json, &detail);
     };
     defer files.arena.deinit();
     try std.testing.expectEqualStrings("humanoid_v1", files.rig.id);
@@ -364,7 +365,7 @@ test "compact Bezier run preserves dense controls, solved poses, and contact int
     var compact = try load();
     defer compact.arena.deinit();
     var detail: animation.Diagnostic = .{};
-    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, aiming_json, &detail), &detail);
+    var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
     defer dense.arena.deinit();
     try std.testing.expectEqual(dense.motion.cycle_seconds, compact.motion.cycle_seconds);
     try std.testing.expectEqual(dense.motion.reference_speed_mps, compact.motion.reference_speed_mps);
@@ -609,7 +610,7 @@ test "character asset array order does not define joint, limb, control, contact,
     const reordered_motion = try std.json.Stringify.valueAlloc(std.testing.allocator, motion.value, .{});
     defer std.testing.allocator.free(reordered_motion);
     var detail: animation.Diagnostic = .{};
-    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, actions_json, aiming_json, &detail), &detail);
+    var reordered = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, reordered_rig, reordered_motion, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
     defer reordered.arena.deinit();
     for (0..12) |index| {
         const phase = @as(f64, @floatFromInt(index)) / 12;
@@ -774,7 +775,7 @@ test "invalid locomotion JSON preserves the complete installed pose and contacts
         const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, locomotion_json, case[0], case[1]);
         defer std.testing.allocator.free(malformed);
         const result = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, actions_json, aiming_json, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, malformed, actions_json, aiming_json, walls_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -1099,7 +1100,7 @@ test "invalid action assets preserve live airborne state and successful reload r
         defer std.testing.allocator.free(malformed);
         try std.testing.expect(!std.mem.eql(u8, malformed, actions_json));
         const result = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, malformed, aiming_json, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, malformed, aiming_json, walls_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -1962,7 +1963,7 @@ test "invalid aiming settings preserve live pose and successful reload clears tr
         const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, aiming_json, case[0], case[1]);
         defer std.testing.allocator.free(malformed);
         const result: anyerror!void = replacement: {
-            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, malformed, &detail) catch |err| break :replacement err;
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, malformed, walls_json, &detail) catch |err| break :replacement err;
             break :replacement animation.replaceAssets(files, &detail);
         };
         try std.testing.expectError(error.InvalidCharacterAsset, result);
@@ -1973,4 +1974,421 @@ test "invalid aiming settings preserve live pose and successful reload clears tr
     animation.installAssets(try load());
     try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.aim_weight);
     try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.shot_hold_seconds);
+}
+
+fn createAnimationWall(side: f32, face: f32) !box2d.c.b2BodyId {
+    const body = try box2d.createBody(box2d.createStaticBodyDef(.{ .x = side * (face + 0.5), .y = -2 }));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+    shape.filter.maskBits = collision.MASK_TERRAIN;
+    shape.material.friction = 0;
+    shape.enableSensorEvents = true;
+    const polygon = box2d.c.b2MakeBox(0.5, 2.3);
+    _ = box2d.c.b2CreatePolygonShape(body, &shape, &polygon);
+    return body;
+}
+
+const WallPoseSample = struct { label: []const u8, side: f32, frame: animation.FramePose };
+
+fn captureWallPose(samples: *std.ArrayListUnmanaged(WallPoseSample), label: []const u8, side: f32) !void {
+    const frame = animation.playerFrame(7, .physics, null).?;
+    try checkBones(animation.assets.?.rig, frame.pose);
+    try samples.append(std.testing.allocator, .{ .label = label, .side = side, .frame = frame });
+}
+
+test "wall approach braces before contact and sustained input plants both hands and stows the blaster" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var samples: std.ArrayListUnmanaged(WallPoseSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ 1, -1 }) |side| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        const wall = try createAnimationWall(side, 1);
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .facing_right = side > 0, .vertical_speed_mps = 0, .separation_speed_mps = 0, .movement_direction = side, .horizontal_speed_mps = side * 6 };
+        animation.resetPlayer(7);
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+        for (0..7) |tick| {
+            input.body.x = side * (@as(f32, @floatFromInt(tick)) + 1) * 0.1;
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            if (tick == 4) {
+                try std.testing.expectEqual(animation.WallAction.brace, animation.states.get(7).?.wall.action);
+                try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.wall.contact_seconds);
+                try captureWallPose(&samples, "approach", side);
+            }
+        }
+        try captureWallPose(&samples, "contact", side);
+        input.horizontal_speed_mps = 0;
+        for (0..8) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try captureWallPose(&samples, "absorb", side);
+        for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        const pushing = animation.states.get(7).?;
+        try std.testing.expectEqual(animation.WallAction.push, pushing.wall.action);
+        try std.testing.expect(pushing.feet[0].locked and pushing.feet[1].locked);
+        for (0..120) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        const held_push = animation.states.get(7).?;
+        for (pushing.feet, held_push.feet) |before_foot, after_foot| {
+            try std.testing.expect(after_foot.locked);
+            try nearPoint(before_foot.anchor, after_foot.anchor, 0.00001);
+        }
+        try std.testing.expectEqual(side > 0, pushing.facing_right);
+        const stowed = animation.playerFrame(7, .physics, null).?;
+        try std.testing.expect(stowed.weapon_stowed);
+        const rig = animation.assets.?.rig;
+        const hip = animation.attachmentToWorld(rig, animation.attachmentTransform(rig, stowed.pose, "weapon_holster").?, stowed.body, stowed.facing_right);
+        try nearPoint(hip.position, stowed.weapon.position, 0.00001);
+        const shot = animation.playerFrame(7, .physics, .{ .x = -side, .y = 0 }).?;
+        try std.testing.expect(!shot.weapon_stowed);
+        const grip = animation.attachmentToWorld(rig, animation.attachmentTransform(rig, shot.pose, "weapon_hand").?, shot.body, shot.facing_right);
+        try nearPoint(grip.position, shot.weapon.position, 0.00001);
+        try captureWallPose(&samples, "push", side);
+        for ([_]f64{ 0, 0.25, 0.75, 1 }) |alpha| {
+            const pose = animation.interpolatedPose(&animation.assets.?, pushing, alpha);
+            try checkBones(animation.assets.?.rig, pose);
+            for ([_]animation.Joint{ .left_hand, .right_hand }, pushing.wall.hands) |joint, anchor| {
+                try std.testing.expect(anchor != null);
+                const hand = animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(joint)], input.body, pushing.facing_right);
+                try nearPoint(anchor.?, hand, 0.00003);
+                try std.testing.expectApproxEqAbs(side, hand.x, 0.00003);
+            }
+        }
+        try checkAirPose(pushing);
+        // Aiming retains the free hand's contact and restores the weapon hand.
+        input.aiming = true;
+        input.movement_direction = 0;
+        input.aim_direction = .{ .x = -side, .y = 0 };
+        for (0..45) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        const aimed = animation.playerFrame(7, .physics, null).?;
+        try std.testing.expect(!aimed.weapon_stowed);
+        try std.testing.expectEqual(side < 0, aimed.facing_right);
+        const free_hand = animation.toWorld(animation.assets.?.rig, aimed.pose.joints[@intFromEnum(animation.Joint.left_hand)], aimed.body, aimed.facing_right);
+        try std.testing.expectApproxEqAbs(side, free_hand.x, 0.00003);
+        try std.testing.expectApproxEqAbs(-side, player.weaponDirection(player.weaponFrame(7, .physics, null).?).x, 0.00003);
+        try captureWallPose(&samples, "aim away", side);
+        const before_release = animation.states.get(7).?;
+        // Actual wall removal must release contacts even while aim stays held.
+        box2d.c.b2DestroyBody(wall);
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try checkWallPoseBoundary(before_release, animation.states.get(7).?);
+        try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+        try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, animation.states.get(7).?.wall.hands);
+        input.aiming = false;
+        for (0..60) |_| {
+            const previous = animation.states.get(7).?;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            try checkWallPoseBoundary(previous, animation.states.get(7).?);
+        }
+        try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.stow_weight);
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/wall_samples.json", bytes);
+}
+
+fn addAnimationWallSensors(body: box2d.c.b2BodyId) void {
+    const moving = movement.states.getPtr(7).?;
+    for ([_]f32{ -1, 1 }) |side| {
+        var shape = box2d.c.b2DefaultShapeDef();
+        shape.isSensor = true;
+        shape.enableSensorEvents = true;
+        shape.density = 0;
+        shape.filter.categoryBits = collision.CATEGORY_SENSOR;
+        shape.filter.maskBits = collision.MASK_SENSOR_WALL;
+        const polygon = box2d.c.b2MakeOffsetBox(0.15, 0.4, .{ .x = side * 0.2, .y = -0.5 }, box2d.c.b2MakeRot(0));
+        const id = box2d.c.b2CreatePolygonShape(body, &shape, &polygon);
+        if (side < 0) moving.leftWallSensorId = id else moving.rightWallSensorId = id;
+    }
+}
+
+test "real wall slide and wall jump drive poses without changing physics even with zero forced movement steps" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var samples: std.ArrayListUnmanaged(WallPoseSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ -1, 1 }) |side| {
+        for ([_]u32{ 0, 5 }) |forced_steps| {
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            _ = try createAnimationWall(side, 1);
+            addAnimationWallSensors(body);
+            movement.towerfallSettings.wallJump.forcedMovementSteps = forced_steps;
+            const moving = movement.states.getPtr(7).?;
+            var saw_push = false;
+            var slide_ticks: usize = 0;
+            var jump_tick: ?usize = null;
+            var extended_ticks: usize = 0;
+            for (0..190) |tick| {
+                var input: player_input.Sample = .{ .movementDirection = .{ .x = side, .y = 0 }, .aimDirection = .{ .x = side, .y = 0 } };
+                const wall_jump = slide_ticks >= 3 and jump_tick == null;
+                input.buttons.set(.jump, tick == 60 or wall_jump);
+                player_input.submit(7, input);
+                control.applyPlayerInput(7);
+                player_input.beginPhysicsStep();
+                movement.applyAll(1.0 / 60.0);
+                const launch = moving.wallJumpedDirection;
+                box2d.worldStep(1.0 / 60.0, 4);
+                try movement.processSensorEvents();
+                const before_velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+                const before_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+                const before_animation = animation.states.get(7).?;
+                animation.fixedUpdate(1.0 / 60.0);
+                try nearPoint(before_velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0);
+                try nearPoint(before_position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0);
+                player_input.endPhysicsStep();
+                const sample = animation.states.get(7).?;
+                if (before_animation.initialized and before_animation.facing_right == sample.facing_right) try checkWallPoseBoundary(before_animation, sample);
+                try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+                if (sample.wall.action == .push) saw_push = true;
+                if (sample.wall.action == .slide) {
+                    slide_ticks += 1;
+                    if (slide_ticks == 3) try captureWallPose(&samples, "slide", side);
+                    try std.testing.expect(moving.wallSliding);
+                    try std.testing.expect(!sample.feet[0].locked and !sample.feet[1].locked);
+                }
+                if (launch != 0) {
+                    try std.testing.expect(jump_tick == null);
+                    jump_tick = tick;
+                    try std.testing.expectEqual(@as(i8, @intFromFloat(-side)), launch);
+                    try std.testing.expectEqual(animation.WallAction.jump, sample.wall.action);
+                    try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, sample.wall.hands);
+                    try std.testing.expect(before_velocity.x * side < 0 and before_velocity.y < 0);
+                    try captureWallPose(&samples, "push off", side);
+                }
+                if (jump_tick == null) continue;
+                const age = tick - jump_tick.?;
+                if (age < 12 and forced_steps == 5) {
+                    const labels = [_][]const u8{ "jump 00", "jump 01", "jump 02", "jump 03", "jump 04", "jump 05", "jump 06", "jump 07", "jump 08", "jump 09", "jump 10", "jump 11" };
+                    try captureWallPose(&samples, labels[age], side);
+                }
+                if (age >= 1 and age <= 5) {
+                    const rig = animation.assets.?.rig;
+                    const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+                    var extended = true;
+                    for (rig.limbs[0..2]) |limb| {
+                        const length = rig.lengths[@intFromEnum(limb.middle)] + rig.lengths[@intFromEnum(limb.end)];
+                        const reach = vec.magnitude(vec.subtract(pose.joints[@intFromEnum(limb.end)], pose.joints[@intFromEnum(limb.root)]));
+                        extended = extended and reach > length * 0.95;
+                    }
+                    if (extended) extended_ticks += 1;
+                }
+                if (tick == jump_tick.? + 5) try captureWallPose(&samples, "depart", side);
+                if (tick <= jump_tick.? + 20) continue;
+                try std.testing.expect(sample.wall.action != .jump);
+                break;
+            }
+            if (!saw_push or slide_ticks < 3 or jump_tick == null) std.debug.print("wall trial side={d} forced={d}: push={} slide_ticks={d} jump={?d}, pos={any}, contacts={d}/{d}\n", .{ side, forced_steps, saw_push, slide_ticks, jump_tick, box2d.c.b2Body_GetPosition(body), moving.leftWallContactCount, moving.rightWallContactCount });
+            try std.testing.expect(saw_push);
+            try std.testing.expect(slide_ticks >= 3);
+            try std.testing.expect(jump_tick != null);
+            // The push-off must be visible for several real gameplay frames.
+            try std.testing.expect(extended_ticks >= 3);
+            movement.reset(7);
+            animation.resetPlayer(7);
+            try std.testing.expectEqual(@as(i8, 0), moving.wallJumpedDirection);
+            try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try fs.writeFile("artifacts/character_animation/wall_jump_samples.json", bytes);
+}
+
+test "wall jump keeps reachable toes planted then releases without stretching or reacquiring" {
+    for ([_]f32{ -1, 1 }) |side| {
+        for ([_]bool{ false, true }) |aim_away| {
+            for ([_]bool{ false, true }) |remove_wall| {
+                _ = try beginLocomotion();
+                defer box2d.destroyWorld();
+                defer animation.cleanup();
+                const wall = try createAnimationWall(side, 0.3);
+                var input: animation.LocomotionInput = .{ .body = .{ .x = 0, .y = -1.5 }, .supported = false, .ground_y = null, .facing_right = side > 0, .vertical_speed_mps = 2, .separation_speed_mps = 0, .wall_sliding = true, .movement_direction = side, .aiming = aim_away, .aim_direction = .{ .x = -side, .y = 0 } };
+                for (0..90) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+                const rig = animation.assets.?.rig;
+                const sliding = animation.states.get(7).?;
+                const slide_pose = animation.interpolatedPose(&animation.assets.?, sliding, 1);
+                for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                    const sole = animation.toWorld(rig, slide_pose.joints[@intFromEnum(joint)], sliding.body, sliding.facing_right);
+                    try std.testing.expectApproxEqAbs(side * 0.3, sole.x, 0.00003);
+                }
+                var retained: usize = 0;
+                var released = [_]bool{ false, false };
+                for (0..12) |tick| {
+                    const previous = animation.states.get(7).?;
+                    input.body.x -= side * 0.1;
+                    input.body.y -= 0.1;
+                    input.vertical_speed_mps = -6;
+                    input.wall_sliding = false;
+                    input.wall_jump_direction = if (tick == 0) @intFromFloat(-side) else 0;
+                    if (tick == 1 and remove_wall) box2d.c.b2DestroyBody(wall);
+                    animation.updatePlayer(7, input, 1.0 / 60.0);
+                    const current = animation.states.get(7).?;
+                    try checkWallPoseBoundary(previous, current);
+                    for (current.wall.feet, 0..) |anchor, index| {
+                        if (anchor == null) {
+                            released[index] = true;
+                            continue;
+                        }
+                        try std.testing.expect(!released[index]);
+                        try std.testing.expect(!remove_wall or tick == 0);
+                        try nearPoint(sliding.wall.feet[index].?, anchor.?, 0.00001);
+                        retained += 1;
+                        for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                            const pose = animation.interpolatedPose(&animation.assets.?, current, alpha);
+                            const body = vec.add(previous.body, vec.mul(vec.subtract(current.body, previous.body), @floatCast(alpha)));
+                            const joint: animation.Joint = if (index == 0) .left_toe else .right_toe;
+                            const toe = animation.toWorld(rig, pose.joints[@intFromEnum(joint)], body, current.facing_right);
+                            try nearPoint(anchor.?, toe, 0.00003);
+                        }
+                    }
+                }
+                try std.testing.expect(retained >= 2);
+                try std.testing.expect(released[0] and released[1]);
+            }
+        }
+    }
+}
+
+test "sliding wall contacts follow authored foot height curves" {
+    const ramp_json = try std.mem.replaceOwned(u8, std.testing.allocator, walls_json, "{\"phase\": 1, \"value\": -0.52, \"interpolation\": \"linear\"}", "{\"phase\": 1, \"value\": -0.62, \"interpolation\": \"linear\"}");
+    defer std.testing.allocator.free(ramp_json);
+    for ([_]f32{ -1, 1 }) |side| {
+        _ = try beginLocomotion();
+        defer box2d.destroyWorld();
+        defer animation.cleanup();
+        _ = try createAnimationWall(side, 0.3);
+        var detail: animation.Diagnostic = .{};
+        const files = try data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, aiming_json, ramp_json, &detail);
+        try animation.replaceAssets(files, &detail);
+        const input: animation.LocomotionInput = .{ .body = .{ .x = 0, .y = -1.5 }, .supported = false, .ground_y = null, .facing_right = side > 0, .vertical_speed_mps = 2, .separation_speed_mps = 0, .wall_sliding = true, .movement_direction = side };
+        for (0..14) |_| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const sample = animation.states.get(7).?;
+            const rig = animation.assets.?.rig;
+            const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+            const phase = @min(1, sample.wall.seconds / animation.assets.?.walls.slide.cycle_seconds);
+            try std.testing.expectApproxEqAbs(-0.52 - phase * 0.1, pose.joints[@intFromEnum(animation.Joint.left_ankle)].y, 0.00003);
+            const toe = animation.toWorld(rig, pose.joints[@intFromEnum(animation.Joint.left_toe)], sample.body, sample.facing_right);
+            try std.testing.expectApproxEqAbs(side * 0.3, toe.x, 0.00003);
+            try std.testing.expect(sample.wall.feet[0] != null);
+            try checkBones(rig, pose);
+        }
+    }
+}
+
+test "wall settings validate atomically and reload clears contacts and holstering" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    _ = try createAnimationWall(1, 0.3);
+    for (0..40) |_| animation.updatePlayer(7, .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .facing_right = true, .vertical_speed_mps = 0, .separation_speed_mps = 0, .movement_direction = 1 }, 1.0 / 60.0);
+    const before = animation.states.get(7).?;
+    try std.testing.expectEqual(animation.WallAction.push, before.wall.action);
+    const old_id = animation.assets.?.walls.settings.id.ptr;
+    const previous_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = previous_log_level;
+    var detail: animation.Diagnostic = .{};
+    const cases = [_][2][]const u8{
+        .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"rig_id\": \"humanoid_v1\"", "\"rig_id\": \"missing\"" },
+        .{ "\"blend_seconds\": 0.06", "\"blend_seconds\": 0" },
+        .{ "\"probe_distance_m\": 0.75", "\"probe_distance_m\": 0.1" },
+        .{ "\"impact_compression_m\": 0.09", "\"impact_compression_m\": 1e999" },
+        .{ "\"start\": 0, \"end\": 0.2", "\"start\": 0.1, \"end\": 0.2" },
+        .{ "\"wall_jump_v1\"", "\"wall_slide_v1\"" },
+        .{ "\"loop\": false", "\"loop\": true" },
+        .{ "\"time_unit\": \"seconds\",", "" },
+    };
+    for (cases) |case| {
+        const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, walls_json, case[0], case[1]);
+        defer std.testing.allocator.free(malformed);
+        const result: anyerror!void = replacement: {
+            const files = data.parseCharacterAnimationData(std.testing.allocator, rig_json, motion_json, locomotion_json, actions_json, aiming_json, malformed, &detail) catch |err| break :replacement err;
+            break :replacement animation.replaceAssets(files, &detail);
+        };
+        try std.testing.expectError(error.InvalidCharacterAsset, result);
+        try std.testing.expectEqualStrings(data.characterWallsPath, detail.file);
+        try std.testing.expectEqual(old_id, animation.assets.?.walls.settings.id.ptr);
+        try std.testing.expectEqualDeep(before, animation.states.get(7).?);
+    }
+    animation.installAssets(try load());
+    try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.stow_weight);
+}
+
+test "wall bracing releases on neutral input edges and unsupported surfaces" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const wall = try createAnimationWall(1, 0.3);
+    var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .facing_right = true, .vertical_speed_mps = 0, .separation_speed_mps = 0, .movement_direction = 1 };
+    for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.push, animation.states.get(7).?.wall.action);
+    input.movement_direction = 0;
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+    try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, animation.states.get(7).?.wall.hands);
+    input.movement_direction = 1;
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.brace, animation.states.get(7).?.wall.action);
+    // Dynamic/rotated surfaces do not inherit static wall anchors.
+    box2d.c.b2Body_SetType(wall, box2d.c.b2_kinematicBody);
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+    box2d.c.b2Body_SetType(wall, box2d.c.b2_staticBody);
+    box2d.c.b2Body_SetTransform(wall, .{ .x = 0.8, .y = -2 }, box2d.c.b2MakeRot(0.1));
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+    box2d.c.b2Body_SetTransform(wall, .{ .x = 0.8, .y = -2 }, box2d.c.b2MakeRot(0));
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(animation.WallAction.brace, animation.states.get(7).?.wall.action);
+    input.supported = false;
+    input.ground_y = null;
+    input.wall_sliding = true;
+    for (0..35) |tick| {
+        input.body.y = -@as(f32, @floatFromInt(tick)) * 0.1;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+    }
+    // Above the wall's top, stale movement contact input cannot keep bracing.
+    try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+    try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, animation.states.get(7).?.wall.hands);
+    input.body = .{ .x = 10, .y = 0 };
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.stow_weight);
+}
+
+fn checkWallPoseBoundary(before: animation.PlayerState, after: animation.PlayerState) !void {
+    const set = &animation.assets.?;
+    const end = animation.interpolatedPose(set, before, 1);
+    const start = animation.interpolatedPose(set, after, 0);
+    try checkBones(set.rig, end);
+    try checkBones(set.rig, start);
+    for (end.joints, start.joints) |a, b| {
+        try nearPoint(animation.toWorld(set.rig, a, before.body, before.facing_right), animation.toWorld(set.rig, b, after.previous_body, after.facing_right), 0.00003);
+    }
+    for ([_]f64{ 0.25, 0.5, 0.75 }) |fraction| try checkBones(set.rig, animation.interpolatedPose(set, after, fraction));
+}
+
+test "partial wall brace entry and release preserve adjacent render endpoints" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    _ = try createAnimationWall(1, 0.3);
+    _ = try createAnimationWall(-1, 0.3);
+    for ([_]f32{ 1, -1 }) |side| {
+        animation.resetPlayer(7);
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .facing_right = side > 0, .vertical_speed_mps = 0, .separation_speed_mps = 0 };
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        for (0..18) |tick| {
+            const before = animation.states.get(7).?;
+            // Release while only partly raised, re-enter during release, then
+            // hold and leave the wall again. Check each shared render endpoint.
+            input.movement_direction = if (tick < 2 or (tick >= 4 and tick < 10)) side else 0;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            try checkWallPoseBoundary(before, animation.states.get(7).?);
+        }
+    }
 }

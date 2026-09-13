@@ -5,6 +5,10 @@ aim-facing, hand-depth and airborne-input revisions. Review and validation resul
 follow below.
 Accepted by the user on 2026-09-13 after review, testing and the revisions above.
 
+This is the accepted aiming phase record. The following
+[wall-pose phase](character_animation_walls.md) adds wall contacts and a hip-stowed
+weapon during two-hand poses, extending the shared asset load to six files.
+
 ## Behavior
 
 In procedural stick/overlay views, the standalone blaster stays attached to the
