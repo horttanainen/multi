@@ -15,6 +15,7 @@ const collision = @import("src/collision.zig");
 const player = @import("src/player.zig");
 const movement = @import("src/movement.zig");
 const player_input = @import("src/player_input.zig");
+const gamepad = @import("src/gamepad.zig");
 const sprite = @import("src/sprite.zig");
 const weapon = @import("src/weapon.zig");
 const control = @import("src/control.zig");
@@ -33,6 +34,133 @@ const motion_json = @embedFile("character_motions/run_reference.json");
 const original_motion_json = @embedFile("tests/fixtures/character_run_reference_v1.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
+
+test "directional profiles preserve defaults and allow aiming independent of movement mechanism" {
+    runtime.init(std.testing.io);
+    const previous = player_input.directionSettings;
+    defer player_input.directionSettings = previous;
+    for ([_][]const u8{ "movements/towerfall_keep.json", "movements/liero_default.json", "movements/liero_theater.json" }) |path| {
+        var profile = try data.loadMovementData(path);
+        const expected_aim: data.AimMode = if (profile.mechanism == .towerfall) .eight_directions else .free;
+        player_input.configure(profile);
+        try std.testing.expectEqual(data.MovementInputMode.axis_thresholds, player_input.directionSettings.movementMode);
+        try std.testing.expectEqual(expected_aim, player_input.directionSettings.aimMode);
+        // Files without the new block still load with the mechanism defaults.
+        profile.input = null;
+        player_input.configure(profile);
+        try std.testing.expectEqual(expected_aim, player_input.directionSettings.aimMode);
+        profile.input = .{ .movementMode = .eight_directions, .aimMode = if (expected_aim == .free) .eight_directions else .free };
+        player_input.configure(profile);
+        try std.testing.expectEqual(profile.input.?, player_input.directionSettings);
+        player_input.directionSettings = .{ .aimMode = expected_aim };
+        player_input.resetDirectionSettings();
+        try std.testing.expectEqual(profile.input.?, player_input.directionSettings);
+        // Loading a different profile discards debug overrides.
+        player_input.configure(try data.loadMovementData(path));
+        try std.testing.expectEqual(expected_aim, player_input.directionSettings.aimMode);
+        try std.testing.expectEqual(data.MovementInputMode.axis_thresholds, player_input.directionSettings.movementMode);
+    }
+    const parsed = try std.json.parseFromSlice(data.DirectionalInputData, std.testing.allocator,
+        \\{"movementMode":"eight_directions","aimMode":"free"}
+    , .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(data.AimMode.free, parsed.value.aimMode);
+    try std.testing.expectEqual(data.MovementInputMode.eight_directions, parsed.value.movementMode);
+    try std.testing.expectError(error.InvalidEnumTag, std.json.parseFromSlice(data.DirectionalInputData, std.testing.allocator,
+        \\{"aimMode":"typo"}
+    , .{}));
+}
+
+test "eight sectors keep exact cardinals full diagonal movement and equal boundaries at all strengths" {
+    const expected = [_]vec.Vec2{ vec.east, .{ .x = 1, .y = 1 }, vec.north, .{ .x = -1, .y = 1 }, vec.west, .{ .x = -1, .y = -1 }, vec.south, .{ .x = 1, .y = -1 } };
+    try std.testing.expectEqual(vec.zero, player_input.eightDirection(vec.zero));
+    for (expected, 0..) |direction, index| {
+        const center = @as(f32, @floatFromInt(index)) * std.math.pi / 4.0;
+        for ([_]f32{ 0.01, 0.3, 1 }) |strength| {
+            for ([_]f32{ -22.49, 0, 22.49 }) |offset| {
+                const angle = center + offset * std.math.pi / 180.0;
+                try std.testing.expectEqual(direction, player_input.eightDirection(.{ .x = @cos(angle) * strength, .y = @sin(angle) * strength }));
+            }
+            const outside = center + 22.51 * std.math.pi / 180.0;
+            try std.testing.expectEqual(expected[(index + 1) % 8], player_input.eightDirection(.{ .x = @cos(outside) * strength, .y = @sin(outside) * strength }));
+        }
+    }
+}
+
+test "stick sectors provide a down region while free aim retains the original angle and Liero uses its own stick" {
+    const previous = player_input.directionSettings;
+    defer player_input.directionSettings = previous;
+    runtime.init(std.testing.io);
+    try movement.configure(try data.loadMovementData("movements/towerfall_keep.json"));
+    try player_input.register(77);
+    defer _ = player_input.playerInputs.swapRemove(77);
+    const move: gamepad.StickAxes = .{ .x = 8000, .y = 30000 };
+    const other: gamepad.StickAxes = .{ .x = -30000, .y = -10000 };
+    player_input.directionSettings = .{ .movementMode = .axis_thresholds, .aimMode = .free };
+    var sample = gamepad.sampleSticks(gamepad.defaultBindings, move, other);
+    try std.testing.expectEqual(vec.Vec2{ .x = 1, .y = -1 }, sample.movementDirection);
+    player_input.directionSettings.movementMode = .eight_directions;
+    sample = gamepad.sampleSticks(gamepad.defaultBindings, move, other);
+    try std.testing.expectEqual(vec.south, sample.movementDirection);
+    player_input.submit(77, sample);
+    const free = player_input.playerInputs.get(77).?.aimDirection;
+    try nearPoint(vec.normalize(.{ .x = 8000, .y = -30000 }), vec.normalize(free), 0.000001);
+    player_input.directionSettings.aimMode = .eight_directions;
+    player_input.submit(77, sample);
+    const snapped = player_input.playerInputs.get(77).?.aimDirection;
+    try nearPoint(vec.south, vec.normalize(snapped), 0.000001);
+    try std.testing.expectApproxEqAbs(vec.magnitude(free), vec.magnitude(snapped), 0.000001);
+    for ([_]gamepad.StickAxes{ .{ .x = 0, .y = 0 }, .{ .x = 6000, .y = 0 } }) |neutral| {
+        sample = gamepad.sampleSticks(gamepad.defaultBindings, neutral, other);
+        player_input.submit(77, sample);
+        try std.testing.expectEqual(vec.zero, sample.movementDirection);
+        try std.testing.expectEqual(vec.zero, player_input.playerInputs.get(77).?.aimDirection);
+    }
+    // A diagonal just outside the radial deadzone still gives full run intent.
+    sample = gamepad.sampleSticks(gamepad.defaultBindings, .{ .x = 5000, .y = -5000 }, other);
+    try std.testing.expectEqual(vec.Vec2{ .x = 1, .y = 1 }, sample.movementDirection);
+    try movement.configure(try data.loadMovementData("movements/liero_default.json"));
+    sample = gamepad.sampleSticks(gamepad.defaultBindings, move, other);
+    player_input.submit(77, sample);
+    try std.testing.expectEqual(vec.Vec2{ .x = 1, .y = -1 }, sample.movementDirection);
+    try nearPoint(vec.normalize(.{ .x = -30000, .y = 10000 }), vec.normalize(player_input.playerInputs.get(77).?.aimDirection), 0.000001);
+    player_input.directionSettings.aimMode = .eight_directions;
+    player_input.submit(77, sample);
+    try nearPoint(vec.west, vec.normalize(player_input.playerInputs.get(77).?.aimDirection), 0.000001);
+}
+
+test "debug input choices use shared menu shortcuts and restore the loaded profile" {
+    resetMenuInput();
+    defer resetMenuInput();
+    const previous = player_input.directionSettings;
+    defer player_input.directionSettings = previous;
+    runtime.init(std.testing.io);
+    const profile = try data.loadMovementData("movements/towerfall_keep.json");
+    player_input.configure(profile);
+    var keys: [sdl.c.SDL_SCANCODE_COUNT]bool = @splat(false);
+    debug_menu.open();
+    try menu.handleKey(sdl.c.SDL_SCANCODE_F, false);
+    try std.testing.expectEqual(data.AimMode.free, player_input.directionSettings.aimMode);
+    try std.testing.expect(!menu.isOpen());
+    keys[sdl.c.SDL_SCANCODE_F] = true;
+    try std.testing.expect(menu.blocksGameplayInput(&keys));
+    menu.beginFrame();
+    keys[sdl.c.SDL_SCANCODE_F] = false;
+    try std.testing.expect(!menu.blocksGameplayInput(&keys));
+    debug_menu.open();
+    try menu.handleKey(sdl.c.SDL_SCANCODE_M, false);
+    try std.testing.expectEqual(data.MovementInputMode.eight_directions, player_input.directionSettings.movementMode);
+    debug_menu.open();
+    try menu.handleKey(sdl.c.SDL_SCANCODE_C, false);
+    try std.testing.expectEqual(profile.input.?, player_input.directionSettings);
+    const previous_editing = state.editingLevel;
+    defer state.editingLevel = previous_editing;
+    state.editingLevel = true;
+    debug_menu.open();
+    try menu.handleKey(sdl.c.SDL_SCANCODE_F, false);
+    try menu.handleKey(sdl.c.SDL_SCANCODE_M, false);
+    try std.testing.expectEqual(profile.input.?, player_input.directionSettings);
+}
 
 fn load() !animation.Assets {
     var detail: animation.Diagnostic = .{};
@@ -200,7 +328,7 @@ test "debug cancellation consumes the event batch and respects existing menus an
     menu.close();
     state.editingLevel = true;
     _ = debug_menu.handleKey(sdl.c.SDL_SCANCODE_GRAVE, '`', false);
-    try std.testing.expectEqual(@as(usize, 6), menu.focusedIndex()); // Only atlas export is visible.
+    try std.testing.expectEqual(@as(usize, 9), menu.focusedIndex()); // Only atlas export is visible.
     const previous_zoom = animation.close_view;
     try menu.handleKey(sdl.c.SDL_SCANCODE_Z, false);
     try std.testing.expectEqual(previous_zoom, animation.close_view);
@@ -1732,66 +1860,69 @@ test "airborne aim preserves the same trajectory as continuing the previous hori
     box2d.c.b2Body_SetLinearDamping(body, movement.bodyMotion.linearDamping);
     var expected_positions: [90]vec.Vec2 = undefined;
     var expected_velocities: [90]vec.Vec2 = undefined;
-    for ([_]f32{ -1, -0.35, 0, 0.4, 1 }) |horizontal| {
-        var landing_tick: usize = 90;
-        for ([_]bool{ false, true }) |aiming| {
-            movement.reset(7);
-            player_input.neutralize(7);
-            box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -2 }, box2d.c.b2MakeRot(0));
-            box2d.c.b2Body_SetLinearVelocity(body, .{ .x = if (horizontal == 0) 6 else horizontal * 2, .y = -8 });
-            moving.heldJumpGravityActive = true;
-            var landed = false;
-            for (0..90) |tick| {
-                const holding_aim = aiming and tick >= 5;
-                // Poll less often than physics after the press. Turning the
-                // aim immediately and later must not replace the earlier input.
-                if (tick <= 5 or tick % 3 == 0) {
-                    const direction: vec.Vec2 = if (holding_aim) .{ .x = if (tick % 2 == 0) 1 else -1, .y = -1 } else .{ .x = horizontal, .y = 0 };
-                    var input: player_input.Sample = .{ .movementDirection = direction, .aimDirection = direction };
-                    input.buttons.set(.shoot, holding_aim);
-                    input.buttons.set(.jump, tick < 12);
-                    player_input.submit(7, input);
+    for ([_]data.AimMode{ .free, .eight_directions }) |aim_mode| {
+        player_input.directionSettings.aimMode = aim_mode;
+        for ([_]f32{ -1, -0.35, 0, 0.4, 1 }) |horizontal| {
+            var landing_tick: usize = 90;
+            for ([_]bool{ false, true }) |aiming| {
+                movement.reset(7);
+                player_input.neutralize(7);
+                box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -2 }, box2d.c.b2MakeRot(0));
+                box2d.c.b2Body_SetLinearVelocity(body, .{ .x = if (horizontal == 0) 6 else horizontal * 2, .y = -8 });
+                moving.heldJumpGravityActive = true;
+                var landed = false;
+                for (0..90) |tick| {
+                    const holding_aim = aiming and tick >= 5;
+                    // Poll less often than physics after the press. Turning the
+                    // aim immediately and later must not replace the earlier input.
+                    if (tick <= 5 or tick % 3 == 0) {
+                        const direction: vec.Vec2 = if (holding_aim) .{ .x = if (tick % 2 == 0) 1 else -1, .y = -0.7 } else .{ .x = horizontal, .y = 0 };
+                        var input: player_input.Sample = .{ .movementDirection = direction, .aimDirection = direction };
+                        input.buttons.set(.shoot, holding_aim);
+                        input.buttons.set(.jump, tick < 12);
+                        player_input.submit(7, input);
+                        control.applyPlayerInput(7);
+                    }
+                    player_input.beginPhysicsStep();
+                    movement.applyAll(1.0 / 60.0);
+                    box2d.worldStep(1.0 / 60.0, 4);
+                    try movement.processSensorEvents();
+                    player_input.endPhysicsStep();
+                    const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+                    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+                    if (aiming) {
+                        try std.testing.expect(tick <= landing_tick);
+                        try nearPoint(expected_positions[tick], position, 0.00002);
+                        try nearPoint(expected_velocities[tick], velocity, 0.00002);
+                    } else {
+                        expected_positions[tick] = position;
+                        expected_velocities[tick] = velocity;
+                    }
+                    if (!moving.groundState.supported) continue;
+                    landed = true;
+                    if (!aiming) {
+                        landing_tick = tick;
+                        break;
+                    }
+                    try std.testing.expectEqual(landing_tick, tick);
+                    try std.testing.expectEqual(@as(f32, 0), player_input.playerInputs.get(7).?.aimMovementDirection);
+                    try std.testing.expectEqual(@as(i8, 0), moving.lateralMovementIntent);
+                    // Another jump while aim stays held must not resurrect the
+                    // direction captured for the completed jump.
+                    var jump: player_input.Sample = .{ .movementDirection = vec.west, .aimDirection = vec.west };
+                    jump.buttons.set(.shoot, true);
+                    jump.buttons.set(.jump, true);
+                    player_input.submit(7, jump);
                     control.applyPlayerInput(7);
-                }
-                player_input.beginPhysicsStep();
-                movement.applyAll(1.0 / 60.0);
-                box2d.worldStep(1.0 / 60.0, 4);
-                try movement.processSensorEvents();
-                player_input.endPhysicsStep();
-                const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
-                const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
-                if (aiming) {
-                    try std.testing.expect(tick <= landing_tick);
-                    try nearPoint(expected_positions[tick], position, 0.00002);
-                    try nearPoint(expected_velocities[tick], velocity, 0.00002);
-                } else {
-                    expected_positions[tick] = position;
-                    expected_velocities[tick] = velocity;
-                }
-                if (!moving.groundState.supported) continue;
-                landed = true;
-                if (!aiming) {
-                    landing_tick = tick;
+                    player_input.beginPhysicsStep();
+                    movement.applyAll(1.0 / 60.0);
+                    player_input.endPhysicsStep();
+                    try std.testing.expect(box2d.c.b2Body_GetLinearVelocity(body).y < 0);
+                    try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
                     break;
                 }
-                try std.testing.expectEqual(landing_tick, tick);
-                try std.testing.expectEqual(@as(f32, 0), player_input.playerInputs.get(7).?.aimMovementDirection);
-                try std.testing.expectEqual(@as(i8, 0), moving.lateralMovementIntent);
-                // Another jump while aim stays held must not resurrect the
-                // direction captured for the completed jump.
-                var jump: player_input.Sample = .{ .movementDirection = vec.west, .aimDirection = vec.west };
-                jump.buttons.set(.shoot, true);
-                jump.buttons.set(.jump, true);
-                player_input.submit(7, jump);
-                control.applyPlayerInput(7);
-                player_input.beginPhysicsStep();
-                movement.applyAll(1.0 / 60.0);
-                player_input.endPhysicsStep();
-                try std.testing.expect(box2d.c.b2Body_GetLinearVelocity(body).y < 0);
-                try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
-                break;
+                try std.testing.expect(landed);
             }
-            try std.testing.expect(landed);
         }
     }
 }
@@ -2065,6 +2196,66 @@ test "release-to-fire captures direction once across quick taps re-presses switc
     control.applyFixedStepPlayerInputs();
     player_input.endPhysicsStep();
     try std.testing.expectEqual(@as(usize, 2), weapon.activeTrails.items.len);
+}
+
+test "free and snapped stick aim align the procedural barrel and release shot through neutral and re-press" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    defer {
+        delay.cleanup();
+        delay.delayedActions = .init(allocator.allocator);
+    }
+    defer weapon.activeTrails.clearAndFree(allocator.allocator);
+    try std.testing.expect(sdl.c.SDL_SetHint(sdl.c.SDL_HINT_AUDIO_DRIVER, "dummy"));
+    defer _ = sdl.c.SDL_ResetHint(sdl.c.SDL_HINT_AUDIO_DRIVER);
+    try std.testing.expect(sdl.c.SDL_InitSubSystem(sdl.c.SDL_INIT_AUDIO));
+    defer sdl.c.SDL_QuitSubSystem(sdl.c.SDL_INIT_AUDIO);
+    try audio.init();
+    defer audio.cleanup();
+    for ([_]data.AimMode{ .free, .eight_directions }) |aim_mode| {
+        player_input.directionSettings.aimMode = aim_mode;
+        player_input.neutralize(7);
+        animation.resetPlayer(7);
+        weapon.activeTrails.clearRetainingCapacity();
+        var sample = gamepad.sampleSticks(gamepad.defaultBindings, .{ .x = 30000, .y = -20000 }, .{ .x = 0, .y = 0 });
+        sample.buttons.set(.shoot, true);
+        player_input.submit(7, sample);
+        control.applyPlayerInput(7);
+        const expected = if (aim_mode == .free) vec.normalize(.{ .x = 3, .y = 2 }) else vec.normalize(.{ .x = 1, .y = 1 });
+        try nearPoint(expected, player.players.get(7).?.aimDirection, 0.00001);
+        // Another render poll before physics: the stick returns to neutral while
+        // the button is held and its press edge has not yet been consumed.
+        sample = .{};
+        sample.buttons.set(.shoot, true);
+        player_input.submit(7, sample);
+        control.applyPlayerInput(7);
+        try nearPoint(expected, player.players.get(7).?.aimDirection, 0.00001);
+        player_input.beginPhysicsStep();
+        player_input.endPhysicsStep();
+        for (0..10) |_| animation.fixedUpdate(1.0 / 60.0);
+        const held_frame = player.weaponFrame(7, .physics, null).?;
+        try nearPoint(expected, player.weaponDirection(held_frame), 0.00001);
+        const muzzle = player.weaponMuzzle(held_frame).?;
+        sample.buttons.set(.shoot, false);
+        player_input.submit(7, sample);
+        control.applyPlayerInput(7);
+        // A new hold before physics may change live aim but not the queued shot.
+        submitAim(vec.north, true);
+        try nearPoint(expected, player_input.playerInputs.get(7).?.releasedAimDirection, 0.00001);
+        player_input.beginPhysicsStep();
+        control.applyFixedStepPlayerInputs();
+        player_input.endPhysicsStep();
+        try std.testing.expectEqual(@as(usize, 1), weapon.activeTrails.items.len);
+        const trail = weapon.activeTrails.items[0];
+        try nearPoint(conv.pixel2M(muzzle), trail.startPos, 0.00001);
+        try nearPoint(.{ .x = expected.x * 3, .y = -expected.y * 3 }, vec.subtract(trail.endPos, trail.startPos), 0.00001);
+        player_input.beginPhysicsStep();
+        control.applyFixedStepPlayerInputs();
+        player_input.endPhysicsStep();
+        try std.testing.expectEqual(@as(usize, 1), weapon.activeTrails.items.len);
+    }
 }
 
 test "invalid aiming settings preserve live pose and successful reload clears transient aiming" {

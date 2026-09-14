@@ -1,5 +1,9 @@
 {
   "mechanism": "liero",
+  "input": {
+    "movementMode": "axis_thresholds",
+    "aimMode": "free"
+  },
   "aimGuideLengthMeters": 2,
   "liero": {
     "control": {

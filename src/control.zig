@@ -130,7 +130,10 @@ fn updateTowerfallAimState(playerId: usize, inputState: player_input.PlayerInput
     // occur here. Remember the resolved default facing along with explicit aim.
     const liveInput = player_input.playerInputs.getPtr(playerId).?;
     if (shootButton.held) {
-        if (hasDirection or shootButton.pendingPressed or !p.isAiming) player.aim(p, inputState.aimDirection);
+        // A press can stay pending across render polls before the fixed step.
+        // Once aiming has begun, neutral stick input keeps the resolved direction.
+        const needsDefaultAim = shootButton.pendingPressed and vec.equals(inputState.heldAimDirection, vec.zero);
+        if (hasDirection or needsDefaultAim or !p.isAiming) player.aim(p, inputState.aimDirection);
         liveInput.heldAimDirection = p.aimDirection;
         return;
     }

@@ -16,6 +16,8 @@ pub const TRIGGER_THRESHOLD: f32 = 0.1;
 pub const MOVEMENT_THRESHOLD: f32 = 0.2;
 pub const axisMax: f32 = 32767.0;
 
+pub const StickAxes = struct { x: i16, y: i16 };
+
 pub const GamepadState = struct {
     gamepad: ?*sdl.Gamepad,
     instanceId: sdl.c.SDL_JoystickID,
@@ -199,6 +201,32 @@ fn applyRadialDeadzone(rawX: i16, rawY: i16, deadzone: f32) vec.Vec2 {
     return .{ .x = x, .y = y };
 }
 
+// Keep the original stick angle available to aiming even when movement is digital.
+// Both sticks use the device's SDL coordinate system; samples use positive Y up.
+pub fn sampleSticks(bindings: GamepadBindings, moveAxes: StickAxes, aimAxes: StickAxes) player_input.Sample {
+    const move = switch (player_input.directionSettings.movementMode) {
+        .axis_thresholds => vec.Vec2{
+            .x = digitalAxis(normalizeAxis(moveAxes.x), bindings.moveThreshold),
+            .y = -digitalAxis(normalizeAxis(moveAxes.y), bindings.moveThreshold),
+        },
+        .eight_directions => blk: {
+            const stick = applyRadialDeadzone(moveAxes.x, moveAxes.y, @max(stickDeadzone, bindings.moveThreshold));
+            break :blk player_input.eightDirection(.{ .x = stick.x, .y = -stick.y });
+        },
+    };
+    const axes = if (movement.mechanism == .liero) aimAxes else moveAxes;
+    const deadzone = if (movement.mechanism == .liero) stickDeadzone else @max(stickDeadzone, bindings.moveThreshold);
+    const aim = applyRadialDeadzone(axes.x, axes.y, deadzone);
+    const aimThreshold = if (movement.mechanism == .liero) bindings.aimThreshold else 0;
+    return .{
+        .movementDirection = move,
+        .aimDirection = if (@abs(aim.x) > aimThreshold or @abs(aim.y) > aimThreshold)
+            .{ .x = aim.x, .y = -aim.y }
+        else
+            vec.zero,
+    };
+}
+
 pub fn createController(playerId: usize, color: sprite.Color) ?controller.Controller {
     const maybeGamepad = availableGamepads.pop();
     if (maybeGamepad == null) {
@@ -282,35 +310,23 @@ pub fn handle(ctrl: *const controller.Controller) void {
         return;
     };
 
-    const moveX = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveXAxis));
-    const moveY = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.moveYAxis));
-    const movementDirection: vec.Vec2 = .{
-        .x = digitalAxis(moveX, bindings.moveThreshold),
-        .y = -digitalAxis(moveY, bindings.moveThreshold),
-    };
+    var sample = sampleSticks(bindings, .{
+        .x = sdl.getGamepadAxis(sdlGamepad, bindings.moveXAxis),
+        .y = sdl.getGamepadAxis(sdlGamepad, bindings.moveYAxis),
+    }, .{
+        .x = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis),
+        .y = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis),
+    });
 
-    var aimDirection = movementDirection;
     var shootHeld = sdl.getGamepadButton(sdlGamepad, .x);
     var zoomHeld = false;
     if (movement.mechanism == .liero) {
-        const rawAimX = sdl.getGamepadAxis(sdlGamepad, bindings.aimXAxis);
-        const rawAimY = sdl.getGamepadAxis(sdlGamepad, bindings.aimYAxis);
-        const aim = applyRadialDeadzone(rawAimX, rawAimY, stickDeadzone);
-        aimDirection = if (@abs(aim.x) > bindings.aimThreshold or @abs(aim.y) > bindings.aimThreshold)
-            .{ .x = aim.x, .y = -aim.y }
-        else
-            vec.zero;
-
         const shootValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, bindings.shootAxis));
         shootHeld = shootValue > bindings.shootThreshold;
         const zoomValue = normalizeAxis(sdl.getGamepadAxis(sdlGamepad, .triggerleft));
         zoomHeld = zoomValue > TRIGGER_THRESHOLD;
     }
 
-    var sample: player_input.Sample = .{
-        .movementDirection = movementDirection,
-        .aimDirection = aimDirection,
-    };
     sample.buttons.set(.jump, sdl.getGamepadButton(sdlGamepad, bindings.jumpButton));
     sample.buttons.set(.dodge, sdl.getGamepadButton(sdlGamepad, bindings.dodgeButton));
     sample.buttons.set(.shoot, shootHeld);

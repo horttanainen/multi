@@ -145,6 +145,14 @@ pub const MovementMechanism = enum {
     towerfall,
 };
 
+pub const MovementInputMode = enum { axis_thresholds, eight_directions };
+pub const AimMode = enum { free, eight_directions };
+
+pub const DirectionalInputData = struct {
+    movementMode: MovementInputMode = .axis_thresholds,
+    aimMode: AimMode,
+};
+
 pub const MovementGroundingMode = enum {
     foot_contact,
     body_contact,
@@ -234,6 +242,8 @@ pub const TowerfallMovementData = struct {
 
 pub const MovementData = struct {
     mechanism: MovementMechanism,
+    // Older profiles inherit the mechanism's input defaults.
+    input: ?DirectionalInputData = null,
     aimGuideLengthMeters: f32 = 0.5,
     liero: ?LieroMovementData = null,
     towerfall: ?TowerfallMovementData = null,

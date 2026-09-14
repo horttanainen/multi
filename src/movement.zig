@@ -93,6 +93,7 @@ pub fn configure(movementData: data.MovementData) !void {
     }
 
     minimumSupportUpAmount = @cos(grounding.maxSlopeAngleDegrees * std.math.pi / 180.0);
+    player_input.configure(movementData);
 }
 
 fn clearRuntimeState(state: *State) void {

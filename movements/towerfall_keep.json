@@ -1,5 +1,9 @@
 {
   "mechanism": "towerfall",
+  "input": {
+    "movementMode": "axis_thresholds",
+    "aimMode": "eight_directions"
+  },
   "aimGuideLengthMeters": 2,
   "towerfall": {
     "control": {

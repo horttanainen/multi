@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const allocator = @import("allocator.zig").allocator;
+const data = @import("data.zig");
 const vec = @import("vector.zig");
 
 pub const ButtonState = struct {
@@ -27,6 +28,7 @@ pub const ButtonStates = std.EnumArray(Button, ButtonState);
 
 pub const Sample = struct {
     movementDirection: vec.Vec2 = vec.zero,
+    // Device direction after its deadzone, before the configured aim snapping.
     aimDirection: vec.Vec2 = vec.zero,
     buttons: ButtonValues = ButtonValues.initFill(false),
 };
@@ -43,6 +45,46 @@ pub const PlayerInput = struct {
 };
 
 pub var playerInputs: std.AutoArrayHashMapUnmanaged(usize, PlayerInput) = .empty;
+pub var directionSettings: data.DirectionalInputData = .{ .aimMode = .free };
+var profileDirectionSettings: data.DirectionalInputData = .{ .aimMode = .free };
+
+pub fn configure(settings: data.MovementData) void {
+    profileDirectionSettings = settings.input orelse .{
+        .aimMode = switch (settings.mechanism) {
+            .liero => .free,
+            .towerfall => .eight_directions,
+        },
+    };
+    resetDirectionSettings();
+}
+
+pub fn resetDirectionSettings() void {
+    directionSettings = profileDirectionSettings;
+}
+
+// Exact cardinal zeros prevent vertical aim from requesting a horizontal turn.
+// Diagonal movement keeps full horizontal intent instead of slowing to 1/sqrt(2).
+pub fn eightDirection(direction: vec.Vec2) vec.Vec2 {
+    if (vec.equals(direction, vec.zero)) return vec.zero;
+    if (!std.math.isFinite(direction.x) or !std.math.isFinite(direction.y)) {
+        std.log.warn("player_input.eightDirection: non-finite direction {any}", .{direction});
+        return vec.zero;
+    }
+    const directions = [_]vec.Vec2{
+        vec.east, .{ .x = 1, .y = 1 },   vec.north, .{ .x = -1, .y = 1 },
+        vec.west, .{ .x = -1, .y = -1 }, vec.south, .{ .x = 1, .y = -1 },
+    };
+    const sector: i32 = @intFromFloat(@round(std.math.atan2(direction.y, direction.x) / (std.math.pi / 4.0)));
+    return directions[@intCast(@mod(sector, 8))];
+}
+
+fn resolveAim(direction: vec.Vec2) vec.Vec2 {
+    if (directionSettings.aimMode == .free or vec.equals(direction, vec.zero)) return direction;
+    const snapped = eightDirection(direction);
+    if (vec.equals(snapped, vec.zero)) return vec.zero;
+    // Preserve stick strength for consumers such as camera look-ahead.
+    return vec.mul(vec.normalize(snapped), vec.magnitude(direction));
+}
 
 pub fn register(playerId: usize) !void {
     try playerInputs.put(allocator, playerId, .{});
@@ -94,19 +136,20 @@ pub fn cleanup() void {
 }
 
 fn applySample(inputState: *PlayerInput, sample: Sample) void {
+    const aimDirection = resolveAim(sample.aimDirection);
     const wasAiming = inputState.buttons.get(.shoot).held;
     const aiming = sample.buttons.get(.shoot);
-    const hasDirection = !vec.equals(sample.aimDirection, vec.zero);
+    const hasDirection = !vec.equals(aimDirection, vec.zero);
     if (!aiming) inputState.aimMovementDirection = 0;
     if (aiming and !wasAiming) inputState.aimMovementDirection = inputState.movementDirection.x;
-    if (aiming and (!wasAiming or hasDirection)) inputState.heldAimDirection = sample.aimDirection;
+    if (aiming and (!wasAiming or hasDirection)) inputState.heldAimDirection = aimDirection;
     if (wasAiming and !aiming) {
         // Keep the release direction until the fixed step consumes the edge.
         // Subsequent movement or a new aim press must not redirect this shot.
-        inputState.releasedAimDirection = if (hasDirection) sample.aimDirection else inputState.heldAimDirection;
+        inputState.releasedAimDirection = if (hasDirection) aimDirection else inputState.heldAimDirection;
     }
     inputState.movementDirection = sample.movementDirection;
-    inputState.aimDirection = sample.aimDirection;
+    inputState.aimDirection = aimDirection;
 
     var iterator = inputState.buttons.iterator();
     while (iterator.next()) |entry| {
