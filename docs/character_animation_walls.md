@@ -2,7 +2,8 @@
 
 Implemented against `69c9656`; independent review and corrections are complete,
 including the wall-jump extension iteration. Accepted by the user on 2026-09-13.
-The requested wall-slide revision follows as a separately reviewed phase.
+The [one-handed wall-slide revision](character_animation_wall_slide.md) follows
+as a separately reviewed phase; the behavior below records this accepted baseline.
 Grappling and rope animation are deferred.
 
 ## Behavior

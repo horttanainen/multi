@@ -19,8 +19,10 @@ See [character_animation_aiming.md](character_animation_aiming.md) for the data,
 validation and acceptance checks. Grappling and rope animation are deferred.
 Wall bracing, pushing, sliding and jump push-off are accepted by the user,
 including the leg-extension correction; see
-[character_animation_walls.md](character_animation_walls.md). A wall-slide pose
-revision follows as a separately planned and reviewed phase.
+[character_animation_walls.md](character_animation_walls.md). The one-handed,
+outward-facing wall-slide revision is accepted, including the near-straight leg
+and downward-toe adjustment; independent review and validation are complete. See
+[character_animation_wall_slide.md](character_animation_wall_slide.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -275,6 +277,9 @@ Split this work into independently reviewed commits:
   compression, sustained two-hand pushing, wall slides and wall-jump push-off.
   Reuse movement signals, surface probes, action curves, IK and shared weapon
   placement; aiming has priority over the weapon hand.
+- **3B, wall-slide revision (accepted):** Raised support hand,
+  outward-facing slide, one near-straight leg, one bent knee, downward toes and a ready blaster. Keep the gun in
+  hand through push-off; extend the existing contact, facing and limb blending.
 - **3B, deferred:** Grappling and rope animation, with explicit control priorities.
 - **3C:** Static slopes and steps, followed by a separately reviewed moving and
   destructible rubble phase. Plan the terrain-query/contact changes first.

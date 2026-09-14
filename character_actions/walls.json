@@ -79,19 +79,19 @@
     "reference_speed_mps": 0,
     "loop": false,
     "tracks": [
-      {"binding": "pelvis_x", "keys": [{"phase": 0, "value": -0.18, "interpolation": "linear"}, {"phase": 1, "value": -0.18, "interpolation": "linear"}]},
-      {"binding": "pelvis_y", "keys": [{"phase": 0, "value": -0.045, "interpolation": "bezier", "out_handle": [0.33333333, -0.045]}, {"phase": 1, "value": -0.045, "interpolation": "linear", "in_handle": [0.66666667, -0.045]}]},
-      {"binding": "torso_angle", "keys": [{"phase": 0, "value": 0.14, "interpolation": "bezier", "out_handle": [0.33333333, 0.14]}, {"phase": 1, "value": 0.14, "interpolation": "linear", "in_handle": [0.66666667, 0.14]}]},
+      {"binding": "pelvis_x", "keys": [{"phase": 0, "value": -0.07, "interpolation": "bezier", "out_handle": [0.33333333, -0.07]}, {"phase": 1, "value": -0.07, "interpolation": "linear", "in_handle": [0.66666667, -0.07]}]},
+      {"binding": "pelvis_y", "keys": [{"phase": 0, "value": -0.06, "interpolation": "bezier", "out_handle": [0.33333333, -0.06]}, {"phase": 1, "value": -0.06, "interpolation": "linear", "in_handle": [0.66666667, -0.06]}]},
+      {"binding": "torso_angle", "keys": [{"phase": 0, "value": -0.08, "interpolation": "bezier", "out_handle": [0.33333333, -0.08]}, {"phase": 1, "value": -0.08, "interpolation": "linear", "in_handle": [0.66666667, -0.08]}]},
       {"binding": "left_foot_x", "keys": [{"phase": 0, "value": 0.225, "interpolation": "linear"}, {"phase": 1, "value": 0.225, "interpolation": "linear"}]},
-      {"binding": "left_foot_y", "keys": [{"phase": 0, "value": -0.52, "interpolation": "linear"}, {"phase": 1, "value": -0.52, "interpolation": "linear"}]},
+      {"binding": "left_foot_y", "keys": [{"phase": 0, "value": -0.91, "interpolation": "linear"}, {"phase": 1, "value": -0.91, "interpolation": "linear"}]},
       {"binding": "left_foot_angle", "keys": [{"phase": 0, "value": 1.5707963267948966, "interpolation": "linear"}, {"phase": 1, "value": 1.5707963267948966, "interpolation": "linear"}]},
       {"binding": "left_hand_x", "keys": [{"phase": 0, "value": 0.3, "interpolation": "bezier", "out_handle": [0.33333333, 0.3]}, {"phase": 1, "value": 0.3, "interpolation": "linear", "in_handle": [0.66666667, 0.3]}]},
-      {"binding": "left_hand_y", "keys": [{"phase": 0, "value": 0.55, "interpolation": "bezier", "out_handle": [0.33333333, 0.55]}, {"phase": 1, "value": 0.55, "interpolation": "linear", "in_handle": [0.66666667, 0.55]}]},
+      {"binding": "left_hand_y", "keys": [{"phase": 0, "value": 0.68, "interpolation": "bezier", "out_handle": [0.33333333, 0.68]}, {"phase": 1, "value": 0.68, "interpolation": "linear", "in_handle": [0.66666667, 0.68]}]},
       {"binding": "right_foot_x", "keys": [{"phase": 0, "value": 0.225, "interpolation": "linear"}, {"phase": 1, "value": 0.225, "interpolation": "linear"}]},
-      {"binding": "right_foot_y", "keys": [{"phase": 0, "value": -0.38, "interpolation": "linear"}, {"phase": 1, "value": -0.38, "interpolation": "linear"}]},
+      {"binding": "right_foot_y", "keys": [{"phase": 0, "value": -0.52, "interpolation": "linear"}, {"phase": 1, "value": -0.52, "interpolation": "linear"}]},
       {"binding": "right_foot_angle", "keys": [{"phase": 0, "value": 1.5707963267948966, "interpolation": "linear"}, {"phase": 1, "value": 1.5707963267948966, "interpolation": "linear"}]},
-      {"binding": "right_hand_x", "keys": [{"phase": 0, "value": 0.3, "interpolation": "bezier", "out_handle": [0.33333333, 0.3]}, {"phase": 1, "value": 0.3, "interpolation": "linear", "in_handle": [0.66666667, 0.3]}]},
-      {"binding": "right_hand_y", "keys": [{"phase": 0, "value": 0.35, "interpolation": "bezier", "out_handle": [0.33333333, 0.35]}, {"phase": 1, "value": 0.35, "interpolation": "linear", "in_handle": [0.66666667, 0.35]}]}
+      {"binding": "right_hand_x", "keys": [{"phase": 0, "value": -0.47, "interpolation": "bezier", "out_handle": [0.33333333, -0.47]}, {"phase": 1, "value": -0.47, "interpolation": "linear", "in_handle": [0.66666667, -0.47]}]},
+      {"binding": "right_hand_y", "keys": [{"phase": 0, "value": 0.02, "interpolation": "bezier", "out_handle": [0.33333333, 0.02]}, {"phase": 1, "value": 0.02, "interpolation": "linear", "in_handle": [0.66666667, 0.02]}]}
     ],
     "contacts": [{"limb": "left_leg", "start": 0, "end": 1}, {"limb": "right_leg", "start": 0, "end": 1}]
   },
@@ -109,17 +109,17 @@
     "tracks": [
       {"binding": "pelvis_x", "keys": [{"phase": 0, "value": -0.1, "interpolation": "linear"}, {"phase": 0.4, "value": -0.1, "interpolation": "bezier", "out_handle": [0.6, -0.1]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.8, 0]}]},
       {"binding": "pelvis_y", "keys": [{"phase": 0, "value": 0.02, "interpolation": "linear"}, {"phase": 0.4, "value": 0.02, "interpolation": "bezier", "out_handle": [0.6, 0.02]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.8, 0]}]},
-      {"binding": "torso_angle", "keys": [{"phase": 0, "value": 0.24, "interpolation": "bezier", "out_handle": [0.33333333, 0.24]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.66666667, 0]}]},
+      {"binding": "torso_angle", "keys": [{"phase": 0, "value": -0.08, "interpolation": "bezier", "out_handle": [0.33333333, -0.08]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.66666667, 0]}]},
       {"binding": "left_foot_x", "keys": [{"phase": 0, "value": 0.43, "interpolation": "linear"}, {"phase": 0.4, "value": 0.43, "interpolation": "bezier", "out_handle": [0.6, 0.43]}, {"phase": 1, "value": 0.2, "interpolation": "linear", "in_handle": [0.8, 0.2]}]},
       {"binding": "left_foot_y", "keys": [{"phase": 0, "value": -0.71, "interpolation": "linear"}, {"phase": 0.4, "value": -0.71, "interpolation": "bezier", "out_handle": [0.6, -0.71]}, {"phase": 1, "value": -0.5, "interpolation": "linear", "in_handle": [0.8, -0.5]}]},
       {"binding": "left_foot_angle", "keys": [{"phase": 0, "value": 1.5707963267948966, "interpolation": "linear"}, {"phase": 0.4, "value": 1.5707963267948966, "interpolation": "bezier", "out_handle": [0.6, 1.5707963267948966]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.8, 0]}]},
-      {"binding": "left_hand_x", "keys": [{"phase": 0, "value": 0.45, "interpolation": "bezier", "out_handle": [0.33333333, 0.45]}, {"phase": 1, "value": 0.16, "interpolation": "linear", "in_handle": [0.66666667, 0.16]}]},
-      {"binding": "left_hand_y", "keys": [{"phase": 0, "value": 0.42, "interpolation": "bezier", "out_handle": [0.33333333, 0.42]}, {"phase": 1, "value": 0.74, "interpolation": "linear", "in_handle": [0.66666667, 0.74]}]},
+      {"binding": "left_hand_x", "keys": [{"phase": 0, "value": 0.3, "interpolation": "bezier", "out_handle": [0.33333333, 0.3]}, {"phase": 1, "value": -0.16, "interpolation": "linear", "in_handle": [0.66666667, -0.16]}]},
+      {"binding": "left_hand_y", "keys": [{"phase": 0, "value": 0.68, "interpolation": "bezier", "out_handle": [0.33333333, 0.68]}, {"phase": 1, "value": 0.74, "interpolation": "linear", "in_handle": [0.66666667, 0.74]}]},
       {"binding": "right_foot_x", "keys": [{"phase": 0, "value": 0.53, "interpolation": "linear"}, {"phase": 0.4, "value": 0.53, "interpolation": "bezier", "out_handle": [0.6, 0.53]}, {"phase": 1, "value": -0.23, "interpolation": "linear", "in_handle": [0.8, -0.23]}]},
       {"binding": "right_foot_y", "keys": [{"phase": 0, "value": -0.62, "interpolation": "linear"}, {"phase": 0.4, "value": -0.62, "interpolation": "bezier", "out_handle": [0.6, -0.62]}, {"phase": 1, "value": -0.62, "interpolation": "linear", "in_handle": [0.8, -0.62]}]},
       {"binding": "right_foot_angle", "keys": [{"phase": 0, "value": 1.5707963267948966, "interpolation": "linear"}, {"phase": 0.4, "value": 1.5707963267948966, "interpolation": "bezier", "out_handle": [0.6, 1.5707963267948966]}, {"phase": 1, "value": 0, "interpolation": "linear", "in_handle": [0.8, 0]}]},
-      {"binding": "right_hand_x", "keys": [{"phase": 0, "value": 0.43, "interpolation": "bezier", "out_handle": [0.33333333, 0.43]}, {"phase": 1, "value": -0.18, "interpolation": "linear", "in_handle": [0.66666667, -0.18]}]},
-      {"binding": "right_hand_y", "keys": [{"phase": 0, "value": 0.26, "interpolation": "bezier", "out_handle": [0.33333333, 0.26]}, {"phase": 1, "value": 0.69, "interpolation": "linear", "in_handle": [0.66666667, 0.69]}]}
+      {"binding": "right_hand_x", "keys": [{"phase": 0, "value": -0.47, "interpolation": "bezier", "out_handle": [0.33333333, -0.47]}, {"phase": 1, "value": -0.42, "interpolation": "linear", "in_handle": [0.66666667, -0.42]}]},
+      {"binding": "right_hand_y", "keys": [{"phase": 0, "value": 0.02, "interpolation": "bezier", "out_handle": [0.33333333, 0.02]}, {"phase": 1, "value": 0.12, "interpolation": "linear", "in_handle": [0.66666667, 0.12]}]}
     ],
     "contacts": [{"limb": "left_leg", "start": 0, "end": 0.2}, {"limb": "right_leg", "start": 0, "end": 0.2}]
   }

@@ -126,8 +126,11 @@ pub const WallState = struct {
     impact: f32 = 0,
     weight: f32 = 0,
     hands: [2]?vec.Vec2 = .{ null, null },
-    // Toe contacts slide with the body, then stay in world space for push-off.
+    // Toe targets slide with the body, then stay in world space for push-off.
     feet: [2]?vec.Vec2 = .{ null, null },
+    feet_planted: [2]bool = .{ false, false },
+    // Surface limits remain available while a transitioning foot is unplanted.
+    foot_surfaces: [2]?f32 = .{ null, null },
 };
 pub const LocomotionInput = struct {
     body: vec.Vec2,
@@ -184,10 +187,11 @@ pub const PlayerState = struct {
     previous_wall: WallState = .{},
     stow_weight: f32 = 0,
     previous_stow_weight: f32 = 0,
-    arm_release_angles: [2][2]f32 = .{ .{ 0, 0 }, .{ 0, 0 } },
-    arm_release_seconds: f32 = 1,
-    previous_arm_release_seconds: f32 = 1,
-    arm_release_facing_right: bool = false,
+    limb_release_angles: [limbCount][2]f32 = @splat(.{ 0, 0 }),
+    limb_release_active: [limbCount]bool = @splat(false),
+    limb_release_seconds: f32 = 1,
+    previous_limb_release_seconds: f32 = 1,
+    limb_release_facing_right: bool = false,
 };
 pub const Sampling = enum { render, physics };
 pub const FramePose = struct {
@@ -901,7 +905,11 @@ fn updateWall(set: *const Assets, state: *PlayerState, input: LocomotionInput, p
         state.wall.weight = @min(1, state.wall.weight + dt / settings.blend_seconds);
     }
     if (state.wall.action == .none) state.wall = .{};
-    if (state.wall.action != .slide and state.wall.action != .jump) state.wall.feet = .{ null, null };
+    if (state.wall.side != before.side) state.wall.foot_surfaces = .{ null, null };
+    if (state.wall.action != .slide and state.wall.action != .jump) {
+        state.wall.feet = .{ null, null };
+        state.wall.foot_surfaces = .{ null, null };
+    }
     const changed = state.wall.action != before.action or state.wall.side != before.side;
     if (changed) state.wall.seconds = 0;
     return changed;
@@ -957,6 +965,8 @@ fn planWallHands(set: *const Assets, state: *PlayerState) void {
         .none, .jump => unreachable,
     };
     for (&state.wall.hands, state.previous_wall.hands, 0..) |*hand, before, index| {
+        // The named weapon hand stays free on a slide on either wall side.
+        if (state.wall.action == .slide and set.rig.limbs[index + 2].end == set.rig.attachments.get("weapon_hand").?.joint) continue;
         // Plan the authored contact height; interpolating toward it happens in
         // the pose. Locking a partly raised hand would trap it below the target.
         const height = evaluateTrack(clip.tracks[@intFromEnum(target_y[index + 2])], clipPhase(clip, state.wall.seconds / clip.cycle_seconds));
@@ -971,6 +981,18 @@ fn planWallHands(set: *const Assets, state: *PlayerState) void {
 }
 
 fn planWallFeet(set: *const Assets, state: *PlayerState, launching: bool) void {
+    if (state.wall.action == .brace and (state.action == .jump or state.action == .fall)) {
+        // The airborne brace precedes slide entry; its free feet must already
+        // clear the face before the knee changes branch at the next boundary.
+        const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
+        for (&state.wall.foot_surfaces, 0..) |*surface, index| {
+            const toe = toWorld(set.rig, .{ .x = state.controls[@intFromEnum(target_x[index])] + offsets[index * 2].x, .y = state.controls[@intFromEnum(target_y[index])] + offsets[index * 2].y }, state.body, state.facing_right);
+            const point = wallPoint(.{ .x = state.body.x, .y = toe.y }, state.wall.side, set.walls.settings.probe_distance_m);
+            surface.* = if (point == null) null else point.?.x;
+        }
+        clearWallSoles(set.rig, &state.controls, offsets, state.wall, state.body, state.facing_right);
+        return;
+    }
     if (state.wall.action != .slide and state.wall.action != .jump) return;
     const jumping = state.wall.action == .jump;
     const clip = if (jumping) set.walls.jump else set.walls.slide;
@@ -978,7 +1000,7 @@ fn planWallFeet(set: *const Assets, state: *PlayerState, launching: bool) void {
     const sign: f32 = if (state.facing_right) 1 else -1;
     const side: f32 = @floatFromInt(state.wall.side);
     const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
-    for (&state.wall.feet, 0..) |*anchor, index| {
+    for (&state.wall.feet, &state.wall.foot_surfaces, 0..) |*anchor, *surface_x, index| {
         const x = @intFromEnum(target_x[index]);
         const y = @intFromEnum(target_y[index]);
         const offset = offsets[index * 2];
@@ -991,15 +1013,25 @@ fn planWallFeet(set: *const Assets, state: *PlayerState, launching: bool) void {
             const origin: vec.Vec2 = .{ .x = body.x, .y = body.y - set.rig.root_from_body.y - height - offset.y };
             anchor.* = if (intent) wallPoint(origin, state.wall.side, set.walls.settings.contact_distance_m) else null;
         }
-        if (anchor.* == null) continue;
+        if (anchor.* == null) {
+            // An entry arc can continue into an immediate jump. It has no
+            // planted toe, but still needs the nearby wall's clearance plane.
+            if (surface_x.* == null) continue;
+            const toe = toWorld(set.rig, .{ .x = state.controls[x] + offset.x, .y = state.controls[y] + offset.y }, state.body, state.facing_right);
+            const surface = wallPoint(.{ .x = state.body.x, .y = toe.y }, state.wall.side, set.walls.settings.probe_distance_m);
+            surface_x.* = if (surface == null) null else surface.?.x;
+            continue;
+        }
         const point = anchor.*.?;
         // Revalidate at the contact, not from the receding body. A removed wall
         // releases immediately, and a released jump foot never reattaches.
         const surface = wallPoint(.{ .x = point.x - side * 0.02, .y = point.y }, state.wall.side, 0.04);
         if (surface == null or @abs(surface.?.x - point.x) > 0.001) {
             anchor.* = null;
+            surface_x.* = null;
             continue;
         }
+        surface_x.* = point.x;
         const ankle: vec.Vec2 = .{ .x = (point.x - state.body.x) * sign - set.rig.root_from_body.x - offset.x, .y = state.body.y - set.rig.root_from_body.y - point.y - offset.y };
         if (intent and reachableFoot(set.rig, state.controls, index, ankle)) {
             state.controls[x] = ankle.x;
@@ -1019,6 +1051,21 @@ fn planWallFeet(set: *const Assets, state: *PlayerState, launching: bool) void {
         state.transition_offsets[y] += released.y - state.controls[y];
         state.controls[x] = released.x;
         state.controls[y] = released.y;
+    }
+}
+
+fn clearWallSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, wall: WallState, body: vec.Vec2, facing_right: bool) void {
+    if (wall.side == 0) return;
+    const side: f32 = @floatFromInt(wall.side);
+    const sign: f32 = if (facing_right) 1 else -1;
+    for (wall.foot_surfaces, 0..) |surface, index| {
+        if (surface == null) continue;
+        const x = @intFromEnum(target_x[index]);
+        const y = @intFromEnum(target_y[index]);
+        for ([_]vec.Vec2{ offsets[index * 2], vec.add(offsets[index * 2], offsets[index * 2 + 1]) }) |offset| {
+            const point = toWorld(rig, .{ .x = controls[x] + offset.x, .y = controls[y] + offset.y }, body, facing_right);
+            controls[x] -= @max(0, (point.x - surface.?) * side) * side * sign;
+        }
     }
 }
 
@@ -1121,8 +1168,8 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.previous_sole_floors = state.sole_floors;
     state.previous_wall = state.wall;
     state.previous_stow_weight = state.stow_weight;
-    state.previous_arm_release_seconds = state.arm_release_seconds;
-    state.arm_release_seconds += step;
+    state.previous_limb_release_seconds = state.limb_release_seconds;
+    state.limb_release_seconds += step;
     const previous_speed = state.speed_mps;
     state.speed_mps = (input.body.x - state.body.x) / step;
     state.body = input.body;
@@ -1133,16 +1180,16 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.aim_weight = if (raising) @min(1, state.aim_weight + step / set.aiming.raise_seconds) else @max(0, state.aim_weight - step / set.aiming.lower_seconds);
     const speed = @abs(state.speed_mps);
     const wall_changed = if (playback == .locomotion) updateWall(set, state, input, previous_speed, step) else false;
-    const stowing = playback == .locomotion and state.wall.action != .none and !raising;
+    const stowing = playback == .locomotion and (state.wall.action == .brace or state.wall.action == .push) and !raising;
     state.stow_weight = if (stowing) @min(1, state.stow_weight + step / set.walls.settings.blend_seconds) else @max(0, state.stow_weight - step / set.walls.settings.blend_seconds);
     if (raising) {
         // Keep the current facing near vertical aim so stick noise cannot
         // repeatedly reverse the character. Use the normal planted-foot turn.
         if (@abs(state.aim_direction.x) > 0.1) state.facing_right = state.aim_direction.x > 0;
     } else if (playback == .locomotion and state.wall.action != .none) {
-        // Finish the brief push-off facing the wall; travel-facing resumes when
-        // the wall action ends. Aiming retains its existing facing priority.
-        state.facing_right = state.wall.side > 0;
+        // Slides and their push-off look into the arena while the contacts
+        // continue to use the wall side. Grounded bracing faces the obstacle.
+        state.facing_right = if (state.wall.action == .slide or state.wall.action == .jump) state.wall.side < 0 else state.wall.side > 0;
     } else if (playback != .locomotion) {
         state.facing_right = input.facing_right;
     } else if (speed > profile.stop_speed_mps) {
@@ -1156,7 +1203,9 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     const turning = state.facing_right != state.previous_facing_right;
     const action_changed = updateAction(set, state, input, step);
     const supported = state.action != .jump and state.action != .fall;
-    const foot_facing_right = if (state.wall.action == .slide or state.wall.action == .jump) state.wall.side > 0 else state.facing_right;
+    // Outward feet rotate into the wall with toes down and ankles clear of the
+    // surface. Keep that heading through push-off, independently of aiming.
+    const foot_facing_right = if (state.wall.action == .slide or state.wall.action == .jump) state.wall.side < 0 else state.facing_right;
     state.foot_heading = std.math.lerp(state.foot_heading, if (foot_facing_right) @as(f32, 0) else 1, 1 - @exp(-step / profile.turn_seconds));
     const target_weight: f32 = if (supported and speed > profile.stop_speed_mps) 1 else 0;
     const response = if (target_weight > state.run_weight) profile.start_seconds else profile.stop_seconds;
@@ -1189,28 +1238,64 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     plantFeet(set, state, input, step);
     planWallHands(set, state);
     planWallFeet(set, state, input.wall_jump_direction != 0);
-    if (!initialize and before_state.wall.action != .none and state.wall.action == .none) {
-        // Once the wall releases, blend bone angles from the displayed arm.
-        // Switching between the two IK branches at an unchanged hand target
-        // would snap the elbow. A short free-hand arc preserves bone lengths.
+    const before_rig = wallPoseRig(set.rig, before_state.wall.action, before_state.wall.side, before_state.facing_right);
+    const after_rig = wallPoseRig(set.rig, state.wall.action, state.wall.side, state.facing_right);
+    var releasing: [limbCount]bool = @splat(false);
+    for (before_rig.limbs, after_rig.limbs, &releasing, 0..) |before, after, *release, index| {
+        const before_sign = before.bend_sign * @as(i8, if (before_state.facing_right) 1 else -1);
+        const after_sign = after.bend_sign * @as(i8, if (state.facing_right) 1 else -1);
+        const wall_transition = before_state.wall.action != .none or state.wall.action != .none;
+        const sliding = before_state.wall.action == .slide or before_state.wall.action == .jump or state.wall.action == .slide or state.wall.action == .jump;
+        release.* = wall_transition and before_sign != after_sign and (index >= 2 or sliding);
+    }
+    if (!initialize and std.mem.indexOfScalar(bool, &releasing, true) != null) {
+        // Reuse the release arc for any limb changing IK branch. Only released
+        // limbs blend; the supporting arm and planted feet retain their branch.
         const before_pose = interpolatedPose(set, before_state, 1);
-        for (set.rig.limbs[2..4], &state.arm_release_angles) |limb, *angles| {
+        for (set.rig.limbs, &state.limb_release_angles, &state.limb_release_active, releasing) |limb, *angles, *active, release| {
+            active.* = release or (active.* and before_state.limb_release_seconds < set.walls.settings.blend_seconds);
             const upper = vec.subtract(before_pose.joints[@intFromEnum(limb.middle)], before_pose.joints[@intFromEnum(limb.root)]);
             const lower = vec.subtract(before_pose.joints[@intFromEnum(limb.end)], before_pose.joints[@intFromEnum(limb.middle)]);
             angles.* = .{ std.math.atan2(upper.y, upper.x), std.math.atan2(lower.y, lower.x) };
         }
-        state.arm_release_seconds = 0;
-        state.previous_arm_release_seconds = 0;
-        state.arm_release_facing_right = before_state.facing_right;
+        state.limb_release_seconds = 0;
+        state.previous_limb_release_seconds = 0;
+        state.limb_release_facing_right = before_state.facing_right;
+    }
+    for (&state.wall.feet_planted, state.wall.feet, state.limb_release_active[0..2]) |*planted, target, active| {
+        // Keep the target for an immediate push-off, but report a contact only
+        // after the entry arc has put the sole on it.
+        planted.* = target != null and !(active and state.limb_release_seconds < set.walls.settings.blend_seconds);
     }
     if (initialize) {
         state.previous_controls = state.controls;
+        state.previous_facing_right = state.facing_right;
+        state.previous_foot_heading = state.foot_heading;
         state.previous_feet = state.feet;
         state.previous_sole_floors = state.sole_floors;
         state.previous_wall = state.wall;
         state.previous_stow_weight = state.stow_weight;
     }
     updateWeaponAngle(set, state, raising);
+}
+
+fn wallPoseRig(rig: Rig, action: WallAction, side: i8, facing_right: bool) Rig {
+    if (action == .none) return rig;
+    var result = rig;
+    const sliding = action == .slide or action == .jump;
+    const facing_wall = facing_right == (side > 0);
+    const weapon_joint = rig.attachments.get("weapon_hand").?.joint;
+    for (&result.limbs, 0..) |*limb, index| {
+        if (index < 2) {
+            // Knees fold into the arena, clear of the wall, even when aiming
+            // back at it. The soles retain their independent wall heading.
+            if (sliding and facing_wall) limb.bend_sign *= -1;
+            continue;
+        }
+        if (facing_wall or (sliding and limb.end == weapon_joint)) continue;
+        limb.bend_sign *= -1;
+    }
+    return result;
 }
 
 pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
@@ -1223,7 +1308,7 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     const sign: f32 = if (state.facing_right) 1 else -1;
     const offsets = turnedFootOffsets(set.rig, controls, std.math.lerp(state.previous_foot_heading, state.foot_heading, fraction), state.facing_right);
     for (state.previous_feet, state.feet, state.previous_wall.feet, state.wall.feet, 0..) |before, foot, before_wall, wall, index| {
-        const anchor: ?vec.Vec2 = if (before.locked and foot.locked and std.meta.eql(before.anchor, foot.anchor)) foot.anchor else if (before_wall != null and wall != null and std.meta.eql(before_wall.?, wall.?)) wall else null;
+        const anchor: ?vec.Vec2 = if (before.locked and foot.locked and std.meta.eql(before.anchor, foot.anchor)) foot.anchor else if (state.previous_wall.feet_planted[index] and state.wall.feet_planted[index] and state.previous_wall.side == state.wall.side and before_wall != null and wall != null) vec.add(before_wall.?, vec.mul(vec.subtract(wall.?, before_wall.?), fraction)) else null;
         if (anchor == null) continue;
         const offset = offsets[index * 2];
         controls[@intFromEnum(target_x[index])] = (anchor.?.x - body.x) * sign - set.rig.root_from_body.x - offset.x;
@@ -1236,46 +1321,102 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
         floor.* = std.math.lerp(before.?, after.?, fraction);
     }
     clearSoles(set.rig, &controls, offsets, floors, body, state.facing_right);
+    clearWallSoles(set.rig, &controls, offsets, state.wall, body, state.facing_right);
     // Hand targets were resolved once in the fixed-step controls. Their linear
     // interpolation with the body already preserves stationary world contacts.
-    var pose_rig = set.rig;
-    if (state.wall.action != .none and state.facing_right != (state.wall.side > 0)) {
-        // An arm still braced behind an aim-facing turn keeps its elbow on the
-        // same world side of the shoulder/hand line. The aim layer solves its
-        // own weapon arm afterward using the ordinary rig convention.
-        pose_rig.limbs[@intFromEnum(Limb.left_arm)].bend_sign *= -1;
-        pose_rig.limbs[@intFromEnum(Limb.right_arm)].bend_sign *= -1;
-    }
+    // Support limbs keep their bend relative to the wall while the free gun
+    // arm uses the ordinary facing convention, also used by the aim solver.
+    const pose_rig = wallPoseRig(set.rig, state.wall.action, state.wall.side, state.facing_right);
     var pose = solvePoseWithFeet(pose_rig, controls, offsets);
-    blendReleasedArms(set, state, &pose, fraction);
+    blendReleasedLimbs(set, state, &pose, offsets, floors, body, fraction);
     pose.contact_intent = state.contact_intent;
     return pose;
 }
 
-fn blendReleasedArms(set: *const Assets, state: PlayerState, pose: *Pose, fraction: f32) void {
-    const seconds = std.math.lerp(state.previous_arm_release_seconds, state.arm_release_seconds, fraction);
+fn blendReleasedLimbs(set: *const Assets, state: PlayerState, pose: *Pose, offsets: [4]vec.Vec2, floors: [4]?f32, body: vec.Vec2, fraction: f32) void {
+    const seconds = std.math.lerp(state.previous_limb_release_seconds, state.limb_release_seconds, fraction);
     const duration = set.walls.settings.blend_seconds;
     if (seconds >= duration) return;
     const progress = std.math.clamp(seconds / duration, 0, 1);
     const weight = 1 - progress * progress * (3 - 2 * progress);
-    for (set.rig.limbs[2..4], state.arm_release_angles) |limb, saved_angles| {
+    for (set.rig.limbs, state.limb_release_angles, state.limb_release_active, 0..) |limb, saved_angles, active, index| {
+        if (!active) continue;
         const root = pose.joints[@intFromEnum(limb.root)];
         const middle = pose.joints[@intFromEnum(limb.middle)];
         const end = pose.joints[@intFromEnum(limb.end)];
         const upper = std.math.atan2(middle.y - root.y, middle.x - root.x);
         const lower = std.math.atan2(end.y - middle.y, end.x - middle.x);
-        const before_upper = if (state.facing_right == state.arm_release_facing_right) saved_angles[0] else std.math.pi - saved_angles[0];
-        const before_lower = if (state.facing_right == state.arm_release_facing_right) saved_angles[1] else std.math.pi - saved_angles[1];
-        const angle = upper + std.math.atan2(@sin(before_upper - upper), @cos(before_upper - upper)) * weight;
+        const before_upper = if (state.facing_right == state.limb_release_facing_right) saved_angles[0] else std.math.pi - saved_angles[0];
+        const before_lower = if (state.facing_right == state.limb_release_facing_right) saved_angles[1] else std.math.pi - saved_angles[1];
+        var angle = upper + std.math.atan2(@sin(before_upper - upper), @cos(before_upper - upper)) * weight;
         const bend = std.math.atan2(@sin(lower - upper), @cos(lower - upper));
         const before_bend = std.math.atan2(@sin(before_lower - before_upper), @cos(before_lower - before_upper));
-        // Signed elbow angles blend through extension when changing branch.
+        // Signed elbow/knee angles pass through extension when changing branch.
         const blended_bend = std.math.lerp(bend, before_bend, weight);
         const upper_length = set.rig.lengths[@intFromEnum(limb.middle)];
         const lower_length = set.rig.lengths[@intFromEnum(limb.end)];
+        if (index < 2) {
+            const ankle = vec.add(rotate(.{ .x = upper_length, .y = 0 }, angle), rotate(.{ .x = lower_length, .y = 0 }, angle + blended_bend));
+            angle += releasedLegClearance(set.rig, state, root, ankle, offsets[index * 2 ..][0..2].*, floors[index * 2 ..][0..2].*, body, index);
+        }
         pose.joints[@intFromEnum(limb.middle)] = vec.add(root, rotate(.{ .x = upper_length, .y = 0 }, angle));
         pose.joints[@intFromEnum(limb.end)] = vec.add(pose.joints[@intFromEnum(limb.middle)], rotate(.{ .x = lower_length, .y = 0 }, angle + blended_bend));
     }
+    // Toe and heel links follow a released ankle, retaining their solved angles.
+    for (foot_joints, 0..) |joint_id, index| {
+        if (!state.limb_release_active[index / 2]) continue;
+        const joint = set.rig.joints[@intFromEnum(joint_id)];
+        pose.joints[@intFromEnum(joint_id)] = vec.add(pose.joints[@intFromEnum(joint.parent.?)], offsets[index]);
+    }
+}
+
+// Rotate the entire bent leg around its hip to clear the wall/floor. Keeping
+// its radius and relative knee angle preserves both bone lengths and the arc
+// through a straight knee; clamping the ankle and re-solving IK would snap it.
+fn releasedLegClearance(rig: Rig, state: PlayerState, root: vec.Vec2, ankle: vec.Vec2, offsets: [2]vec.Vec2, floors: [2]?f32, body: vec.Vec2, index: usize) f32 {
+    const sign: f32 = if (state.facing_right) 1 else -1;
+    const side: f32 = if (state.wall.side == 0) 1 else @floatFromInt(state.wall.side);
+    const toward = side * sign;
+    var wall_limit = std.math.inf(f32);
+    var floor_limit = -std.math.inf(f32);
+    for ([_]vec.Vec2{ offsets[0], vec.add(offsets[0], offsets[1]) }, floors) |offset, floor| {
+        if (state.wall.foot_surfaces[index] != null) wall_limit = @min(wall_limit, (state.wall.foot_surfaces[index].? - body.x) * side - (rig.root_from_body.x + root.x + offset.x) * toward);
+        if (floor != null) floor_limit = @max(floor_limit, body.y - rig.root_from_body.y - floor.? - root.y - offset.y);
+    }
+    const radius = vec.magnitude(ankle);
+    const original = std.math.atan2(ankle.y, ankle.x * toward);
+    if (ankle.x * toward <= wall_limit and ankle.y >= floor_limit) return 0;
+    // The candidates are the boundaries of the permitted angular intervals.
+    // A reachable plane intersects the circle at two angles; out-of-range
+    // planes contribute no boundary. The current angle is already rejected.
+    var candidates: [4]f32 = undefined;
+    var count: usize = 0;
+    if (@abs(wall_limit) <= radius) {
+        const angle = std.math.acos(wall_limit / radius);
+        candidates[count] = angle;
+        candidates[count + 1] = -angle;
+        count += 2;
+    }
+    if (@abs(floor_limit) <= radius) {
+        const angle = std.math.asin(floor_limit / radius);
+        candidates[count] = angle;
+        candidates[count + 1] = std.math.pi - angle;
+        count += 2;
+    }
+    var best: ?f32 = null;
+    var distance = std.math.inf(f32);
+    for (candidates[0..count]) |angle| {
+        if (radius * @cos(angle) > wall_limit + 0.00001 or radius * @sin(angle) < floor_limit - 0.00001) continue;
+        const delta = std.math.atan2(@sin(angle - original), @cos(angle - original));
+        if (@abs(delta) >= distance) continue;
+        distance = @abs(delta);
+        best = delta * toward;
+    }
+    if (best == null) {
+        std.log.warn("character_animation.releasedLegClearance: limb {d} cannot clear surface planes at its current bend", .{index});
+        return 0;
+    }
+    return best.?;
 }
 
 fn basePlayerPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
@@ -1579,7 +1720,8 @@ pub fn drawAll() !void {
             try drawRing(toScreen(foot.anchor), width * 3, width * 0.6);
         }
         try gpu.setRenderDrawColor(.{ .r = 90, .g = 210, .b = 255, .a = 255 });
-        for (state.wall.hands ++ state.wall.feet) |contact| {
+        for (state.wall.hands ++ state.wall.feet, 0..) |contact, index| {
+            if (index >= 2 and !state.wall.feet_planted[index - 2]) continue;
             if (contact == null) continue;
             try drawRing(toScreen(contact.?), width * 2, width * 0.6);
         }

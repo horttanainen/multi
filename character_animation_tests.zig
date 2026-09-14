@@ -2110,85 +2110,112 @@ test "real wall slide and wall jump drive poses without changing physics even wi
     defer samples.deinit(std.testing.allocator);
     for ([_]f32{ -1, 1 }) |side| {
         for ([_]u32{ 0, 5 }) |forced_steps| {
-            const body = try beginAimingPlayer();
-            defer endAimingPlayer(body);
-            _ = try createAnimationWall(side, 1);
-            addAnimationWallSensors(body);
-            movement.towerfallSettings.wallJump.forcedMovementSteps = forced_steps;
-            const moving = movement.states.getPtr(7).?;
-            var saw_push = false;
-            var slide_ticks: usize = 0;
-            var jump_tick: ?usize = null;
-            var extended_ticks: usize = 0;
-            for (0..190) |tick| {
-                var input: player_input.Sample = .{ .movementDirection = .{ .x = side, .y = 0 }, .aimDirection = .{ .x = side, .y = 0 } };
-                const wall_jump = slide_ticks >= 3 and jump_tick == null;
-                input.buttons.set(.jump, tick == 60 or wall_jump);
-                player_input.submit(7, input);
-                control.applyPlayerInput(7);
-                player_input.beginPhysicsStep();
-                movement.applyAll(1.0 / 60.0);
-                const launch = moving.wallJumpedDirection;
-                box2d.worldStep(1.0 / 60.0, 4);
-                try movement.processSensorEvents();
-                const before_velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
-                const before_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
-                const before_animation = animation.states.get(7).?;
-                animation.fixedUpdate(1.0 / 60.0);
-                try nearPoint(before_velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0);
-                try nearPoint(before_position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0);
-                player_input.endPhysicsStep();
-                const sample = animation.states.get(7).?;
-                if (before_animation.initialized and before_animation.facing_right == sample.facing_right) try checkWallPoseBoundary(before_animation, sample);
-                try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
-                if (sample.wall.action == .push) saw_push = true;
-                if (sample.wall.action == .slide) {
-                    slide_ticks += 1;
-                    if (slide_ticks == 3) try captureWallPose(&samples, "slide", side);
-                    try std.testing.expect(moving.wallSliding);
-                    try std.testing.expect(!sample.feet[0].locked and !sample.feet[1].locked);
-                }
-                if (launch != 0) {
-                    try std.testing.expect(jump_tick == null);
-                    jump_tick = tick;
-                    try std.testing.expectEqual(@as(i8, @intFromFloat(-side)), launch);
-                    try std.testing.expectEqual(animation.WallAction.jump, sample.wall.action);
-                    try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, sample.wall.hands);
-                    try std.testing.expect(before_velocity.x * side < 0 and before_velocity.y < 0);
-                    try captureWallPose(&samples, "push off", side);
-                }
-                if (jump_tick == null) continue;
-                const age = tick - jump_tick.?;
-                if (age < 12 and forced_steps == 5) {
-                    const labels = [_][]const u8{ "jump 00", "jump 01", "jump 02", "jump 03", "jump 04", "jump 05", "jump 06", "jump 07", "jump 08", "jump 09", "jump 10", "jump 11" };
-                    try captureWallPose(&samples, labels[age], side);
-                }
-                if (age >= 1 and age <= 5) {
-                    const rig = animation.assets.?.rig;
-                    const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
-                    var extended = true;
-                    for (rig.limbs[0..2]) |limb| {
-                        const length = rig.lengths[@intFromEnum(limb.middle)] + rig.lengths[@intFromEnum(limb.end)];
-                        const reach = vec.magnitude(vec.subtract(pose.joints[@intFromEnum(limb.end)], pose.joints[@intFromEnum(limb.root)]));
-                        extended = extended and reach > length * 0.95;
+            for ([_]usize{ 3, 8 }) |slide_before_jump| {
+                const body = try beginAimingPlayer();
+                defer endAimingPlayer(body);
+                _ = try createAnimationWall(side, 1);
+                addAnimationWallSensors(body);
+                movement.towerfallSettings.wallJump.forcedMovementSteps = forced_steps;
+                const moving = movement.states.getPtr(7).?;
+                var saw_push = false;
+                var slide_ticks: usize = 0;
+                var jump_tick: ?usize = null;
+                var extended_ticks: usize = 0;
+                for (0..190) |tick| {
+                    var input: player_input.Sample = .{ .movementDirection = .{ .x = side, .y = 0 }, .aimDirection = .{ .x = side, .y = 0 } };
+                    const wall_jump = slide_ticks >= slide_before_jump and jump_tick == null;
+                    input.buttons.set(.jump, tick == 60 or wall_jump);
+                    player_input.submit(7, input);
+                    control.applyPlayerInput(7);
+                    player_input.beginPhysicsStep();
+                    movement.applyAll(1.0 / 60.0);
+                    const launch = moving.wallJumpedDirection;
+                    box2d.worldStep(1.0 / 60.0, 4);
+                    try movement.processSensorEvents();
+                    const before_velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+                    const before_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+                    const before_animation = animation.states.get(7).?;
+                    animation.fixedUpdate(1.0 / 60.0);
+                    try nearPoint(before_velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0);
+                    try nearPoint(before_position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0);
+                    player_input.endPhysicsStep();
+                    const sample = animation.states.get(7).?;
+                    if (before_animation.initialized and (before_animation.facing_right == sample.facing_right or before_animation.wall.action != .none or sample.wall.action != .none)) try checkWallPoseBoundary(before_animation, sample);
+                    try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+                    if (sample.wall.action == .push) saw_push = true;
+                    if (sample.wall.action == .slide) {
+                        slide_ticks += 1;
+                        if (slide_ticks == 3) try captureWallPose(&samples, "slide", side);
+                        try std.testing.expect(moving.wallSliding);
+                        try std.testing.expectEqual(side < 0, sample.facing_right);
+                        try std.testing.expect(sample.wall.hands[1] == null);
+                        try std.testing.expect(!sample.feet[0].locked and !sample.feet[1].locked);
+                        for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                            const set = &animation.assets.?;
+                            const pose = animation.interpolatedPose(set, sample, alpha);
+                            const position = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+                            for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                                const sole = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], position, sample.facing_right);
+                                if (sole.x * side > 1.00003) std.debug.print("slide sole {s} side={d} age={d} alpha={d}: {any} planes={any}\n", .{ @tagName(joint), side, sample.wall.seconds, alpha, sole, sample.wall.foot_surfaces });
+                                try std.testing.expect(sole.x * side <= 1.00003);
+                            }
+                            for (sample.previous_wall.feet, sample.wall.feet, 0..) |before, after, index| {
+                                if (!sample.previous_wall.feet_planted[index] or !sample.wall.feet_planted[index]) continue;
+                                if (before == null or after == null) continue;
+                                const expected = vec.add(before.?, vec.mul(vec.subtract(after.?, before.?), @floatCast(alpha)));
+                                const joint: animation.Joint = if (index == 0) .left_toe else .right_toe;
+                                const toe = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], position, sample.facing_right);
+                                try nearPoint(expected, toe, 0.00003);
+                            }
+                        }
                     }
-                    if (extended) extended_ticks += 1;
+                    if (launch != 0) {
+                        try std.testing.expect(jump_tick == null);
+                        jump_tick = tick;
+                        try std.testing.expectEqual(@as(i8, @intFromFloat(-side)), launch);
+                        try std.testing.expectEqual(animation.WallAction.jump, sample.wall.action);
+                        try std.testing.expectEqualDeep([2]?vec.Vec2{ null, null }, sample.wall.hands);
+                        try std.testing.expect(before_velocity.x * side < 0 and before_velocity.y < 0);
+                        try captureWallPose(&samples, "push off", side);
+                    }
+                    if (jump_tick == null) continue;
+                    if (sample.wall.action == .jump) {
+                        try std.testing.expectEqual(side < 0, sample.facing_right);
+                        try std.testing.expect(!animation.playerFrame(7, .physics, null).?.weapon_stowed);
+                    }
+                    const age = tick - jump_tick.?;
+                    if (age < 12 and forced_steps == 5) {
+                        const labels = [_][]const u8{ "jump 00", "jump 01", "jump 02", "jump 03", "jump 04", "jump 05", "jump 06", "jump 07", "jump 08", "jump 09", "jump 10", "jump 11" };
+                        try captureWallPose(&samples, labels[age], side);
+                    }
+                    if (age >= 1 and age <= 5) {
+                        const rig = animation.assets.?.rig;
+                        const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+                        var extended = true;
+                        for (rig.limbs[0..2]) |limb| {
+                            const length = rig.lengths[@intFromEnum(limb.middle)] + rig.lengths[@intFromEnum(limb.end)];
+                            const reach = vec.magnitude(vec.subtract(pose.joints[@intFromEnum(limb.end)], pose.joints[@intFromEnum(limb.root)]));
+                            extended = extended and reach > length * 0.95;
+                        }
+                        if (extended) extended_ticks += 1;
+                    }
+                    if (tick == jump_tick.? + 5) try captureWallPose(&samples, "depart", side);
+                    if (tick <= jump_tick.? + 20) continue;
+                    try std.testing.expect(sample.wall.action != .jump);
+                    break;
                 }
-                if (tick == jump_tick.? + 5) try captureWallPose(&samples, "depart", side);
-                if (tick <= jump_tick.? + 20) continue;
-                try std.testing.expect(sample.wall.action != .jump);
-                break;
+                if (!saw_push or slide_ticks < 3 or jump_tick == null) std.debug.print("wall trial side={d} forced={d}: push={} slide_ticks={d} jump={?d}, pos={any}, contacts={d}/{d}\n", .{ side, forced_steps, saw_push, slide_ticks, jump_tick, box2d.c.b2Body_GetPosition(body), moving.leftWallContactCount, moving.rightWallContactCount });
+                try std.testing.expect(saw_push);
+                try std.testing.expect(slide_ticks >= 3);
+                try std.testing.expect(jump_tick != null);
+                // The push-off must be visible for several real gameplay frames.
+                if (extended_ticks < 3) std.debug.print("extended ticks side={d}: {d}\n", .{ side, extended_ticks });
+                try std.testing.expect(extended_ticks >= 3);
+                movement.reset(7);
+                animation.resetPlayer(7);
+                try std.testing.expectEqual(@as(i8, 0), moving.wallJumpedDirection);
+                try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
             }
-            if (!saw_push or slide_ticks < 3 or jump_tick == null) std.debug.print("wall trial side={d} forced={d}: push={} slide_ticks={d} jump={?d}, pos={any}, contacts={d}/{d}\n", .{ side, forced_steps, saw_push, slide_ticks, jump_tick, box2d.c.b2Body_GetPosition(body), moving.leftWallContactCount, moving.rightWallContactCount });
-            try std.testing.expect(saw_push);
-            try std.testing.expect(slide_ticks >= 3);
-            try std.testing.expect(jump_tick != null);
-            // The push-off must be visible for several real gameplay frames.
-            try std.testing.expect(extended_ticks >= 3);
-            movement.reset(7);
-            animation.resetPlayer(7);
-            try std.testing.expectEqual(@as(i8, 0), moving.wallJumpedDirection);
-            try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
         }
     }
     const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
@@ -2244,7 +2271,9 @@ test "wall jump keeps reachable toes planted then releases without stretching or
                         }
                     }
                 }
-                try std.testing.expect(retained >= 2);
+                // The nearly straight leg releases on launch; the bent leg
+                // stays until extension or next-tick wall removal.
+                try std.testing.expect(retained >= if (remove_wall) @as(usize, 1) else 2);
                 try std.testing.expect(released[0] and released[1]);
             }
         }
@@ -2269,13 +2298,101 @@ test "sliding wall contacts follow authored foot height curves" {
             const rig = animation.assets.?.rig;
             const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
             const phase = @min(1, sample.wall.seconds / animation.assets.?.walls.slide.cycle_seconds);
-            try std.testing.expectApproxEqAbs(-0.52 - phase * 0.1, pose.joints[@intFromEnum(animation.Joint.left_ankle)].y, 0.00003);
-            const toe = animation.toWorld(rig, pose.joints[@intFromEnum(animation.Joint.left_toe)], sample.body, sample.facing_right);
+            try std.testing.expectApproxEqAbs(-0.52 - phase * 0.1, pose.joints[@intFromEnum(animation.Joint.right_ankle)].y, 0.00003);
+            const toe = animation.toWorld(rig, pose.joints[@intFromEnum(animation.Joint.right_toe)], sample.body, sample.facing_right);
             try std.testing.expectApproxEqAbs(side * 0.3, toe.x, 0.00003);
-            try std.testing.expect(sample.wall.feet[0] != null);
+            try std.testing.expect(sample.wall.feet[1] != null);
             try checkBones(rig, pose);
         }
     }
+}
+
+test "one-handed wall slide faces outward and keeps the blaster ready through aiming and push-off" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var samples: std.ArrayListUnmanaged(WallPoseSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ -1, 1 }) |side| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        _ = try createAnimationWall(side, 1);
+        var input: animation.LocomotionInput = .{ .body = .{ .x = side * 0.7, .y = -1.5 }, .supported = false, .ground_y = null, .facing_right = side > 0, .vertical_speed_mps = 2, .separation_speed_mps = 0, .movement_direction = side, .wall_sliding = true };
+        box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+        animation.resetPlayer(7);
+        for (0..90) |tick| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            if (tick == 0) try captureWallPose(&samples, "enter", side);
+        }
+        const set = &animation.assets.?;
+        const sliding = animation.states.get(7).?;
+        const ready = animation.playerFrame(7, .physics, null).?;
+        try std.testing.expectEqual(side < 0, ready.facing_right);
+        try std.testing.expect(!ready.weapon_stowed);
+        try std.testing.expect(sliding.wall.hands[0] != null and sliding.wall.hands[1] == null);
+        try std.testing.expectEqual(@as(f32, 0), sliding.stow_weight);
+        try checkWallSlideLegs(ready, side);
+        const hand = animation.toWorld(set.rig, ready.pose.joints[@intFromEnum(animation.Joint.left_hand)], ready.body, ready.facing_right);
+        const head = animation.toWorld(set.rig, ready.pose.joints[@intFromEnum(animation.Joint.head)], ready.body, ready.facing_right);
+        try nearPoint(sliding.wall.hands[0].?, hand, 0.00003);
+        try std.testing.expect(hand.y < head.y);
+        const direction = player.weaponDirection(player.weaponFrame(7, .physics, null).?);
+        try std.testing.expect(direction.x * side < -0.8 and direction.y < 0 and direction.y > -0.6);
+        for ([_]animation.Joint{ .left_knee, .right_knee }) |joint| {
+            const knee = animation.toWorld(set.rig, ready.pose.joints[@intFromEnum(joint)], ready.body, ready.facing_right);
+            try std.testing.expect(knee.x * side < 1);
+        }
+        try captureWallPose(&samples, "slide", side);
+        // The knife-style grip travels down the face, rather than hanging from
+        // one stationary point. Neither animation nor aiming holds up the body.
+        for (0..5) |_| {
+            input.body.y += 0.02;
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+        }
+        try std.testing.expectApproxEqAbs(sliding.wall.hands[0].?.y + 0.1, animation.states.get(7).?.wall.hands[0].?.y, 0.00003);
+        const directions = [_]vec.Vec2{ .{ .x = -side, .y = 0 }, vec.north, .{ .x = side, .y = 0 } };
+        for (directions, [_][]const u8{ "aim out", "aim up", "aim wall" }) |aim, label| {
+            input.aiming = true;
+            input.aim_direction = aim;
+            for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            const frame = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expect(!frame.weapon_stowed);
+            try std.testing.expect(animation.states.get(7).?.wall.hands[1] == null);
+            try checkWallSlideLegs(frame, side);
+            const support = animation.toWorld(set.rig, frame.pose.joints[@intFromEnum(animation.Joint.left_hand)], frame.body, frame.facing_right);
+            try nearPoint(animation.states.get(7).?.wall.hands[0].?, support, 0.00003);
+            try nearPoint(aim, player.weaponDirection(player.weaponFrame(7, .physics, null).?), 0.00003);
+            const forced = animation.playerFrame(7, .physics, .{ .x = -side, .y = 0 }).?;
+            try std.testing.expect(!forced.weapon_stowed);
+            try captureWallPose(&samples, label, side);
+        }
+        input.aiming = false;
+        for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(side < 0, animation.states.get(7).?.facing_right);
+        for (0..25) |tick| {
+            const before = animation.states.get(7).?;
+            input.body.x -= side * 0.15;
+            input.body.y -= 0.15;
+            input.vertical_speed_mps = -9;
+            input.wall_sliding = false;
+            input.wall_jump_direction = if (tick == 0) @intFromFloat(-side) else 0;
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const after = animation.states.get(7).?;
+            const frame = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expectEqual(side < 0, frame.facing_right);
+            try std.testing.expect(!frame.weapon_stowed);
+            try std.testing.expect(after.wall.hands[0] == null and after.wall.hands[1] == null);
+            try checkWallPoseBoundary(before, after);
+            try nearPoint(animation.toWorld(set.rig, animation.attachmentPosition(set.rig, frame.pose, "weapon_hand").?, frame.body, frame.facing_right), frame.weapon.position, 0.00003);
+            if (tick == 0) try captureWallPose(&samples, "push off", side);
+            if (tick == 5) try captureWallPose(&samples, "depart", side);
+            if (tick == 20) try captureWallPose(&samples, "airborne", side);
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try fs.writeFile("artifacts/character_animation/one_hand_slide_samples.json", bytes);
 }
 
 test "wall settings validate atomically and reload clears contacts and holstering" {
@@ -2360,14 +2477,38 @@ test "wall bracing releases on neutral input edges and unsupported surfaces" {
     try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.stow_weight);
 }
 
+fn checkWallSlideLegs(frame: animation.FramePose, side: f32) !void {
+    const rig = animation.assets.?.rig;
+    for (rig.limbs[0..2], 0..) |limb, index| {
+        const length = rig.lengths[@intFromEnum(limb.middle)] + rig.lengths[@intFromEnum(limb.end)];
+        const reach = vec.magnitude(vec.subtract(frame.pose.joints[@intFromEnum(limb.end)], frame.pose.joints[@intFromEnum(limb.root)]));
+        try std.testing.expect(if (index == 0) reach > length * 0.97 else reach < length * 0.8);
+        const toe_id: animation.Joint = if (index == 0) .left_toe else .right_toe;
+        const heel_id: animation.Joint = if (index == 0) .left_heel else .right_heel;
+        const ankle = animation.toWorld(rig, frame.pose.joints[@intFromEnum(limb.end)], frame.body, frame.facing_right);
+        const toe = animation.toWorld(rig, frame.pose.joints[@intFromEnum(toe_id)], frame.body, frame.facing_right);
+        const heel = animation.toWorld(rig, frame.pose.joints[@intFromEnum(heel_id)], frame.body, frame.facing_right);
+        try std.testing.expect(ankle.x * side < 1);
+        try std.testing.expectApproxEqAbs(side, toe.x, 0.00003);
+        try std.testing.expectApproxEqAbs(side, heel.x, 0.00003);
+        try std.testing.expect(toe.y > ankle.y and toe.y > heel.y + 0.2);
+    }
+}
+
 fn checkWallPoseBoundary(before: animation.PlayerState, after: animation.PlayerState) !void {
     const set = &animation.assets.?;
     const end = animation.interpolatedPose(set, before, 1);
     const start = animation.interpolatedPose(set, after, 0);
     try checkBones(set.rig, end);
     try checkBones(set.rig, start);
-    for (end.joints, start.joints) |a, b| {
-        try nearPoint(animation.toWorld(set.rig, a, before.body, before.facing_right), animation.toWorld(set.rig, b, after.previous_body, after.facing_right), 0.00003);
+    // Facing reflects the rig's small anatomical shoulder offsets (8 mm each).
+    // Allow that shoulder shift on a turn, but catch a switched elbow/knee branch.
+    const tolerance: f32 = if (before.facing_right == after.facing_right) 0.00003 else 0.02;
+    for (end.joints, start.joints, 0..) |a, b, index| {
+        nearPoint(animation.toWorld(set.rig, a, before.body, before.facing_right), animation.toWorld(set.rig, b, after.previous_body, after.facing_right), tolerance) catch |err| {
+            std.debug.print("wall boundary {s}->{s}, joint {s}, age={d}\n", .{ @tagName(before.wall.action), @tagName(after.wall.action), @tagName(@as(animation.Joint, @enumFromInt(index))), after.wall.seconds });
+            return err;
+        };
     }
     for ([_]f64{ 0.25, 0.5, 0.75 }) |fraction| try checkBones(set.rig, animation.interpolatedPose(set, after, fraction));
 }
