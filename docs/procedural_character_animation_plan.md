@@ -23,6 +23,11 @@ including the leg-extension correction; see
 outward-facing wall-slide revision is accepted, including the near-straight leg
 and downward-toe adjustment; independent review and validation are complete. See
 [character_animation_wall_slide.md](character_animation_wall_slide.md).
+Running polish is accepted by the user: near-under-hip touchdown,
+rearward push-off, high compact heel recovery and forward knee motion, retaining
+separate stride and intensity tuning. See
+[character_animation_running_polish.md](character_animation_running_polish.md).
+Crouching polish is the next phase to plan before terrain adaptation.
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -281,6 +286,10 @@ Split this work into independently reviewed commits:
   outward-facing slide, one near-straight leg, one bent knee, downward toes and a ready blaster. Keep the gun in
   hand through push-off; extend the existing contact, facing and limb blending.
 - **3B, deferred:** Grappling and rope animation, with explicit control priorities.
+- **Running polish (accepted):** Reshape the sparse run curves using the existing
+  exporter, preserve the original regression assets, and verify foot contact,
+  heel recovery and independent width/lift tuning at slow/reference/game speeds.
+  Independent review and validation are complete.
 - **3C:** Static slopes and steps, followed by a separately reviewed moving and
   destructible rubble phase. Plan the terrain-query/contact changes first.
 

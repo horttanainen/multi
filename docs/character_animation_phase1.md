@@ -285,8 +285,12 @@ surface anchors and actual contact acquisition will be runtime state in phase tw
 
 ### Reproduction and Blender preparation
 
-`scripts/export_character_run.py` recreates the initial assets from
-`tests/fixtures/character_run_source.json`. It retains the original pelvis/torso
+`scripts/export_character_run.py` now exports the polished run from
+`tests/fixtures/character_run_polish_source.json`; see the
+[running polish phase](character_animation_running_polish.md). The original study
+remains in `tests/fixtures/character_run_source.json`, and its compact runtime
+motion is archived in `tests/fixtures/character_run_reference_v1.json` for the
+original pose and dense-curve regression checks. The exporter retains pelvis/torso
 Bezier handles and fits preferred hand/foot controls into cubic Bezier segments.
 Source boundaries seed each track, including contact changes and wrapping. The
 fit uses endpoint values and one-sided slopes, with time handles at segment
@@ -300,7 +304,9 @@ The game rig rotates shoulder offsets with the torso. This is a deliberate
 hierarchy correction from the original study, shifting arm positions by under
 6 mm. Other sampled reference joints agree within 0.15 mm.
 
-Running the export script replaces both initial assets; ordinary JSON tuning
+Running the export script replaces only `character_motions/run_reference.json`;
+the rig is maintained separately, including attachments added in later phases.
+Ordinary JSON tuning
 needs only § then R. The game never invokes the exporter. Later Blender tooling can
 bootstrap its controls from these assets and export the same named tracks,
 explicit handles/samples, and contact intervals. Blender is not needed to run,

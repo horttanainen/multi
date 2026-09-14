@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reproduce the phase-one runtime assets from the accepted, calculated run study.
+"""Export the polished run from the sparse, calculated run study.
 
 No external packages. Fit foot/hand controls with cubic Bezier segments, checking
-0.1 mm / 0.0001 rad error at 64 interior points of each accepted segment.
+0.1 mm / 0.0001 rad error at 64 interior points of each authored segment.
 Pelvis and torso retain their original cubic Bezier handles. The archived dense
 motion is never written by this exporter.
 """
@@ -12,7 +12,7 @@ from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = json.loads((ROOT / 'tests/fixtures/character_run_source.json').read_text())
+SOURCE = json.loads((ROOT / 'tests/fixtures/character_run_polish_source.json').read_text())
 PELVIS_HEIGHT = 0.84
 TOLERANCE = 0.0001
 
@@ -57,7 +57,7 @@ def targets(phase):
         q = (p + offset) % 1
         if q < SOURCE['duty_fraction']:
             beta = evaluate(tracks['stance_foot_angle'], q)
-            toe = [.45-q*SOURCE['cycle_seconds']*SOURCE['reference_speed_mps'], -PELVIS_HEIGHT]
+            toe = [SOURCE['touchdown_toe_x']-q*SOURCE['cycle_seconds']*SOURCE['reference_speed_mps'], -PELVIS_HEIGHT]
             ankle = add(toe, rotate([-.15, .075], beta))
         else:
             beta = evaluate(tracks['swing_foot_angle'], q)
@@ -143,45 +143,6 @@ def bezier_track(binding, source, value_offset=0):
     return {'binding': binding, 'keys': keys}
 
 
-def point(value):
-    return {'x': value[0], 'y': value[1]}
-
-
-def knee(ankle):
-    distance = math.hypot(*ankle)
-    height = math.sqrt(.46**2-distance**2/4)
-    return [ankle[0]/2-ankle[1]/distance*height, ankle[1]/2+ankle[0]/distance*height]
-
-
-def make_rig():
-    joints = [{'id': 'pelvis', 'parent': None, 'rest_offset': point([0, 0])}]
-    for name, parent, offset in [('chest','pelvis',[0,.43]), ('neck','chest',[0,.08]), ('head','neck',[0,.105])]:
-        joints.append({'id': name, 'parent': parent, 'rest_offset': point(offset)})
-    limbs = []
-    neutral = {'pelvis_x': 0, 'pelvis_y': 0, 'torso_angle': 0}
-    for side, x in [('left', .12), ('right', -.12)]:
-        ankle = [x, .075-PELVIS_HEIGHT]
-        bend = knee(ankle)
-        offsets = [('shoulder','chest',[.008 if side == 'left' else -.008,-.02]),
-                   ('elbow',f'{side}_shoulder',[0,-.29]), ('hand',f'{side}_elbow',[.26,0]),
-                   ('knee','pelvis',bend), ('ankle',f'{side}_knee',[ankle[0]-bend[0],ankle[1]-bend[1]]),
-                   ('toe',f'{side}_ankle',[.15,-.075]), ('heel',f'{side}_toe',[-.22,0])]
-        for name, parent, offset in offsets:
-            joints.append({'id': f'{side}_{name}', 'parent': parent, 'rest_offset': point(offset)})
-        for name, root, middle, end, sign in [('leg','pelvis',f'{side}_knee',f'{side}_ankle',1),
-                                            ('arm',f'{side}_shoulder',f'{side}_elbow',f'{side}_hand',-1)]:
-            limbs.append({'id': f'{side}_{name}', 'root': root, 'middle': middle, 'end': end,
-                          'bend_sign': sign, 'min_bend_radians': .001, 'max_bend_radians': math.pi-.001})
-        neutral.update({f'{side}_foot_x': x, f'{side}_foot_y': ankle[1], f'{side}_foot_angle': 0,
-                        f'{side}_hand_x': .1+(.008 if side == 'left' else -.008), f'{side}_hand_y': -.09})
-    return {'schema_version': 1, 'id': 'humanoid_v1', 'distance_unit': 'meters', 'angle_unit': 'radians',
-            'coordinates': 'x_forward_y_up', 'root_from_body': point([0, PELVIS_HEIGHT-.3]),
-            'joints': joints, 'limbs': limbs, 'head_radius': .105, 'line_width': .032,
-            'attachments': [{'id': 'weapon_hand', 'joint': 'right_hand', 'local_offset': point([0,0])},
-                            {'id': 'grapple_hand', 'joint': 'left_hand', 'local_offset': point([0,0])}],
-            'neutral_controls': [{'binding': name, 'value': value} for name, value in neutral.items()]}
-
-
 def main():
     tracks = [fitted_track(name) for name in targets(0) if name not in ('pelvis_x','pelvis_y','torso_angle')]
     tracks += [{'binding': 'pelvis_x', 'keys': [{'phase': 0, 'value': 0, 'interpolation': 'step'},
@@ -190,13 +151,13 @@ def main():
                bezier_track('torso_angle', 'torso_lean_half_cycle')]
     motion = {'schema_version': 1, 'id': 'run_reference_v1', 'rig_id': 'humanoid_v1',
               'time_unit': 'seconds', 'distance_unit': 'meters', 'angle_unit': 'radians',
-              'coordinates': 'x_forward_y_up', 'cycle_seconds': .6, 'reference_speed_mps': 3.2,
+              'coordinates': 'x_forward_y_up', 'cycle_seconds': SOURCE['cycle_seconds'],
+              'reference_speed_mps': SOURCE['reference_speed_mps'],
               'loop': True, 'tracks': tracks,
-              'contacts': [{'limb': 'left_leg', 'start': 0, 'end': .36},
-                           {'limb': 'right_leg', 'start': .5, 'end': .86}]}
-    for path, value in [('character_rigs/humanoid.json', make_rig()), ('character_motions/run_reference.json', motion)]:
-        (ROOT/path).write_text(json.dumps(value, indent=2)+'\n')
-    print(f'Exported rig and run: {sum(len(t["keys"]) for t in tracks)} keys across {len(tracks)} controls.')
+              'contacts': [{'limb': f'{side}_leg', 'start': offset, 'end': offset+SOURCE['duty_fraction']}
+                           for side, offset in SOURCE['leg_phase_offsets'].items()]}
+    (ROOT/'character_motions/run_reference.json').write_text(json.dumps(motion, indent=2)+'\n')
+    print(f'Exported run: {sum(len(t["keys"]) for t in tracks)} keys across {len(tracks)} controls.')
 
 
 if __name__ == '__main__':

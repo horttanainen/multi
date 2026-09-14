@@ -30,6 +30,7 @@ const walls_json = @embedFile("character_actions/walls.json");
 const aiming_json = @embedFile("character_actions/aiming.json");
 const actions_json = @embedFile("character_actions/airborne.json");
 const motion_json = @embedFile("character_motions/run_reference.json");
+const original_motion_json = @embedFile("tests/fixtures/character_run_reference_v1.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 
@@ -341,8 +342,9 @@ test "character curves respect outgoing interpolation and solve nonlinear Bezier
     try std.testing.expectEqual(@as(f32, 6), animation.evaluateTrack(stepped, 0.75));
 }
 
-test "character run reproduces the twelve accepted poses after explicit frame conversion" {
-    var set = try load();
+test "original character run reproduces the twelve accepted poses after explicit frame conversion" {
+    var detail: animation.Diagnostic = .{};
+    var set = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, original_motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
     defer set.arena.deinit();
     const reference = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, reference_json, .{});
     defer reference.deinit();
@@ -361,10 +363,10 @@ test "character run reproduces the twelve accepted poses after explicit frame co
     }
 }
 
-test "compact Bezier run preserves dense controls, solved poses, and contact intent throughout the cycle" {
-    var compact = try load();
-    defer compact.arena.deinit();
+test "original compact Bezier run preserves dense controls, solved poses, and contact intent throughout the cycle" {
     var detail: animation.Diagnostic = .{};
+    var compact = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, original_motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
+    defer compact.arena.deinit();
     var dense = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, dense_motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
     defer dense.arena.deinit();
     try std.testing.expectEqual(dense.motion.cycle_seconds, compact.motion.cycle_seconds);
@@ -444,6 +446,51 @@ test "character continuous run and neutral preserve every bone and loop without 
     }
 }
 
+test "polished run lands beneath the hips, extends at toe-off, and folds the heel beside the advancing knee" {
+    var set = try load();
+    defer set.arena.deinit();
+    const pelvis = @intFromEnum(animation.Joint.pelvis);
+    const ankle = @intFromEnum(animation.Joint.left_ankle);
+    const knee = @intFromEnum(animation.Joint.left_knee);
+    const heel = @intFromEnum(animation.Joint.left_heel);
+    const toe = @intFromEnum(animation.Joint.left_toe);
+    const touchdown = animation.evaluatePose(&set, 0, .run);
+    try std.testing.expect(@abs(touchdown.joints[ankle].x - touchdown.joints[pelvis].x) < 0.1);
+    const toe_off = animation.evaluatePose(&set, 0.3599, .run);
+    const leg_length = set.rig.lengths[knee] + set.rig.lengths[ankle];
+    try std.testing.expect(vec.magnitude(vec.subtract(toe_off.joints[ankle], toe_off.joints[pelvis])) > leg_length * 0.9);
+    try std.testing.expect(toe_off.joints[heel].y > toe_off.joints[toe].y + 0.15);
+    // During contact, the authored toe travels backwards exactly as far as the
+    // root travels forwards. Planting should only correct terrain/transitions.
+    for (0..36) |index| {
+        const phase = @as(f32, @floatFromInt(index)) / 100;
+        const pose = animation.evaluatePose(&set, phase, .run);
+        try std.testing.expectApproxEqAbs(touchdown.joints[toe].x, pose.joints[toe].x + phase * set.motion.cycle_seconds * set.motion.reference_speed_mps, 0.0002);
+    }
+    const recovery = animation.evaluatePose(&set, 0.66, .run);
+    try std.testing.expect(vec.magnitude(vec.subtract(recovery.joints[heel], recovery.joints[pelvis])) < 0.22);
+    try std.testing.expect(recovery.joints[knee].x > recovery.joints[pelvis].x + 0.25);
+    try std.testing.expect(recovery.joints[ankle].x < recovery.joints[knee].x - 0.25);
+    const unfolding = animation.evaluatePose(&set, 0.84, .run);
+    try std.testing.expect(unfolding.joints[ankle].x > recovery.joints[ankle].x + 0.3);
+    try std.testing.expect(unfolding.joints[ankle].y < recovery.joints[ankle].y - 0.3);
+    const returning = animation.evaluatePose(&set, 0.96, .run);
+    try std.testing.expect(returning.joints[ankle].x < unfolding.joints[ankle].x);
+
+    // Exact native IK output for the review sheet and continuous foot-path plot.
+    const Sample = struct { phase: f32, joints: @TypeOf(recovery.joints) };
+    var samples: [360]Sample = undefined;
+    for (&samples, 0..) |*sample, index| {
+        const phase = @as(f32, @floatFromInt(index)) / samples.len;
+        sample.* = .{ .phase = phase, .joints = animation.evaluatePose(&set, phase, .run).joints };
+    }
+    runtime.init(std.testing.io);
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/run_polish_poses.json", bytes);
+}
+
 test "character contacts are half-open and facing conversion preserves the root and attachments" {
     var set = try load();
     defer set.arena.deinit();
@@ -520,7 +567,6 @@ test "character invalid assets report field paths and failed replacement preserv
     const motion_cases = [_][3][]const u8{
         .{ "\"end\": 0.36", "\"end\": 1.1", "contacts" },
         .{ "\"phase\": 0.0,", "\"phase\": 1e999,", "tracks[0].keys[0].phase: number must be finite" },
-        .{ "\"value\": 0.30000000000000004", "\"value\": 1e999", "tracks[0].keys[0].value: number must be finite" },
     };
     for (motion_cases) |case| {
         const malformed_motion = try std.mem.replaceOwned(u8, std.testing.allocator, motion_json, case[0], case[1]);
@@ -528,6 +574,22 @@ test "character invalid assets report field paths and failed replacement preserv
         try std.testing.expectError(error.InvalidCharacterAsset, replaceFromJson(rig_json, malformed_motion, &detail));
         try std.testing.expectEqualStrings(data.characterMotionPath, detail.file);
         try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], case[2]) != null);
+        try std.testing.expect(old_id == animation.assets.?.rig.id.ptr);
+        try std.testing.expectEqual(@as(f64, 0.7), animation.states.get(7).?.phase);
+        try std.testing.expectEqual(@as(f64, 0.3), animation.states.get(19).?.phase);
+    }
+    // Mutate the first control structurally so tuning its value cannot silently
+    // stop exercising non-finite value rejection.
+    {
+        var motion = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, motion_json, .{});
+        defer motion.deinit();
+        const keys = motion.value.object.get("tracks").?.array.items[0].object.get("keys").?.array.items;
+        try keys[0].object.put(motion.arena.allocator(), "value", .{ .number_string = "1e999" });
+        const malformed_motion = try std.json.Stringify.valueAlloc(std.testing.allocator, motion.value, .{});
+        defer std.testing.allocator.free(malformed_motion);
+        try std.testing.expectError(error.InvalidCharacterAsset, replaceFromJson(rig_json, malformed_motion, &detail));
+        try std.testing.expectEqualStrings(data.characterMotionPath, detail.file);
+        try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], "tracks[0].keys[0].value: number must be finite") != null);
         try std.testing.expect(old_id == animation.assets.?.rig.id.ptr);
         try std.testing.expectEqual(@as(f64, 0.7), animation.states.get(7).?.phase);
         try std.testing.expectEqual(@as(f64, 0.3), animation.states.get(19).?.phase);
@@ -655,6 +717,9 @@ test "locomotion stands still against a wall and adapts cadence with planted toe
     _ = try beginLocomotion();
     defer box2d.destroyWorld();
     defer animation.cleanup();
+    runtime.init(std.testing.io);
+    var samples: std.ArrayList(LocomotionSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
     for (0..120) |_| advanceRun(0, true);
     try std.testing.expectEqual(@as(f64, 0), animation.states.get(7).?.phase);
     try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.run_weight);
@@ -669,6 +734,11 @@ test "locomotion stands still against a wall and adapts cadence with planted toe
             x += speed / 60;
             advanceRun(x, true);
             const sample = animation.states.get(7).?;
+            if (tick >= 120) {
+                var joints = animation.interpolatedPose(&animation.assets.?, sample, 1).joints;
+                for (&joints) |*point| point.* = animation.toWorld(animation.assets.?.rig, point.*, sample.body, sample.facing_right);
+                try samples.append(std.testing.allocator, .{ .speed = speed, .phase = animation.clipPhase(animation.assets.?.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints });
+            }
             for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
                 const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
                 try checkBones(animation.assets.?.rig, pose);
@@ -692,6 +762,55 @@ test "locomotion stands still against a wall and adapts cadence with planted toe
         try std.testing.expectApproxEqAbs(@as(f64, expected), cadence, 0.0001);
         previous_cadence = cadence;
     }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/run_speed_samples.json", bytes);
+}
+
+test "run lift and horizontal stride respond independently to locomotion profile tuning" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const base = animation.assets.?.locomotion;
+    var widths: [3]f32 = undefined;
+    var heights: [3]f32 = undefined;
+    var cadences: [3]f64 = undefined;
+    for (0..3) |variant| {
+        animation.assets.?.locomotion = base;
+        if (variant == 1) animation.assets.?.locomotion.full_run_speed_mps = 6.4;
+        if (variant == 2) animation.assets.?.locomotion.stride_max = 0.75;
+        animation.resetPlayer(7);
+        advanceRun(0, true);
+        var x: f32 = 0;
+        var minimum_x: f32 = 20;
+        var maximum_x: f32 = -20;
+        var maximum_y: f32 = -20;
+        for (0..360) |tick| {
+            x += 3.2 / 60.0;
+            advanceRun(x, true);
+            if (tick < 120) continue;
+            const sample = animation.states.get(7).?;
+            const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+            try checkBones(animation.assets.?.rig, pose);
+            for ([_]animation.Joint{ .left_toe, .right_toe }) |joint| {
+                const point = pose.joints[@intFromEnum(joint)];
+                minimum_x = @min(minimum_x, point.x);
+                maximum_x = @max(maximum_x, point.x);
+                maximum_y = @max(maximum_y, point.y);
+            }
+        }
+        widths[variant] = maximum_x - minimum_x;
+        heights[variant] = maximum_y + 0.84;
+        const sample = animation.states.get(7).?;
+        cadences[variant] = (sample.phase - sample.previous_phase) * 60;
+    }
+    try std.testing.expect(heights[1] < heights[0] * 0.6);
+    try std.testing.expectApproxEqAbs(widths[0], widths[1], 0.025);
+    try std.testing.expectApproxEqAbs(cadences[0], cadences[1], 0.00001);
+    try std.testing.expect(widths[2] < widths[0] * 0.85);
+    try std.testing.expectApproxEqAbs(heights[0], heights[2], 0.025);
+    try std.testing.expect(cadences[2] > cadences[0]);
 }
 
 test "locomotion settles a stopped swing, turns using actual displacement, and releases on support loss or teleport" {
@@ -1193,7 +1312,8 @@ test "landing compression lowers the hips while preserving walking and running f
         var sample = advanceAir(vec.zero, 0, true);
         try std.testing.expectEqual(@as(f32, 1), sample.landing_strength);
         // A matching player with zero compression provides the locomotion pose.
-        // Their feet should follow the same paths even at full impact strength.
+        // Their authored paths should match even at full impact strength.
+        // Lower hips can retain a contact that an extended leg must release.
         animation.states.getPtr(8).?.* = sample;
         animation.states.getPtr(8).?.landing_strength = 0;
         var x: f32 = 0;
@@ -1209,11 +1329,21 @@ test "landing compression lowers the hips while preserving walking and running f
             const baseline = animation.states.get(8).?;
             const pelvis_y = @intFromEnum(animation.Control.pelvis_y);
             if (sample.controls[pelvis_y] < baseline.controls[pelvis_y] - 0.07) saw_compression = true;
-            for ([_]animation.Control{ .left_foot_x, .left_foot_y, .left_foot_angle, .right_foot_x, .right_foot_y, .right_foot_angle }) |binding| try std.testing.expectApproxEqAbs(baseline.controls[@intFromEnum(binding)], sample.controls[@intFromEnum(binding)], 0.000002);
             const phase = animation.clipPhase(animation.assets.?.motion, sample.phase);
             for (sample.contact_intent, 0..) |intent, index| try std.testing.expectEqual(animation.contactIntent(animation.assets.?.motion, @enumFromInt(index), phase), intent);
             try checkAirPose(sample);
             if (sample.action != .land) continue;
+            for ([_][3]animation.Control{
+                .{ .left_foot_x, .left_foot_y, .left_foot_angle },
+                .{ .right_foot_x, .right_foot_y, .right_foot_angle },
+            }, sample.feet, baseline.feet) |bindings, foot, baseline_foot| {
+                const ix = @intFromEnum(bindings[0]);
+                const iy = @intFromEnum(bindings[1]);
+                const ia = @intFromEnum(bindings[2]);
+                try std.testing.expectApproxEqAbs(baseline.controls[ix] - baseline_foot.correction.x, sample.controls[ix] - foot.correction.x, 0.000002);
+                try std.testing.expectApproxEqAbs(baseline.controls[iy] + baseline_foot.correction.y, sample.controls[iy] + foot.correction.y, 0.000002);
+                try std.testing.expectApproxEqAbs(baseline.controls[ia], sample.controls[ia], 0.000002);
+            }
             minimum_ankle_x = @min(minimum_ankle_x, sample.controls[@intFromEnum(animation.Control.left_foot_x)]);
             maximum_ankle_x = @max(maximum_ankle_x, sample.controls[@intFromEnum(animation.Control.left_foot_x)]);
         }
