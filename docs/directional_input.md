@@ -72,7 +72,7 @@ Suggested manual checks:
    pre-aim horizontal input; aiming down should not introduce a fast fall.
 4. Enable movement sectors and hold the stick mostly down. Small sideways
    offsets should remain down; a diagonal should resume full horizontal running.
-   The current crouch animation remains until the separate kneeling phase.
+   Stationary Down now uses the separate [kneeling pose](character_animation_kneeling.md).
 5. Compare the same aim modes in a Liero level. Movement and aim should still use
    separate sticks. Restore with `C`, and verify that a reload restores defaults.
 

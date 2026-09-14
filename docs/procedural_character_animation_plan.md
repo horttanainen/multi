@@ -31,9 +31,11 @@ Configurable directional input is accepted by the user: independent
 movement interpretation and aiming modes in the existing profiles, plus debug
 menu comparisons. Independent review, correction, and validation are complete.
 See [directional_input.md](directional_input.md).
-Next, plan kneeling and landing polish: stationary
-Down kneels with one knee grounded and the torso forward; horizontal movement
-uses regular running; impact absorption uses a separate landing squat.
+Kneeling and landing polish is accepted by the user, including aiming from the
+kneeling stance. Independent review and validation are complete: stationary Down
+kneels with one knee grounded and the torso forward; horizontal movement uses
+regular running; impact absorption uses a separate landing squat.
+See [character_animation_kneeling.md](character_animation_kneeling.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in

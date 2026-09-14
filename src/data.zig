@@ -336,10 +336,10 @@ pub const CharacterActionsData = struct {
     takeoff_speed_mps: f32,
     min_landing_speed_mps: f32,
     full_landing_speed_mps: f32,
-    crouch_hold_phase: f32,
     jump: CharacterMotionData,
     fall: CharacterMotionData,
-    crouch: CharacterMotionData,
+    landing: CharacterMotionData,
+    kneel: CharacterMotionData,
 };
 pub const CharacterLocomotionData = struct {
     schema_version: u32,

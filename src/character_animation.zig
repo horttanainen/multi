@@ -55,7 +55,7 @@ pub const Control = enum(u8) {
 };
 pub const View = enum { sprites, stick, overlay };
 pub const Playback = enum { locomotion, neutral, run };
-pub const Action = enum { grounded, jump, fall, land, crouch };
+pub const Action = enum { grounded, jump, fall, land, kneel };
 pub const WallAction = enum { none, brace, push, slide, jump };
 pub const ReviewAction = enum { view, pose, diagnostics, reload, slow_motion, zoom };
 pub const Interpolation = enum { step, linear, bezier };
@@ -108,7 +108,7 @@ pub const Motion = struct {
     reference_speed_mps: f32,
     loop: bool,
 };
-pub const Actions = struct { settings: data.CharacterActionsData, jump: Motion, fall: Motion, crouch: Motion };
+pub const Actions = struct { settings: data.CharacterActionsData, jump: Motion, fall: Motion, landing: Motion, kneel: Motion };
 pub const WallActions = struct { settings: data.CharacterWallsData, brace: Motion, push: Motion, slide: Motion, jump: Motion };
 pub const Assets = struct { arena: std.heap.ArenaAllocator, rig: Rig, motion: Motion, locomotion: data.CharacterLocomotionData, actions: Actions, aiming: data.CharacterAimingData, walls: WallActions };
 pub const Diagnostic = data.CharacterAssetDiagnostic;
@@ -142,7 +142,7 @@ pub const LocomotionInput = struct {
     vertical_speed_mps: f32,
     // Positive along the support normal means moving away from the surface.
     separation_speed_mps: f32,
-    crouch_requested: bool = false,
+    kneel_requested: bool = false,
     aiming: bool = false,
     aim_direction: vec.Vec2 = vec.east,
     horizontal_speed_mps: f32 = 0,
@@ -172,6 +172,8 @@ pub const PlayerState = struct {
     previous_foot_heading: f32 = 0,
     sole_floors: [4]?f32 = @splat(null),
     previous_sole_floors: [4]?f32 = @splat(null),
+    knee_floors: [2]?f32 = @splat(null),
+    previous_knee_floors: [2]?f32 = @splat(null),
     previous_controls: [controlCount]f32 = @splat(0),
     controls: [controlCount]f32 = @splat(0),
     previous_facing_right: bool = false,
@@ -382,23 +384,28 @@ fn validateLocomotion(file: data.CharacterLocomotionData, rig: Rig, motion: Moti
 }
 
 fn validateActions(file: data.CharacterActionsData, rig: Rig, detail: *Diagnostic) !Actions {
-    if (file.schema_version != 1) return invalid(detail, "schema_version: expected 1", .{});
+    if (file.schema_version != 2) return invalid(detail, "schema_version: expected 2", .{});
     if (file.id.len == 0 or file.id.len > 64) return invalid(detail, "id: expected 1..64 bytes", .{});
     if (file.blend_seconds < 0.01 or file.blend_seconds > 0.5) return invalid(detail, "blend_seconds: expected 0.01..0.5 seconds", .{});
     if (file.takeoff_speed_mps < 0.01 or file.takeoff_speed_mps > 2) return invalid(detail, "takeoff_speed_mps: expected 0.01..2", .{});
     if (file.min_landing_speed_mps < 0 or file.full_landing_speed_mps <= file.min_landing_speed_mps or file.full_landing_speed_mps > 100) return invalid(detail, "full_landing_speed_mps: expected 0 <= min_landing_speed_mps < full_landing_speed_mps <= 100", .{});
-    if (file.crouch_hold_phase <= 0 or file.crouch_hold_phase >= 1) return invalid(detail, "crouch_hold_phase: expected a phase strictly between 0 and 1", .{});
-    var actions: Actions = .{ .settings = file, .jump = undefined, .fall = undefined, .crouch = undefined };
-    inline for (.{ "jump", "fall", "crouch" }) |name| {
+    var actions: Actions = .{ .settings = file, .jump = undefined, .fall = undefined, .landing = undefined, .kneel = undefined };
+    inline for (.{ "jump", "fall", "landing", "kneel" }) |name| {
         const clip = @field(file, name);
         @field(actions, name) = validateMotion(clip, rig, detail) catch {
             const message = detail.message;
             return invalid(detail, "{s}.{s}", .{ name, message[0..detail.length] });
         };
         if (clip.loop or clip.reference_speed_mps != 0) return invalid(detail, "{s}: action clips must be non-looping with reference_speed_mps = 0", .{name});
-        if (!std.mem.eql(u8, name, "crouch") and clip.contacts.len != 0) return invalid(detail, "{s}.contacts: airborne clips cannot plant feet", .{name});
+        const airborne = std.mem.eql(u8, name, "jump") or std.mem.eql(u8, name, "fall");
+        if (airborne and clip.contacts.len != 0) return invalid(detail, "{s}.contacts: airborne clips cannot plant feet", .{name});
     }
-    if (std.mem.eql(u8, file.jump.id, file.fall.id) or std.mem.eql(u8, file.jump.id, file.crouch.id) or std.mem.eql(u8, file.fall.id, file.crouch.id)) return invalid(detail, "jump/fall/crouch.id: expected distinct clip IDs", .{});
+    const clips = [_]Motion{ actions.jump, actions.fall, actions.landing, actions.kneel };
+    for (clips, 0..) |clip, index| {
+        for (clips[0..index]) |previous| {
+            if (std.mem.eql(u8, clip.id, previous.id)) return invalid(detail, "jump/fall/landing/kneel.id: expected distinct clip IDs", .{});
+        }
+    }
     return actions;
 }
 
@@ -792,6 +799,43 @@ fn clearSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, floo
     }
 }
 
+fn kneesClearGround(rig: Rig, controls: [controlCount]f32, floors: [2]?f32, body: vec.Vec2) bool {
+    const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
+    for (rig.limbs[0..2], floors, 0..) |limb, floor, index| {
+        if (floor == null) continue;
+        const upper = rig.lengths[@intFromEnum(limb.middle)];
+        const lower = rig.lengths[@intFromEnum(limb.end)];
+        const ankle = vec.Vec2{ .x = controls[@intFromEnum(target_x[index])], .y = controls[@intFromEnum(target_y[index])] };
+        const solution = solveLimb(pelvis, ankle, upper, lower, limb.bend_sign, reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians));
+        const minimum_y = body.y - rig.root_from_body.y - floor.? + rig.line_width / 2;
+        if (solution.middle.y < minimum_y) return false;
+    }
+    return true;
+}
+
+fn clearKnees(rig: Rig, controls: *[controlCount]f32, floors: [2]?f32, body: vec.Vec2) void {
+    if (kneesClearGround(rig, controls.*, floors, body)) return;
+    // A low hip can send a turning knee below the floor even when both soles
+    // are clear. Lift the pelvis just enough, then solve the same ankle targets
+    // again: planted feet and both leg lengths remain intact.
+    const y = @intFromEnum(Control.pelvis_y);
+    var low = controls[y];
+    var high = low;
+    for (rig.limbs[0..2], floors) |limb, floor| {
+        if (floor == null) continue;
+        high = @max(high, body.y - rig.root_from_body.y - floor.? + rig.line_width / 2 + rig.lengths[@intFromEnum(limb.middle)]);
+    }
+    for (0..12) |_| {
+        controls[y] = (low + high) / 2;
+        if (kneesClearGround(rig, controls.*, floors, body)) {
+            high = controls[y];
+        } else {
+            low = controls[y];
+        }
+    }
+    controls[y] = high;
+}
+
 fn reachableFoot(rig: Rig, controls: [controlCount]f32, index: usize, ankle: vec.Vec2) bool {
     const limb = rig.limbs[index];
     const limits = reachLimits(rig.lengths[@intFromEnum(limb.middle)], rig.lengths[@intFromEnum(limb.end)], limb.min_bend_radians, limb.max_bend_radians);
@@ -811,21 +855,20 @@ fn updateAction(set: *const Assets, state: *PlayerState, input: LocomotionInput,
     if (!supported) {
         state.action = if (input.vertical_speed_mps < 0) .jump else .fall;
         state.landing_strength = 0;
-    } else if (input.crouch_requested) {
-        state.action = .crouch;
-        state.landing_strength = 0;
     } else if (airborne) {
         state.landing_strength = std.math.clamp((impact_speed - settings.min_landing_speed_mps) / (settings.full_landing_speed_mps - settings.min_landing_speed_mps), 0, 1);
         state.action = if (state.landing_strength > 0) .land else .grounded;
-    } else if (previous == .crouch or (previous == .land and state.action_seconds >= set.actions.crouch.cycle_seconds)) {
-        state.action = .grounded;
+    } else if (previous != .land or state.action_seconds >= set.actions.landing.cycle_seconds) {
+        const stationary = @abs(state.speed_mps) <= set.locomotion.stop_speed_mps and
+            @abs(input.horizontal_speed_mps) <= set.locomotion.stop_speed_mps and input.movement_direction == 0;
+        state.action = if (input.kneel_requested and stationary and state.wall.action == .none) .kneel else .grounded;
         state.landing_strength = 0;
     }
     if (state.action == previous) return false;
     state.action_seconds = 0;
     // Airborne transitions discard stance state. Finishing a grounded landing
     // preserves the running/standing contacts that are already in progress.
-    if (airborne or state.action == .jump or state.action == .fall) state.feet = .{ .{}, .{} };
+    if (airborne or state.action == .jump or state.action == .fall or previous == .kneel or state.action == .kneel) state.feet = .{ .{}, .{} };
     return true;
 }
 
@@ -837,11 +880,12 @@ fn actionControls(set: *const Assets, state: *PlayerState) void {
     const clip = switch (state.action) {
         .jump => set.actions.jump,
         .fall => set.actions.fall,
-        .land, .crouch => set.actions.crouch,
+        .land => set.actions.landing,
+        .kneel => set.actions.kneel,
         .grounded => unreachable,
     };
-    const phase = if (state.action == .crouch) set.actions.settings.crouch_hold_phase else clipPhase(clip, state.action_seconds / clip.cycle_seconds);
-    const compression = state.action == .land or state.action == .crouch;
+    const phase = clipPhase(clip, state.action_seconds / clip.cycle_seconds);
+    const compression = state.action == .land;
     const strength = if (state.action == .land) state.landing_strength else 1;
     // Landing adds compression relative to the rig's neutral pose. Locomotion
     // continues underneath it, including foot trajectories and stance timing.
@@ -1075,6 +1119,7 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
     const moving = @abs(state.speed_mps) > profile.stop_speed_mps;
     const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
     state.sole_floors = @splat(null);
+    state.knee_floors = @splat(null);
     for (&state.feet, 0..) |*foot, index| {
         const x = @intFromEnum(target_x[index]);
         const y = @intFromEnum(target_y[index]);
@@ -1133,6 +1178,17 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
         foot.locked = false;
         foot.blocked = moving;
     }
+    if (input.ground_y == null or !input.supported or state.action == .jump or state.action == .fall) return;
+    const pelvis_world_y = input.body.y - set.rig.root_from_body.y - state.controls[@intFromEnum(Control.pelvis_y)];
+    const longest_thigh = @max(set.rig.lengths[@intFromEnum(Joint.left_knee)], set.rig.lengths[@intFromEnum(Joint.right_knee)]);
+    if (pelvis_world_y + longest_thigh + set.rig.line_width / 2 < input.ground_y.?) return;
+    const pose = solvePoseWithFeet(set.rig, state.controls, offsets);
+    for (set.rig.limbs[0..2], &state.knee_floors) |limb, *floor| {
+        if (pelvis_world_y + set.rig.lengths[@intFromEnum(limb.middle)] + set.rig.line_width / 2 < input.ground_y.?) continue;
+        const knee = toWorld(set.rig, pose.joints[@intFromEnum(limb.middle)], input.body, state.facing_right);
+        floor.* = flatGroundAt(knee.x, input.ground_y.?, profile);
+    }
+    clearKnees(set.rig, &state.controls, state.knee_floors, input.body);
 }
 
 // The fixed-step caller provides physical position and fresh grounding. Tests
@@ -1166,6 +1222,7 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.previous_body = state.body;
     state.previous_foot_heading = state.foot_heading;
     state.previous_sole_floors = state.sole_floors;
+    state.previous_knee_floors = state.knee_floors;
     state.previous_wall = state.wall;
     state.previous_stow_weight = state.stow_weight;
     state.previous_limb_release_seconds = state.limb_release_seconds;
@@ -1273,6 +1330,7 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
         state.previous_foot_heading = state.foot_heading;
         state.previous_feet = state.feet;
         state.previous_sole_floors = state.sole_floors;
+        state.previous_knee_floors = state.knee_floors;
         state.previous_wall = state.wall;
         state.previous_stow_weight = state.stow_weight;
     }
@@ -1321,6 +1379,13 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
         floor.* = std.math.lerp(before.?, after.?, fraction);
     }
     clearSoles(set.rig, &controls, offsets, floors, body, state.facing_right);
+    var knee_floors: [2]?f32 = @splat(null);
+    for (&knee_floors, state.previous_knee_floors, state.knee_floors) |*floor, before, after| {
+        if (before == null or after == null) continue;
+        if (@abs(before.? - after.?) > set.locomotion.flat_height_tolerance_m) continue;
+        floor.* = std.math.lerp(before.?, after.?, fraction);
+    }
+    clearKnees(set.rig, &controls, knee_floors, body);
     clearWallSoles(set.rig, &controls, offsets, state.wall, body, state.facing_right);
     // Hand targets were resolved once in the fixed-step controls. Their linear
     // interpolation with the body already preserves stationary world contacts.
@@ -1551,6 +1616,10 @@ pub fn fixedUpdate(dt: f64) void {
         const support_velocity = if (contact == null or !movement_state.groundState.supported) vec.zero else vec.fromBox2d(box2d.c.b2Body_GetWorldPointVelocity(contact.?.bodyId, vec.toBox2d(contact.?.worldPoint)));
         const relative_velocity = vec.subtract(vec.fromBox2d(velocity), support_velocity);
         const direction = movement.locomotionDirection(player_id);
+        // Towerfall hands the movement stick to aiming. Preserve an existing
+        // kneel until that hold ends; aim direction must not choose a stance.
+        // This loop's registered animation state remains present throughout.
+        const hold_kneel = movement.mechanism == .towerfall and p.isAiming and states.get(player_id).?.action == .kneel;
         updatePlayer(player_id, .{
             .body = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId)),
             .supported = movement_state.groundState.supported,
@@ -1558,7 +1627,7 @@ pub fn fixedUpdate(dt: f64) void {
             .facing_right = movement_state.facingRight,
             .vertical_speed_mps = relative_velocity.y,
             .separation_speed_mps = if (contact == null) 0 else vec.dot(relative_velocity, contact.?.normal),
-            .crouch_requested = direction.y < 0,
+            .kneel_requested = direction.y < 0 or hold_kneel,
             .aiming = p.isAiming,
             .aim_direction = p.aimDirection,
             .horizontal_speed_mps = velocity.x,

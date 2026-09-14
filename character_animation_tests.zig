@@ -206,9 +206,9 @@ test "decoded character data owns its strings and curves after the source buffer
         try std.testing.expect(track.keys.len >= 2);
         try std.testing.expectEqual(@as(f32, 1), track.keys[track.keys.len - 1].phase);
     }
-    try std.testing.expectEqualStrings("airborne_v1", files.actions.id);
+    try std.testing.expectEqualStrings("airborne_v2", files.actions.id);
     try std.testing.expectEqualStrings("jump_reference_v1", files.actions.jump.id);
-    try std.testing.expectEqual(@as(f32, 1), files.actions.crouch.tracks[0].keys[2].phase);
+    try std.testing.expectEqual(@as(f32, 1), files.actions.landing.tracks[0].keys[2].phase);
 }
 
 test "data file loading transfers ownership to runtime assets and reproduces the reference poses" {
@@ -1175,7 +1175,7 @@ fn checkAirPose(sample: animation.PlayerState) !void {
 test "airborne clips retain bone lengths and reach their authored controls without clamping" {
     var set = try load();
     defer set.arena.deinit();
-    for ([_]animation.Motion{ set.actions.jump, set.actions.fall, set.actions.crouch }) |clip| {
+    for ([_]animation.Motion{ set.actions.jump, set.actions.fall, set.actions.landing, set.actions.kneel }) |clip| {
         for (0..241) |tick| {
             var controls = set.rig.neutral;
             for (&controls, clip.tracks) |*value, track| value.* = animation.evaluateTrack(track, @as(f32, @floatFromInt(tick)) / 240);
@@ -1290,7 +1290,7 @@ test "real physics and movement grounding drive jump fall and landing through fi
         for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
         try samples.append(std.testing.allocator, .{ .action = sample.action, .seconds = sample.action_seconds, .strength = sample.landing_strength, .pose = .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints } });
     }
-    for (seen[0..@intFromEnum(animation.Action.crouch)]) |visited| try std.testing.expect(visited);
+    for (seen[0..@intFromEnum(animation.Action.kneel)]) |visited| try std.testing.expect(visited);
     try std.testing.expect(landing_contacts > 0);
     try std.testing.expect(early_landing_contacts > 0);
     for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
@@ -1311,7 +1311,7 @@ test "real physics and movement grounding drive jump fall and landing through fi
     }
     player_input.submit(7, .{ .movementDirection = .{ .x = 0, .y = -1 } });
     animation.fixedUpdate(1.0 / 60.0);
-    try std.testing.expectEqual(animation.Action.crouch, animation.states.get(7).?.action);
+    try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
     player_input.neutralize(7);
     animation.fixedUpdate(1.0 / 60.0);
     try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
@@ -1328,12 +1328,15 @@ test "invalid action assets preserve live airborne state and successful reload r
     defer std.testing.log_level = previous_log_level;
     var detail: animation.Diagnostic = .{};
     const cases = [_][2][]const u8{
+        .{ "\"schema_version\": 2", "\"schema_version\": 1" },
+        .{ "\"schema_version\": 2", "\"schema_version\": 3" },
         .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"kneel\":", "\"crouch\":" },
         .{ "\"humanoid_v1\"", "\"missing_rig\"" },
         .{ "\"blend_seconds\": 0.045", "\"blend_seconds\": 0" },
         .{ "\"takeoff_speed_mps\": 0.2", "\"takeoff_speed_mps\": -1" },
         .{ "\"full_landing_speed_mps\": 12.0", "\"full_landing_speed_mps\": 0.5" },
-        .{ "\"crouch_hold_phase\": 0.22", "\"crouch_hold_phase\": 1" },
+        .{ "\"kneel_reference_v1\"", "\"landing_reference_v1\"" },
         .{ "\"loop\": false", "\"loop\": true" },
         .{ "\"cycle_seconds\": 0.18", "\"cycle_seconds\": 0" },
         .{ "\"jump_reference_v1\"", "\"fall_reference_v1\"" },
@@ -1365,7 +1368,7 @@ test "invalid action assets preserve live airborne state and successful reload r
     try std.testing.expectEqual(before.facing_right, cleared.facing_right);
 }
 
-test "hard landings crouch and settle on both feet in either facing, including an airborne turn" {
+test "hard landings squat and settle on both feet in either facing, including an airborne turn" {
     _ = try beginLocomotion();
     defer box2d.destroyWorld();
     defer animation.cleanup();
@@ -1503,51 +1506,163 @@ test "ascent keeps both hands above the head and descent lowers them" {
     try checkAirPose(sample);
 }
 
-test "held crouch keeps the hips low while standing and moving, and releases into standing or jumping" {
+test "kneeling plants the rear knee and front foot with a low head on both facings" {
     _ = try beginLocomotion();
     defer box2d.destroyWorld();
     defer animation.cleanup();
     runtime.init(std.testing.io);
+    const set = &animation.assets.?;
     var samples: std.ArrayList(AirSample) = .empty;
     defer samples.deinit(std.testing.allocator);
-    for ([_]f32{ 0, 0.5, 3.2, 9, -3.2 }) |speed| {
+    for ([_]bool{ true, false }) |facing| {
         animation.resetPlayer(7);
-        advanceRun(0, true);
-        var x: f32 = 0;
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = facing };
+        for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        input.kneel_requested = true;
         var sample: animation.PlayerState = undefined;
-        var contact_frames: usize = 0;
-        for (0..120) |tick| {
-            x += speed / 60;
-            animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
+        for (0..90) |tick| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
             sample = animation.states.get(7).?;
-            try std.testing.expectEqual(animation.Action.crouch, sample.action);
+            try std.testing.expectEqual(animation.Action.kneel, sample.action);
             try checkAirPose(sample);
-            if (tick < 30) continue;
-            try std.testing.expect(sample.controls[@intFromEnum(animation.Control.pelvis_y)] < -0.26);
-            if (sample.feet[0].locked or sample.feet[1].locked) contact_frames += 1;
-            const set = &animation.assets.?;
+            for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                const pose = animation.interpolatedPose(set, sample, alpha);
+                for ([_]animation.Joint{ .left_knee, .right_knee }) |knee| {
+                    const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(knee)], sample.body, facing);
+                    try std.testing.expect(point.y <= 0.3002);
+                }
+            }
             var joints = animation.interpolatedPose(set, sample, 1).joints;
-            for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
-            try samples.append(std.testing.allocator, .{ .action = sample.action, .seconds = sample.action_seconds, .strength = 1, .pose = .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints } });
+            for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, facing);
+            if (tick >= 30) {
+                try std.testing.expectApproxEqAbs(@as(f32, 0.284), joints[@intFromEnum(animation.Joint.right_knee)].y, 0.008);
+                try std.testing.expect(joints[@intFromEnum(animation.Joint.left_knee)].y < 0.1);
+                try std.testing.expectApproxEqAbs(@as(f32, 0.3), joints[@intFromEnum(animation.Joint.left_toe)].y, 0.00003);
+                try std.testing.expect(joints[@intFromEnum(animation.Joint.head)].y > -0.5);
+                const sign: f32 = if (facing) 1 else -1;
+                try std.testing.expect((joints[@intFromEnum(animation.Joint.head)].x - joints[@intFromEnum(animation.Joint.pelvis)].x) * sign > 0.45);
+                for (sample.feet) |foot| try std.testing.expect(foot.locked);
+            }
+            if (tick % 3 == 0) try samples.append(std.testing.allocator, .{ .action = sample.action, .seconds = sample.action_seconds, .strength = 1, .pose = .{ .speed = sample.speed_mps, .phase = 0, .weight = sample.run_weight, .facing_right = facing, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints } });
         }
-        try std.testing.expect(contact_frames > 10);
-        try std.testing.expectEqual(speed == 0, sample.phase == 0);
-        for (0..60) |_| sample = advanceAir(.{ .x = x, .y = 0 }, 0, true);
-        try std.testing.expectEqual(animation.Action.grounded, sample.action);
+        const settled = animation.interpolatedPose(set, sample, 1);
+        input.kneel_requested = false;
+        for (0..90) |tick| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            sample = animation.states.get(7).?;
+            try std.testing.expectEqual(animation.Action.grounded, sample.action);
+            try checkAirPose(sample);
+            if (tick == 0) {
+                const boundary = animation.interpolatedPose(set, sample, 0);
+                for (settled.joints, boundary.joints) |a, b| try nearPoint(a, b, 0.00003);
+            }
+        }
         try std.testing.expectApproxEqAbs(@as(f32, 0), sample.controls[@intFromEnum(animation.Control.pelvis_y)], 0.0001);
-        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = -0.1 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = -6, .separation_speed_mps = 6, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
-        sample = animation.states.get(7).?;
-        try std.testing.expectEqual(animation.Action.jump, sample.action);
-        try checkAirPose(sample);
-        _ = advanceAir(.{ .x = x, .y = -0.2 }, 12, false);
-        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = 0 }, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .crouch_requested = true }, 1.0 / 60.0);
-        try std.testing.expectEqual(animation.Action.crouch, animation.states.get(7).?.action);
-        try checkAirPose(animation.states.get(7).?);
     }
     const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
     defer std.testing.allocator.free(bytes);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
-    try fs.writeFile("artifacts/character_animation/crouch_samples.json", bytes);
+    try fs.writeFile("artifacts/character_animation/kneel_samples.json", bytes);
+}
+
+test "Down never crouch walks and horizontal intent exits kneeling before the body moves" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    for ([_]f32{ 0.5, 3.2, 9, -3.2 }) |speed| {
+        animation.resetPlayer(7);
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .kneel_requested = true };
+        for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+        input.movement_direction = if (speed > 0) 1 else -1;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+        for (0..120) |tick| {
+            input.body.x += speed / 60;
+            input.horizontal_speed_mps = speed;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const sample = animation.states.get(7).?;
+            try std.testing.expectEqual(animation.Action.grounded, sample.action);
+            try checkAirPose(sample);
+            if (tick > 30) try std.testing.expect(sample.controls[@intFromEnum(animation.Control.pelvis_y)] > -0.15);
+        }
+        // Releasing sideways input during residual motion cannot start a kneel.
+        input.movement_direction = 0;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+        input.horizontal_speed_mps = 0;
+        for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+        input.body.y = -0.1;
+        input.vertical_speed_mps = -6;
+        input.separation_speed_mps = 6;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+        try checkAirPose(animation.states.get(7).?);
+    }
+}
+
+test "kneeling turns while aiming and losing support releases the stance" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .kneel_requested = true };
+    for ([_]vec.Vec2{ vec.east, vec.west, vec.east }) |direction| {
+        input.aiming = true;
+        input.aim_direction = direction;
+        for (0..90) |tick| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const sample = animation.states.get(7).?;
+            try std.testing.expectEqual(animation.Action.kneel, sample.action);
+            try checkAirPose(sample);
+            for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+                for ([_]animation.Joint{ .left_knee, .right_knee }) |knee| {
+                    const point = animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(knee)], sample.body, sample.facing_right);
+                    errdefer std.log.err("kneel turn: tick {d}, alpha {d}, knee {s}, point {any}", .{ tick, alpha, @tagName(knee), point });
+                    try std.testing.expect(point.y <= 0.3002);
+                }
+            }
+        }
+    }
+    input.supported = false;
+    input.ground_y = null;
+    input.vertical_speed_mps = 2;
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    const falling = animation.states.get(7).?;
+    try std.testing.expectEqual(animation.Action.fall, falling.action);
+    for (falling.feet) |foot| try std.testing.expect(!foot.locked);
+}
+
+test "landing has priority over Down and only settles into kneeling after impact recovery" {
+    _ = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    for ([_]f32{ 0, 3.2 }) |speed| {
+        animation.resetPlayer(7);
+        _ = advanceAir(.{ .x = 0, .y = -0.1 }, 16, false);
+        var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true, .kneel_requested = true, .horizontal_speed_mps = speed };
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.Action.land, animation.states.get(7).?.action);
+        for (0..90) |tick| {
+            input.body.x += speed / 60;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const sample = animation.states.get(7).?;
+            if (sample.action_seconds > 0.07 and sample.action == .land) {
+                const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
+                for ([_]animation.Joint{ .left_knee, .right_knee }) |knee| {
+                    const point = animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(knee)], sample.body, sample.facing_right);
+                    errdefer std.log.err("landing knee: speed {d}, tick {d}, {s}, y {d}", .{ speed, tick, @tagName(knee), point.y });
+                    // Running keeps its leg cycle; only a stationary landing
+                    // has the symmetric squat's larger knee clearance.
+                    try std.testing.expect(point.y < (if (speed == 0) @as(f32, 0.2) else 0.3002));
+                }
+            }
+            if (tick < 15) try std.testing.expectEqual(animation.Action.land, sample.action);
+            try checkAirPose(sample);
+        }
+        try std.testing.expectEqual(if (speed == 0) animation.Action.kneel else animation.Action.grounded, animation.states.get(7).?.action);
+    }
 }
 
 test "blaster source loads through SDL and its grip and muzzle markers are extracted" {
@@ -1593,7 +1708,7 @@ test "anchored sprite keeps its grip fixed and mirrors the muzzle across both fa
     }
 }
 
-test "carried attachment uses solved wrist rotation through running crouching and airborne interpolation" {
+test "carried attachment uses solved wrist rotation through running kneeling and airborne interpolation" {
     _ = try beginLocomotion();
     defer box2d.destroyWorld();
     defer animation.cleanup();
@@ -1603,12 +1718,14 @@ test "carried attachment uses solved wrist rotation through running crouching an
     attachment.local_offset = .{ .x = 0.025, .y = -0.01 };
     var x: f32 = 0;
     for (0..240) |tick| {
-        const speed: f32 = if (tick < 120) 3.2 else -3.2;
+        const kneeling = tick >= 150 and tick < 200;
+        const speed: f32 = if (kneeling) 0 else if (tick < 120) 3.2 else -3.2;
         x += speed / 60;
         const in_air = tick >= 60 and tick < 110;
         const vertical: f32 = if (tick < 85) -6 else 8;
-        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = if (in_air) -0.2 else 0 }, .supported = !in_air, .ground_y = if (in_air) null else 0.3, .vertical_speed_mps = if (in_air) vertical else 0, .separation_speed_mps = if (in_air) -vertical else 0, .facing_right = speed > 0, .crouch_requested = tick >= 150 and tick < 200 }, 1.0 / 60.0);
+        animation.updatePlayer(7, .{ .body = .{ .x = x, .y = if (in_air) -0.2 else 0 }, .supported = !in_air, .ground_y = if (in_air) null else 0.3, .vertical_speed_mps = if (in_air) vertical else 0, .separation_speed_mps = if (in_air) -vertical else 0, .facing_right = speed > 0, .kneel_requested = kneeling }, 1.0 / 60.0);
         const sample = animation.states.get(7).?;
+        if (kneeling) try std.testing.expectEqual(animation.Action.kneel, sample.action);
         for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
             const pose = animation.interpolatedPose(set, sample, alpha);
             const local = animation.attachmentTransform(set.rig, pose, "weapon_hand").?;
@@ -1661,13 +1778,13 @@ test "aim IK preserves legs and grip while the barrel points in every direction 
     var samples: std.ArrayListUnmanaged(AimSample) = .empty;
     defer samples.deinit(std.testing.allocator);
     const body: vec.Vec2 = .{ .x = 2, .y = 3 };
-    for ([_][]const u8{ "neutral", "run", "crouch", "jump", "fall" }) |action| {
+    for ([_][]const u8{ "neutral", "run", "kneel", "jump", "fall" }) |action| {
         var base = animation.evaluatePose(&set, 0.25, .neutral);
         if (std.mem.eql(u8, action, "run")) base = animation.evaluatePose(&set, 0.25, .run);
         if (!std.mem.eql(u8, action, "run") and !std.mem.eql(u8, action, "neutral")) {
-            const clip = if (std.mem.eql(u8, action, "jump")) set.actions.jump else if (std.mem.eql(u8, action, "fall")) set.actions.fall else set.actions.crouch;
+            const clip = if (std.mem.eql(u8, action, "jump")) set.actions.jump else if (std.mem.eql(u8, action, "fall")) set.actions.fall else set.actions.kneel;
             var controls = set.rig.neutral;
-            const phase: f32 = if (std.mem.eql(u8, action, "crouch")) set.actions.settings.crouch_hold_phase else 1;
+            const phase: f32 = 1;
             for (&controls, clip.tracks) |*value, track| value.* = animation.evaluateTrack(track, phase);
             base = animation.solvePose(set.rig, controls);
         }
@@ -1799,6 +1916,112 @@ fn submitAim(direction: vec.Vec2, held: bool) void {
     control.applyPlayerInput(7);
 }
 
+fn stepAimingMovement() !void {
+    player_input.beginPhysicsStep();
+    defer player_input.endPhysicsStep();
+    movement.applyAll(1.0 / 60.0);
+    box2d.worldStep(1.0 / 60.0, 4);
+    try movement.processSensorEvents();
+    animation.fixedUpdate(1.0 / 60.0);
+}
+
+test "Towerfall input keeps an existing kneel while aiming and restores live stance on release" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    for ([_]data.AimMode{ .free, .eight_directions }) |aim_mode| {
+        player_input.directionSettings.aimMode = aim_mode;
+        submitAim(vec.south, false);
+        for (0..30) |_| try stepAimingMovement();
+        try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+        for ([_]vec.Vec2{ vec.east, vec.west, vec.north, vec.south, .{ .x = 0.8, .y = 0.3 }, vec.zero }) |direction| {
+            submitAim(direction, true);
+            for (0..20) |_| {
+                try stepAimingMovement();
+                const sample = animation.states.get(7).?;
+                try std.testing.expectEqual(animation.Action.kneel, sample.action);
+                try checkAirPose(sample);
+                try nearPoint(vec.zero, movement.locomotionDirection(7), 0.00001);
+                try std.testing.expectApproxEqAbs(@as(f32, 0), box2d.c.b2Body_GetLinearVelocity(body).x, 0.00001);
+            }
+            const frame = player.weaponFrame(7, .physics, null).?;
+            try nearPoint(player.players.get(7).?.aimDirection, player.weaponDirection(frame), 0.00001);
+            const pose = animation.playerFrame(7, .physics, null).?;
+            try checkBones(animation.assets.?.rig, pose.pose);
+            try std.testing.expect(pose.pose.joints[@intFromEnum(animation.Joint.pelvis)].y < -0.35);
+        }
+        // Down can keep the stance after firing; neutral ends it immediately.
+        submitAim(vec.south, false);
+        try stepAimingMovement();
+        try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+        submitAim(vec.zero, true);
+        try stepAimingMovement();
+        submitAim(vec.zero, false);
+        try stepAimingMovement();
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+        // Aiming down from standing cannot create a kneel from aim input.
+        submitAim(vec.south, true);
+        for (0..15) |_| try stepAimingMovement();
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+    }
+    submitAim(vec.south, false);
+    for (0..30) |_| try stepAimingMovement();
+    submitAim(vec.east, true);
+    try stepAimingMovement();
+    player_input.neutralize(7);
+    control.applyPlayerInput(7);
+    try stepAimingMovement();
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+    submitAim(vec.south, false);
+    for (0..30) |_| try stepAimingMovement();
+    submitAim(vec.east, true);
+    try stepAimingMovement();
+    var jump: player_input.Sample = .{ .movementDirection = vec.east, .aimDirection = vec.east };
+    jump.buttons.set(.shoot, true);
+    jump.buttons.set(.jump, true);
+    player_input.submit(7, jump);
+    control.applyPlayerInput(7);
+    try stepAimingMovement();
+    try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+    // Once interrupted by a jump, the aim hold cannot restore the old kneel.
+    jump.buttons.set(.jump, false);
+    player_input.submit(7, jump);
+    control.applyPlayerInput(7);
+    for (0..180) |_| {
+        try stepAimingMovement();
+        try std.testing.expect(animation.states.get(7).?.action != .kneel);
+    }
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+}
+
+test "Liero aiming uses live movement input to enter and leave kneeling" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    movement.mechanism = .liero;
+    defer movement.mechanism = .towerfall;
+    var input: player_input.Sample = .{ .movementDirection = vec.south, .aimDirection = vec.east };
+    player_input.submit(7, input);
+    control.applyPlayerInput(7);
+    for (0..30) |_| try stepAimingMovement();
+    try std.testing.expect(player.players.get(7).?.isAiming);
+    try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+    input.aimDirection = vec.west;
+    player_input.submit(7, input);
+    control.applyPlayerInput(7);
+    for (0..30) |_| try stepAimingMovement();
+    try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+    try nearPoint(vec.west, player.weaponDirection(player.weaponFrame(7, .physics, null).?), 0.00001);
+    input.movementDirection = vec.zero;
+    player_input.submit(7, input);
+    control.applyPlayerInput(7);
+    try stepAimingMovement();
+    try std.testing.expect(player.players.get(7).?.isAiming);
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+}
+
 test "aiming removes directional locomotion while momentum gravity and independent jumping continue" {
     const old_view = animation.view;
     defer animation.view = old_view;
@@ -1814,7 +2037,7 @@ test "aiming removes directional locomotion while momentum gravity and independe
     movement.applyAll(1.0 / 60.0);
     try std.testing.expectApproxEqAbs(6 - movement.towerfallSettings.control.groundDeceleration / 60, box2d.c.b2Body_GetLinearVelocity(body).x, 0.00001);
     animation.fixedUpdate(1.0 / 60.0);
-    try std.testing.expect(animation.states.get(7).?.action != .crouch);
+    try std.testing.expect(animation.states.get(7).?.action != .kneel);
     const moving = movement.states.getPtr(7).?;
     moving.groundState = .{};
     moving.leftWallContactCount = 1;

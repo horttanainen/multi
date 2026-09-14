@@ -4,6 +4,10 @@ Status: accepted by the user, including the stronger impact, airborne-arm and
 held-crouch revision. Validation and independent review passed; commit authorized.
 Baseline: `d138623` (accepted movement-driven running and flat-ground planting).
 
+This records the accepted original phase. The subsequent
+[kneeling and landing polish](character_animation_kneeling.md) replaces the shared
+crouch clip and state described below with separate kneeling and landing clips.
+
 ## Behavior
 
 The normal `locomotion` playback now selects five animation states:
