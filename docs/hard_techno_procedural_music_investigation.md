@@ -2,8 +2,10 @@
 
 Investigated 2026-09-24 against commit `657ac10` and the existing working tree.
 This document records the preimplementation findings and proposed roadmap.
-Phase 1 is now implemented and the user selected the tight listening candidate; see
-[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-1-results-and-listening) for results,
+Phase 1 is committed with the user's selected tight candidate. Phase 2 adds
+three percussion grooves; the user liked Warehouse and Machine and leans toward
+Warehouse. The user has requested the completed Phase 2 commit; see
+[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-2-percussion-groove) for results,
 validation and current status.
 
 The user has explicitly made earlier music-generation guidance optional because

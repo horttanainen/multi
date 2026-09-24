@@ -24,6 +24,7 @@ pub const Envelope = struct {
     decay_rate: f32,
     sustain_level: f32,
     release_rate: f32,
+    release_samples: f32 = 1.0,
 };
 
 pub fn envelopeInit(attack_s: f32, decay_s: f32, sustain: f32, release_s: f32) Envelope {
@@ -32,6 +33,7 @@ pub fn envelopeInit(attack_s: f32, decay_s: f32, sustain: f32, release_s: f32) E
         .decay_rate = (1.0 - sustain) / @max(decay_s * SAMPLE_RATE, 1.0),
         .sustain_level = sustain,
         .release_rate = sustain / @max(release_s * SAMPLE_RATE, 1.0),
+        .release_samples = @max(release_s * SAMPLE_RATE, 1.0),
     };
 }
 
@@ -44,11 +46,16 @@ pub fn envelopeRetrigger(env: *Envelope, attack_s: f32, decay_s: f32, sustain: f
     env.decay_rate = (1.0 - sustain) / @max(decay_s * SAMPLE_RATE, 1.0);
     env.sustain_level = sustain;
     env.release_rate = sustain / @max(release_s * SAMPLE_RATE, 1.0);
+    env.release_samples = @max(release_s * SAMPLE_RATE, 1.0);
     env.state = .attack;
 }
 
 pub fn envelopeNoteOff(env: *Envelope) void {
-    if (env.state != .idle) env.state = .release;
+    if (env.state == .idle or env.state == .release) return;
+    // Release from the current level, including note-off during attack/decay
+    // and zero-sustain percussion. Repeated note-off must not extend the tail.
+    env.release_rate = env.level / env.release_samples;
+    env.state = .release;
 }
 
 pub fn envelopeProcess(env: *Envelope) f32 {
@@ -65,7 +72,7 @@ pub fn envelopeProcess(env: *Envelope) f32 {
             env.level -= env.decay_rate;
             if (env.level <= env.sustain_level) {
                 env.level = env.sustain_level;
-                env.state = .sustain;
+                env.state = if (env.sustain_level == 0.0) .idle else .sustain;
             }
         },
         .sustain => {},

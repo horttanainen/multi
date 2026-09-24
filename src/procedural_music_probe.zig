@@ -39,6 +39,8 @@ const RenderConfig = struct {
     kick_drive: f32 = 2.3,
     kick_decay: f32 = 0.28,
     rumble_level: f32 = 0.52,
+    percussion_level: f32 = 0.65,
+    techno_groove: procedural_hard_techno.Groove = .warehouse,
     techno_options_set: bool = false,
     instrument_set: bool = false,
 };
@@ -109,13 +111,19 @@ pub fn main(init: std.process.Init) !void {
         logTaikoBusStats(cfg);
     }
     if (cfg.style == .hard_techno) {
-        std.log.info("techno_render: bus={s} bpm={d:.3} kicks={d} drive={d:.3} decay={d:.3} rumble={d:.3} dc={d:.7} clipped={d} non_finite={d} render_ms={d}", .{
+        std.log.info("techno_render: bus={s} groove={s} bpm={d:.3} kicks={d} hats_closed={d} hats_open={d} claps={d} metal={d} drive={d:.3} decay={d:.3} rumble={d:.3} percussion={d:.3} dc={d:.7} clipped={d} non_finite={d} render_ms={d}", .{
             @tagName(cfg.techno_bus),
+            @tagName(cfg.techno_groove),
             procedural_hard_techno.BASE_BPM * cfg.tempo_scale,
             procedural_hard_techno.kick_count,
+            procedural_hard_techno.percussion_counts[0],
+            procedural_hard_techno.percussion_counts[1],
+            procedural_hard_techno.percussion_counts[2],
+            procedural_hard_techno.percussion_counts[3],
             cfg.kick_drive,
             cfg.kick_decay,
             cfg.rumble_level,
+            cfg.percussion_level,
             stats.sum / @as(f64, @floatFromInt(@max(stats.finite_samples, 1))),
             stats.clipped_samples,
             stats.non_finite_samples,
@@ -230,7 +238,7 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--techno-bus")) {
             const value = try optionValue(args, idx, arg);
             cfg.techno_bus = std.meta.stringToEnum(procedural_hard_techno.Bus, value) orelse {
-                std.log.err("procedural_music_probe: unknown techno bus '{s}' (use mix, kick, rumble)", .{value});
+                std.log.err("procedural_music_probe: unknown techno bus '{s}' (use mix, kick, rumble, low_end, hats, clap, metal, percussion)", .{value});
                 return error.InvalidArgument;
             };
             cfg.techno_options_set = true;
@@ -251,6 +259,22 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--rumble")) {
             cfg.rumble_level = try parseBoundedFloatArg("rumble", try optionValue(args, idx, arg), 0.0, 1.0);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--groove")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.techno_groove = std.meta.stringToEnum(procedural_hard_techno.Groove, value) orelse {
+                std.log.err("procedural_music_probe: unknown groove '{s}' (use foundation, warehouse, rolling, machine)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--percussion")) {
+            cfg.percussion_level = try parseBoundedFloatArg("percussion", try optionValue(args, idx, arg), 0.0, 1.0);
             cfg.techno_options_set = true;
             idx += 2;
             continue;
@@ -420,6 +444,8 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .kick_drive = cfg.kick_drive,
                 .kick_decay = cfg.kick_decay,
                 .rumble_level = cfg.rumble_level,
+                .percussion_level = cfg.percussion_level,
+                .groove = cfg.techno_groove,
                 .room_mix = cfg.reverb_mix,
                 .bus = cfg.techno_bus,
             };
@@ -661,7 +687,7 @@ fn instrumentLabel(cfg: RenderConfig) []const u8 {
     return switch (cfg.style) {
         .americana_guitar => instrumentFlavorLabel(cfg.instrument_flavor),
         .taiko => "taiko-ensemble",
-        .hard_techno => "kick-and-rumble",
+        .hard_techno => "electronic-percussion",
     };
 }
 
@@ -679,7 +705,7 @@ fn printUsage() void {
         \\Styles:
         \\  americana-guitar
         \\  taiko
-        \\  hard-techno        150 BPM kick and rumble proof
+        \\  hard-techno        150 BPM kick, rumble and percussion grooves
         \\
         \\Options:
         \\  --duration SECONDS
@@ -694,7 +720,9 @@ fn printUsage() void {
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
         \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
-        \\  --techno-bus NAME   mix, kick, rumble (hard-techno only)
+        \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion
+        \\  --groove NAME       warehouse (default), rolling, machine, foundation
+        \\  --percussion VALUE  0..1, default 0.65 (hard-techno only)
         \\  --kick-drive VALUE  1..8, default 2.3 (hard-techno only)
         \\  --kick-decay SECS   0.08..0.8 to -60 dB, default 0.28 (hard-techno only)
         \\  --rumble VALUE      0..1, default 0.52 (hard-techno only)

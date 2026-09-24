@@ -632,11 +632,32 @@ pub const HiHat = struct {
     env: dsp.Envelope = dsp.envelopeInit(0.001, 0.03, 0.0, 0.02),
     hpf: dsp.HPF = dsp.hpfInit(6000.0),
     volume: f32 = 0.45,
+    velocity: f32 = 1.0,
+    base_frequency_hz: f32 = 6200.0,
+    noise_mix: f32 = 0.62,
+    curved_decay: bool = false,
     phases: [6]f32 = .{ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
 };
 
 pub fn hiHatTrigger(ctx: *HiHat) void {
     dsp.envelopeTrigger(&ctx.env);
+}
+
+// Independent open/closed instances share this voice; choke the open instance
+// before triggering a closed hit. Legacy callers keep their original envelope.
+pub fn hiHatTriggerWithDecay(ctx: *HiHat, velocity: f32, decay_seconds: f32) void {
+    if (!std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
+        !std.math.isFinite(decay_seconds) or decay_seconds < 0.005 or decay_seconds > 0.8)
+    {
+        std.log.warn("hiHatTriggerWithDecay: invalid velocity/decay ({d}, {d}), skipping", .{ velocity, decay_seconds });
+        return;
+    }
+    ctx.velocity = velocity;
+    dsp.envelopeRetrigger(&ctx.env, 0.0005, decay_seconds, 0.0, 0.004);
+}
+
+pub fn hiHatChoke(ctx: *HiHat) void {
+    dsp.envelopeNoteOff(&ctx.env);
 }
 
 pub fn hiHatProcess(ctx: *HiHat, rng_inst: *dsp.Rng) f32 {
@@ -645,12 +666,63 @@ pub fn hiHatProcess(ctx: *HiHat, rng_inst: *dsp.Rng) f32 {
     const ratios = [_]f32{ 1.0, 1.41, 1.73, 2.37, 3.11, 4.35 };
     var metal: f32 = 0.0;
     for (0..ctx.phases.len) |idx| {
-        ctx.phases[idx] += 6200.0 * ratios[idx] * dsp.INV_SR * dsp.TAU;
+        ctx.phases[idx] += ctx.base_frequency_hz * ratios[idx] * dsp.INV_SR * dsp.TAU;
         if (ctx.phases[idx] > dsp.TAU) ctx.phases[idx] -= dsp.TAU;
         metal += @sin(ctx.phases[idx]) * (0.22 - @as(f32, @floatFromInt(idx)) * 0.02);
     }
     const noise = dsp.hpfProcess(&ctx.hpf, dsp.rngFloat(rng_inst) * 2.0 - 1.0);
-    return (noise * 0.62 + metal * 0.38) * env_val * ctx.volume;
+    const shaped = if (ctx.curved_decay) env_val * env_val else env_val;
+    return (noise * ctx.noise_mix + metal * (1.0 - ctx.noise_mix)) * shaped * ctx.volume * ctx.velocity;
+}
+
+pub const ElectronicClap = struct {
+    hpf: dsp.HPF = dsp.hpfInit(900.0),
+    lpf: dsp.LPF = dsp.lpfInit(4600.0),
+    age: u32 = 0,
+    active: bool = false,
+    velocity: f32 = 0.0,
+    tail: f32 = 0.0,
+    last_sample: f32 = 0.0,
+};
+
+pub fn electronicClapTrigger(clap: *ElectronicClap, velocity: f32) void {
+    if (!std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0) {
+        std.log.warn("electronicClapTrigger: invalid velocity={d}, skipping", .{velocity});
+        return;
+    }
+    clap.tail = clap.last_sample;
+    clap.velocity = velocity;
+    clap.age = 0;
+    clap.active = true;
+}
+
+pub fn electronicClapProcess(clap: *ElectronicClap, noise_rng: *dsp.Rng) f32 {
+    if (!clap.active) return 0.0;
+    const time = @as(f32, @floatFromInt(clap.age)) * dsp.INV_SR;
+    if (time >= 0.4) {
+        clap.active = false;
+        clap.last_sample = 0.0;
+        return 0.0;
+    }
+    // Three hand-like bursts followed by a diffuse tail. Each burst ramps in
+    // briefly; keeping filter state and fading the old sample avoids retrigger clicks.
+    var envelope: f32 = 0.0;
+    for ([_]f32{ 0.0, 0.009, 0.019 }) |offset| {
+        if (time < offset) continue;
+        const local = time - offset;
+        envelope += (1.0 - @exp(-local / 0.0003)) * @exp(-local / 0.0035) * 0.85;
+    }
+    if (time >= 0.019) {
+        const local = time - 0.019;
+        envelope += (1.0 - @exp(-local / 0.001)) * @exp(-local / 0.038) * 0.65;
+    }
+    const noise = dsp.rngFloat(noise_rng) * 2.0 - 1.0;
+    const filtered = dsp.lpfProcess(&clap.lpf, dsp.hpfProcess(&clap.hpf, noise));
+    const sample = filtered * envelope * clap.velocity + clap.tail;
+    clap.tail *= @exp(-dsp.INV_SR / 0.001);
+    clap.age += 1;
+    clap.last_sample = sample;
+    return sample;
 }
 
 pub const DjembeStroke = enum { bass, tone, slap };
