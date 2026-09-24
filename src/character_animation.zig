@@ -117,6 +117,16 @@ pub const FootState = struct {
     blocked: bool = false,
     anchor: vec.Vec2 = vec.zero,
     correction: vec.Vec2 = vec.zero,
+    terrain_y: f32 = 0,
+    terrain_angle: f32 = 0,
+};
+// A finite, static polygon face in world coordinates. Render interpolation can
+// evaluate its slope without querying physics or extending it across a ledge.
+pub const GroundSurface = struct {
+    point: vec.Vec2,
+    normal: vec.Vec2,
+    minimum_x: f32,
+    maximum_x: f32,
 };
 pub const WallState = struct {
     action: WallAction = .none,
@@ -135,8 +145,9 @@ pub const WallState = struct {
 pub const LocomotionInput = struct {
     body: vec.Vec2,
     supported: bool,
-    // Only an upward-facing static contact provides a flat planting plane.
+    // Static support height centers the bounded cosmetic terrain probes.
     ground_y: ?f32,
+    ground_normal: vec.Vec2 = .{ .x = 0, .y = -1 },
     facing_right: bool,
     // Box2D convention: positive is downward; relative to support when present.
     vertical_speed_mps: f32,
@@ -170,10 +181,12 @@ pub const PlayerState = struct {
     previous_feet: [2]FootState = .{ .{}, .{} },
     foot_heading: f32 = 0,
     previous_foot_heading: f32 = 0,
-    sole_floors: [4]?f32 = @splat(null),
-    previous_sole_floors: [4]?f32 = @splat(null),
-    knee_floors: [2]?f32 = @splat(null),
-    previous_knee_floors: [2]?f32 = @splat(null),
+    sole_surfaces: [4]?GroundSurface = @splat(null),
+    previous_sole_surfaces: [4]?GroundSurface = @splat(null),
+    knee_surfaces: [2]?GroundSurface = @splat(null),
+    previous_knee_surfaces: [2]?GroundSurface = @splat(null),
+    pelvis_reference_y: f32 = 0,
+    previous_pelvis_reference_y: f32 = 0,
     previous_controls: [controlCount]f32 = @splat(0),
     controls: [controlCount]f32 = @splat(0),
     previous_facing_right: bool = false,
@@ -368,7 +381,7 @@ fn validateMotion(file: data.CharacterMotionData, rig: Rig, detail: *Diagnostic)
 }
 
 fn validateLocomotion(file: data.CharacterLocomotionData, rig: Rig, motion: Motion, detail: *Diagnostic) !void {
-    if (file.schema_version != 1) return invalid(detail, "schema_version: expected 1", .{});
+    if (file.schema_version != 2) return invalid(detail, "schema_version: expected 2", .{});
     if (file.id.len == 0 or file.id.len > 64) return invalid(detail, "id: expected 1..64 bytes", .{});
     if (!std.mem.eql(u8, file.rig_id, rig.id)) return invalid(detail, "rig_id: does not match loaded rig", .{});
     if (!std.mem.eql(u8, file.motion_id, motion.id)) return invalid(detail, "motion_id: does not match loaded motion", .{});
@@ -378,9 +391,18 @@ fn validateLocomotion(file: data.CharacterLocomotionData, rig: Rig, motion: Moti
     inline for (.{ "start_seconds", "stop_seconds", "turn_seconds", "release_seconds" }) |field| {
         if (@field(file, field) < 0.01 or @field(file, field) > 2) return invalid(detail, "{s}: expected 0.01..2 seconds", .{field});
     }
-    inline for (.{ "plant_distance_m", "max_anchor_error_m", "flat_height_tolerance_m" }) |field| {
+    inline for (.{ "plant_distance_m", "max_anchor_error_m", "surface_tolerance_m" }) |field| {
         if (@field(file, field) < 0.001 or @field(file, field) > 0.5) return invalid(detail, "{s}: expected 0.001..0.5 meters", .{field});
     }
+    inline for (.{ "probe_up_m", "probe_down_m" }) |field| {
+        if (@field(file.terrain, field) < 0.001 or @field(file.terrain, field) > 1) return invalid(detail, "terrain.{s}: expected 0.001..1 meters", .{field});
+    }
+    inline for (.{ "pelvis_limit_m", "lookahead_m" }) |field| {
+        if (@field(file.terrain, field) < 0.001 or @field(file.terrain, field) > 0.5) return invalid(detail, "terrain.{s}: expected 0.001..0.5 meters", .{field});
+    }
+    if (file.terrain.max_slope_radians < 0 or file.terrain.max_slope_radians > std.math.pi / 3.0) return invalid(detail, "terrain.max_slope_radians: expected 0..pi/3", .{});
+    if (file.terrain.blend_seconds < 0.01 or file.terrain.blend_seconds > 0.5) return invalid(detail, "terrain.blend_seconds: expected 0.01..0.5 seconds", .{});
+    if (file.terrain.swing_clearance_m < 0 or file.terrain.swing_clearance_m > 0.15) return invalid(detail, "terrain.swing_clearance_m: expected 0..0.15 meters", .{});
 }
 
 fn validateActions(file: data.CharacterActionsData, rig: Rig, detail: *Diagnostic) !Actions {
@@ -756,15 +778,47 @@ fn locomotionControls(set: *const Assets, state: *const PlayerState) [controlCou
     return controls;
 }
 
-fn flatGroundAt(x: f32, floor_y: f32, profile: data.CharacterLocomotionData) ?f32 {
+fn groundAt(x: f32, input: LocomotionInput, profile: data.CharacterLocomotionData) ?GroundSurface {
+    if (input.ground_y == null or -input.ground_normal.y < @cos(profile.terrain.max_slope_radians)) return null;
+    // Center on the controller's support plane at this X, so a downhill heel
+    // gets the same step budget as an uphill toe, regardless of stride width.
+    const floor_y = input.ground_y.? - (x - input.body.x) * input.ground_normal.x / input.ground_normal.y;
     var filter = box2d.c.b2DefaultQueryFilter();
     filter.categoryBits = collision.CATEGORY_SENSOR;
     filter.maskBits = collision.MASK_SENSOR_FOOT;
-    const tolerance = profile.flat_height_tolerance_m;
-    const result = box2d.castRayClosest(.{ .x = x, .y = floor_y - tolerance * 2 }, .{ .x = 0, .y = tolerance * 4 }, filter);
-    if (!result.hit or result.normal.y > -0.999 or @abs(result.point.y - floor_y) > tolerance) return null;
-    if (box2d.c.b2Body_GetType(box2d.c.b2Shape_GetBody(result.shapeId)) != box2d.c.b2_staticBody) return null;
-    return result.point.y;
+    const settings = profile.terrain;
+    const result = box2d.castRayClosest(.{ .x = x, .y = floor_y - settings.probe_up_m }, .{ .x = 0, .y = settings.probe_up_m + settings.probe_down_m }, filter);
+    if (!result.hit or -result.normal.y < @cos(settings.max_slope_radians)) return null;
+    const body = box2d.c.b2Shape_GetBody(result.shapeId);
+    if (box2d.c.b2Body_GetType(body) != box2d.c.b2_staticBody or box2d.c.b2Shape_GetType(result.shapeId) != box2d.c.b2_polygonShape) return null;
+    const polygon = box2d.c.b2Shape_GetPolygon(result.shapeId);
+    const count: usize = @intCast(polygon.count);
+    for (0..count) |index| {
+        const a = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, polygon.vertices[index]));
+        const b = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, polygon.vertices[(index + 1) % count]));
+        const edge = vec.subtract(b, a);
+        const normal = vec.normalize(.{ .x = edge.y, .y = -edge.x });
+        if (vec.dot(normal, vec.fromBox2d(result.normal)) < 0.9999) continue;
+        return .{ .point = vec.fromBox2d(result.point), .normal = normal, .minimum_x = @min(a.x, b.x), .maximum_x = @max(a.x, b.x) };
+    }
+    // Rounded polygon corners do not provide a planar foothold.
+    return null;
+}
+
+fn surfaceHeight(surface: ?GroundSurface, x: f32) ?f32 {
+    if (surface == null) return null;
+    const face = surface.?;
+    if (x < face.minimum_x - 0.00001 or x > face.maximum_x + 0.00001) return null;
+    return face.point.y - (x - face.point.x) * face.normal.x / face.normal.y;
+}
+
+fn interpolatedSurface(before: ?GroundSurface, after: ?GroundSurface, x: f32) ?GroundSurface {
+    if (after == null) return null; // Fresh probes released or lost this surface.
+    const current_y = surfaceHeight(after, x);
+    const previous_y = surfaceHeight(before, x);
+    if (current_y == null) return if (previous_y == null) null else before;
+    if (previous_y == null or current_y.? <= previous_y.?) return after;
+    return before;
 }
 
 fn turnedFootOffsets(rig: Rig, controls: [controlCount]f32, heading: f32, facing_right: bool) [4]vec.Vec2 {
@@ -785,49 +839,56 @@ fn turnedFootOffsets(rig: Rig, controls: [controlCount]f32, heading: f32, facing
     return offsets;
 }
 
-fn clearSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, floors: [4]?f32, body: vec.Vec2, facing_right: bool) void {
+fn clearSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, surfaces: [4]?GroundSurface, body: vec.Vec2, facing_right: bool) void {
     for (0..2) |index| {
         const x = @intFromEnum(target_x[index]);
         const y = @intFromEnum(target_y[index]);
         const toe_offset = offsets[index * 2];
         const heel_offset = vec.add(toe_offset, offsets[index * 2 + 1]);
-        for ([_]vec.Vec2{ toe_offset, heel_offset }, floors[index * 2 ..][0..2]) |offset, floor| {
-            if (floor == null) continue;
+        for ([_]vec.Vec2{ toe_offset, heel_offset }, surfaces[index * 2 ..][0..2]) |offset, surface| {
             const point = toWorld(rig, .{ .x = controls[x] + offset.x, .y = controls[y] + offset.y }, body, facing_right);
-            controls[y] += @max(0, point.y - floor.?);
+            const floor = surfaceHeight(surface, point.x) orelse continue;
+            controls[y] += @max(0, point.y - floor);
         }
     }
 }
 
-fn kneesClearGround(rig: Rig, controls: [controlCount]f32, floors: [2]?f32, body: vec.Vec2) bool {
+fn kneesClearGround(rig: Rig, controls: [controlCount]f32, surfaces: [2]?GroundSurface, body: vec.Vec2, facing_right: bool) bool {
     const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
-    for (rig.limbs[0..2], floors, 0..) |limb, floor, index| {
-        if (floor == null) continue;
+    for (rig.limbs[0..2], surfaces, 0..) |limb, surface, index| {
+        if (surface == null) continue;
         const upper = rig.lengths[@intFromEnum(limb.middle)];
         const lower = rig.lengths[@intFromEnum(limb.end)];
         const ankle = vec.Vec2{ .x = controls[@intFromEnum(target_x[index])], .y = controls[@intFromEnum(target_y[index])] };
         const solution = solveLimb(pelvis, ankle, upper, lower, limb.bend_sign, reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians));
-        const minimum_y = body.y - rig.root_from_body.y - floor.? + rig.line_width / 2;
+        const knee = toWorld(rig, solution.middle, body, facing_right);
+        const floor = surfaceHeight(surface, knee.x) orelse continue;
+        const minimum_y = body.y - rig.root_from_body.y - floor + rig.line_width / 2;
         if (solution.middle.y < minimum_y) return false;
     }
     return true;
 }
 
-fn clearKnees(rig: Rig, controls: *[controlCount]f32, floors: [2]?f32, body: vec.Vec2) void {
-    if (kneesClearGround(rig, controls.*, floors, body)) return;
+fn clearKnees(rig: Rig, controls: *[controlCount]f32, surfaces: [2]?GroundSurface, body: vec.Vec2, facing_right: bool) void {
+    if (kneesClearGround(rig, controls.*, surfaces, body, facing_right)) return;
     // A low hip can send a turning knee below the floor even when both soles
     // are clear. Lift the pelvis just enough, then solve the same ankle targets
     // again: planted feet and both leg lengths remain intact.
     const y = @intFromEnum(Control.pelvis_y);
     var low = controls[y];
     var high = low;
-    for (rig.limbs[0..2], floors) |limb, floor| {
-        if (floor == null) continue;
-        high = @max(high, body.y - rig.root_from_body.y - floor.? + rig.line_width / 2 + rig.lengths[@intFromEnum(limb.middle)]);
+    for (rig.limbs[0..2], surfaces) |limb, surface| {
+        if (surface == null) continue;
+        const face = surface.?;
+        const upper = rig.lengths[@intFromEnum(limb.middle)];
+        const root_x = toWorld(rig, .{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = 0 }, body, facing_right).x;
+        const high_x = std.math.clamp(root_x - std.math.sign(face.normal.x) * upper, face.minimum_x, face.maximum_x);
+        const floor = surfaceHeight(face, high_x).?;
+        high = @max(high, body.y - rig.root_from_body.y - floor + rig.line_width / 2 + upper);
     }
     for (0..12) |_| {
         controls[y] = (low + high) / 2;
-        if (kneesClearGround(rig, controls.*, floors, body)) {
+        if (kneesClearGround(rig, controls.*, surfaces, body, facing_right)) {
             high = controls[y];
         } else {
             low = controls[y];
@@ -842,6 +903,57 @@ fn reachableFoot(rig: Rig, controls: [controlCount]f32, index: usize, ankle: vec
     const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
     const distance = vec.magnitude(vec.subtract(ankle, pelvis));
     return distance >= limits[0] and distance <= limits[1] - 0.002;
+}
+
+fn unevenGround(surfaces: [4]?GroundSurface, tolerance: f32) bool {
+    var flat_height: ?f32 = null;
+    var uneven = false;
+    for (surfaces) |surface| {
+        if (surface == null) continue;
+        if (flat_height == null) flat_height = surface.?.point.y;
+        uneven = uneven or @abs(surface.?.normal.x) > 0.00001 or @abs(surface.?.point.y - flat_height.?) > tolerance;
+    }
+    return uneven;
+}
+
+fn fitGroundedPelvis(set: *const Assets, controls: *[controlCount]f32, surfaces: [4]?GroundSurface, reference_y: f32) void {
+    if (!unevenGround(surfaces, set.locomotion.surface_tolerance_m)) return;
+    var maximum_y = reference_y + set.locomotion.terrain.pelvis_limit_m;
+    for (set.rig.limbs[0..2], 0..) |limb, index| {
+        if (surfaces[index * 2] == null and surfaces[index * 2 + 1] == null) continue;
+        const upper = set.rig.lengths[@intFromEnum(limb.middle)];
+        const lower = set.rig.lengths[@intFromEnum(limb.end)];
+        const reach: f32 = @floatCast(reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians)[1] - 0.002);
+        const dx = controls[@intFromEnum(target_x[index])] - controls[@intFromEnum(Control.pelvis_x)];
+        const height = @sqrt(@max(0, reach * reach - dx * dx));
+        maximum_y = @min(maximum_y, controls[@intFromEnum(target_y[index])] + height);
+    }
+    const minimum_y = reference_y - set.locomotion.terrain.pelvis_limit_m;
+    controls[@intFromEnum(Control.pelvis_y)] = @max(minimum_y, @min(controls[@intFromEnum(Control.pelvis_y)], maximum_y));
+}
+
+fn constrainGroundFeet(set: *const Assets, controls: *[controlCount]f32, offsets: [4]vec.Vec2, surfaces: [4]?GroundSurface, body: vec.Vec2, facing_right: bool) void {
+    if (!unevenGround(surfaces, set.locomotion.surface_tolerance_m)) return;
+    // If bounded hip motion exhausts a leg's reach, reposition the free foot.
+    // Alternate the existing reach and sole constraints so an IK clamp cannot
+    // move a previously cleared ankle back through a sloping surface.
+    const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
+    for (0..12) |_| {
+        clearSoles(set.rig, controls, offsets, surfaces, body, facing_right);
+        var clamped = false;
+        for (set.rig.limbs[0..2], 0..) |limb, index| {
+            const x = @intFromEnum(target_x[index]);
+            const y = @intFromEnum(target_y[index]);
+            const upper = set.rig.lengths[@intFromEnum(limb.middle)];
+            const lower = set.rig.lengths[@intFromEnum(limb.end)];
+            const solution = solveLimb(pelvis, .{ .x = controls[x], .y = controls[y] }, upper, lower, limb.bend_sign, reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians));
+            if (!solution.clamped) continue;
+            clamped = true;
+            controls[x] = solution.end.x;
+            controls[y] = solution.end.y;
+        }
+        if (!clamped) return;
+    }
 }
 
 fn updateAction(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) bool {
@@ -1113,30 +1225,79 @@ fn clearWallSoles(rig: Rig, controls: *[controlCount]f32, offsets: [4]vec.Vec2, 
     }
 }
 
+fn adaptGround(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) void {
+    const profile = set.locomotion;
+    const supported = input.ground_y != null and input.supported and state.action != .jump and state.action != .fall;
+    const sign: f32 = if (state.facing_right) 1 else -1;
+    const before = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
+    const response = 1 - @exp(-dt / profile.terrain.blend_seconds);
+    state.sole_surfaces = @splat(null);
+    state.knee_surfaces = @splat(null);
+    state.pelvis_reference_y = state.controls[@intFromEnum(Control.pelvis_y)];
+    for (&state.feet, 0..) |*foot, index| {
+        const x = @intFromEnum(target_x[index]);
+        const y = @intFromEnum(target_y[index]);
+        const toe = toWorld(set.rig, vec.add(.{ .x = state.controls[x], .y = state.controls[y] }, before[index * 2]), input.body, state.facing_right);
+        const surface = if (supported) groundAt(toe.x, input, profile) else null;
+        state.sole_surfaces[index * 2] = surface;
+        var target_y_offset: f32 = 0;
+        var target_angle: f32 = 0;
+        terrain: {
+            if (surface == null) break :terrain;
+            // Warp the authored flat-ground path to the local surface, retaining
+            // its swing height and recovery shape. Foot tilt is world-relative.
+            const rest_offset = rotate(set.rig.joints[@intFromEnum(toes[index])].rest_offset, set.rig.neutral[@intFromEnum(foot_angles[index])]);
+            const reference_floor = input.body.y - set.rig.root_from_body.y - set.rig.neutral[y] - rest_offset.y;
+            target_y_offset = reference_floor - surface.?.point.y;
+            target_angle = -std.math.atan2(surface.?.normal.x, -surface.?.normal.y);
+            if (!state.contact_intent[index] and @abs(state.speed_mps) > profile.stop_speed_mps) {
+                const ahead = groundAt(toe.x + std.math.sign(state.speed_mps) * profile.terrain.lookahead_m, input, profile) orelse break :terrain;
+                if (ahead.point.y < surface.?.point.y - profile.surface_tolerance_m) {
+                    target_y_offset = @max(target_y_offset, reference_floor - ahead.point.y + profile.terrain.swing_clearance_m);
+                }
+            }
+        }
+        // A moving target follows a slope continuously. Filtering that height
+        // would leave the foot hovering behind the surface during stance.
+        const sloped = surface != null and @abs(surface.?.normal.x) > 0.00001;
+        foot.terrain_y = if (sloped) target_y_offset else std.math.lerp(foot.terrain_y, target_y_offset, response);
+        foot.terrain_angle = std.math.lerp(foot.terrain_angle, target_angle, response);
+        state.controls[@intFromEnum(foot_angles[index])] += foot.terrain_angle * sign;
+    }
+    const after = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
+    for (state.feet, 0..) |foot, index| {
+        state.controls[@intFromEnum(target_x[index])] += before[index * 2].x - after[index * 2].x;
+        state.controls[@intFromEnum(target_y[index])] += before[index * 2].y - after[index * 2].y + foot.terrain_y;
+    }
+    const pelvis_offset = (state.feet[0].terrain_y + state.feet[1].terrain_y) / 4;
+    state.controls[@intFromEnum(Control.pelvis_y)] += std.math.clamp(pelvis_offset, -profile.terrain.pelvis_limit_m, profile.terrain.pelvis_limit_m);
+    fitGroundedPelvis(set, &state.controls, state.sole_surfaces, state.pelvis_reference_y);
+}
+
 fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) void {
     const profile = set.locomotion;
     const sign: f32 = if (state.facing_right) 1 else -1;
     const moving = @abs(state.speed_mps) > profile.stop_speed_mps;
     const offsets = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
-    state.sole_floors = @splat(null);
-    state.knee_floors = @splat(null);
     for (&state.feet, 0..) |*foot, index| {
         const x = @intFromEnum(target_x[index]);
         const y = @intFromEnum(target_y[index]);
         const toe_offset = offsets[index * 2];
-        const toe_can_support = offsets[index * 2 + 1].y >= -0.000001;
         const desired = vec.Vec2{ .x = state.controls[x], .y = state.controls[y] };
         const desired_toe = toWorld(set.rig, vec.add(desired, toe_offset), input.body, state.facing_right);
+        const surface = state.sole_surfaces[index * 2];
+        const heel_link = offsets[index * 2 + 1];
+        const toe_can_support = surface != null and vec.dot(.{ .x = heel_link.x * sign, .y = -heel_link.y }, surface.?.normal) >= -0.000001;
         const intent = state.contact_intent[index];
         if (!intent or !moving) foot.blocked = false;
         const supported = input.ground_y != null and input.supported and state.action != .jump and state.action != .fall;
         if (foot.locked) {
             const correction = vec.subtract(foot.anchor, desired_toe);
             const ankle = vec.add(desired, .{ .x = correction.x * sign, .y = -correction.y });
-            const anchor_floor = if (supported) flatGroundAt(foot.anchor.x, foot.anchor.y, profile) else null;
+            const anchor_surface = if (supported) groundAt(foot.anchor.x, input, profile) else null;
+            const anchor_floor = surfaceHeight(anchor_surface, foot.anchor.x);
             const valid = supported and intent and toe_can_support and anchor_floor != null and
                 @abs(anchor_floor.? - foot.anchor.y) <= 0.00001 and
-                @abs(foot.anchor.y - input.ground_y.?) <= profile.flat_height_tolerance_m and
                 vec.magnitude(correction) <= profile.max_anchor_error_m and
                 reachableFoot(set.rig, state.controls, index, ankle);
             if (!valid) {
@@ -1146,7 +1307,7 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
                 foot.correction = correction;
             }
         }
-        const candidate_floor = if (!foot.locked and !foot.blocked and supported and intent and toe_can_support) flatGroundAt(desired_toe.x, input.ground_y.?, profile) else null;
+        const candidate_floor = if (!foot.locked and !foot.blocked and supported and intent and toe_can_support) surfaceHeight(surface, desired_toe.x) else null;
         acquire: {
             if (candidate_floor == null) break :acquire;
             const anchor = vec.Vec2{ .x = desired_toe.x, .y = candidate_floor.? };
@@ -1160,17 +1321,18 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
         if (!foot.locked) foot.correction = vec.mul(foot.correction, @exp(-dt / profile.release_seconds));
         state.controls[x] += foot.correction.x * sign;
         state.controls[y] -= foot.correction.y;
-        // Blending an airborne foot toward rest must not drag its sole below a
-        // real flat surface. Both ends are queried; ledges are not infinite planes.
+        // Query both sole ends after anchoring: they may straddle different
+        // steps. Every saved face retains its finite extent for interpolation.
         if (!supported) continue;
         const heel_offset = vec.add(toe_offset, offsets[index * 2 + 1]);
         for ([_]vec.Vec2{ toe_offset, heel_offset }, 0..) |offset, end| {
             const point = toWorld(set.rig, .{ .x = state.controls[x] + offset.x, .y = state.controls[y] + offset.y }, input.body, state.facing_right);
-            state.sole_floors[index * 2 + end] = flatGroundAt(point.x, input.ground_y.?, profile);
+            state.sole_surfaces[index * 2 + end] = groundAt(point.x, input, profile);
         }
     }
     const before_clearance = state.controls;
-    clearSoles(set.rig, &state.controls, offsets, state.sole_floors, input.body, state.facing_right);
+    clearSoles(set.rig, &state.controls, offsets, state.sole_surfaces, input.body, state.facing_right);
+    fitGroundedPelvis(set, &state.controls, state.sole_surfaces, state.pelvis_reference_y);
     for (&state.feet, 0..) |*foot, index| {
         if (!foot.locked) continue;
         const y = @intFromEnum(target_y[index]);
@@ -1179,16 +1341,26 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
         foot.blocked = moving;
     }
     if (input.ground_y == null or !input.supported or state.action == .jump or state.action == .fall) return;
-    const pelvis_world_y = input.body.y - set.rig.root_from_body.y - state.controls[@intFromEnum(Control.pelvis_y)];
-    const longest_thigh = @max(set.rig.lengths[@intFromEnum(Joint.left_knee)], set.rig.lengths[@intFromEnum(Joint.right_knee)]);
-    if (pelvis_world_y + longest_thigh + set.rig.line_width / 2 < input.ground_y.?) return;
-    const pose = solvePoseWithFeet(set.rig, state.controls, offsets);
-    for (set.rig.limbs[0..2], &state.knee_floors) |limb, *floor| {
-        if (pelvis_world_y + set.rig.lengths[@intFromEnum(limb.middle)] + set.rig.line_width / 2 < input.ground_y.?) continue;
-        const knee = toWorld(set.rig, pose.joints[@intFromEnum(limb.middle)], input.body, state.facing_right);
-        floor.* = flatGroundAt(knee.x, input.ground_y.?, profile);
+    knees: {
+        const pelvis_world_y = input.body.y - set.rig.root_from_body.y - state.controls[@intFromEnum(Control.pelvis_y)];
+        const longest_thigh = @max(set.rig.lengths[@intFromEnum(Joint.left_knee)], set.rig.lengths[@intFromEnum(Joint.right_knee)]);
+        if (pelvis_world_y + longest_thigh + set.rig.line_width / 2 < input.ground_y.? - profile.terrain.probe_up_m) break :knees;
+        const pose = solvePoseWithFeet(set.rig, state.controls, offsets);
+        for (set.rig.limbs[0..2], &state.knee_surfaces) |limb, *floor| {
+            if (pelvis_world_y + set.rig.lengths[@intFromEnum(limb.middle)] + set.rig.line_width / 2 < input.ground_y.? - profile.terrain.probe_up_m) continue;
+            const knee = toWorld(set.rig, pose.joints[@intFromEnum(limb.middle)], input.body, state.facing_right);
+            floor.* = groundAt(knee.x, input, profile);
+        }
+        clearKnees(set.rig, &state.controls, state.knee_surfaces, input.body, state.facing_right);
     }
-    clearKnees(set.rig, &state.controls, state.knee_floors, input.body);
+    constrainGroundFeet(set, &state.controls, offsets, state.sole_surfaces, input.body, state.facing_right);
+    for (&state.feet, 0..) |*foot, index| {
+        if (!foot.locked) continue;
+        const ankle = vec.Vec2{ .x = state.controls[@intFromEnum(target_x[index])], .y = state.controls[@intFromEnum(target_y[index])] };
+        if (reachableFoot(set.rig, state.controls, index, ankle) and vec.magnitude(vec.subtract(toWorld(set.rig, vec.add(ankle, offsets[index * 2]), input.body, state.facing_right), foot.anchor)) < 0.00001) continue;
+        foot.locked = false;
+        foot.blocked = moving;
+    }
 }
 
 // The fixed-step caller provides physical position and fresh grounding. Tests
@@ -1221,8 +1393,9 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.previous_feet = state.feet;
     state.previous_body = state.body;
     state.previous_foot_heading = state.foot_heading;
-    state.previous_sole_floors = state.sole_floors;
-    state.previous_knee_floors = state.knee_floors;
+    state.previous_sole_surfaces = state.sole_surfaces;
+    state.previous_knee_surfaces = state.knee_surfaces;
+    state.previous_pelvis_reference_y = state.pelvis_reference_y;
     state.previous_wall = state.wall;
     state.previous_stow_weight = state.stow_weight;
     state.previous_limb_release_seconds = state.limb_release_seconds;
@@ -1280,6 +1453,7 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.controls = locomotionControls(set, state);
     actionControls(set, state);
     wallControls(set, state);
+    adaptGround(set, state, input, step);
     if (!initialize and (turning or action_changed or wall_changed)) {
         const previous = if (turning) mirrorControls(set.rig, state.previous_controls) else state.previous_controls;
         for (&state.transition_offsets, previous, state.controls) |*offset, before, after| offset.* = before - after;
@@ -1329,8 +1503,9 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
         state.previous_facing_right = state.facing_right;
         state.previous_foot_heading = state.foot_heading;
         state.previous_feet = state.feet;
-        state.previous_sole_floors = state.sole_floors;
-        state.previous_knee_floors = state.knee_floors;
+        state.previous_sole_surfaces = state.sole_surfaces;
+        state.previous_knee_surfaces = state.knee_surfaces;
+        state.previous_pelvis_reference_y = state.pelvis_reference_y;
         state.previous_wall = state.wall;
         state.previous_stow_weight = state.stow_weight;
     }
@@ -1372,20 +1547,23 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
         controls[@intFromEnum(target_x[index])] = (anchor.?.x - body.x) * sign - set.rig.root_from_body.x - offset.x;
         controls[@intFromEnum(target_y[index])] = body.y - set.rig.root_from_body.y - anchor.?.y - offset.y;
     }
-    var floors: [4]?f32 = @splat(null);
-    for (&floors, state.previous_sole_floors, state.sole_floors) |*floor, before, after| {
-        if (before == null or after == null) continue;
-        if (@abs(before.? - after.?) > set.locomotion.flat_height_tolerance_m) continue;
-        floor.* = std.math.lerp(before.?, after.?, fraction);
+    var surfaces: [4]?GroundSurface = @splat(null);
+    for (&surfaces, state.previous_sole_surfaces, state.sole_surfaces, 0..) |*surface, before, after, index| {
+        const leg = index / 2;
+        const offset = if (index % 2 == 0) offsets[index] else vec.add(offsets[index - 1], offsets[index]);
+        const point = toWorld(set.rig, .{ .x = controls[@intFromEnum(target_x[leg])] + offset.x, .y = controls[@intFromEnum(target_y[leg])] + offset.y }, body, state.facing_right);
+        surface.* = interpolatedSurface(before, after, point.x);
     }
-    clearSoles(set.rig, &controls, offsets, floors, body, state.facing_right);
-    var knee_floors: [2]?f32 = @splat(null);
-    for (&knee_floors, state.previous_knee_floors, state.knee_floors) |*floor, before, after| {
-        if (before == null or after == null) continue;
-        if (@abs(before.? - after.?) > set.locomotion.flat_height_tolerance_m) continue;
-        floor.* = std.math.lerp(before.?, after.?, fraction);
+    clearSoles(set.rig, &controls, offsets, surfaces, body, state.facing_right);
+    fitGroundedPelvis(set, &controls, surfaces, std.math.lerp(state.previous_pelvis_reference_y, state.pelvis_reference_y, fraction));
+    var knee_surfaces: [2]?GroundSurface = @splat(null);
+    const before_clearance = solvePoseWithFeet(set.rig, controls, offsets);
+    for (&knee_surfaces, state.previous_knee_surfaces, state.knee_surfaces, set.rig.limbs[0..2]) |*surface, before, after, limb| {
+        const knee = toWorld(set.rig, before_clearance.joints[@intFromEnum(limb.middle)], body, state.facing_right);
+        surface.* = interpolatedSurface(before, after, knee.x);
     }
-    clearKnees(set.rig, &controls, knee_floors, body);
+    clearKnees(set.rig, &controls, knee_surfaces, body, state.facing_right);
+    constrainGroundFeet(set, &controls, offsets, surfaces, body, state.facing_right);
     clearWallSoles(set.rig, &controls, offsets, state.wall, body, state.facing_right);
     // Hand targets were resolved once in the fixed-step controls. Their linear
     // interpolation with the body already preserves stationary world contacts.
@@ -1393,6 +1571,11 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     // arm uses the ordinary facing convention, also used by the aim solver.
     const pose_rig = wallPoseRig(set.rig, state.wall.action, state.wall.side, state.facing_right);
     var pose = solvePoseWithFeet(pose_rig, controls, offsets);
+    var floors: [4]?f32 = @splat(null);
+    for (&floors, surfaces, foot_joints) |*floor, surface, joint| {
+        const point = toWorld(set.rig, pose.joints[@intFromEnum(joint)], body, state.facing_right);
+        floor.* = surfaceHeight(surface, point.x);
+    }
     blendReleasedLimbs(set, state, &pose, offsets, floors, body, fraction);
     pose.contact_intent = state.contact_intent;
     return pose;
@@ -1609,8 +1792,9 @@ pub fn fixedUpdate(dt: f64) void {
             continue;
         };
         var ground_y: ?f32 = null;
+        const body_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
         const contact = movement_state.groundState.groundContact;
-        if (contact != null and contact.?.normal.y < -0.999 and box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody) ground_y = contact.?.worldPoint.y;
+        if (contact != null and -contact.?.normal.y >= @cos(assets.?.locomotion.terrain.max_slope_radians) and box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody) ground_y = contact.?.worldPoint.y - (body_position.x - contact.?.worldPoint.x) * contact.?.normal.x / contact.?.normal.y;
         const velocity = box2d.c.b2Body_GetLinearVelocity(p.bodyId);
         // A rising platform should not look like a jump away from its support.
         const support_velocity = if (contact == null or !movement_state.groundState.supported) vec.zero else vec.fromBox2d(box2d.c.b2Body_GetWorldPointVelocity(contact.?.bodyId, vec.toBox2d(contact.?.worldPoint)));
@@ -1621,9 +1805,10 @@ pub fn fixedUpdate(dt: f64) void {
         // This loop's registered animation state remains present throughout.
         const hold_kneel = movement.mechanism == .towerfall and p.isAiming and states.get(player_id).?.action == .kneel;
         updatePlayer(player_id, .{
-            .body = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId)),
+            .body = body_position,
             .supported = movement_state.groundState.supported,
             .ground_y = ground_y,
+            .ground_normal = if (contact == null) .{ .x = 0, .y = -1 } else contact.?.normal,
             .facing_right = movement_state.facingRight,
             .vertical_speed_mps = relative_velocity.y,
             .separation_speed_mps = if (contact == null) 0 else vec.dot(relative_velocity, contact.?.normal),

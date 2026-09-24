@@ -40,6 +40,27 @@ var levelNumber: usize = 0;
 var currentPathBuf: [200]u8 = undefined;
 pub var currentPath: []const u8 = undefined;
 
+// Keep the requested path in the level component after the argument arena is
+// released. Normal startup and reloading then share the same level loader.
+pub fn configureStartup(args: []const []const u8) !bool {
+    var requested = false;
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (!std.mem.eql(u8, args[index], "--level")) continue;
+        if (index + 1 >= args.len or args[index + 1].len == 0 or std.mem.startsWith(u8, args[index + 1], "--")) {
+            std.log.err("level.configureStartup: --level requires a level JSON path", .{});
+            return error.MissingLevelPath;
+        }
+        index += 1;
+        currentPath = std.fmt.bufPrint(&currentPathBuf, "{s}", .{args[index]}) catch {
+            std.log.err("level.configureStartup: --level path exceeds {d} bytes", .{currentPathBuf.len});
+            return error.LevelPathTooLong;
+        };
+        requested = true;
+    }
+    return requested;
+}
+
 pub var position: vec.IVec2 = .{
     .x = 0,
     .y = 0,

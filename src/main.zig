@@ -183,10 +183,12 @@ fn smokeTestTimerCallback(_: ?*anyopaque, _: sdl.TimerID, _: u32) callconv(.c) u
 pub fn main(init: std.process.Init) !void {
     runtime.init(init.io);
 
+    var requestedLevel = false;
     {
         var argsArena = std.heap.ArenaAllocator.init(allocator.allocator);
         defer argsArena.deinit();
         const args = try init.minimal.args.toSlice(argsArena.allocator());
+        requestedLevel = try level.configureStartup(args);
         try explosion_benchmark.configure(args);
         try level_overview.configure(args);
         try character_animation.configure(args);
@@ -224,10 +226,12 @@ pub fn main(init: std.process.Init) !void {
     const overviewLevelPath = level_overview.levelPath();
     if (overviewLevelPath != null) {
         _ = try level.loadLevel(overviewLevelPath.?);
-    } else if (benchmarkLevelPath == null) {
-        try level.next();
-    } else {
+    } else if (benchmarkLevelPath != null) {
         try level.tryEditorLevel(benchmarkLevelPath.?);
+    } else if (requestedLevel) {
+        try level.reload();
+    } else {
+        try level.next();
     }
 
     box2d.setFrictionCallback(&friction.callback);

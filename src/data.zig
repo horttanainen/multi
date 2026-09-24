@@ -238,6 +238,7 @@ pub const TowerfallMovementData = struct {
     jump: TowerfallJumpData,
     wallSlide: TowerfallWallSlideData,
     wallJump: TowerfallWallJumpData,
+    maxStepHeight: f32 = 0,
 };
 
 pub const MovementData = struct {
@@ -358,7 +359,17 @@ pub const CharacterLocomotionData = struct {
     release_seconds: f32,
     plant_distance_m: f32,
     max_anchor_error_m: f32,
-    flat_height_tolerance_m: f32,
+    surface_tolerance_m: f32,
+    terrain: CharacterTerrainData,
+};
+pub const CharacterTerrainData = struct {
+    probe_up_m: f32,
+    probe_down_m: f32,
+    max_slope_radians: f32,
+    pelvis_limit_m: f32,
+    blend_seconds: f32,
+    swing_clearance_m: f32,
+    lookahead_m: f32,
 };
 pub const CharacterAssetDiagnostic = struct {
     file: []const u8 = "",

@@ -998,6 +998,189 @@ test "flat foot queries release removed support even with stale grounded input a
     for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
 }
 
+fn checkTerrainPose(sample: animation.PlayerState, slope: f32) !void {
+    const set = &animation.assets.?;
+    for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+        const pose = animation.interpolatedPose(set, sample, alpha);
+        try checkBones(set.rig, pose);
+        const body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+        for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel, .left_knee, .right_knee }) |joint| {
+            const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], body, sample.facing_right);
+            const floor = 0.3 + slope * point.x;
+            errdefer std.log.err("terrain pose: slope {d}, speed {d}, action {s}, alpha {d}, {s} depth {d}, point {any}, clamped {any}", .{ slope, sample.speed_mps, @tagName(sample.action), alpha, @tagName(joint), point.y - floor, point, pose.clamped });
+            try std.testing.expect(point.y <= floor + 0.0003);
+        }
+        for (sample.previous_feet, sample.feet, [_]animation.Joint{ .left_toe, .right_toe }) |before, foot, toe| {
+            if (!before.locked or !foot.locked or !std.meta.eql(before.anchor, foot.anchor)) continue;
+            try nearPoint(foot.anchor, animation.toWorld(set.rig, pose.joints[@intFromEnum(toe)], body, sample.facing_right), 0.00003);
+        }
+    }
+}
+
+test "static slopes adapt running soles and preserve planted toes in both directions" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    runtime.init(std.testing.io);
+    var samples: std.ArrayList(LocomotionSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ -0.55, -0.25, 0.25, 0.55 }) |angle| {
+        const rotation = box2d.c.b2MakeRot(angle);
+        box2d.c.b2Body_SetTransform(floor, .{ .x = 0, .y = 0.3 + 0.5 / rotation.c }, rotation);
+        const slope = rotation.s / rotation.c;
+        for ([_]f32{ 0, 0.5, 3.2, 9, -3.2 }) |speed| {
+            animation.resetPlayer(7);
+            var locked_samples: usize = 0;
+            for (0..180) |tick| {
+                const x = speed * @as(f32, @floatFromInt(tick)) / 60;
+                animation.updatePlayer(7, .{ .body = .{ .x = x, .y = slope * x }, .supported = true, .ground_y = 0.3 + slope * x, .ground_normal = .{ .x = rotation.s, .y = -rotation.c }, .vertical_speed_mps = speed * slope, .separation_speed_mps = 0, .horizontal_speed_mps = speed, .movement_direction = std.math.sign(speed), .facing_right = speed >= 0 }, 1.0 / 60.0);
+                const sample = animation.states.get(7).?;
+                try checkTerrainPose(sample, slope);
+                if (angle == -0.25 and speed == 3.2 and tick >= 120 and tick < 144 and tick % 2 == 0) {
+                    const set = &animation.assets.?;
+                    var joints = animation.interpolatedPose(set, sample, 1).joints;
+                    for (&joints) |*point| point.* = animation.toWorld(set.rig, point.*, sample.body, sample.facing_right);
+                    try samples.append(std.testing.allocator, .{ .speed = sample.speed_mps, .phase = animation.clipPhase(set.motion, sample.phase), .weight = sample.run_weight, .facing_right = sample.facing_right, .body = sample.body, .planted = .{ sample.feet[0].locked, sample.feet[1].locked }, .joints = joints });
+                }
+                for (sample.feet) |foot| {
+                    if (foot.locked and tick > 30) locked_samples += 1;
+                }
+            }
+            errdefer std.log.err("slope contacts: angle {d}, speed {d}, count {d}", .{ angle, speed, locked_samples });
+            try std.testing.expect(locked_samples > 15);
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile("artifacts/character_animation/terrain_run_samples.json", bytes);
+}
+
+test "kneeling aiming and landing retain clearance on static slopes" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    for ([_]f32{ -0.55, -0.25, 0.25, 0.55 }) |angle| {
+        const rotation = box2d.c.b2MakeRot(angle);
+        box2d.c.b2Body_SetTransform(floor, .{ .x = 0, .y = 0.3 + 0.5 / rotation.c }, rotation);
+        for ([_]bool{ true, false }) |facing| {
+            animation.resetPlayer(7);
+            var input: animation.LocomotionInput = .{ .body = vec.zero, .supported = true, .ground_y = 0.3, .ground_normal = .{ .x = rotation.s, .y = -rotation.c }, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = facing, .kneel_requested = true };
+            for (0..90) |_| {
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+            }
+            try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+            input.aiming = true;
+            input.aim_direction = if (facing) vec.west else vec.east;
+            for (0..90) |_| {
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+            }
+            input.kneel_requested = false;
+            for (0..60) |_| {
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+            }
+            input.supported = false;
+            input.ground_y = null;
+            input.body.y = -0.5;
+            input.vertical_speed_mps = 12;
+            for (0..20) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            input.supported = true;
+            input.ground_y = 0.3;
+            input.body.y = 0;
+            input.vertical_speed_mps = 0;
+            for (0..60) |tick| {
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                if (tick == 0) try std.testing.expectEqual(animation.Action.land, animation.states.get(7).?.action);
+                try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+            }
+        }
+    }
+}
+
+fn addTerrainBox(position: vec.Vec2, half_size: vec.Vec2) !box2d.c.b2BodyId {
+    const body = try box2d.createBody(box2d.createStaticBodyDef(position));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+    shape.filter.maskBits = collision.MASK_TERRAIN;
+    const polygon = box2d.c.b2MakeBox(half_size.x, half_size.y);
+    _ = box2d.c.b2CreatePolygonShape(body, &shape, &polygon);
+    return body;
+}
+
+test "running over static step edges clears both soles without interpolating a false ramp" {
+    const original_floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    box2d.c.b2DestroyBody(original_floor);
+    _ = try addTerrainBox(.{ .x = -50, .y = 0.8 }, .{ .x = 50, .y = 0.5 });
+    const upper = try addTerrainBox(.{ .x = 50, .y = 0.65 }, .{ .x = 50, .y = 0.5 });
+    const set = &animation.assets.?;
+    for ([_]f32{ 0.12, 0.24 }) |height| {
+        box2d.c.b2Body_SetTransform(upper, .{ .x = 50, .y = 0.8 - height }, box2d.c.b2MakeRot(0));
+        for ([_]f32{ 0.5, 3.2, 9, -0.5, -3.2, -9 }) |speed| {
+            animation.resetPlayer(7);
+            const frames: usize = @intFromFloat(@ceil(4 / @abs(speed) * 60));
+            for (0..frames) |tick| {
+                const x = -2.0 * @as(f32, @floatFromInt(std.math.sign(speed))) + speed * @as(f32, @floatFromInt(tick)) / 60;
+                const floor_y: f32 = if (x < 0) 0.3 else 0.3 - height;
+                animation.updatePlayer(7, .{ .body = .{ .x = x, .y = floor_y - 0.3 }, .supported = true, .ground_y = floor_y, .vertical_speed_mps = 0, .separation_speed_mps = 0, .horizontal_speed_mps = speed, .movement_direction = std.math.sign(speed), .facing_right = speed >= 0 }, 1.0 / 60.0);
+                const sample = animation.states.get(7).?;
+                for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                    const pose = animation.interpolatedPose(set, sample, alpha);
+                    try checkBones(set.rig, pose);
+                    const body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+                    for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                        const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], body, sample.facing_right);
+                        const ground: f32 = if (point.x < 0) 0.3 else 0.3 - height;
+                        errdefer std.log.err("step: height {d}, speed {d}, tick {d}, alpha {d}, {s} depth {d}, point {any}", .{ height, speed, tick, alpha, @tagName(joint), point.y - ground, point });
+                        try std.testing.expect(point.y <= ground + 0.0003);
+                    }
+                    for (sample.previous_feet, sample.feet, [_]animation.Joint{ .left_toe, .right_toe }) |before, foot, toe| {
+                        if (!before.locked or !foot.locked or !std.meta.eql(before.anchor, foot.anchor)) continue;
+                        try nearPoint(foot.anchor, animation.toWorld(set.rig, pose.joints[@intFromEnum(toe)], body, sample.facing_right), 0.00003);
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "kneeling and aiming across static step edges retain knee and sole clearance" {
+    const original_floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    box2d.c.b2DestroyBody(original_floor);
+    _ = try addTerrainBox(.{ .x = -50, .y = 0.8 }, .{ .x = 50, .y = 0.5 });
+    _ = try addTerrainBox(.{ .x = 50, .y = 0.68 }, .{ .x = 50, .y = 0.5 });
+    const set = &animation.assets.?;
+    for ([_]f32{ -0.2, -0.08, 0.08, 0.2 }) |x| {
+        for ([_]bool{ true, false }) |facing| {
+            animation.resetPlayer(7);
+            const floor_y: f32 = if (x < 0) 0.3 else 0.18;
+            var input: animation.LocomotionInput = .{ .body = .{ .x = x, .y = floor_y - 0.3 }, .supported = true, .ground_y = floor_y, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = facing, .kneel_requested = true };
+            for (0..180) |tick| {
+                input.aiming = tick >= 90;
+                input.aim_direction = if (facing) vec.west else vec.east;
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                const sample = animation.states.get(7).?;
+                for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+                    const pose = animation.interpolatedPose(set, sample, alpha);
+                    try checkBones(set.rig, pose);
+                    for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel, .left_knee, .right_knee }) |joint| {
+                        const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], sample.body, sample.facing_right);
+                        const ground: f32 = if (point.x < 0) 0.3 else 0.18;
+                        errdefer std.log.err("kneeling step: x {d}, facing {}, tick {d}, alpha {d}, {s} depth {d}", .{ x, facing, tick, alpha, @tagName(joint), point.y - ground });
+                        try std.testing.expect(point.y <= ground + 0.0003);
+                    }
+                }
+            }
+        }
+    }
+}
+
 test "invalid locomotion JSON preserves the complete installed pose and contacts; valid reload clears transient state" {
     _ = try beginLocomotion();
     defer box2d.destroyWorld();
@@ -1010,13 +1193,20 @@ test "invalid locomotion JSON preserves the complete installed pose and contacts
     defer std.testing.log_level = previous_log_level;
     var detail: animation.Diagnostic = .{};
     const cases = [_][2][]const u8{
-        .{ "\"schema_version\": 1", "\"schema_version\": 2" },
+        .{ "\"schema_version\": 2", "\"schema_version\": 3" },
         .{ "\"run_reference_v1\"", "\"missing_clip\"" },
         .{ "\"stride_max\": 1.15", "\"stride_max\": 0.1" },
         .{ "\"start_seconds\": 0.08", "\"start_seconds\": 0" },
         .{ "\"release_seconds\": 0.055", "\"release_seconds\": 1e999" },
         .{ "\"full_run_speed_mps\": 1.8", "\"full_run_speed_mps\": 0.01" },
         .{ "\"plant_distance_m\": 0.035,", "" },
+        .{ "\"probe_up_m\": 0.65", "\"probe_up_m\": 0" },
+        .{ "\"probe_down_m\": 0.65", "\"probe_down_m\": 1.1" },
+        .{ "\"max_slope_radians\": 0.7853982", "\"max_slope_radians\": 1.5" },
+        .{ "\"pelvis_limit_m\": 0.18", "\"pelvis_limit_m\": -1" },
+        .{ "\"blend_seconds\": 0.06", "\"blend_seconds\": 1e999" },
+        .{ "\"swing_clearance_m\": 0.04", "\"swing_clearance_m\": -0.01" },
+        .{ "\"lookahead_m\": 0.12", "\"lookahead_m\": 0.9" },
     };
     for (cases) |case| {
         const malformed = try std.mem.replaceOwned(u8, std.testing.allocator, locomotion_json, case[0], case[1]);
@@ -1921,8 +2111,323 @@ fn stepAimingMovement() !void {
     defer player_input.endPhysicsStep();
     movement.applyAll(1.0 / 60.0);
     box2d.worldStep(1.0 / 60.0, 4);
+    try movement.resolveGroundMovement();
     try movement.processSensorEvents();
     animation.fixedUpdate(1.0 / 60.0);
+}
+
+fn addTraversalTorso(body: box2d.c.b2BodyId) void {
+    box2d.c.b2Body_SetGravityScale(body, movement.bodyMotion.gravityScale);
+    box2d.c.b2Body_SetLinearDamping(body, movement.bodyMotion.linearDamping);
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_PLAYER;
+    shape.filter.maskBits = collision.MASK_PLAYER;
+    shape.material.friction = 0;
+    const polygon = box2d.c.b2MakeOffsetBox(player.bodyColliderHalfWidth, player.bodyColliderHalfHeight, vec.toBox2d(player.bodyColliderOffset), box2d.c.b2MakeRot(0));
+    _ = box2d.c.b2CreatePolygonShape(body, &shape, &polygon);
+}
+
+test "real controller contacts drive static slope adaptation through kneeling aiming jumping and landing" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = collision.CATEGORY_SENSOR;
+    filter.maskBits = collision.CATEGORY_TERRAIN;
+    const hit = box2d.castRayClosest(.{ .x = 0, .y = 0 }, .{ .x = 0, .y = 1 }, filter);
+    try std.testing.expect(hit.hit);
+    const floor = box2d.c.b2Shape_GetBody(hit.shapeId);
+    for ([_]f32{ -0.55, -0.25, 0.25, 0.55 }) |angle| {
+        const rotation = box2d.c.b2MakeRot(angle);
+        box2d.c.b2Body_SetTransform(floor, .{ .x = 0, .y = 0.3 + 0.5 / rotation.c }, rotation);
+        box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -0.15 }, box2d.c.b2MakeRot(0));
+        box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+        movement.reset(7);
+        animation.resetPlayer(7);
+        submitAim(vec.south, false);
+        for (0..120) |_| try stepAimingMovement();
+        errdefer std.log.err("real slope: angle {d}, velocity {any}, action {s}", .{ angle, box2d.c.b2Body_GetLinearVelocity(body), @tagName(animation.states.get(7).?.action) });
+        try std.testing.expect(movement.states.get(7).?.groundState.supported);
+        try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+        try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+        submitAim(vec.west, true);
+        for (0..45) |_| {
+            try stepAimingMovement();
+            try std.testing.expectEqual(animation.Action.kneel, animation.states.get(7).?.action);
+            try checkTerrainPose(animation.states.get(7).?, rotation.s / rotation.c);
+        }
+        var input: player_input.Sample = .{ .aimDirection = vec.west };
+        input.buttons.set(.shoot, true);
+        input.buttons.set(.jump, true);
+        player_input.submit(7, input);
+        control.applyPlayerInput(7);
+        try stepAimingMovement();
+        try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+        input.buttons.set(.jump, false);
+        player_input.submit(7, input);
+        control.applyPlayerInput(7);
+        var landed = false;
+        for (0..180) |_| {
+            try stepAimingMovement();
+            const sample = animation.states.get(7).?;
+            if (sample.action == .land) landed = true;
+            if (sample.action == .jump or sample.action == .fall) continue;
+            try checkTerrainPose(sample, rotation.s / rotation.c);
+        }
+        try std.testing.expect(landed);
+        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+        for ([_]vec.Vec2{ vec.east, vec.west }) |direction| {
+            submitAim(vec.zero, false);
+            for (0..120) |_| try stepAimingMovement();
+            const start_x = box2d.c.b2Body_GetPosition(body).x;
+            submitAim(direction, false);
+            var supported_steps: usize = 0;
+            var controller_supported_steps: usize = 0;
+            for (0..120) |_| {
+                try stepAimingMovement();
+                if (movement.states.get(7).?.groundState.supported) controller_supported_steps += 1;
+                const sample = animation.states.get(7).?;
+                if (sample.action == .jump or sample.action == .fall) {
+                    for (sample.feet) |foot| try std.testing.expect(!foot.locked);
+                    for ([_]f64{ 0, 0.5, 1 }) |alpha| try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, alpha));
+                    continue;
+                }
+                supported_steps += 1;
+                try checkTerrainPose(sample, rotation.s / rotation.c);
+            }
+            const distance = (box2d.c.b2Body_GetPosition(body).x - start_x) * direction.x;
+            errdefer std.log.err("real slope run: direction {any}, supported {d}, controller supported {d}, distance {d}, input {any}, mechanism {s}", .{ direction, supported_steps, controller_supported_steps, distance, movement.locomotionDirection(7), @tagName(movement.mechanism) });
+            try std.testing.expectEqual(@as(usize, 120), supported_steps);
+            try std.testing.expectEqual(@as(usize, 120), controller_supported_steps);
+            try std.testing.expect(distance > 15);
+            try std.testing.expectApproxEqAbs(direction.x * movement.towerfallSettings.control.maxRunSpeed, box2d.c.b2Body_GetLinearVelocity(body).x, 0.03);
+        }
+    }
+}
+
+test "real controller climbs and descends 0.2 through 0.5 meter stairs without jumping" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    for ([_]f32{ 0.2, 0.3, 0.4, 0.5 }) |height| {
+        for ([_]f32{ -1, 1 }) |direction| {
+            var stairs: [3]box2d.c.b2BodyId = undefined;
+            for (&stairs, 0..) |*stair, index| {
+                const step: f32 = @floatFromInt(index);
+                const half_width: f32 = if (index == 2) 50 else 0.6;
+                stair.* = try addTerrainBox(.{ .x = direction * (step * 1.2 + half_width), .y = 0.8 - height * (step + 1) }, .{ .x = half_width, .y = 0.5 });
+            }
+            defer for (stairs) |stair| box2d.c.b2DestroyBody(stair);
+            box2d.c.b2Body_SetTransform(body, .{ .x = -2 * direction, .y = -0.02 }, box2d.c.b2MakeRot(0));
+            box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+            movement.reset(7);
+            animation.resetPlayer(7);
+            submitAim(vec.zero, false);
+            for (0..30) |_| try stepAimingMovement();
+            for ([_]f32{ direction, -direction }) |travel| {
+                submitAim(.{ .x = travel, .y = 0 }, false);
+                for (0..65) |tick| {
+                    try stepAimingMovement();
+                    const sample = animation.states.get(7).?;
+                    errdefer std.log.err("stairs: height {d}, direction {d}, travel {d}, tick {d}, body {any}, action {s}, support {}", .{ height, direction, travel, tick, sample.body, @tagName(sample.action), movement.states.get(7).?.groundState.supported });
+                    try std.testing.expectEqual(animation.Action.grounded, sample.action);
+                    const set = &animation.assets.?;
+                    for ([_]f64{ 0, 0.5, 1 }) |alpha| {
+                        const pose = animation.interpolatedPose(set, sample, alpha);
+                        try checkBones(set.rig, pose);
+                        const position = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), @floatCast(alpha)));
+                        for ([_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel }) |joint| {
+                            const point = animation.toWorld(set.rig, pose.joints[@intFromEnum(joint)], position, sample.facing_right);
+                            const step = std.math.clamp(@floor(point.x * direction / 1.2) + 1, 0, 3);
+                            errdefer std.log.err("stairs sole: {s}, alpha {d}, point {any}, floor {d}", .{ @tagName(joint), alpha, point, 0.3 - step * height });
+                            try std.testing.expect(point.y <= 0.3 - step * height + 0.002);
+                        }
+                    }
+                }
+                const position = box2d.c.b2Body_GetPosition(body);
+                if (travel == direction) {
+                    try std.testing.expect(position.x * direction > 4);
+                    try std.testing.expect(position.y < -height * 3 + 0.03);
+                } else {
+                    try std.testing.expect(position.x * direction < -0.4);
+                    try std.testing.expectApproxEqAbs(@as(f32, 0), position.y, 0.03);
+                }
+            }
+        }
+    }
+}
+
+test "step climbing works from rest against a riser and at low speed" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    for ([_]f32{ 0.3, 0.5 }) |height| {
+        for ([_]f32{ -1, 1 }) |direction| {
+            const stair = try addTerrainBox(.{ .x = direction * 50, .y = 0.8 - height }, .{ .x = 50, .y = 0.5 });
+            defer box2d.c.b2DestroyBody(stair);
+            for ([_]f32{ 0.1, 1 }) |speed| {
+                box2d.c.b2Body_SetTransform(body, .{ .x = -0.31 * direction, .y = -0.02 }, box2d.c.b2MakeRot(0));
+                box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+                movement.reset(7);
+                animation.resetPlayer(7);
+                submitAim(vec.zero, false);
+                for (0..30) |_| try stepAimingMovement();
+                submitAim(.{ .x = direction * speed, .y = 0 }, false);
+                for (0..90) |tick| {
+                    try stepAimingMovement();
+                    const sample = animation.states.get(7).?;
+                    try std.testing.expectEqual(animation.Action.grounded, sample.action);
+                    try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+                    if (tick != 5) continue;
+                    submitAim(vec.zero, false);
+                    for (0..15) |_| {
+                        try stepAimingMovement();
+                        try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+                    }
+                    submitAim(.{ .x = direction * speed, .y = 0 }, false);
+                }
+                const position = box2d.c.b2Body_GetPosition(body);
+                errdefer std.log.err("step from rest: height {d}, direction {d}, speed {d}, position {any}", .{ height, direction, speed, position });
+                try std.testing.expect(position.x * direction > 0.5);
+                try std.testing.expectApproxEqAbs(-height, position.y, 0.03);
+            }
+        }
+    }
+}
+
+test "ground following preserves upward motion generated during the physics step" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    submitAim(vec.zero, false);
+    for (0..30) |_| try stepAimingMovement();
+    try std.testing.expect(movement.states.get(7).?.groundState.supported);
+    player_input.beginPhysicsStep();
+    defer player_input.endPhysicsStep();
+    movement.applyAll(1.0 / 60.0);
+    try std.testing.expect(movement.states.get(7).?.followGround);
+    const mass = box2d.c.b2Body_GetMass(body);
+    box2d.c.b2Body_ApplyForceToCenter(body, .{ .x = 0, .y = -mass * 600 }, true);
+    box2d.worldStep(1.0 / 60.0, 4);
+    const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+    try std.testing.expect(velocity.y < -5);
+    try movement.resolveGroundMovement();
+    try nearPoint(position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0.000001);
+    try nearPoint(velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0.000001);
+    try std.testing.expect(!movement.states.get(7).?.followGround);
+    try movement.processSensorEvents();
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+}
+
+test "running follows flat to ramp transitions without selecting an airborne pose" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    // Keep the original floor beneath a ramp that rises from x=0 to x=3.
+    const rotation = box2d.c.b2MakeRot(-0.4);
+    const slope = rotation.s / rotation.c;
+    const ramp = try addTerrainBox(.{ .x = 1.5 - 0.2 * rotation.s, .y = 0.3 + 1.5 * slope + 0.2 * rotation.c }, .{ .x = 1.5 / rotation.c, .y = 0.2 });
+    box2d.c.b2Body_SetTransform(ramp, box2d.c.b2Body_GetPosition(ramp), rotation);
+    _ = try addTerrainBox(.{ .x = 53, .y = 0.8 + 3 * slope }, .{ .x = 50, .y = 0.5 });
+    box2d.c.b2Body_SetTransform(body, .{ .x = -2, .y = -0.02 }, box2d.c.b2MakeRot(0));
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+    movement.reset(7);
+    animation.resetPlayer(7);
+    submitAim(vec.zero, false);
+    for (0..30) |_| try stepAimingMovement();
+    for ([_]vec.Vec2{ vec.east, vec.west }) |direction| {
+        submitAim(direction, false);
+        for (0..80) |tick| {
+            try stepAimingMovement();
+            const sample = animation.states.get(7).?;
+            errdefer std.log.err("ramp seam: direction {any}, tick {d}, body {any}, action {s}", .{ direction, tick, sample.body, @tagName(sample.action) });
+            try std.testing.expectEqual(animation.Action.grounded, sample.action);
+            try std.testing.expect(movement.states.get(7).?.groundState.supported);
+            try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+        }
+    }
+    try std.testing.expect(box2d.c.b2Body_GetPosition(body).x < -0.5);
+}
+
+test "step climbing respects the height limit disabled setting and full body ceiling clearance" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    const step = try addTerrainBox(.{ .x = 50, .y = 0.2 }, .{ .x = 50, .y = 0.5 });
+    const ceiling = try addTerrainBox(.{ .x = 0, .y = -10 }, .{ .x = 5, .y = 0.1 });
+    for (0..3) |scenario| {
+        const height: f32 = if (scenario == 0) 0.6 else if (scenario == 1) 0.3 else 0.5;
+        movement.towerfallSettings.maxStepHeight = if (scenario == 2) 0 else 0.5;
+        box2d.c.b2Body_SetTransform(step, .{ .x = 50, .y = 0.8 - height }, box2d.c.b2MakeRot(0));
+        box2d.c.b2Body_SetTransform(ceiling, .{ .x = 0, .y = if (scenario == 1) -1.3 else -10 }, box2d.c.b2MakeRot(0));
+        box2d.c.b2Body_SetTransform(body, .{ .x = -2, .y = -0.02 }, box2d.c.b2MakeRot(0));
+        box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+        movement.reset(7);
+        animation.resetPlayer(7);
+        submitAim(vec.zero, false);
+        for (0..30) |_| try stepAimingMovement();
+        submitAim(vec.east, false);
+        for (0..100) |_| {
+            try stepAimingMovement();
+            const position = box2d.c.b2Body_GetPosition(body);
+            errdefer std.log.err("blocked step: scenario {d}, position {any}", .{ scenario, position });
+            try std.testing.expect(position.x < -0.1);
+            if (scenario == 1) try std.testing.expect(position.y > -0.11);
+        }
+    }
+}
+
+test "ground following releases for jumps and drops beyond the step limit" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    _ = try addTerrainBox(.{ .x = -25, .y = 0.1 }, .{ .x = 25, .y = 0.5 });
+    box2d.c.b2Body_SetTransform(body, .{ .x = -1, .y = -0.72 }, box2d.c.b2MakeRot(0));
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+    movement.reset(7);
+    animation.resetPlayer(7);
+    submitAim(vec.zero, false);
+    for (0..30) |_| try stepAimingMovement();
+    var jumping: player_input.Sample = .{};
+    jumping.buttons.set(.jump, true);
+    player_input.submit(7, jumping);
+    control.applyPlayerInput(7);
+    try stepAimingMovement();
+    try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+    try std.testing.expect(!movement.states.get(7).?.followGround);
+    try std.testing.expect(box2d.c.b2Body_GetPosition(body).y < -0.95);
+    submitAim(vec.zero, false);
+    for (0..120) |_| try stepAimingMovement();
+    try std.testing.expect(movement.states.get(7).?.groundState.supported);
+    submitAim(vec.east, false);
+    var fell = false;
+    errdefer std.log.err("large drop: fell {}, body {any}, action {s}", .{ fell, box2d.c.b2Body_GetPosition(body), @tagName(animation.states.get(7).?.action) });
+    for (0..70) |_| {
+        try stepAimingMovement();
+        const sample = animation.states.get(7).?;
+        if (sample.body.x > 0 and sample.action == .fall) {
+            fell = true;
+            for (sample.feet) |foot| try std.testing.expect(!foot.locked);
+        }
+    }
+    try std.testing.expect(fell);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), box2d.c.b2Body_GetPosition(body).y, 0.03);
 }
 
 test "Towerfall input keeps an existing kneel while aiming and restores live stance on release" {
@@ -2337,6 +2842,7 @@ test "lowering from backwards aim stays continuous throughout the running cycle"
                     const frame = animation.playerFrame(7, .render, null).?;
                     const angle = frame.weapon.angle + (if (frame.weapon_facing_right) @as(f32, 0) else std.math.pi);
                     const delta = angle - (before orelse angle);
+                    errdefer std.log.err("aim lowering: speed {d}, release phase {d}, tick {d}, alpha {d}, angle delta {d}", .{ speed, release_phase, tick, alpha, delta });
                     // A quarter of a physics step must not jump across the
                     // +/-pi seam when the moving wrist passes the aim's opposite.
                     try std.testing.expect(@abs(std.math.atan2(@sin(delta), @cos(delta))) < 0.5);

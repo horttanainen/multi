@@ -36,6 +36,13 @@ kneeling stance. Independent review and validation are complete: stationary Down
 kneels with one knee grounded and the torso forward; horizontal movement uses
 regular running; impact absorption uses a separate landing squat.
 See [character_animation_kneeling.md](character_animation_kneeling.md).
+Static slope and step adaptation is accepted by the user on 2026-09-24, including
+continuous slope running and automatic stair climbing up to 0.5 m through the
+existing movement controller. Independent review, corrections, validation and
+user testing are complete.
+See [character_animation_terrain.md](character_animation_terrain.md) for the
+terrain profile, runtime constraints and test scene. Moving/destructible rubble
+is a separate later phase.
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -298,8 +305,13 @@ Split this work into independently reviewed commits:
   exporter, preserve the original regression assets, and verify foot contact,
   heel recovery and independent width/lift tuning at slow/reference/game speeds.
   Independent review and validation are complete.
-- **3C:** Static slopes and steps, followed by a separately reviewed moving and
-  destructible rubble phase. Plan the terrain-query/contact changes first.
+- **3C, static terrain (accepted):** Finite static surface probes,
+  foot height/tilt, step clearance, pelvis fitting and existing toe/knee
+  constraints, with regression coverage and a dedicated terrain scene. The current
+  correction adds grounded slope travel and collision-checked stair climbing up
+  to the movement profile limit (0.5 m in Tower Keep).
+- **3C, later:** Moving and destructible rubble with body-local anchors and
+  support-lifetime validation; plan and review this as a separate phase.
 
 ### 4. Blender authoring after the setup works
 

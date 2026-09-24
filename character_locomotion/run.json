@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "id": "run_v1",
+  "schema_version": 2,
+  "id": "run_v2",
   "rig_id": "humanoid_v1",
   "motion_id": "run_reference_v1",
   "distance_unit": "meters",
@@ -15,5 +15,14 @@
   "release_seconds": 0.055,
   "plant_distance_m": 0.035,
   "max_anchor_error_m": 0.3,
-  "flat_height_tolerance_m": 0.025
+  "surface_tolerance_m": 0.025,
+  "terrain": {
+    "probe_up_m": 0.65,
+    "probe_down_m": 0.65,
+    "max_slope_radians": 0.7853982,
+    "pelvis_limit_m": 0.18,
+    "blend_seconds": 0.06,
+    "swing_clearance_m": 0.04,
+    "lookahead_m": 0.12
+  }
 }

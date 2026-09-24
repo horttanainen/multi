@@ -6,6 +6,7 @@
   },
   "aimGuideLengthMeters": 2,
   "towerfall": {
+    "maxStepHeight": 0.5,
     "control": {
       "maxRunSpeed": 9.0,
       "groundAcceleration": 55.0,

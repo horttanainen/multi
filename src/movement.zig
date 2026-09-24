@@ -21,6 +21,9 @@ const GroundSweepContext = struct {
     playerBodyId: box2d.c.b2BodyId,
     groundContact: ?GroundContact = null,
     fraction: f32 = 1,
+    walkableOnly: bool = true,
+    translation: vec.Vec2 = .{ .x = 0, .y = 1 },
+    blocked: bool = false,
 };
 
 pub const GroundState = struct {
@@ -49,6 +52,10 @@ pub const State = struct {
     bufferedJumpUntilMs: ?u64 = null,
     heldJumpGravityActive: bool = false,
     facingRight: bool = false,
+    followGround: bool = false,
+    groundTargetX: f32 = 0,
+    groundVelocityX: f32 = 0,
+    traversalContact: ?GroundContact = null,
 };
 
 pub var states: std.AutoArrayHashMapUnmanaged(usize, State) = .empty;
@@ -66,11 +73,7 @@ var minimumSupportUpAmount: f32 = undefined;
 var contactDataScratch: std.ArrayListUnmanaged(box2d.c.b2ContactData) = .empty;
 
 pub fn configure(movementData: data.MovementData) !void {
-    mechanism = movementData.mechanism;
-    aimGuideLengthMeters = movementData.aimGuideLengthMeters;
-    grounding = movementData.grounding;
-
-    switch (mechanism) {
+    switch (movementData.mechanism) {
         .liero => {
             const settings = movementData.liero orelse {
                 std.log.err("movement.configure: liero settings are missing", .{});
@@ -86,12 +89,19 @@ pub fn configure(movementData: data.MovementData) !void {
                 std.log.err("movement.configure: TowerFall settings are missing", .{});
                 return error.MissingTowerfallMovementSettings;
             };
+            if (!std.math.isFinite(settings.maxStepHeight) or settings.maxStepHeight < 0 or settings.maxStepHeight > 0.75) {
+                std.log.err("movement.configure: maxStepHeight must be between 0 and 0.75 meters", .{});
+                return error.InvalidStepHeight;
+            }
             towerfallSettings = settings;
             bodyMotion = settings.bodyMotion;
             surfaceResponse = settings.surfaceResponse;
         },
     }
 
+    mechanism = movementData.mechanism;
+    aimGuideLengthMeters = movementData.aimGuideLengthMeters;
+    grounding = movementData.grounding;
     minimumSupportUpAmount = @cos(grounding.maxSlopeAngleDegrees * std.math.pi / 180.0);
     player_input.configure(movementData);
 }
@@ -108,6 +118,8 @@ fn clearRuntimeState(state: *State) void {
     state.airJumpCounter = 0;
     state.bufferedJumpUntilMs = null;
     state.heldJumpGravityActive = false;
+    state.followGround = false;
+    state.traversalContact = null;
 }
 
 pub fn reset(playerId: usize) void {
@@ -238,6 +250,7 @@ fn finishTowerfallJump(state: *State) void {
     state.bufferedJumpUntilMs = null;
     state.heldJumpGravityActive = true;
     state.wallSliding = false;
+    state.followGround = false;
 }
 
 fn executeTowerfallGroundJump(state: *State) void {
@@ -343,8 +356,10 @@ fn towerfallMovementDirection(inputState: player_input.PlayerInput, state: *Stat
 }
 
 fn applyTowerfallFalling(inputState: player_input.PlayerInput, state: *State, velocity: *box2d.c.b2Vec2, dt: f32) void {
-    if (state.groundState.supported and velocity.y >= 0) {
-        velocity.y = 0;
+    if (state.followGround) {
+        const contact = state.groundState.groundContact.?;
+        const support = box2d.c.b2Body_GetWorldPointVelocity(contact.bodyId, vec.toBox2d(contact.worldPoint));
+        velocity.y = support.y - (velocity.x - support.x) * contact.normal.x / contact.normal.y;
         state.heldJumpGravityActive = false;
         state.wallSliding = false;
         return;
@@ -405,6 +420,15 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
     const movementDirection = towerfallMovementDirection(inputState, state);
     const targetSpeed = movementDirection * controlSettings.maxRunSpeed;
     var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    const contact = state.groundState.groundContact;
+    grounded: {
+        if (!state.groundState.supported or contact == null) break :grounded;
+        if (!box2d.c.b2Body_IsValid(contact.?.bodyId) or !box2d.c.b2Shape_IsValid(contact.?.shapeId)) break :grounded;
+        // Jumps and upward impulses must leave support. Tangential uphill
+        // travel has upward velocity too, but does not separate from the floor.
+        if (separatingFromGround(state, contact.?)) break :grounded;
+        state.followGround = true;
+    }
     const reversing = movementDirection != 0 and velocity.x * movementDirection < 0;
     const acceleration = if (movementDirection == 0)
         if (state.groundState.supported) controlSettings.groundDeceleration else controlSettings.airDeceleration
@@ -422,10 +446,14 @@ fn applyTowerfallMovement(playerId: usize, state: *State, dt: f32) void {
     const currentTimeMs = time.nowMs();
     if (inputState.buttons.get(.jump).pressed) requestTowerfallJump(state, currentTimeMs);
     processTowerfallBufferedJump(state, currentTimeMs);
+    state.groundTargetX = box2d.c.b2Body_GetPosition(state.bodyId).x + velocity.x * dt;
+    state.groundVelocityX = velocity.x;
 }
 
 fn applyMovement(playerId: usize, state: *State, dt: f32) void {
     state.wallJumpedDirection = 0;
+    state.followGround = false;
+    state.traversalContact = null;
     if (!box2d.c.b2Body_IsEnabled(state.bodyId)) return;
 
     switch (mechanism) {
@@ -491,9 +519,9 @@ fn groundContactForContact(state: *const State, contact: box2d.c.b2ContactData) 
     };
 }
 
-fn findGroundContact(state: *const State) !?GroundContact {
+fn bodyContacts(state: *const State) ![]const box2d.c.b2ContactData {
     const contactCapacity = box2d.c.b2Body_GetContactCapacity(state.bodyId);
-    if (contactCapacity == 0) return null;
+    if (contactCapacity == 0) return &.{};
 
     const capacity: usize = @intCast(contactCapacity);
     try contactDataScratch.ensureTotalCapacity(allocator, capacity);
@@ -504,10 +532,13 @@ fn findGroundContact(state: *const State) !?GroundContact {
         contactDataScratch.items.ptr,
         contactCapacity,
     ));
+    return contactDataScratch.items[0..contactCount];
+}
 
+fn findGroundContact(state: *const State) !?GroundContact {
     var bestGroundContact: ?GroundContact = null;
     var bestUpAmount: f32 = -1.0;
-    for (contactDataScratch.items[0..contactCount]) |contact| {
+    for (try bodyContacts(state)) |contact| {
         const groundContact = groundContactForContact(state, contact) orelse continue;
         const upAmount = vec.dot(groundContact.normal, .{ .x = 0, .y = -1 });
         if (bestGroundContact != null and upAmount <= bestUpAmount) continue;
@@ -533,7 +564,10 @@ fn collectGroundSweep(
     const sweepContext: *GroundSweepContext = @ptrCast(@alignCast(context.?));
     const bodyId = box2d.c.b2Shape_GetBody(shapeId);
     if (box2d.c.B2_ID_EQUALS(bodyId, sweepContext.playerBodyId)) return -1;
+    if (box2d.c.b2Shape_IsSensor(shapeId)) return -1;
     if (normal.x == 0 and normal.y == 0) return -1;
+    if (sweepContext.walkableOnly and -normal.y < minimumSupportUpAmount) return -1;
+    if (vec.dot(vec.fromBox2d(normal), sweepContext.translation) >= -0.000001) return -1;
     if (sweepContext.groundContact != null and sweepContext.fraction <= fraction) return sweepContext.fraction;
 
     sweepContext.groundContact = .{
@@ -585,6 +619,201 @@ fn visitorBelongsToBody(visitorShapeId: box2d.c.b2ShapeId, bodyId: box2d.c.b2Bod
     return box2d.c.B2_ID_EQUALS(visitorBodyId, bodyId);
 }
 
+const groundSkin: f32 = 0.005;
+
+fn traversalProxy(shapeId: box2d.c.b2ShapeId, offset: vec.Vec2) ?box2d.c.b2ShapeProxy {
+    var transform = box2d.c.b2Body_GetTransform(box2d.c.b2Shape_GetBody(shapeId));
+    transform.p.x += offset.x;
+    transform.p.y += offset.y;
+    switch (box2d.c.b2Shape_GetType(shapeId)) {
+        box2d.c.b2_polygonShape => {
+            const polygon = box2d.c.b2Shape_GetPolygon(shapeId);
+            return box2d.c.b2MakeOffsetProxy(&polygon.vertices, polygon.count, polygon.radius, transform.p, transform.q);
+        },
+        box2d.c.b2_circleShape => {
+            const circle = box2d.c.b2Shape_GetCircle(shapeId);
+            return box2d.c.b2MakeOffsetProxy(&circle.center, 1, circle.radius, transform.p, transform.q);
+        },
+        box2d.c.b2_capsuleShape => {
+            const capsule = box2d.c.b2Shape_GetCapsule(shapeId);
+            const points = [_]box2d.c.b2Vec2{ capsule.center1, capsule.center2 };
+            return box2d.c.b2MakeOffsetProxy(&points, points.len, capsule.radius, transform.p, transform.q);
+        },
+        else => {
+            std.log.warn("movement.traversalProxy: unsupported character collider type", .{});
+            return null;
+        },
+    }
+}
+
+fn collectTraversalOverlap(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
+    if (context == null) {
+        std.log.err("movement.collectTraversalOverlap: query context is missing", .{});
+        return false;
+    }
+    const result: *GroundSweepContext = @ptrCast(@alignCast(context.?));
+    if (box2d.c.B2_ID_EQUALS(box2d.c.b2Shape_GetBody(shapeId), result.playerBodyId) or box2d.c.b2Shape_IsSensor(shapeId)) return true;
+    result.blocked = true;
+    return false;
+}
+
+// Sweep every solid collider, using its real geometry and collision filter.
+// The raised origin is overlap-tested because casts ignore initial overlap.
+fn castBody(state: *const State, offset: vec.Vec2, translation: vec.Vec2) GroundSweepContext {
+    var result = GroundSweepContext{ .playerBodyId = state.bodyId, .walkableOnly = false, .translation = translation };
+    var shapes: [16]box2d.c.b2ShapeId = undefined;
+    const count = box2d.c.b2Body_GetShapeCount(state.bodyId);
+    if (count <= 0 or count > shapes.len) {
+        std.log.warn("movement.castBody: unsupported character shape count {d}", .{count});
+        result.blocked = true;
+        return result;
+    }
+    const length: usize = @intCast(box2d.c.b2Body_GetShapes(state.bodyId, &shapes, shapes.len));
+    for (shapes[0..length]) |shape| {
+        if (box2d.c.b2Shape_IsSensor(shape)) continue;
+        const proxy = traversalProxy(shape, offset) orelse {
+            result.blocked = true;
+            return result;
+        };
+        const sourceFilter = box2d.c.b2Shape_GetFilter(shape);
+        var filter = box2d.c.b2DefaultQueryFilter();
+        filter.categoryBits = sourceFilter.categoryBits;
+        filter.maskBits = sourceFilter.maskBits;
+        if (!vec.equals(offset, vec.zero)) box2d.overlapShape(&proxy, filter, collectTraversalOverlap, &result);
+        if (result.blocked) return result;
+        box2d.castShape(&proxy, vec.toBox2d(translation), filter, collectGroundSweep, &result);
+    }
+    return result;
+}
+
+fn traversableContact(contact: ?GroundContact) bool {
+    if (contact == null or -contact.?.normal.y < minimumSupportUpAmount) return false;
+    if (!box2d.c.b2Body_IsValid(contact.?.bodyId) or !box2d.c.b2Shape_IsValid(contact.?.shapeId)) return false;
+    return box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody;
+}
+
+fn alignGroundVelocity(state: *const State, contact: GroundContact) void {
+    const support = box2d.c.b2Body_GetWorldPointVelocity(contact.bodyId, vec.toBox2d(contact.worldPoint));
+    var velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    velocity.y = support.y - (velocity.x - support.x) * contact.normal.x / contact.normal.y;
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, velocity);
+}
+
+fn separatingFromGround(state: *const State, contact: GroundContact) bool {
+    const support = box2d.c.b2Body_GetWorldPointVelocity(contact.bodyId, vec.toBox2d(contact.worldPoint));
+    const velocity = box2d.c.b2Body_GetLinearVelocity(state.bodyId);
+    const relative = vec.subtract(vec.fromBox2d(velocity), vec.fromBox2d(support));
+    return relative.y < -0.5 and vec.dot(relative, contact.normal) > 0.5;
+}
+
+fn separatingAfterStep(state: *const State) !bool {
+    if (!separatingFromGround(state, state.groundState.groundContact.?)) return false;
+    // At a seam, the solver can redirect motion along a new face or the radial
+    // normal of a rounded foot against a corner. Check every upward contact,
+    // rather than mistaking separation from the previous face alone for takeoff.
+    for (try bodyContacts(state)) |contact| {
+        const ground = groundContactForContact(state, contact) orelse continue;
+        if (ground.normal.y >= -0.01) continue;
+        if (!separatingFromGround(state, ground)) return false;
+    }
+    return true;
+}
+
+// A rounded character collider hits a stair corner with a radial normal. Use
+// the actual walkable polygon face at that point for supported step traversal.
+fn stepContact(contact: ?GroundContact) ?GroundContact {
+    if (contact == null) return null;
+    var result = contact.?;
+    if (!box2d.c.b2Body_IsValid(result.bodyId) or !box2d.c.b2Shape_IsValid(result.shapeId)) return null;
+    if (box2d.c.b2Body_GetType(result.bodyId) != box2d.c.b2_staticBody) return null;
+    if (box2d.c.b2Shape_GetType(result.shapeId) != box2d.c.b2_polygonShape) return if (traversableContact(contact)) contact else null;
+    const polygon = box2d.c.b2Shape_GetPolygon(result.shapeId);
+    const count: usize = @intCast(polygon.count);
+    const local = vec.fromBox2d(box2d.c.b2Body_GetLocalPoint(result.bodyId, vec.toBox2d(result.worldPoint)));
+    for (0..count) |index| {
+        const normal = vec.fromBox2d(box2d.c.b2Body_GetWorldVector(result.bodyId, polygon.normals[index]));
+        if (-normal.y < minimumSupportUpAmount) continue;
+        const a = vec.fromBox2d(polygon.vertices[index]);
+        const b = vec.fromBox2d(polygon.vertices[(index + 1) % count]);
+        const edge = vec.subtract(b, a);
+        const from_a = vec.subtract(local, a);
+        const along = vec.dot(from_a, edge) / vec.dot(edge, edge);
+        if (along < -groundSkin or along > 1 + groundSkin) continue;
+        if (@abs(vec.dot(from_a, vec.fromBox2d(polygon.normals[index])) - polygon.radius) > 2 * groundSkin) continue;
+        result.normal = normal;
+        return result;
+    }
+    return if (traversableContact(contact)) contact else null;
+}
+
+fn climbStep(state: *State, forward: f32) bool {
+    const height = towerfallSettings.maxStepHeight;
+    if (height == 0 or state.lateralMovementIntent == 0 or forward * state.groundVelocityX <= 0 or @abs(forward) <= groundSkin) return false;
+    const upDistance = height + 2 * groundSkin;
+    const up = castBody(state, vec.zero, .{ .x = 0, .y = -upDistance });
+    if (up.blocked) return false;
+    const lift = upDistance * up.fraction - groundSkin;
+    if (lift <= groundSkin) return false;
+    const across = castBody(state, .{ .x = 0, .y = -lift }, .{ .x = forward, .y = 0 });
+    if (across.blocked or across.fraction < 1) return false;
+    const downDistance = lift + groundSkin;
+    const down = castBody(state, .{ .x = forward, .y = -lift }, .{ .x = 0, .y = downDistance });
+    if (down.blocked) return false;
+    const candidate = stepContact(down.groundContact) orelse return false;
+    const previous = state.groundState.groundContact.?;
+    const oldFloor = previous.worldPoint.y - (candidate.worldPoint.x - previous.worldPoint.x) * previous.normal.x / previous.normal.y;
+    const rise = oldFloor - candidate.worldPoint.y;
+    if (rise < -groundSkin or rise > height + groundSkin) return false;
+    const deltaY = -lift + downDistance * down.fraction - groundSkin;
+    if (deltaY >= -groundSkin) return false;
+    var position = box2d.c.b2Body_GetPosition(state.bodyId);
+    position.x += forward;
+    position.y += deltaY;
+    box2d.c.b2Body_SetTransform(state.bodyId, position, box2d.c.b2Body_GetRotation(state.bodyId));
+    box2d.c.b2Body_SetLinearVelocity(state.bodyId, .{ .x = state.groundVelocityX, .y = 0 });
+    alignGroundVelocity(state, candidate);
+    state.traversalContact = candidate;
+    return true;
+}
+
+// Resolve only movement that began supported. Jumps, airborne aim momentum and
+// large drops retain their ordinary trajectory. Run after Box2D, before fresh
+// grounding and animation, so every consumer sees the corrected position.
+pub fn resolveGroundMovement() !void {
+    if (mechanism != .towerfall) return;
+    for (states.values()) |*state| {
+        if (!state.followGround or !traversableContact(state.groundState.groundContact)) continue;
+        if (try separatingAfterStep(state)) {
+            state.followGround = false;
+            continue;
+        }
+        const forward = state.groundTargetX - box2d.c.b2Body_GetPosition(state.bodyId).x;
+        if (climbStep(state, forward)) continue;
+        const contact = try findGroundContact(state);
+        if (traversableContact(contact)) {
+            state.traversalContact = contact;
+            alignGroundVelocity(state, contact.?);
+            continue;
+        }
+        const limit = @max(towerfallSettings.maxStepHeight, grounding.sweepDistance);
+        if (limit == 0) continue;
+        const distance = limit + 2 * groundSkin;
+        const down = castBody(state, vec.zero, .{ .x = 0, .y = distance });
+        if (down.blocked) continue;
+        const candidate = stepContact(down.groundContact) orelse continue;
+        const previous = stepContact(state.groundState.groundContact) orelse state.groundState.groundContact.?;
+        const oldFloor = previous.worldPoint.y - (candidate.worldPoint.x - previous.worldPoint.x) * previous.normal.x / previous.normal.y;
+        if (candidate.worldPoint.y - oldFloor > limit + groundSkin) continue;
+        const drop = distance * down.fraction - groundSkin;
+        if (drop > limit + groundSkin) continue;
+        var position = box2d.c.b2Body_GetPosition(state.bodyId);
+        position.y += @max(0, drop);
+        box2d.c.b2Body_SetTransform(state.bodyId, position, box2d.c.b2Body_GetRotation(state.bodyId));
+        state.traversalContact = candidate;
+        alignGroundVelocity(state, candidate);
+    }
+}
+
 fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) !void {
     const sensorEvents = box2d.getSensorEvents();
     const wasSupported = state.groundState.supported;
@@ -625,13 +854,15 @@ fn processStateSensorEvents(playerId: usize, state: *State, currentTimeMs: u64) 
         }
     }
 
-    const groundContact = switch (grounding.mode) {
+    const groundContact = state.traversalContact orelse switch (grounding.mode) {
         .foot_contact => if (state.groundState.footOverlapCount > 0)
             try findGroundContact(state)
         else
             null,
         .body_contact => try findGroundContact(state),
-        .ground_sweep => sweepGroundContact(state),
+        // Shape casts ignore initial overlap. On slopes the foot probe can
+        // overlap a surface already supporting the body; reuse its contacts.
+        .ground_sweep => sweepGroundContact(state) orelse try findGroundContact(state),
         .none => null,
     };
     const supported = groundContact != null and vec.dot(groundContact.?.normal, .{ .x = 0, .y = -1 }) >= minimumSupportUpAmount;

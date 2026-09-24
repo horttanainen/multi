@@ -181,7 +181,11 @@ pub fn setFrictionCallback(callback: ?*const c.b2FrictionCallback) void {
 
 pub fn overlapCircle(circle: *const c.b2Circle, transform: c.b2Transform, filter: c.b2QueryFilter, callback: ?*const c.b2OverlapResultFcn, userContext: ?*anyopaque) void {
     const proxy = c.b2MakeOffsetProxy(&circle.center, 1, circle.radius, transform.p, transform.q);
-    _ = c.b2World_OverlapShape(getWorldId(), &proxy, filter, callback, userContext);
+    overlapShape(&proxy, filter, callback, userContext);
+}
+
+pub fn overlapShape(proxy: *const c.b2ShapeProxy, filter: c.b2QueryFilter, callback: ?*const c.b2OverlapResultFcn, context: ?*anyopaque) void {
+    _ = c.b2World_OverlapShape(getWorldId(), proxy, filter, callback, context);
 }
 
 pub fn overlapAABB(aabb: c.b2AABB, filter: c.b2QueryFilter, callback: ?*const c.b2OverlapResultFcn, userContext: ?*anyopaque) void {

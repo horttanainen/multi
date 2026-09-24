@@ -27,6 +27,7 @@ pub fn step() !usize {
             movement.clampAllSpeeds();
             movement.applyAll(config.physics.dt);
             box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+            try movement.resolveGroundMovement();
             try movement.processSensorEvents();
             try sensor.processSensorEvents();
             character_animation.fixedUpdate(config.physics.dt);
