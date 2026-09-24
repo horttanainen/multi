@@ -13,6 +13,7 @@ const m2Pixel = conv.m2Pixel;
 const movement = @import("movement.zig");
 const renderer = @import("renderer.zig");
 const player = @import("player.zig");
+const damage = @import("damage.zig");
 const projectile = @import("projectile.zig");
 const time = @import("time.zig");
 
@@ -79,7 +80,11 @@ fn triggerAutoMissileExplosion() !void {
     box2d.c.b2Body_SetTransform(attacker.bodyId, vec.toBox2d(attackerPosition), box2d.c.b2Body_GetRotation(attacker.bodyId));
     box2d.c.b2Body_SetLinearVelocity(attacker.bodyId, box2d.c.b2Vec2_zero);
 
-    const guaranteedGibHealth = autoMissileExplosionMaximumDamage + player.gibHealthThreshold - 1.0;
+    const guaranteedGibHealth = autoMissileExplosionMaximumDamage + damage.rules.gibHealthThreshold - 1.0;
+    if (guaranteedGibHealth <= 0) {
+        std.log.warn("triggerAutoMissileExplosion: configured gib threshold cannot be reached by the debug explosion from positive health", .{});
+        return;
+    }
     if (victim.health > guaranteedGibHealth) {
         const setupDamage = victim.health - guaranteedGibHealth;
         const setupResult = try player.damage(victim.id, setupDamage, attacker.id);

@@ -4,6 +4,7 @@ const box2d = @import("box2d.zig");
 const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const data = @import("data.zig");
+const damage = @import("damage.zig");
 const gibbing = @import("gibbing.zig");
 const particle = @import("particle.zig");
 const perf = @import("perf.zig");
@@ -208,7 +209,11 @@ fn prepareVictim(victimId: usize, attackerId: usize, maximumDamage: f32) !void {
         std.log.err("explosion_benchmark.prepareVictim: victim player {d} is missing", .{victimId});
         return error.ExplosionBenchmarkPlayerMissing;
     };
-    const guaranteedGibHealth = maximumDamage + player.gibHealthThreshold - 1.0;
+    const guaranteedGibHealth = maximumDamage + damage.rules.gibHealthThreshold - 1.0;
+    if (guaranteedGibHealth <= 0) {
+        std.log.warn("explosion_benchmark.prepareVictim: configured gib threshold cannot be reached by this explosion from positive health", .{});
+        return error.ExplosionBenchmarkGibThresholdUnreachable;
+    }
     if (victim.health <= guaranteedGibHealth) return;
 
     const setupDamage = victim.health - guaranteedGibHealth;

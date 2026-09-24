@@ -2,6 +2,7 @@ const std = @import("std");
 
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
+const data = @import("data.zig");
 const particle_effect = @import("particle_effect.zig");
 const sprite = @import("sprite.zig");
 const vec = @import("vector.zig");
@@ -32,6 +33,38 @@ pub const Health = struct {
     current: f32,
     maximum: f32,
 };
+
+pub const HealthOutcome = enum { alive, dead, gibbed };
+pub const HealthResult = struct {
+    remaining: f32,
+    outcome: HealthOutcome,
+};
+
+pub var rules: data.DamageRulesData = .{};
+
+pub fn configure(candidate: data.DamageRulesData) !void {
+    if (!std.math.isFinite(candidate.gibHealthThreshold) or candidate.gibHealthThreshold >= 0) {
+        std.log.warn("damage.configure: gibHealthThreshold must be finite and below zero, got {d}", .{candidate.gibHealthThreshold});
+        return error.InvalidDamageRules;
+    }
+    rules = candidate;
+}
+
+// Shared subtraction and classification. Owners choose the actual death effect.
+pub fn applyHealth(current: f32, amount: f32) ?HealthResult {
+    if (!std.math.isFinite(current) or !std.math.isFinite(amount)) {
+        std.log.warn("damage.applyHealth: non-finite health or damage ({d}, {d})", .{ current, amount });
+        return null;
+    }
+    if (amount <= 0) return null; // Healing is not a damage event.
+    const remaining = current - amount;
+    if (!std.math.isFinite(remaining)) {
+        std.log.warn("damage.applyHealth: health subtraction overflow ({d}, {d})", .{ current, amount });
+        return null;
+    }
+    const outcome: HealthOutcome = if (remaining > 0) .alive else if (remaining <= rules.gibHealthThreshold) .gibbed else .dead;
+    return .{ .remaining = remaining, .outcome = outcome };
+}
 
 pub const SurfaceCutout = struct {
     radiusScale: f32 = 1,
@@ -119,12 +152,12 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
 
     switch (component.model) {
         .health => |*health| {
-            if (!std.math.isFinite(event.amount) or event.amount <= 0) return .ignored;
+            const result = applyHealth(health.current, event.amount) orelse return .ignored;
+            health.current = result.remaining;
+            if (result.outcome == .alive) return .damaged;
 
-            health.current -= event.amount;
-            if (health.current > 0) return .damaged;
-
-            health.current = 0;
+            // Preserve overkill for owners that distinguish ordinary destruction
+            // from gibbing. Ordinary objects retain their registered effect.
             component.pendingDestruction = true;
             return .{ .destroyed = .{
                 .effect = component.onDestroyed,

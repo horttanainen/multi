@@ -206,6 +206,7 @@ pub fn main(init: std.process.Init) !void {
     box2d.initWorld();
     try debug.init();
     try data.init();
+    try damage.configure(try data.loadDamageRulesData("damage_rules.json"));
     character_animation.init();
     try explosion_visual.init(data.explosionVisualDataMap);
     try gravestone.init();

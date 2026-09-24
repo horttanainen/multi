@@ -60,6 +60,14 @@ build/smoke check passed. The user has authorized the artwork commit. See the
 [runtime artwork notes](character_animation_artwork.md), the
 [art pack](../character_art/curb_rat_v1/README.md), and the
 [first appearance study](../character_art/concepts/alien_skater_v1/README.md).
+The user has requested another phase for giblets made from the actual body parts,
+non-gibbing deaths becoming ragdolls, and revised shared gibbing rules. This is
+planned in section 6 below. The agreed threshold is -40 HP, with the same weighted
+selection of surviving anatomical parts for players and ragdolls. Phase 6A is
+accepted by the user and its commit is authorized: configurable -40 HP threshold
+and shared signed health outcomes. Independent review, corrections and validation
+are complete. Weighted body-part giblets (6B) and ragdolls (6C) remain pending.
+See [gibbing rule implementation](character_gibbing_rules.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -336,8 +344,9 @@ Split this work into independently reviewed commits:
 
 ### 4. Blender authoring after the setup works
 
-Proposed next phase now that body artwork is accepted; implementation awaits
-the user's go-ahead. Begin with the running profile as one reviewable commit.
+Deferred while the newly requested body-part gibbing and ragdoll work is planned.
+Implementation awaits the user's go-ahead. Begin with the running profile as one
+reviewable commit when returning to Blender authoring.
 
 Build a prepared Blender scene with a planar skeleton, named target controls, IK preview, useful animation layout, and a limited set of custom properties for locomotion settings.
 
@@ -351,7 +360,140 @@ At this stage the user can tune profiles in Blender, export, and test in the gam
 
 ### 5. Body artwork
 
-Attach body segments to the existing named bones and attachment points, with explicit pivots and draw order. Keep the stick-figure view as a diagnostic overlay. Add mesh deformation only if the chosen artwork needs it.
+Accepted and committed as `0171fd9`. Body segments use the existing named bones
+and attachment points, explicit pivots, player tint and draw order. The
+stick-figure overlay remains available for diagnosis.
+
+### 6. Body-part giblets, ragdolls and shared gibbing rules
+
+Requested follow-up, planned before returning to Blender. This section records
+the intended behavior and review boundaries; it does not authorize implementation
+of all subphases at once. Present each concrete subphase before starting it.
+
+#### Baseline behavior and agreed revision
+
+Before 6A, `player.damage` subtracted a hit from health, killed at `health <= 0`,
+and gibbed at the hardcoded `player.gibHealthThreshold = -5`. A player with 10 HP
+therefore gibbed from a 15-damage hit. Non-gibbing death disables the live body/entity and schedules
+the gravestone and respawn; there is no corpse physics. Dead players ignore damage.
+
+`gibbing.zig` currently chooses unrelated head/leg/meat templates from
+`giblets.json`, scatters them at random offsets/orientations, and uses pooled
+physical bodies. Individual giblets have 1 HP and use the shared
+`damage.zig` / `destruction.zig` particle-burst and pool-return behavior.
+Before 6A, object health clamped to zero on destruction, losing the overkill needed
+to distinguish the proposed corpse outcomes. Phase 6A preserves signed health.
+
+The user has chosen a new threshold of **-40 HP** for both players and ragdolls.
+Gibbing uses a shared weighted random selection of the actual anatomical body
+parts, allowing the destruction to consume some parts rather than always dropping
+the whole skeleton. A selected part becomes a giblet; an omitted part is consumed
+by the destruction effect and leaves no physical body. Keep threshold and part
+weights configurable through the existing data/settings loading approach. No
+separate corpse rule or attack-type restriction is introduced by this revision.
+
+#### Required death and corpse outcomes
+
+Let `H` be health after the damage event. Keep death at exactly zero, and gib when
+health reaches **-40 or lower**. For example, a player with 10 HP dies without
+gibbing from a 49-damage hit (`H = -39`), but gibs from a 50-damage hit (`H = -40`).
+
+| Post-hit health | Living player | Existing ragdoll |
+| --- | --- | --- |
+| `H > 0` | Continue playing | Continue simulating |
+| `-40 < H <= 0` | Die and create a ragdoll with a fresh, shared 100 HP | Remove the entire ragdoll with a particle burst |
+| `H <= -40` | Die and run the shared weighted body-part gibbing effect | Run the same weighted body-part gibbing effect |
+
+The ragdoll's 100 HP belongs to the whole corpse, not to each limb. Damage to any
+part routes to the same health owner through the existing physical-object damage
+pipeline. After gibbing, detached parts use individual giblet damage/destruction.
+Corpse damage must not award another player kill or reset the respawn timer.
+
+Both sources provide the same gibbing inputs: anatomical part identities, current
+world transforms, motion, appearance and damage impulse. For a live player these
+come from its solved physics pose; for a ragdoll they come from its current
+physical bodies. One selector applies the same per-part survival weights in both
+cases, including separate actual left/right parts without duplicating anatomy.
+Skin and fixed-color layers are selected together as one part. Exact weights are
+tuning data to review in 6B; damage-scaled or impact-location weighting is not
+implicitly added. The survivors scatter as giblets and consumed parts contribute
+to the blood/particle effect.
+
+#### 6A. Centralize the -40 HP gibbing rule
+
+Accepted by the user; commit authorized. The
+`damage_rules.json` profile selects -40 HP, `damage.zig` owns signed subtraction
+and outcome classification, and `player.damage` uses that decision. Physical
+objects retain their signed remaining health and registered destruction effect.
+Score, death and respawn remain in their current owners.
+
+This phase preserves separate pellet hits and the existing direct-impact plus
+explosion budget. Dead players ignore later hits, including the remainder of an
+explosive projectile after a fatal direct hit. Grouping damage to several corpse
+limbs and preventing the originating attack from damaging newly created corpse
+parts belong to 6C; no corpse event infrastructure is added ahead of its owner.
+
+Validate ordinary damage, exact zero, both sides of the gib threshold, repeated
+hits, and agreed attack-grouping cases using the existing test entry points.
+The user reviews the resulting weapon/death behavior before a separate commit.
+
+#### 6B. Giblets from the assembled character
+
+Replace the legacy player-death templates with the anatomical parts from the
+active character-art manifest. Capture the final physics pose before disabling
+the player or resetting animation, preserving each part's position, orientation,
+facing, player tint and fixed-color details. Start parts with inherited motion
+and the hit's scatter impulse so death begins from the character on screen.
+
+Introduce the shared weighted survivor selection described above. Select from the
+parts the character actually has instead of choosing unrelated template images.
+Only selected parts receive active giblet bodies; consume the remaining parts
+with the existing destruction particles. Make the selector accept a pose/part
+snapshot so ragdoll gibbing can use the identical behavior in 6C.
+
+Reuse `character_art.zig` placement/layer rendering, sprite ownership, and the
+existing `gibbing.zig`, pool, entity, blood and particle-destruction components.
+Skin and fixed layers of a part describe one physical object. Keep colliders and
+physical properties as body-part metadata, separate from motion curves, loaded
+through `data.zig`. Preserve generic stepping and foot support on the parts.
+
+Validate both facings/colors, running and airborne death poses, inherited motion,
+weighted selection with repeatable random inputs, exclusion of consumed parts,
+detached-part damage and pool reuse. Ensure assets remain valid across respawn,
+artwork reload and level cleanup. Review and commit the part-based giblets before
+adding connected corpse physics.
+
+#### 6C. Ragdolls with shared health and destruction
+
+On a non-gibbing death, create the same physical body parts connected by Box2D
+hinge joints with anatomical angle limits, initialized from the death pose and
+motion. The normal player remains disabled for the existing respawn lifecycle.
+Use a corpse component to own the body/joint group and body-to-corpse lookup;
+reuse the existing damage/destruction and art owners rather than creating a
+parallel damage pipeline or copying the character renderer.
+
+Give the corpse a shared 100 HP pool and route hitscan, projectile and explosion
+damage from its parts to that pool. Group explosion health damage per corpse
+(proposed: use the strongest valid limb sample), while physical impulses may
+still act on individual parts. Use the agreed rule from 6A to select the outcome.
+On gibbing, run the same weighted survivor selection as live-player gibbing.
+Release the joints and transfer only selected parts to giblet ownership without
+resetting their position or velocity; remove consumed parts and emit their
+destruction particles. On ordinary destruction, emit the existing particle-burst
+effect over the body and remove all parts and joints as one operation. No active
+invisible colliders or orphan damage entries may remain.
+
+Handle level teardown, player respawn, artwork reload and pool recycling through
+the existing lifecycle boundaries. Settle any corpse-count/retention limit and
+gravestone/weapon presentation before implementing those choices. Walking and
+foot anchoring must continue to treat solid corpse parts as physical supports.
+
+Validate death-to-ragdoll continuity, joint limits, shared-health damage,
+multi-limb explosions, threshold equality, ragdoll-to-giblet continuity,
+identical survivor selection for equivalent live/ragdoll inputs, consumed-part
+cleanup, whole-corpse particle removal, score/respawn independence and cleanup. Run the
+existing relevant tests and build/smoke workflow, then independently review the
+phase and hand it to the user for weapon and terrain testing before committing.
 
 ## Minimal development tools and verification
 

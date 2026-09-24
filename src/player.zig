@@ -22,6 +22,7 @@ const movement = @import("movement.zig");
 const spawn_points = @import("spawn.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
+const damage_component = @import("damage.zig");
 const gravestone = @import("gravestone.zig");
 const rope = @import("rope.zig");
 const score = @import("score.zig");
@@ -68,7 +69,6 @@ pub const bodyColliderHalfWidth: f32 = 0.2;
 pub const bodyColliderHalfHeight: f32 = 0.6;
 pub const bodyColliderOffset: vec.Vec2 = .{ .x = 0, .y = -0.5 };
 pub const lowerBodyColliderRadius: f32 = 0.3;
-pub const gibHealthThreshold: f32 = -5;
 pub const centerOffset: vec.Vec2 = .{
     .x = 0,
     .y = ((bodyColliderOffset.y - bodyColliderHalfHeight) +
@@ -941,12 +941,12 @@ pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
         std.log.err("damage: player {d} is missing", .{playerId});
         return PlayerError.PlayerUnspawned;
     };
-    if (p.isDead or d <= 0) return .{};
+    if (p.isDead) return .{};
+    const health = damage_component.applyHealth(p.health, d) orelse return .{};
+    p.health = health.remaining;
 
-    p.health -= d;
-
-    const isFatal = p.health <= 0;
-    const isGibbing = p.health <= gibHealthThreshold;
+    const isFatal = health.outcome != .alive;
+    const isGibbing = health.outcome == .gibbed;
     const profileDeath = if (isFatal) perf.beginPlayerDeathCapture(p.id, isGibbing) else false;
     const deathTriggerStart = if (profileDeath) perf.begin(.player_death) else 0;
     defer {

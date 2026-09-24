@@ -251,6 +251,10 @@ pub const MovementData = struct {
     grounding: MovementGroundingData,
 };
 
+pub const DamageRulesData = struct {
+    gibHealthThreshold: f32 = -40,
+};
+
 // Serialized character assets. Decoding owns one temporary arena; the animation
 // component validates these values before taking ownership for runtime playback.
 pub const characterRigPath = "character_rigs/humanoid.json";
@@ -577,14 +581,23 @@ pub fn loadCharacterArtData(memory: std.mem.Allocator, detail: *CharacterAssetDi
 }
 
 pub fn loadMovementData(path: []const u8) !MovementData {
-    var jsonBuf: [16384]u8 = undefined;
-    const jsonData = fs.readFile(path, &jsonBuf) catch |err| {
-        std.log.warn("data.loadMovementData: failed to read '{s}': {}", .{ path, err });
+    return loadValueData(MovementData, path);
+}
+
+pub fn loadDamageRulesData(path: []const u8) !DamageRulesData {
+    return loadValueData(DamageRulesData, path);
+}
+
+// These profiles contain only values, so no parsed allocations escape the call.
+fn loadValueData(comptime T: type, path: []const u8) !T {
+    const jsonData = fs.readFileAlloc(path, allocator, 16384) catch |err| {
+        std.log.warn("data.loadValueData: failed to read '{s}': {}", .{ path, err });
         return err;
     };
+    defer allocator.free(jsonData);
 
-    const parsed = std.json.parseFromSlice(MovementData, allocator, jsonData, .{}) catch |err| {
-        std.log.warn("data.loadMovementData: failed to parse '{s}': {}", .{ path, err });
+    const parsed = std.json.parseFromSlice(T, allocator, jsonData, .{}) catch |err| {
+        std.log.warn("data.loadValueData: failed to parse '{s}': {}", .{ path, err });
         return err;
     };
     defer parsed.deinit();

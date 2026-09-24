@@ -26,6 +26,9 @@ const audio = @import("src/audio.zig");
 const conv = @import("src/conversion.zig");
 const pool = @import("src/pool.zig");
 const character_art = @import("src/character_art.zig");
+const damage = @import("src/damage.zig");
+const gravestone = @import("src/gravestone.zig");
+const score = @import("src/score.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -37,6 +40,135 @@ const original_motion_json = @embedFile("tests/fixtures/character_run_reference_
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 const art_json = @embedFile("character_art/curb_rat_v1/manifest.json");
+
+test "shared health rules retain overkill and distinguish death from gibbing at minus forty" {
+    const previous = damage.rules;
+    defer damage.rules = previous;
+    try damage.configure(.{});
+    const cases = [_]struct { health: f32, amount: f32, remaining: f32, outcome: damage.HealthOutcome }{
+        .{ .health = 100, .amount = 99, .remaining = 1, .outcome = .alive },
+        .{ .health = 100, .amount = 100, .remaining = 0, .outcome = .dead },
+        .{ .health = 100, .amount = 139, .remaining = -39, .outcome = .dead },
+        .{ .health = 100, .amount = 140, .remaining = -40, .outcome = .gibbed },
+        .{ .health = 100, .amount = 141, .remaining = -41, .outcome = .gibbed },
+        .{ .health = 10, .amount = 49, .remaining = -39, .outcome = .dead },
+        .{ .health = 10, .amount = 50, .remaining = -40, .outcome = .gibbed },
+    };
+    for (cases) |case| {
+        const result = damage.applyHealth(case.health, case.amount).?;
+        try std.testing.expectEqual(case.remaining, result.remaining);
+        try std.testing.expectEqual(case.outcome, result.outcome);
+    }
+    const first = damage.applyHealth(100, 55).?;
+    const second = damage.applyHealth(first.remaining, 85).?;
+    try std.testing.expectEqual(damage.HealthOutcome.alive, first.outcome);
+    try std.testing.expectEqual(damage.HealthOutcome.gibbed, second.outcome);
+    try std.testing.expectEqual(@as(f32, -40), second.remaining);
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err; // Invalid inputs are intentional.
+    defer std.testing.log_level = old_log_level;
+    for ([_]f32{ 0, -5, std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) }) |amount| {
+        try std.testing.expect(damage.applyHealth(100, amount) == null);
+    }
+    try std.testing.expect(damage.applyHealth(std.math.nan(f32), 1) == null);
+    try std.testing.expect(damage.applyHealth(-std.math.floatMax(f32), std.math.floatMax(f32)) == null);
+}
+
+test "damage configuration loads through shared data handling and rejects invalid replacements" {
+    runtime.init(std.testing.io);
+    const previous = damage.rules;
+    defer damage.rules = previous;
+    const loaded = try data.loadDamageRulesData("damage_rules.json");
+    try std.testing.expectEqual(@as(f32, -40), loaded.gibHealthThreshold);
+    try damage.configure(loaded);
+    const path = "artifacts/character_animation/damage_rules_test.json";
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
+    try fs.writeFile(path, "{\"gibHealthThreshold\":-80}");
+    try damage.configure(try data.loadDamageRulesData(path));
+    try std.testing.expectEqual(damage.HealthOutcome.dead, damage.applyHealth(100, 160).?.outcome);
+    try std.testing.expectEqual(damage.HealthOutcome.gibbed, damage.applyHealth(100, 180).?.outcome);
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = old_log_level;
+    for ([_]f32{ 0, 1, std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) }) |invalid| {
+        try std.testing.expectError(error.InvalidDamageRules, damage.configure(.{ .gibHealthThreshold = invalid }));
+        try std.testing.expectEqual(@as(f32, -80), damage.rules.gibHealthThreshold);
+    }
+    try fs.writeFile(path, "{\"gibHealthThresholdd\":-40}");
+    try std.testing.expectError(error.UnknownField, data.loadDamageRulesData(path));
+    try std.testing.expectEqual(@as(f32, -80), damage.rules.gibHealthThreshold);
+    try fs.writeFile(path, "{}");
+    try std.testing.expectEqual(@as(f32, -40), (try data.loadDamageRulesData(path)).gibHealthThreshold);
+}
+
+test "object damage keeps signed health and the registered destruction response until pool reset" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer damage.cleanup();
+    const body = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+    try damage.register(body, .{
+        .model = .{ .health = .{ .current = 100, .maximum = 100 } },
+        .onDestroyed = .{ .particle_burst = .{ .effectId = 1, .amount = 18, .spreadRadians = 1 } },
+        .destructionLifecycle = .return_to_pool,
+    });
+    for ([_]damage.Source{ .hitscan, .projectile, .explosion }) |source| {
+        try damage.reset(body);
+        try std.testing.expectEqual(@as(f32, 100), damage.components.get(body).?.model.health.current);
+        try std.testing.expect(!damage.components.get(body).?.pendingDestruction);
+        const hit: damage.Event = .{ .source = source, .amount = 60, .position = vec.zero };
+        try std.testing.expectEqual(damage.Outcome.damaged, damage.apply(body, hit));
+        var lethal = hit;
+        lethal.amount = 80;
+        const result = damage.apply(body, lethal);
+        try std.testing.expect(result == .destroyed);
+        try std.testing.expectEqual(damage.DestructionLifecycle.return_to_pool, result.destroyed.lifecycle);
+        try std.testing.expectEqual(@as(f32, 18), result.destroyed.effect.particle_burst.amount);
+        try std.testing.expectEqual(@as(f32, -40), damage.components.get(body).?.model.health.current);
+        try std.testing.expectEqual(damage.Outcome.ignored, damage.apply(body, lethal));
+        try std.testing.expectEqual(@as(f32, -40), damage.components.get(body).?.model.health.current);
+    }
+}
+
+test "player damage uses ordinary death down to minus thirty nine and records it only once" {
+    const previous_rules = damage.rules;
+    defer damage.rules = previous_rules;
+    try damage.configure(.{});
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    try sdl.init(.{});
+    defer sdl.quit();
+    for ([_]f32{ 0, -5, -39 }) |remaining| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        defer gravestone.clearScheduledSpawns();
+        try score.registerPlayer(7);
+        defer score.cleanup();
+        player.players.getPtr(7).?.health = 100;
+        const first = try player.damage(7, 75, null);
+        try std.testing.expect(first.applied and !first.fatal and !first.gibbed);
+        try std.testing.expectEqual(@as(f32, 25), player.players.get(7).?.health);
+        const old_log_level = std.testing.log_level;
+        std.testing.log_level = .err;
+        const invalid = try player.damage(7, std.math.nan(f32), null);
+        std.testing.log_level = old_log_level;
+        try std.testing.expect(!invalid.applied);
+        try std.testing.expectEqual(@as(f32, 25), player.players.get(7).?.health);
+        const result = try player.damage(7, 25 - remaining, null);
+        defer sdl.removeTimer(player.players.get(7).?.respawnTimerId);
+        try std.testing.expect(result.applied and result.fatal and !result.gibbed);
+        try std.testing.expectEqual(remaining, player.players.get(7).?.health);
+        try std.testing.expect(player.players.get(7).?.isDead);
+        try std.testing.expect(!box2d.c.b2Body_IsEnabled(body));
+        try std.testing.expect(!entity.getEntity(body).?.enabled);
+        try std.testing.expectEqual(@as(i32, 1), score.scores.get(7).?.deaths);
+        const timer = player.players.get(7).?.respawnTimerId;
+        try std.testing.expect(!(try player.damage(7, 500, null)).applied);
+        try std.testing.expectEqual(timer, player.players.get(7).?.respawnTimerId);
+        try std.testing.expectEqual(remaining, player.players.get(7).?.health);
+        try std.testing.expectEqual(@as(i32, 1), score.scores.get(7).?.deaths);
+    }
+}
 
 fn loadArt(rig: animation.Rig) !character_art.Pack {
     var detail: data.CharacterAssetDiagnostic = .{};
