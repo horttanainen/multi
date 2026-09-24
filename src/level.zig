@@ -276,6 +276,9 @@ fn spawnStaticSerializableEntity(e: entity.SerializableEntity, shapeDef: box2d.c
 }
 
 pub fn spawnSerializableEntity(e: entity.SerializableEntity) ![]box2d.c.b2BodyId {
+    if (std.mem.eql(u8, e.type, "rubble")) {
+        return rubble.spawnPlaced(e.imgPath, .{ .x = e.scale.x / conv.met2pix, .y = e.scale.y / conv.met2pix }, conv.pixel2M(e.pos), e.rotationDegrees * std.math.pi / 180, e.id);
+    }
     var shapeDef = box2d.c.b2DefaultShapeDef();
     shapeDef.material.friction = e.friction;
     shapeDef.enableSensorEvents = true;

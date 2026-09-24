@@ -352,7 +352,21 @@ pub const ttf = struct {
 // ============================================================
 
 pub const image = struct {
+    // CPU sprite painting, masks and rubble generation all read BGRA bytes.
+    // Decoders may return RGBA, RGB or indexed pixels; normalize once on load.
     pub fn load(path: [*:0]const u8) !*Surface {
-        return c.IMG_Load(path) orelse return error.IMGLoadFailed;
+        const surface: *Surface = c.IMG_Load(path) orelse {
+            std.log.err("image.load: could not load '{s}': {s}", .{ path, c.SDL_GetError() });
+            return error.IMGLoadFailed;
+        };
+        errdefer destroySurface(surface);
+        if (surface.format == c.SDL_PIXELFORMAT_BGRA32) return surface;
+
+        const normalized = c.SDL_ConvertSurface(surface, c.SDL_PIXELFORMAT_BGRA32) orelse {
+            std.log.err("image.load: could not convert '{s}' to BGRA: {s}", .{ path, c.SDL_GetError() });
+            return error.ConvertSurfaceFailed;
+        };
+        destroySurface(surface);
+        return normalized;
     }
 };

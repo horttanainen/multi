@@ -1,0 +1,567 @@
+{
+  "size": {
+    "x": 5120,
+    "y": 1440
+  },
+  "levelHeightMeters": 18,
+  "cameraZoomMeters": 12,
+  "aspectRatio": {
+    "width": 32,
+    "height": 9
+  },
+  "gravity": 10,
+  "pixelsPerMeter": 80,
+  "splitscreen": true,
+  "movementFile": "movements/towerfall_keep.json",
+  "parallaxEntities": [
+    {
+      "parallaxDistance": 8,
+      "fog": 0.4,
+      "imgPath": "level_assets/medieval_keep/backgrounds/far_fortress.png",
+      "scale": {
+        "x": 2.6,
+        "y": 2.6
+      },
+      "pos": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": 1,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.078125,
+        "y": 6.5158371
+      },
+      "pos": {
+        "x": -2540,
+        "y": -250
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 2,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.078125,
+        "y": 6.5158371
+      },
+      "pos": {
+        "x": 2540,
+        "y": -250
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 3,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 10.0,
+        "y": 0.27149321
+      },
+      "pos": {
+        "x": 0,
+        "y": 440
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 4,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 1.40625,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": -2160,
+        "y": 0
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 5,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 1.01153209,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": -1537,
+        "y": -69
+      },
+      "rotationDegrees": -15.109575
+    },
+    {
+      "id": 6,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 1.171875,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": -1000,
+        "y": -135
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 7,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 1.01153209,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": -463,
+        "y": -69
+      },
+      "rotationDegrees": 15.109575
+    },
+    {
+      "id": 8,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.68359375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": -25,
+        "y": 0
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 9,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 200,
+        "y": -24
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 10,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 300,
+        "y": -48
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 11,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 400,
+        "y": -72
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 12,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 500,
+        "y": -48
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 13,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 600,
+        "y": -24
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 14,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.48828125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 775,
+        "y": 0
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 15,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.2734375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 970,
+        "y": -40
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 16,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.2734375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 1110,
+        "y": -80
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 17,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.2734375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 1250,
+        "y": -120
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 18,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.2734375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 1390,
+        "y": -80
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 19,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.2734375,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 1530,
+        "y": -40
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 20,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.48828125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 1725,
+        "y": 0
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 21,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.5694289,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 2001,
+        "y": -82
+      },
+      "rotationDegrees": -30.963757
+    },
+    {
+      "id": 22,
+      "type": "static",
+      "breakable": false,
+      "friction": 0.5,
+      "colliderSource": "rectangle",
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.8203125,
+        "y": 0.45248869
+      },
+      "pos": {
+        "x": 2310,
+        "y": -150
+      },
+      "rotationDegrees": 0
+    },
+    {
+      "id": 23,
+      "type": "spawn",
+      "breakable": false,
+      "friction": 0,
+      "imgPath": "images/spawn.png",
+      "scale": {
+        "x": 1,
+        "y": 1
+      },
+      "pos": {
+        "x": -2350,
+        "y": 320
+      }
+    },
+    {
+      "id": 24,
+      "type": "spawn",
+      "breakable": false,
+      "friction": 0,
+      "imgPath": "images/spawn.png",
+      "scale": {
+        "x": 1,
+        "y": 1
+      },
+      "pos": {
+        "x": 2000,
+        "y": 320
+      }
+    },
+    {
+      "id": 25,
+      "type": "dynamic",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.3125,
+        "y": 0.049773755656108594
+      },
+      "pos": {
+        "x": -1950,
+        "y": 399
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 26,
+      "type": "dynamic",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.375,
+        "y": 0.08597285067873303
+      },
+      "pos": {
+        "x": -1650,
+        "y": 391
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 27,
+      "type": "rubble",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.4296875,
+        "y": 0.22624434389140272
+      },
+      "pos": {
+        "x": -1200,
+        "y": 360
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 28,
+      "type": "rubble",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.4296875,
+        "y": 0.27149321266968324
+      },
+      "pos": {
+        "x": -550,
+        "y": 350
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 29,
+      "type": "dynamic",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.46875,
+        "y": 0.13574660633484162
+      },
+      "pos": {
+        "x": -50,
+        "y": 380
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 30,
+      "type": "dynamic",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.1953125,
+        "y": 0.18099547511312217
+      },
+      "pos": {
+        "x": 750,
+        "y": 370
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 31,
+      "type": "dynamic",
+      "friction": 0.7,
+      "imgPath": "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+      "scale": {
+        "x": 0.5078125,
+        "y": 0.07239819004524888
+      },
+      "pos": {
+        "x": 1250,
+        "y": 394
+      },
+      "rotationDegrees": 0,
+      "health": 20
+    },
+    {
+      "id": 32,
+      "type": "dynamic",
+      "friction": 0.1,
+      "imgPath": "level_assets/animation_tests/low_l.svg",
+      "scale": { "x": 1, "y": 1 },
+      "pos": { "x": -850, "y": 386 },
+      "health": 20
+    },
+    {
+      "id": 33,
+      "type": "dynamic",
+      "friction": 0.1,
+      "imgPath": "level_assets/animation_tests/tall_l.svg",
+      "scale": { "x": 1, "y": 1 },
+      "pos": { "x": 370, "y": 338 },
+      "health": 20
+    }
+  ]
+}

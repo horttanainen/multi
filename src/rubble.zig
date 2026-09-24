@@ -407,11 +407,6 @@ pub fn prepare(spriteUuid: u64, seed: u64) !TemplateId {
         std.log.err("rubble.prepare: source sprite {d} is missing", .{spriteUuid});
         return error.SpriteNotFound;
     };
-    if (source.surface.pitch < source.surface.w * 4) {
-        std.log.err("rubble.prepare: source sprite {d} does not have four-byte pixels", .{spriteUuid});
-        return error.UnsupportedPixelFormat;
-    }
-
     const templateId = templateIdFor(source, seed);
     if (templates.contains(templateId)) return templateId;
 
@@ -484,7 +479,7 @@ fn normalizedOrZero(value: vec.Vec2) vec.Vec2 {
     return .{ .x = value.x / length, .y = value.y / length };
 }
 
-fn activatePiece(piece: Piece, sourcePosition: vec.Vec2, sourceAngle: f32, sourceVelocity: vec.Vec2, sourceAngularVelocity: f32, damageDirection: vec.Vec2, debrisVelocity: vec.Vec2) !void {
+fn activatePiece(piece: Piece, sourcePosition: vec.Vec2, sourceAngle: f32, sourceVelocity: vec.Vec2, sourceAngularVelocity: f32, damageDirection: vec.Vec2, debrisVelocity: vec.Vec2, scatter: bool) !box2d.c.b2BodyId {
     const bodyId = try acquirePieceBody(piece);
     box2d.c.b2Body_Disable(bodyId);
     errdefer {
@@ -522,10 +517,42 @@ fn activatePiece(piece: Piece, sourcePosition: vec.Vec2, sourceAngle: f32, sourc
     rubbleEntity.enabled = true;
     box2d.c.b2Body_SetTransform(bodyId, vec.toBox2d(piecePosition), box2d.c.b2MakeRot(sourceAngle));
     box2d.c.b2Body_Enable(bodyId);
-    const launchVelocity = vec.add(vec.add(sourceVelocity, scatterVelocity), debrisVelocity);
+    const launchVelocity = if (scatter) vec.add(vec.add(sourceVelocity, scatterVelocity), debrisVelocity) else vec.zero;
     box2d.c.b2Body_SetLinearVelocity(bodyId, vec.toBox2d(launchVelocity));
     const angularVariation = runtime.random().float(f32) * 8.0 - 4.0;
-    box2d.c.b2Body_SetAngularVelocity(bodyId, sourceAngularVelocity + angularVariation);
+    box2d.c.b2Body_SetAngularVelocity(bodyId, if (scatter) sourceAngularVelocity + angularVariation else 0);
+    return bodyId;
+}
+
+// Authored rubble uses exactly the same generated shapes, pools, and damage
+// lifecycle as explosion debris, with no launch impulse at level load.
+pub fn spawnPlaced(imgPath: []const u8, scale: vec.Vec2, position: vec.Vec2, angle: f32, seed: u64) ![]box2d.c.b2BodyId {
+    const source = try sprite.createFromImgWithBacking(imgPath, scale, vec.zero, .mutable, .world_meters);
+    defer sprite.cleanupLater(source);
+    const templateId = try prepare(source, seed);
+    const template = templates.get(templateId) orelse {
+        std.log.err("rubble.spawnPlaced: prepared template {d} is missing", .{templateId});
+        return error.RubbleTemplateNotFound;
+    };
+    var bodies: std.ArrayListUnmanaged(box2d.c.b2BodyId) = .empty;
+    defer bodies.deinit(allocator);
+    try bodies.ensureTotalCapacity(allocator, template.pieces.len);
+    errdefer for (bodies.items) |bodyId| {
+        box2d.c.b2Body_Disable(bodyId);
+        const pieceEntity = entity.entities.getPtrLocking(bodyId);
+        if (pieceEntity == null) {
+            std.log.err("rubble.spawnPlaced: activated body has no entity during cleanup", .{});
+            pool.releaseBody(bodyId) catch |err| std.log.err("rubble.spawnPlaced: failed to return orphaned body to pool: {}", .{err});
+            continue;
+        }
+        pieceEntity.?.enabled = false;
+        pool.releaseBody(bodyId) catch |err| std.log.err("rubble.spawnPlaced: failed to return body to pool: {}", .{err});
+    };
+    for (template.pieces) |piece| {
+        const bodyId = try activatePiece(piece, position, angle, vec.zero, 0, vec.zero, vec.zero, false);
+        bodies.appendAssumeCapacity(bodyId);
+    }
+    return bodies.toOwnedSlice(allocator);
 }
 
 pub fn activate(templateId: TemplateId, sourceBodyId: box2d.c.b2BodyId, damageDirection: vec.Vec2, debrisVelocity: vec.Vec2) !void {
@@ -544,8 +571,9 @@ pub fn activate(templateId: TemplateId, sourceBodyId: box2d.c.b2BodyId, damageDi
     const sourceAngularVelocity = box2d.c.b2Body_GetAngularVelocity(sourceBodyId);
 
     for (template.pieces) |piece| {
-        activatePiece(piece, sourcePosition, sourceAngle, sourceVelocity, sourceAngularVelocity, damageDirection, debrisVelocity) catch |err| {
+        _ = activatePiece(piece, sourcePosition, sourceAngle, sourceVelocity, sourceAngularVelocity, damageDirection, debrisVelocity, true) catch |err| {
             std.log.err("rubble.activate: could not activate pooled rubble piece: {}", .{err});
+            continue;
         };
     }
 }

@@ -42,7 +42,11 @@ existing movement controller. Independent review, corrections, validation and
 user testing are complete.
 See [character_animation_terrain.md](character_animation_terrain.md) for the
 terrain profile, runtime constraints and test scene. Moving/destructible rubble
-is a separate later phase.
+is accepted by the user, including generic solid support for giblets, stepping
+and blocking against the same supporting body's upright, and correct blood
+colors on SVG objects. Independent review and validation are complete; the user
+has authorized the phase commit.
+See [character_animation_rubble.md](character_animation_rubble.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -310,8 +314,12 @@ Split this work into independently reviewed commits:
   constraints, with regression coverage and a dedicated terrain scene. The current
   correction adds grounded slope travel and collision-checked stair climbing up
   to the movement profile limit (0.5 m in Tower Keep).
-- **3C, later:** Moving and destructible rubble with body-local anchors and
-  support-lifetime validation; plan and review this as a separate phase.
+- **3C, rubble (accepted):** Dynamic step traversal, independent body-local
+  foot anchors, support-relative cadence, render interpolation, and support
+  destruction/pool-reuse validation. Generic solid support includes giblets;
+  anticipatory stepping and same-body blocking preserve pushing separate objects.
+  Extend the existing movement, animation,
+  pool and rubble owners; review and commit separately from static terrain.
 
 ### 4. Blender authoring after the setup works
 

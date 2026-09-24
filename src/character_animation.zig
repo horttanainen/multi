@@ -116,17 +116,28 @@ pub const FootState = struct {
     locked: bool = false,
     blocked: bool = false,
     anchor: vec.Vec2 = vec.zero,
+    support: ?movement.Support = null,
+    local_anchor: vec.Vec2 = vec.zero,
+    support_origin: vec.Vec2 = vec.zero,
+    support_angle: f32 = 0,
     correction: vec.Vec2 = vec.zero,
     terrain_y: f32 = 0,
     terrain_angle: f32 = 0,
 };
-// A finite, static polygon face in world coordinates. Render interpolation can
-// evaluate its slope without querying physics or extending it across a ledge.
+// Finite face and support snapshot. Rendering reconstructs moving faces from
+// their local endpoints without querying physics or bridging separate ledges.
 pub const GroundSurface = struct {
     point: vec.Vec2,
     normal: vec.Vec2,
     minimum_x: f32,
     maximum_x: f32,
+    support: ?movement.Support = null,
+    edge: usize = 0,
+    moving: bool = false,
+    origin: vec.Vec2 = vec.zero,
+    angle: f32 = 0,
+    local_a: vec.Vec2 = vec.zero,
+    local_b: vec.Vec2 = vec.zero,
 };
 pub const WallState = struct {
     action: WallAction = .none,
@@ -144,9 +155,11 @@ pub const WallState = struct {
 };
 pub const LocomotionInput = struct {
     body: vec.Vec2,
+    body_id: ?box2d.c.b2BodyId = null,
     supported: bool,
-    // Static support height centers the bounded cosmetic terrain probes.
+    // Support height centers the bounded cosmetic terrain probes.
     ground_y: ?f32,
+    support_velocity_x: f32 = 0,
     ground_normal: vec.Vec2 = .{ .x = 0, .y = -1 },
     facing_right: bool,
     // Box2D convention: positive is downward; relative to support when present.
@@ -778,28 +791,54 @@ fn locomotionControls(set: *const Assets, state: *const PlayerState) [controlCou
     return controls;
 }
 
+const GroundProbe = struct {
+    body_id: ?box2d.c.b2BodyId,
+    result: box2d.c.b2RayResult = std.mem.zeroes(box2d.c.b2RayResult),
+};
+
+fn collectGroundProbe(shape: box2d.c.b2ShapeId, point: box2d.c.b2Vec2, normal: box2d.c.b2Vec2, fraction: f32, context: ?*anyopaque) callconv(.c) f32 {
+    const pointer = context orelse {
+        std.log.err("character_animation.collectGroundProbe: query context is missing", .{});
+        return 0;
+    };
+    const probe: *GroundProbe = @ptrCast(@alignCast(pointer));
+    // The callback API reports initial overlap with no surface normal.
+    if (normal.x == 0 and normal.y == 0) return -1;
+    const support = movement.supportForShape(shape) orelse return -1;
+    if (!movement.traversableSupport(support, probe.body_id)) return -1;
+    if (probe.result.hit and probe.result.fraction <= fraction) return probe.result.fraction;
+    probe.result = .{ .shapeId = shape, .point = point, .normal = normal, .fraction = fraction, .hit = true };
+    return fraction;
+}
+
 fn groundAt(x: f32, input: LocomotionInput, profile: data.CharacterLocomotionData) ?GroundSurface {
     if (input.ground_y == null or -input.ground_normal.y < @cos(profile.terrain.max_slope_radians)) return null;
     // Center on the controller's support plane at this X, so a downhill heel
     // gets the same step budget as an uphill toe, regardless of stride width.
     const floor_y = input.ground_y.? - (x - input.body.x) * input.ground_normal.x / input.ground_normal.y;
     var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = collision.CATEGORY_SENSOR;
-    filter.maskBits = collision.MASK_SENSOR_FOOT;
+    filter.categoryBits = std.math.maxInt(u64);
+    filter.maskBits = std.math.maxInt(u64);
     const settings = profile.terrain;
-    const result = box2d.castRayClosest(.{ .x = x, .y = floor_y - settings.probe_up_m }, .{ .x = 0, .y = settings.probe_up_m + settings.probe_down_m }, filter);
+    var probe = GroundProbe{ .body_id = input.body_id };
+    box2d.castRay(.{ .x = x, .y = floor_y - settings.probe_up_m }, .{ .x = 0, .y = settings.probe_up_m + settings.probe_down_m }, filter, collectGroundProbe, &probe);
+    const result = probe.result;
     if (!result.hit or -result.normal.y < @cos(settings.max_slope_radians)) return null;
-    const body = box2d.c.b2Shape_GetBody(result.shapeId);
-    if (box2d.c.b2Body_GetType(body) != box2d.c.b2_staticBody or box2d.c.b2Shape_GetType(result.shapeId) != box2d.c.b2_polygonShape) return null;
+    const support = movement.supportForShape(result.shapeId) orelse return null;
+    if (box2d.c.b2Shape_GetType(result.shapeId) != box2d.c.b2_polygonShape) return null;
+    const body = support.bodyId;
     const polygon = box2d.c.b2Shape_GetPolygon(result.shapeId);
     const count: usize = @intCast(polygon.count);
     for (0..count) |index| {
-        const a = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, polygon.vertices[index]));
-        const b = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, polygon.vertices[(index + 1) % count]));
+        const radius_offset = vec.mul(vec.fromBox2d(polygon.normals[index]), polygon.radius);
+        const local_a = vec.add(vec.fromBox2d(polygon.vertices[index]), radius_offset);
+        const local_b = vec.add(vec.fromBox2d(polygon.vertices[(index + 1) % count]), radius_offset);
+        const a = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, vec.toBox2d(local_a)));
+        const b = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, vec.toBox2d(local_b)));
         const edge = vec.subtract(b, a);
         const normal = vec.normalize(.{ .x = edge.y, .y = -edge.x });
         if (vec.dot(normal, vec.fromBox2d(result.normal)) < 0.9999) continue;
-        return .{ .point = vec.fromBox2d(result.point), .normal = normal, .minimum_x = @min(a.x, b.x), .maximum_x = @max(a.x, b.x) };
+        return .{ .point = vec.fromBox2d(result.point), .normal = normal, .minimum_x = @min(a.x, b.x), .maximum_x = @max(a.x, b.x), .support = support, .edge = index, .moving = box2d.c.b2Body_GetType(body) != box2d.c.b2_staticBody, .origin = vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), .angle = box2d.c.b2Rot_GetAngle(box2d.c.b2Body_GetRotation(body)), .local_a = local_a, .local_b = local_b };
     }
     // Rounded polygon corners do not provide a planar foothold.
     return null;
@@ -812,8 +851,26 @@ fn surfaceHeight(surface: ?GroundSurface, x: f32) ?f32 {
     return face.point.y - (x - face.point.x) * face.normal.x / face.normal.y;
 }
 
-fn interpolatedSurface(before: ?GroundSurface, after: ?GroundSurface, x: f32) ?GroundSurface {
+fn interpolatedSurface(before: ?GroundSurface, after: ?GroundSurface, x: f32, fraction: f32) ?GroundSurface {
     if (after == null) return null; // Fresh probes released or lost this surface.
+    const same_face = before != null and before.?.edge == after.?.edge and std.meta.eql(before.?.support, after.?.support);
+    // A previous moving face can no longer constrain a replacement support.
+    // Keep the static stair rule below only for stationary geometry.
+    if ((after.?.moving or (before != null and before.?.moving)) and !same_face) return after;
+    if (after.?.moving and same_face) {
+        var surface = after.?;
+        const transform = box2d.interpolateState(.{ .pos = vec.toBox2d(before.?.origin), .rotAngle = before.?.angle }, .{ .pos = vec.toBox2d(surface.origin), .rotAngle = surface.angle }, fraction);
+        surface.origin = vec.fromBox2d(transform.pos);
+        surface.angle = transform.rotAngle;
+        const a = vec.add(surface.origin, rotate(surface.local_a, surface.angle));
+        const b = vec.add(surface.origin, rotate(surface.local_b, surface.angle));
+        const edge = vec.subtract(b, a);
+        surface.point = a;
+        surface.normal = vec.normalize(.{ .x = edge.y, .y = -edge.x });
+        surface.minimum_x = @min(a.x, b.x);
+        surface.maximum_x = @max(a.x, b.x);
+        return surface;
+    }
     const current_y = surfaceHeight(after, x);
     const previous_y = surfaceHeight(before, x);
     if (current_y == null) return if (previous_y == null) null else before;
@@ -1261,7 +1318,7 @@ fn adaptGround(set: *const Assets, state: *PlayerState, input: LocomotionInput, 
         // would leave the foot hovering behind the surface during stance.
         const sloped = surface != null and @abs(surface.?.normal.x) > 0.00001;
         foot.terrain_y = if (sloped) target_y_offset else std.math.lerp(foot.terrain_y, target_y_offset, response);
-        foot.terrain_angle = std.math.lerp(foot.terrain_angle, target_angle, response);
+        foot.terrain_angle = if (surface != null and surface.?.moving and foot.locked) target_angle else std.math.lerp(foot.terrain_angle, target_angle, response);
         state.controls[@intFromEnum(foot_angles[index])] += foot.terrain_angle * sign;
     }
     const after = turnedFootOffsets(set.rig, state.controls, state.foot_heading, state.facing_right);
@@ -1272,6 +1329,18 @@ fn adaptGround(set: *const Assets, state: *PlayerState, input: LocomotionInput, 
     const pelvis_offset = (state.feet[0].terrain_y + state.feet[1].terrain_y) / 4;
     state.controls[@intFromEnum(Control.pelvis_y)] += std.math.clamp(pelvis_offset, -profile.terrain.pelvis_limit_m, profile.terrain.pelvis_limit_m);
     fitGroundedPelvis(set, &state.controls, state.sole_surfaces, state.pelvis_reference_y);
+}
+
+fn refreshFootAnchor(foot: *FootState, intent: bool) void {
+    if (!foot.locked or foot.support == null) return;
+    if (!movement.validSupport(foot.support.?)) {
+        foot.locked = false;
+        foot.blocked = intent;
+        return;
+    }
+    foot.support_origin = vec.fromBox2d(box2d.c.b2Body_GetPosition(foot.support.?.bodyId));
+    foot.support_angle = box2d.c.b2Rot_GetAngle(box2d.c.b2Body_GetRotation(foot.support.?.bodyId));
+    foot.anchor = vec.add(foot.support_origin, rotate(foot.local_anchor, foot.support_angle));
 }
 
 fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt: f32) void {
@@ -1291,13 +1360,17 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
         const intent = state.contact_intent[index];
         if (!intent or !moving) foot.blocked = false;
         const supported = input.ground_y != null and input.supported and state.action != .jump and state.action != .fall;
+        refreshFootAnchor(foot, intent);
         if (foot.locked) {
             const correction = vec.subtract(foot.anchor, desired_toe);
             const ankle = vec.add(desired, .{ .x = correction.x * sign, .y = -correction.y });
             const anchor_surface = if (supported) groundAt(foot.anchor.x, input, profile) else null;
             const anchor_floor = surfaceHeight(anchor_surface, foot.anchor.x);
             const valid = supported and intent and toe_can_support and anchor_floor != null and
-                @abs(anchor_floor.? - foot.anchor.y) <= 0.00001 and
+                @abs(anchor_floor.? - foot.anchor.y) <= 0.001 and
+                anchor_surface.?.support != null and foot.support != null and
+                box2d.c.B2_ID_EQUALS(anchor_surface.?.support.?.bodyId, foot.support.?.bodyId) and
+                anchor_surface.?.support.?.poolActivation == foot.support.?.poolActivation and
                 vec.magnitude(correction) <= profile.max_anchor_error_m and
                 reachableFoot(set.rig, state.controls, index, ankle);
             if (!valid) {
@@ -1316,6 +1389,10 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
             foot.locked = @abs(correction.y) <= profile.plant_distance_m and reachableFoot(set.rig, state.controls, index, ankle);
             if (!foot.locked) break :acquire;
             foot.anchor = anchor;
+            foot.support = surface.?.support;
+            foot.support_origin = surface.?.origin;
+            foot.support_angle = surface.?.angle;
+            foot.local_anchor = rotate(vec.subtract(anchor, foot.support_origin), -foot.support_angle);
             foot.correction = correction;
         }
         if (!foot.locked) foot.correction = vec.mul(foot.correction, @exp(-dt / profile.release_seconds));
@@ -1365,8 +1442,11 @@ fn plantFeet(set: *const Assets, state: *PlayerState, input: LocomotionInput, dt
 
 // The fixed-step caller provides physical position and fresh grounding. Tests
 // use this same entry point with a Box2D floor and repeatable movement samples.
-pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
+pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64) void {
     if (assets == null) return; // Sprite fallback after an initial loading failure.
+    var input = requested_input;
+    const controller = movement.states.get(player_id);
+    if (input.body_id == null and controller != null) input.body_id = controller.?.bodyId;
     const state = states.getPtr(player_id) orelse {
         std.log.warn("character_animation.updatePlayer: state missing for player {d}", .{player_id});
         return;
@@ -1401,7 +1481,7 @@ pub fn updatePlayer(player_id: usize, input: LocomotionInput, dt: f64) void {
     state.previous_limb_release_seconds = state.limb_release_seconds;
     state.limb_release_seconds += step;
     const previous_speed = state.speed_mps;
-    state.speed_mps = (input.body.x - state.body.x) / step;
+    state.speed_mps = (input.body.x - state.body.x) / step - input.support_velocity_x;
     state.body = input.body;
     state.previous_aim_weight = state.aim_weight;
     if (input.aiming) state.aim_direction = input.aim_direction;
@@ -1541,7 +1621,8 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     const sign: f32 = if (state.facing_right) 1 else -1;
     const offsets = turnedFootOffsets(set.rig, controls, std.math.lerp(state.previous_foot_heading, state.foot_heading, fraction), state.facing_right);
     for (state.previous_feet, state.feet, state.previous_wall.feet, state.wall.feet, 0..) |before, foot, before_wall, wall, index| {
-        const anchor: ?vec.Vec2 = if (before.locked and foot.locked and std.meta.eql(before.anchor, foot.anchor)) foot.anchor else if (state.previous_wall.feet_planted[index] and state.wall.feet_planted[index] and state.previous_wall.side == state.wall.side and before_wall != null and wall != null) vec.add(before_wall.?, vec.mul(vec.subtract(wall.?, before_wall.?), fraction)) else null;
+        var anchor = interpolatedFootAnchor(before, foot, fraction);
+        if (anchor == null and state.previous_wall.feet_planted[index] and state.wall.feet_planted[index] and state.previous_wall.side == state.wall.side and before_wall != null and wall != null) anchor = vec.add(before_wall.?, vec.mul(vec.subtract(wall.?, before_wall.?), fraction));
         if (anchor == null) continue;
         const offset = offsets[index * 2];
         controls[@intFromEnum(target_x[index])] = (anchor.?.x - body.x) * sign - set.rig.root_from_body.x - offset.x;
@@ -1552,7 +1633,7 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
         const leg = index / 2;
         const offset = if (index % 2 == 0) offsets[index] else vec.add(offsets[index - 1], offsets[index]);
         const point = toWorld(set.rig, .{ .x = controls[@intFromEnum(target_x[leg])] + offset.x, .y = controls[@intFromEnum(target_y[leg])] + offset.y }, body, state.facing_right);
-        surface.* = interpolatedSurface(before, after, point.x);
+        surface.* = interpolatedSurface(before, after, point.x, fraction);
     }
     clearSoles(set.rig, &controls, offsets, surfaces, body, state.facing_right);
     fitGroundedPelvis(set, &controls, surfaces, std.math.lerp(state.previous_pelvis_reference_y, state.pelvis_reference_y, fraction));
@@ -1560,7 +1641,7 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     const before_clearance = solvePoseWithFeet(set.rig, controls, offsets);
     for (&knee_surfaces, state.previous_knee_surfaces, state.knee_surfaces, set.rig.limbs[0..2]) |*surface, before, after, limb| {
         const knee = toWorld(set.rig, before_clearance.joints[@intFromEnum(limb.middle)], body, state.facing_right);
-        surface.* = interpolatedSurface(before, after, knee.x);
+        surface.* = interpolatedSurface(before, after, knee.x, fraction);
     }
     clearKnees(set.rig, &controls, knee_surfaces, body, state.facing_right);
     constrainGroundFeet(set, &controls, offsets, surfaces, body, state.facing_right);
@@ -1579,6 +1660,12 @@ pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose
     blendReleasedLimbs(set, state, &pose, offsets, floors, body, fraction);
     pose.contact_intent = state.contact_intent;
     return pose;
+}
+
+fn interpolatedFootAnchor(before: FootState, after: FootState, fraction: f32) ?vec.Vec2 {
+    if (!before.locked or !after.locked or !std.meta.eql(before.support, after.support) or !std.meta.eql(before.local_anchor, after.local_anchor)) return null;
+    const transform = box2d.interpolateState(.{ .pos = vec.toBox2d(before.support_origin), .rotAngle = before.support_angle }, .{ .pos = vec.toBox2d(after.support_origin), .rotAngle = after.support_angle }, fraction);
+    return vec.add(vec.fromBox2d(transform.pos), rotate(after.local_anchor, transform.rotAngle));
 }
 
 fn blendReleasedLimbs(set: *const Assets, state: PlayerState, pose: *Pose, offsets: [4]vec.Vec2, floors: [4]?f32, body: vec.Vec2, fraction: f32) void {
@@ -1794,10 +1881,12 @@ pub fn fixedUpdate(dt: f64) void {
         var ground_y: ?f32 = null;
         const body_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
         const contact = movement_state.groundState.groundContact;
-        if (contact != null and -contact.?.normal.y >= @cos(assets.?.locomotion.terrain.max_slope_radians) and box2d.c.b2Body_GetType(contact.?.bodyId) == box2d.c.b2_staticBody) ground_y = contact.?.worldPoint.y - (body_position.x - contact.?.worldPoint.x) * contact.?.normal.x / contact.?.normal.y;
+        const support = if (contact == null) null else movement.Support{ .bodyId = contact.?.bodyId, .shapeId = contact.?.shapeId, .poolActivation = contact.?.poolActivation };
+        const valid_support = support != null and movement.traversableSupport(support.?, p.bodyId);
+        if (valid_support and -contact.?.normal.y >= @cos(assets.?.locomotion.terrain.max_slope_radians)) ground_y = contact.?.worldPoint.y - (body_position.x - contact.?.worldPoint.x) * contact.?.normal.x / contact.?.normal.y;
         const velocity = box2d.c.b2Body_GetLinearVelocity(p.bodyId);
         // A rising platform should not look like a jump away from its support.
-        const support_velocity = if (contact == null or !movement_state.groundState.supported) vec.zero else vec.fromBox2d(box2d.c.b2Body_GetWorldPointVelocity(contact.?.bodyId, vec.toBox2d(contact.?.worldPoint)));
+        const support_velocity = if (!valid_support or !movement_state.groundState.supported) vec.zero else vec.fromBox2d(box2d.c.b2Body_GetWorldPointVelocity(contact.?.bodyId, vec.toBox2d(contact.?.worldPoint)));
         const relative_velocity = vec.subtract(vec.fromBox2d(velocity), support_velocity);
         const direction = movement.locomotionDirection(player_id);
         // Towerfall hands the movement stick to aiming. Preserve an existing
@@ -1808,6 +1897,7 @@ pub fn fixedUpdate(dt: f64) void {
             .body = body_position,
             .supported = movement_state.groundState.supported,
             .ground_y = ground_y,
+            .support_velocity_x = support_velocity.x,
             .ground_normal = if (contact == null) .{ .x = 0, .y = -1 } else contact.?.normal,
             .facing_right = movement_state.facingRight,
             .vertical_speed_mps = relative_velocity.y,
@@ -1815,7 +1905,7 @@ pub fn fixedUpdate(dt: f64) void {
             .kneel_requested = direction.y < 0 or hold_kneel,
             .aiming = p.isAiming,
             .aim_direction = p.aimDirection,
-            .horizontal_speed_mps = velocity.x,
+            .horizontal_speed_mps = relative_velocity.x,
             .movement_direction = direction.x,
             .wall_sliding = movement_state.wallSliding,
             .wall_jump_direction = movement_state.wallJumpedDirection,

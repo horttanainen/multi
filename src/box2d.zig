@@ -132,15 +132,23 @@ pub fn getState(bodyId: c.b2BodyId) State {
 }
 
 pub fn getInterpolatedState(maybeEarlierState: ?State, currentState: State) State {
-    var interpolatedPosMeter = currentState.pos;
-    var interpolatedRotationAngle = currentState.rotAngle;
-    if (maybeEarlierState) |earlierState| {
-        interpolatedPosMeter = c.b2Vec2{ .x = @floatCast(time.alpha * currentState.pos.x + (1 - time.alpha) * earlierState.pos.x), .y = @floatCast(time.alpha * currentState.pos.y + (1 - time.alpha) * earlierState.pos.y) };
+    const earlierState = maybeEarlierState orelse return currentState;
+    return interpolateState(earlierState, currentState, @floatCast(time.alpha));
+}
 
-        interpolatedRotationAngle = @floatCast(time.alpha * currentState.rotAngle + (1 - time.alpha) * earlierState.rotAngle);
-    }
+// Entity drawing and body-local animation contacts share the same transform,
+// including rotations crossing the signed-angle boundary.
+pub fn interpolateState(before: State, after: State, fraction: f32) State {
+    const delta = after.rotAngle - before.rotAngle;
+    return .{
+        .pos = .{ .x = std.math.lerp(before.pos.x, after.pos.x, fraction), .y = std.math.lerp(before.pos.y, after.pos.y, fraction) },
+        .rotAngle = before.rotAngle + std.math.atan2(@sin(delta), @cos(delta)) * fraction,
+    };
+}
 
-    return .{ .pos = interpolatedPosMeter, .rotAngle = interpolatedRotationAngle };
+pub fn filtersCollide(a: c.b2Filter, b: c.b2Filter) bool {
+    if (a.groupIndex != 0 and a.groupIndex == b.groupIndex) return a.groupIndex > 0;
+    return a.categoryBits & b.maskBits != 0 and b.categoryBits & a.maskBits != 0;
 }
 
 pub fn subtract(a: c.b2Vec2, b: c.b2Vec2) c.b2Vec2 {

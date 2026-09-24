@@ -23,7 +23,11 @@ const BodyPool = struct {
 };
 
 var bodyPools = std.AutoArrayHashMapUnmanaged(Id, BodyPool).empty;
-var bodyToPool = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Id).empty;
+pub const Membership = struct { poolId: Id, activation: u64 = 0 };
+// Zero marks an available body. Every acquisition gets a new identity, including
+// recycling an active body whose Box2D ID remains valid.
+pub var memberships = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Membership).empty;
+var nextActivation: u64 = 1;
 var bodiesToRelease = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, void).empty;
 var nextPoolId: Id = 1;
 
@@ -38,7 +42,7 @@ fn validateBodyIds(bodyIds: []const box2d.c.b2BodyId) !void {
             std.log.err("pool.validateBodyIds: body at index {d} is invalid", .{index});
             return error.InvalidBody;
         }
-        if (bodyToPool.contains(bodyId)) {
+        if (memberships.contains(bodyId)) {
             std.log.err("pool.validateBodyIds: body at index {d} already belongs to a pool", .{index});
             return error.BodyAlreadyPooled;
         }
@@ -114,11 +118,11 @@ pub fn addBodies(poolId: Id, bodyIds: []const box2d.c.b2BodyId) !void {
     try bodyPool.bodyIds.ensureTotalCapacity(allocator, newBodyCount);
     try bodyPool.availableIndices.ensureTotalCapacity(allocator, newBodyCount);
     try bodyPool.activeIndices.ensureTotalCapacity(allocator, newBodyCount);
-    try bodyToPool.ensureUnusedCapacity(allocator, bodyIds.len);
+    try memberships.ensureUnusedCapacity(allocator, bodyIds.len);
 
     bodyPool.bodyIds.appendSliceAssumeCapacity(bodyIds);
     for (bodyIds) |bodyId| {
-        bodyToPool.putAssumeCapacityNoClobber(bodyId, poolId);
+        memberships.putAssumeCapacityNoClobber(bodyId, .{ .poolId = poolId });
     }
 
     var index = newBodyCount;
@@ -144,6 +148,19 @@ fn discardInvalidBody(poolId: Id, bodyId: box2d.c.b2BodyId) !void {
     }
 }
 
+fn activateMembership(bodyId: box2d.c.b2BodyId) !void {
+    const membership = memberships.getPtr(bodyId) orelse {
+        std.log.err("pool.activateMembership: acquired body has no membership", .{});
+        return error.BodyNotInPool;
+    };
+    if (nextActivation == 0) {
+        std.log.err("pool.activateMembership: activation ID space is exhausted", .{});
+        return error.ActivationIdExhausted;
+    }
+    membership.activation = nextActivation;
+    nextActivation +%= 1;
+}
+
 pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
     const bodyPool = bodyPools.getPtr(poolId) orelse {
         std.log.err("pool.acquire: pool {d} is missing", .{poolId});
@@ -158,6 +175,7 @@ pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
             continue;
         }
 
+        try activateMembership(bodyId);
         _ = bodyPool.availableIndices.pop();
         bodyPool.activeIndices.appendAssumeCapacity(availableIndex);
         return .{
@@ -175,6 +193,7 @@ pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
             continue;
         }
 
+        try activateMembership(bodyId);
         _ = bodiesToRelease.swapRemove(bodyId);
         _ = bodyPool.activeIndices.orderedRemove(0);
         bodyPool.activeIndices.appendAssumeCapacity(recycledIndex);
@@ -187,12 +206,12 @@ pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
 }
 
 pub fn release(poolId: Id, bodyId: box2d.c.b2BodyId) !void {
-    const registeredPoolId = bodyToPool.get(bodyId) orelse {
+    const membership = memberships.getPtr(bodyId) orelse {
         std.log.err("pool.release: body is not registered with a pool", .{});
         return error.BodyNotInPool;
     };
-    if (registeredPoolId != poolId) {
-        std.log.err("pool.release: body belongs to pool {d}, not pool {d}", .{ registeredPoolId, poolId });
+    if (membership.poolId != poolId) {
+        std.log.err("pool.release: body belongs to pool {d}, not pool {d}", .{ membership.poolId, poolId });
         return error.BodyInDifferentPool;
     }
 
@@ -215,19 +234,20 @@ pub fn release(poolId: Id, bodyId: box2d.c.b2BodyId) !void {
         return error.BodyNotActive;
     }
 
+    membership.activation = 0;
     bodyPool.availableIndices.appendAssumeCapacity(bodyIndex.?);
 }
 
 pub fn releaseBody(bodyId: box2d.c.b2BodyId) !void {
-    const poolId = bodyToPool.get(bodyId) orelse {
+    const membership = memberships.get(bodyId) orelse {
         std.log.err("pool.releaseBody: body is not registered with a pool", .{});
         return error.BodyNotInPool;
     };
-    try release(poolId, bodyId);
+    try release(membership.poolId, bodyId);
 }
 
 pub fn queueRelease(bodyId: box2d.c.b2BodyId) void {
-    if (!bodyToPool.contains(bodyId)) {
+    if (!memberships.contains(bodyId)) {
         std.log.err("pool.queueRelease: body is not registered with a pool", .{});
         return;
     }
@@ -258,8 +278,8 @@ pub fn processQueuedReleases() void {
 
 // Removes a body before its owner destroys it. Returns false for non-pooled bodies.
 pub fn discardBody(bodyId: box2d.c.b2BodyId) bool {
-    const removedMembership = bodyToPool.fetchSwapRemove(bodyId) orelse return false;
-    const poolId = removedMembership.value;
+    const removedMembership = memberships.fetchSwapRemove(bodyId) orelse return false;
+    const poolId = removedMembership.value.poolId;
     const bodyPool = bodyPools.getPtr(poolId) orelse {
         std.log.err("pool.discardBody: pool {d} is missing for registered body", .{poolId});
         return true;
@@ -303,7 +323,7 @@ pub fn takeBodyIds(poolId: Id) ![]box2d.c.b2BodyId {
 
     var bodyPool = removed.value;
     for (bodyPool.bodyIds.items) |bodyId| {
-        const removedMembership = bodyToPool.fetchSwapRemove(bodyId);
+        const removedMembership = memberships.fetchSwapRemove(bodyId);
         if (removedMembership != null) continue;
         std.log.err("pool.takeBodyIds: body in pool {d} has no reverse membership", .{poolId});
     }
@@ -325,10 +345,10 @@ pub fn cleanup() void {
         deinitBodyPool(bodyPool);
     }
     bodyPools.deinit(allocator);
-    bodyToPool.deinit(allocator);
+    memberships.deinit(allocator);
     bodiesToRelease.deinit(allocator);
     bodyPools = .empty;
-    bodyToPool = .empty;
+    memberships = .empty;
     bodiesToRelease = .empty;
     nextPoolId = 1;
 }

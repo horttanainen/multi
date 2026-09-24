@@ -24,6 +24,7 @@ const camera = @import("src/camera.zig");
 const time = @import("src/time.zig");
 const audio = @import("src/audio.zig");
 const conv = @import("src/conversion.zig");
+const pool = @import("src/pool.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -980,7 +981,7 @@ test "locomotion settles a stopped swing, turns using actual displacement, and r
     try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.speed_mps);
 }
 
-test "flat foot queries release removed support even with stale grounded input and ignore moving floors" {
+test "foot queries follow moving support and release removed support despite stale grounded input" {
     const floor = try beginLocomotion();
     defer box2d.destroyWorld();
     defer animation.cleanup();
@@ -988,7 +989,7 @@ test "flat foot queries release removed support even with stale grounded input a
     for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
     box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
     advanceRun(0, true);
-    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(foot.locked);
     box2d.c.b2Body_SetType(floor, box2d.c.b2_staticBody);
     animation.resetPlayer(7);
     advanceRun(0, true);
@@ -1488,8 +1489,7 @@ test "real physics and movement grounding drive jump fall and landing through fi
     defer std.testing.allocator.free(bytes);
     try std.Io.Dir.cwd().createDirPath(std.testing.io, "artifacts/character_animation");
     try fs.writeFile("artifacts/character_animation/airborne_samples.json", bytes);
-    // Existing moving support remains grounded. Foot anchoring to that support
-    // is a later phase, but its upward velocity must not select the jump clip.
+    // A rising support must remain grounded rather than select the jump clip.
     box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
     box2d.c.b2Body_SetLinearVelocity(floor, .{ .x = 0, .y = -3 });
     box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = -3 });
@@ -1852,6 +1852,74 @@ test "landing has priority over Down and only settles into kneeling after impact
             try checkAirPose(sample);
         }
         try std.testing.expectEqual(if (speed == 0) animation.Action.kneel else animation.Action.grounded, animation.states.get(7).?.action);
+    }
+}
+
+test "SVG L sprites preserve their colors and transparency when stained with red blood" {
+    runtime.init(std.testing.io);
+    const fixtures = .{
+        .{ "level_assets/animation_tests/low_l.svg", sdl.Color{ .r = 135, .g = 152, .b = 170, .a = 255 } },
+        .{ "level_assets/animation_tests/tall_l.svg", sdl.Color{ .r = 166, .g = 148, .b = 124, .a = 255 } },
+    };
+    inline for (fixtures) |fixture| {
+        const surface = try sdl.image.load(fixture[0]);
+        defer sdl.destroySurface(surface);
+        var before: sdl.Color = undefined;
+        try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, 288, @divTrunc(surface.h, 2), &before.r, &before.g, &before.b, &before.a));
+        try std.testing.expectEqualDeep(fixture[1], before);
+
+        // The CPU stain entry point only consumes the surface and rendered scale.
+        var visual: sprite.Sprite = undefined;
+        visual.surface = surface;
+        visual.scale = .{ .x = 1, .y = 1 };
+        const sprite_id = 998877;
+        try sprite.sprites.putLocking(sprite_id, visual);
+        defer _ = sprite.sprites.fetchSwapRemoveLocking(sprite_id);
+        const dirty = try sprite.stainSplatOnSurface(sprite_id, .{ .x = 128 / conv.met2pix, .y = 0 }, 12 / conv.met2pix, vec.zero, 0, .{ .r = 220, .g = 0, .b = 0 }, vec.zero, 42);
+        try std.testing.expect(dirty != null);
+        var after: sdl.Color = undefined;
+        try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, 288, @divTrunc(surface.h, 2), &after.r, &after.g, &after.b, &after.a));
+        try std.testing.expect(after.r > after.b and after.r > after.g);
+        try std.testing.expectEqual(before.a, after.a);
+        try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, 16, surface.h - 6, &after.r, &after.g, &after.b, &after.a));
+        try std.testing.expectEqualDeep(before, after);
+
+        // A stain centered in the empty part of the L must not fill its alpha.
+        _ = try sprite.stainSplatOnSurface(sprite_id, .{ .x = -60 / conv.met2pix, .y = (6 - @as(f32, @floatFromInt(surface.h)) / 2) / conv.met2pix }, 4 / conv.met2pix, vec.zero, 0, .{ .r = 220, .g = 0, .b = 0 }, vec.zero, 42);
+        try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, 100, 6, null, null, null, &after.a));
+        try std.testing.expectEqual(@as(u8, 0), after.a);
+    }
+}
+
+test "image loading preserves decoded colors and alpha in the shared BGRA surface format" {
+    for ([_][*:0]const u8{
+        "level_assets/animation_tests/low_l.svg",
+        "level_assets/animation_tests/tall_l.svg",
+        "weapons/alien_blaster/weapon.svg",
+        "weapons/rocket_launcher/weapon_with_arm.png",
+        "level_assets/medieval_keep/terrain/stone_block_runtime.png",
+    }) |path| {
+        const decoded: *sdl.Surface = sdl.c.IMG_Load(path) orelse {
+            std.log.err("image format test: could not decode {s}: {s}", .{ path, sdl.c.SDL_GetError() });
+            return error.IMGLoadFailed;
+        };
+        defer sdl.destroySurface(decoded);
+        const loaded = try sdl.image.load(path);
+        defer sdl.destroySurface(loaded);
+        try std.testing.expectEqual(@as(c_uint, sdl.c.SDL_PIXELFORMAT_BGRA32), loaded.format);
+        try std.testing.expectEqual(decoded.w, loaded.w);
+        try std.testing.expectEqual(decoded.h, loaded.h);
+        var y: c_int = 0;
+        while (y < decoded.h) : (y += 1) {
+            var x: c_int = 0;
+            while (x < decoded.w) : (x += 1) {
+                var expected: sdl.Color = undefined;
+                var actual: sdl.Color = undefined;
+                try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(decoded, x, y, &expected.r, &expected.g, &expected.b, &expected.a));
+                try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(loaded, x, y, &actual.r, &actual.g, &actual.b, &actual.a));
+                try std.testing.expectEqualDeep(expected, actual);
+            }
+        }
     }
 }
 
@@ -2327,6 +2395,542 @@ test "ground following preserves upward motion generated during the physics step
     try movement.processSensorEvents();
     animation.fixedUpdate(1.0 / 60.0);
     try std.testing.expectEqual(animation.Action.jump, animation.states.get(7).?.action);
+}
+
+fn addRubbleBox(position: vec.Vec2, half_size: vec.Vec2) !box2d.c.b2BodyId {
+    const body = try box2d.createBody(box2d.createDynamicBodyDef(position));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_RUBBLE;
+    shape.filter.maskBits = collision.MASK_RUBBLE;
+    shape.material.friction = 0.7;
+    shape.material.restitution = 0.08;
+    shape.density = 1.2;
+    // Runtime rubble is triangulated with a 1 cm collision radius.
+    const extent = vec.subtract(half_size, .{ .x = 0.01, .y = 0.01 });
+    const corners = [_]box2d.c.b2Vec2{
+        .{ .x = -extent.x, .y = -extent.y },
+        .{ .x = extent.x, .y = -extent.y },
+        .{ .x = extent.x, .y = extent.y },
+        .{ .x = -extent.x, .y = extent.y },
+    };
+    for ([_][3]usize{ .{ 0, 1, 2 }, .{ 0, 2, 3 } }) |indices| {
+        const vertices = [_]box2d.c.b2Vec2{ corners[indices[0]], corners[indices[1]], corners[indices[2]] };
+        const hull = box2d.c.b2ComputeHull(&vertices, 3);
+        const polygon = box2d.c.b2MakePolygon(&hull, 0.01);
+        _ = box2d.c.b2CreatePolygonShape(body, &shape, &polygon);
+    }
+    return body;
+}
+
+test "controller steps onto sleeping and awake dynamic rubble up to half a meter" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    for ([_]f32{ 0.3, 0.5 }) |height| {
+        for ([_]f32{ -1, 1 }) |direction| {
+            const piece = try addRubbleBox(.{ .x = direction * 1.5, .y = 0.3 - height / 2 }, .{ .x = 1.5, .y = height / 2 });
+            defer box2d.c.b2DestroyBody(piece);
+            for ([_]bool{ true, false }) |asleep| {
+                box2d.c.b2Body_SetTransform(piece, .{ .x = direction * 1.5, .y = 0.3 - height / 2 }, box2d.c.b2MakeRot(0));
+                box2d.c.b2Body_SetLinearVelocity(piece, .{ .x = 0, .y = 0 });
+                box2d.c.b2Body_SetAngularVelocity(piece, 0);
+                box2d.c.b2Body_SetTransform(body, .{ .x = -0.31 * direction, .y = -0.02 }, box2d.c.b2MakeRot(0));
+                box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+                movement.reset(7);
+                animation.resetPlayer(7);
+                submitAim(vec.zero, false);
+                for (0..30) |_| try stepAimingMovement();
+                box2d.c.b2Body_SetAwake(piece, !asleep);
+                submitAim(.{ .x = direction, .y = 0 }, false);
+                var stood = false;
+                var planted = false;
+                var highest: f32 = 0;
+                for (0..90) |_| {
+                    try stepAimingMovement();
+                    const sample = animation.states.get(7).?;
+                    highest = @min(highest, sample.body.y);
+                    const contact = movement.states.get(7).?.groundState.groundContact;
+                    if (contact != null and box2d.c.B2_ID_EQUALS(contact.?.bodyId, piece)) stood = true;
+                    for (sample.feet) |foot| {
+                        if (foot.locked and foot.support != null and box2d.c.B2_ID_EQUALS(foot.support.?.bodyId, piece)) planted = true;
+                    }
+                    try checkBones(animation.assets.?.rig, animation.interpolatedPose(&animation.assets.?, sample, 0.5));
+                }
+                errdefer std.log.err("rubble step: height {d}, direction {d}, asleep {}, stood {}, planted {}, highest {d}, body {any}", .{ height, direction, asleep, stood, planted, highest, box2d.c.b2Body_GetPosition(body) });
+                try std.testing.expect(stood and planted);
+                try std.testing.expect(highest < -height + 0.04);
+                try std.testing.expect(box2d.c.b2Body_GetPosition(body).x * direction > 4);
+            }
+        }
+    }
+}
+
+test "controller steps onto pooled giblets and plants feet on their colliders" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |direction| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        addTraversalTorso(body);
+        const giblet = try box2d.createBody(box2d.createDynamicBodyDef(.{ .x = direction * 1.5, .y = 0.15 }));
+        var shape = box2d.c.b2DefaultShapeDef();
+        shape.filter.categoryBits = collision.CATEGORY_GIBLET;
+        shape.filter.maskBits = collision.MASK_GIBLET;
+        shape.material.friction = 0.5;
+        const polygon = box2d.c.b2MakeBox(1.5, 0.15);
+        _ = box2d.c.b2CreatePolygonShape(giblet, &shape, &polygon);
+        const pool_id = try pool.create(&.{giblet});
+        defer allocator.allocator.free(pool.takeBodyIds(pool_id) catch unreachable);
+        _ = (try pool.acquire(pool_id, .return_null)).?;
+        box2d.c.b2Body_SetTransform(body, .{ .x = -0.31 * direction, .y = -0.02 }, box2d.c.b2MakeRot(0));
+        movement.reset(7);
+        animation.resetPlayer(7);
+        submitAim(vec.zero, false);
+        for (0..30) |_| try stepAimingMovement();
+        submitAim(.{ .x = direction, .y = 0 }, false);
+        var planted = false;
+        for (0..90) |_| {
+            try stepAimingMovement();
+            for (animation.states.get(7).?.feet) |foot| {
+                if (foot.locked and foot.support != null and box2d.c.B2_ID_EQUALS(foot.support.?.bodyId, giblet)) planted = true;
+            }
+        }
+        try std.testing.expect(planted);
+        try std.testing.expect(box2d.c.b2Body_GetPosition(body).x * direction > 4);
+    }
+}
+
+fn addDynamicL(height: f32, direction: f32) !box2d.c.b2BodyId {
+    const body = try box2d.createBody(box2d.createDynamicBodyDef(.{ .x = 0, .y = 0.1 }));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_DYNAMIC;
+    shape.filter.maskBits = collision.MASK_DYNAMIC;
+    shape.material.friction = 0;
+    const base = box2d.c.b2MakeBox(3, 0.2);
+    _ = box2d.c.b2CreatePolygonShape(body, &shape, &base);
+    const upright = box2d.c.b2MakeOffsetBox(0.5, height / 2, .{ .x = direction * 1.5, .y = -0.2 - height / 2 }, box2d.c.b2MakeRot(0));
+    _ = box2d.c.b2CreatePolygonShape(body, &shape, &upright);
+    return body;
+}
+
+test "grounding and foot probes use solid collision pairs including custom categories and group overrides" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const custom_category: u64 = 1 << 30;
+    const cases = [_]struct { player_group: i32, support_group: i32, mask: u64, supported: bool }{
+        .{ .player_group = 0, .support_group = 0, .mask = collision.CATEGORY_PLAYER, .supported = true },
+        .{ .player_group = 2, .support_group = 2, .mask = collision.CATEGORY_PLAYER, .supported = true },
+        .{ .player_group = -2, .support_group = -2, .mask = collision.CATEGORY_PLAYER, .supported = false },
+        // Runtime players use group zero: a positive-group shape with no mask
+        // neither collides with them nor supplies a false probe-only foothold.
+        .{ .player_group = 0, .support_group = 2, .mask = 0, .supported = false },
+    };
+    for (cases) |case| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        var player_shapes: [1]box2d.c.b2ShapeId = undefined;
+        _ = box2d.c.b2Body_GetShapes(body, &player_shapes, 1);
+        var player_filter = box2d.c.b2Shape_GetFilter(player_shapes[0]);
+        player_filter.groupIndex = case.player_group;
+        if (case.player_group <= 0) player_filter.maskBits |= custom_category;
+        box2d.c.b2Shape_SetFilter(player_shapes[0], player_filter);
+        const platform = try box2d.createBody(box2d.createStaticBodyDef(.{ .x = 0, .y = 0.1 }));
+        var shape = box2d.c.b2DefaultShapeDef();
+        // No sensor category in its mask: the character's solid filter decides.
+        shape.filter.categoryBits = custom_category;
+        shape.filter.maskBits = case.mask;
+        shape.filter.groupIndex = case.support_group;
+        const polygon = box2d.c.b2MakeBox(3, 0.2);
+        const surface = box2d.c.b2CreatePolygonShape(platform, &shape, &polygon);
+        // A sensor and a non-colliding solid above it must not hide the support.
+        const decoy = try box2d.createBody(box2d.createStaticBodyDef(.{ .x = 0, .y = -0.12 }));
+        const thin = box2d.c.b2MakeBox(3, 0.01);
+        shape.filter.groupIndex = 0;
+        shape.isSensor = true;
+        _ = box2d.c.b2CreatePolygonShape(decoy, &shape, &thin);
+        shape.isSensor = false;
+        shape.filter.maskBits = collision.CATEGORY_SENSOR;
+        _ = box2d.c.b2CreatePolygonShape(decoy, &shape, &thin);
+        box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -0.42 }, box2d.c.b2MakeRot(0));
+        movement.reset(7);
+        animation.resetPlayer(7);
+        submitAim(vec.zero, false);
+        for (0..60) |_| try stepAimingMovement();
+        const sample = animation.states.get(7).?;
+        const contact = movement.states.get(7).?.groundState.groundContact.?;
+        try std.testing.expectEqual(case.supported, box2d.c.B2_ID_EQUALS(surface, contact.shapeId));
+        for (sample.feet) |foot| {
+            try std.testing.expect(foot.locked);
+            try std.testing.expectEqual(case.supported, box2d.c.B2_ID_EQUALS(platform, foot.support.?.bodyId));
+        }
+    }
+}
+
+test "walking up a low dynamic L steps before shoving its upright" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |direction| {
+        for ([_]f32{ 0, 0.68, 0.7 }) |start_x| {
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            addTraversalTorso(body);
+            const support = try addDynamicL(0.3, direction);
+            box2d.c.b2Body_SetTransform(body, .{ .x = direction * start_x, .y = -0.42 }, box2d.c.b2MakeRot(0));
+            movement.reset(7);
+            animation.resetPlayer(7);
+            submitAim(vec.zero, false);
+            for (0..45) |_| try stepAimingMovement();
+            const origin = box2d.c.b2Body_GetPosition(support);
+            submitAim(.{ .x = direction, .y = 0 }, false);
+            var climbed = false;
+            for (0..18) |_| {
+                try stepAimingMovement();
+                const position = box2d.c.b2Body_GetPosition(body);
+                if (position.y < -0.65 and position.x * direction > 1.2) climbed = true;
+            }
+            errdefer std.log.err("low L: climbed {}, support {any}, velocity {any}, player {any}", .{ climbed, box2d.c.b2Body_GetPosition(support), box2d.c.b2Body_GetLinearVelocity(support), box2d.c.b2Body_GetPosition(body) });
+            try std.testing.expect(climbed);
+            try std.testing.expectApproxEqAbs(origin.x, box2d.c.b2Body_GetPosition(support).x, 0.02);
+        }
+    }
+}
+
+test "holding against the same dynamic support cannot continuously propel its tall upright" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |direction| {
+        for ([_]f32{ 0, 0.68, 0.7 }) |start_x| {
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            addTraversalTorso(body);
+            const support = try addDynamicL(1.4, direction);
+            box2d.c.b2Body_SetTransform(body, .{ .x = direction * start_x, .y = -0.42 }, box2d.c.b2MakeRot(0));
+            movement.reset(7);
+            animation.resetPlayer(7);
+            submitAim(vec.zero, false);
+            for (0..45) |_| try stepAimingMovement();
+            const origin = box2d.c.b2Body_GetPosition(support);
+            submitAim(.{ .x = direction, .y = 0 }, false);
+            for (0..180) |_| try stepAimingMovement();
+            errdefer std.log.err("tall L: support {any}, velocity {any}, player {any}", .{ box2d.c.b2Body_GetPosition(support), box2d.c.b2Body_GetLinearVelocity(support), box2d.c.b2Body_GetPosition(body) });
+            try std.testing.expectApproxEqAbs(origin.x, box2d.c.b2Body_GetPosition(support).x, 0.02);
+            try std.testing.expect(@abs(box2d.c.b2Body_GetLinearVelocity(support).x) < 0.02);
+            const local = box2d.c.b2Body_GetLocalPoint(support, box2d.c.b2Body_GetPosition(body));
+            try std.testing.expect(local.x * direction < 0.71);
+            // Real impulses still move the support, carrying the blocked player.
+            const impulse = box2d.c.b2Body_GetMass(support) * 1.2 * direction;
+            box2d.c.b2Body_ApplyLinearImpulseToCenter(support, .{ .x = impulse, .y = 0 }, true);
+            for (0..30) |_| try stepAimingMovement();
+            try std.testing.expect((box2d.c.b2Body_GetPosition(support).x - origin.x) * direction > 0.25);
+            try std.testing.expect(box2d.c.b2Body_GetLinearVelocity(support).x * direction > 0.5);
+        }
+    }
+}
+
+test "walking into a separate tall object still pushes it from terrain or a dynamic support" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]bool{ false, true }) |on_platform| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        addTraversalTorso(body);
+        const floor_y: f32 = if (on_platform) -0.1 else 0.3;
+        if (on_platform) _ = try addRubbleBox(.{ .x = 0, .y = 0.1 }, .{ .x = 8, .y = 0.2 });
+        const box = try addRubbleBox(.{ .x = 1.5, .y = floor_y - 0.7 }, .{ .x = 0.5, .y = 0.7 });
+        box2d.c.b2Body_SetTransform(body, .{ .x = 0.68, .y = floor_y - 0.32 }, box2d.c.b2MakeRot(0));
+        movement.reset(7);
+        animation.resetPlayer(7);
+        submitAim(vec.zero, false);
+        for (0..45) |_| try stepAimingMovement();
+        const origin = box2d.c.b2Body_GetPosition(box);
+        submitAim(vec.east, false);
+        for (0..90) |_| try stepAimingMovement();
+        try std.testing.expect(box2d.c.b2Body_GetPosition(box).x > origin.x + 0.3);
+    }
+}
+
+test "moving and rotating support preserves local foot anchors and idle cadence through rendering" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
+    for (0..30) |_| advanceRun(0, true);
+    const start = animation.states.get(7).?;
+    for (start.feet) |foot| try std.testing.expect(foot.locked);
+    var previous_body = vec.zero;
+    for (1..61) |tick| {
+        const elapsed: f32 = @as(f32, @floatFromInt(tick)) / 60;
+        const angle = elapsed * 0.08;
+        box2d.c.b2Body_SetTransform(floor, .{ .x = elapsed * 0.5, .y = 0.8 - elapsed * 0.1 }, box2d.c.b2MakeRot(angle));
+        const body = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(floor, .{ .x = 0, .y = -0.8 }));
+        const origin = box2d.c.b2Body_GetPosition(floor);
+        const slope = @tan(angle);
+        const floor_y = origin.y + (body.x - origin.x) * slope - 0.5 / @cos(angle);
+        animation.updatePlayer(7, .{ .body = body, .supported = true, .ground_y = floor_y, .ground_normal = .{ .x = @sin(angle), .y = -@cos(angle) }, .vertical_speed_mps = 0, .separation_speed_mps = 0, .support_velocity_x = (body.x - previous_body.x) * 60, .facing_right = true }, 1.0 / 60.0);
+        previous_body = body;
+        const sample = animation.states.get(7).?;
+        errdefer std.log.err("moving anchors tick {d}: {any}", .{ tick, sample.feet });
+        try std.testing.expectEqual(animation.Action.grounded, sample.action);
+        try std.testing.expect(@abs(sample.speed_mps) < 0.0001);
+        try std.testing.expect(sample.run_weight < 0.001);
+        try std.testing.expectEqual(start.phase, sample.phase);
+        for (sample.feet, start.feet) |foot, initial| {
+            try std.testing.expect(foot.locked);
+            try nearPoint(initial.local_anchor, foot.local_anchor, 0.00001);
+            try nearPoint(vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(floor, vec.toBox2d(foot.local_anchor))), foot.anchor, 0.00001);
+        }
+        for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+            const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+            try checkBones(animation.assets.?.rig, pose);
+            const fraction: f32 = @floatCast(alpha);
+            const rendered_body = vec.add(sample.previous_body, vec.mul(vec.subtract(sample.body, sample.previous_body), fraction));
+            for ([_]animation.Joint{ .left_toe, .right_toe }, sample.previous_feet, sample.feet) |joint, before, foot| {
+                const rendered_origin = vec.add(before.support_origin, vec.mul(vec.subtract(foot.support_origin, before.support_origin), fraction));
+                const rendered_angle = std.math.lerp(before.support_angle, foot.support_angle, fraction);
+                const local = foot.local_anchor;
+                const expected = vec.add(rendered_origin, .{ .x = local.x * @cos(rendered_angle) - local.y * @sin(rendered_angle), .y = local.x * @sin(rendered_angle) + local.y * @cos(rendered_angle) });
+                try nearPoint(expected, animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(joint)], rendered_body, sample.facing_right), 0.001);
+            }
+        }
+    }
+}
+
+test "controller follows moving support with idle feet and releases it when disabled" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    addTraversalTorso(body);
+    const platform = try addRubbleBox(.{ .x = 0, .y = -0.2 }, .{ .x = 3, .y = 0.3 });
+    box2d.c.b2Body_SetType(platform, box2d.c.b2_kinematicBody);
+    box2d.c.b2Body_SetTransform(body, .{ .x = 0, .y = -0.82 }, box2d.c.b2MakeRot(0));
+    box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 0, .y = 0 });
+    movement.reset(7);
+    animation.resetPlayer(7);
+    submitAim(vec.zero, false);
+    for (0..45) |_| try stepAimingMovement();
+    box2d.c.b2Body_SetLinearVelocity(platform, .{ .x = 1, .y = -0.1 });
+    for (0..90) |tick| {
+        try stepAimingMovement();
+        if (tick < 30) continue;
+        const sample = animation.states.get(7).?;
+        errdefer std.log.err("carried idle tick {d}: speed {d}, action {s}, body {any}", .{ tick, sample.speed_mps, @tagName(sample.action), sample.body });
+        try std.testing.expectEqual(animation.Action.grounded, sample.action);
+        try std.testing.expect(@abs(sample.speed_mps) < 0.01);
+        try std.testing.expect(sample.run_weight < 0.01);
+        for (sample.feet) |foot| try std.testing.expect(foot.locked);
+    }
+    try std.testing.expect(box2d.c.b2Body_GetPosition(body).x > 1.4);
+    box2d.c.b2Body_Disable(platform);
+    try stepAimingMovement();
+    const released = animation.states.get(7).?;
+    try std.testing.expectEqual(animation.Action.fall, released.action);
+    for (released.feet) |foot| try std.testing.expect(!foot.locked);
+    try std.testing.expect(!movement.states.get(7).?.groundState.supported);
+    for (0..90) |_| try stepAimingMovement();
+    try std.testing.expectEqual(animation.Action.grounded, animation.states.get(7).?.action);
+}
+
+test "feet use separate moving pieces and release a support that tips beyond the slope limit" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    advanceRun(0, true);
+    const neutral = animation.states.get(7).?;
+    const seam = (neutral.feet[0].anchor.x + neutral.feet[1].anchor.x) / 2;
+    box2d.c.b2DestroyBody(floor);
+    _ = try addRubbleBox(.{ .x = seam - 1, .y = 0.5 }, .{ .x = 1, .y = 0.2 });
+    _ = try addRubbleBox(.{ .x = seam + 1, .y = 0.5 }, .{ .x = 1, .y = 0.2 });
+    animation.resetPlayer(7);
+    for (0..30) |_| advanceRun(0, true);
+    const initial = animation.states.get(7).?;
+    try std.testing.expect(initial.feet[0].locked and initial.feet[1].locked);
+    try std.testing.expect(!box2d.c.B2_ID_EQUALS(initial.feet[0].support.?.bodyId, initial.feet[1].support.?.bodyId));
+    const raised = initial.feet[0].support.?.bodyId;
+    const other = initial.feet[1].support.?.bodyId;
+    for (1..16) |tick| {
+        var position = box2d.c.b2Body_GetPosition(raised);
+        position.y -= 0.001;
+        box2d.c.b2Body_SetTransform(raised, position, box2d.c.b2MakeRot(0));
+        advanceRun(0, true);
+        const sample = animation.states.get(7).?;
+        errdefer std.log.err("separate pieces tick {d}: {any}", .{ tick, sample.feet });
+        try std.testing.expect(sample.feet[0].locked and sample.feet[1].locked);
+        try nearPoint(initial.feet[0].local_anchor, sample.feet[0].local_anchor, 0.00001);
+        try nearPoint(initial.feet[1].anchor, sample.feet[1].anchor, 0.00001);
+    }
+    box2d.c.b2Body_SetTransform(raised, box2d.c.b2Body_GetPosition(raised), box2d.c.b2MakeRot(1.1));
+    advanceRun(0, true);
+    try std.testing.expect(!animation.states.get(7).?.feet[0].locked);
+    // A disappearing piece must also release while its neighbor remains alive.
+    box2d.c.b2Body_Disable(other);
+    advanceRun(0, true);
+    for (animation.states.get(7).?.feet) |foot| try std.testing.expect(!foot.locked);
+}
+
+test "render endpoint discards a destroyed or recycled moving surface above its replacement" {
+    for ([_]bool{ false, true }) |recycle| {
+        const floor = try beginLocomotion();
+        defer box2d.destroyWorld();
+        defer animation.cleanup();
+        runtime.init(std.testing.io);
+        box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
+        const pool_id = try pool.create(&.{floor});
+        defer {
+            const bodies = pool.takeBodyIds(pool_id) catch unreachable;
+            allocator.allocator.free(bodies);
+        }
+        _ = (try pool.acquire(pool_id, .return_null)).?;
+        for (0..30) |_| advanceRun(0, true);
+        if (recycle) {
+            try pool.release(pool_id, floor);
+            _ = (try pool.acquire(pool_id, .return_null)).?;
+            box2d.c.b2Body_SetTransform(floor, .{ .x = 0, .y = 0.95 }, box2d.c.b2MakeRot(0));
+        } else {
+            box2d.c.b2DestroyBody(floor);
+            _ = try addTerrainBox(.{ .x = 0, .y = 0.95 }, .{ .x = 100, .y = 0.5 });
+        }
+        animation.updatePlayer(7, .{ .body = .{ .x = 0, .y = 0.15 }, .supported = true, .ground_y = 0.45, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true }, 1.0 / 60.0);
+        const sample = animation.states.get(7).?;
+        var without_stale_surfaces = sample;
+        without_stale_surfaces.previous_sole_surfaces = sample.sole_surfaces;
+        without_stale_surfaces.previous_knee_surfaces = sample.knee_surfaces;
+        const expected = animation.interpolatedPose(&animation.assets.?, without_stale_surfaces, 1);
+        const actual = animation.interpolatedPose(&animation.assets.?, sample, 1);
+        for (expected.joints, actual.joints) |a, b| try nearPoint(a, b, 0.00001);
+        for (sample.feet) |foot| try std.testing.expect(!foot.locked);
+    }
+}
+
+test "asymmetric support and planted feet share rendering through the signed angle boundary" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    const old_alpha = time.alpha;
+    defer time.alpha = old_alpha;
+    var shapes: [1]box2d.c.b2ShapeId = undefined;
+    _ = box2d.c.b2Body_GetShapes(floor, &shapes, 1);
+    box2d.c.b2DestroyShape(shapes[0], true);
+    box2d.c.b2Body_SetType(floor, box2d.c.b2_kinematicBody);
+    const vertices = [_]box2d.c.b2Vec2{ .{ .x = -2, .y = 0.5 }, .{ .x = 2, .y = 0.5 }, .{ .x = -1, .y = -0.6 } };
+    const hull = box2d.c.b2ComputeHull(&vertices, 3);
+    const polygon = box2d.c.b2MakePolygon(&hull, 0.01);
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_RUBBLE;
+    shape.filter.maskBits = collision.MASK_RUBBLE;
+    _ = box2d.c.b2CreatePolygonShape(floor, &shape, &polygon);
+    const before_angle: f32 = std.math.pi - 0.02;
+    box2d.c.b2Body_SetTransform(floor, .{ .x = 0, .y = 0.8 }, box2d.c.b2MakeRot(before_angle));
+    const before = box2d.getState(floor);
+    const floor_y: f32 = 0.8 + 0.51 / @cos(before_angle);
+    const input: animation.LocomotionInput = .{ .body = .{ .x = 0, .y = floor_y - 0.3 }, .supported = true, .ground_y = floor_y, .ground_normal = .{ .x = -@sin(before_angle), .y = @cos(before_angle) }, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true };
+    for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+    box2d.c.b2Body_SetTransform(floor, before.pos, box2d.c.b2MakeRot(std.math.pi + 0.02));
+    var next_input = input;
+    next_input.ground_normal.x *= -1;
+    animation.updatePlayer(7, next_input, 1.0 / 60.0);
+    const sample = animation.states.get(7).?;
+    const after = box2d.getState(floor);
+    for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+        time.alpha = alpha;
+        const drawn = box2d.getInterpolatedState(before, after);
+        try std.testing.expect(before.rotAngle > 3 and after.rotAngle < -3);
+        const expected_angle = std.math.lerp(before.rotAngle, after.rotAngle + std.math.tau, @as(f32, @floatCast(alpha)));
+        // The off-center marker distinguishes an asymmetric piece's orientation.
+        const marker = vec.Vec2{ .x = 0.7, .y = -0.3 };
+        const actual_marker = vec.Vec2{ .x = marker.x * @cos(drawn.rotAngle) - marker.y * @sin(drawn.rotAngle), .y = marker.x * @sin(drawn.rotAngle) + marker.y * @cos(drawn.rotAngle) };
+        const expected_marker = vec.Vec2{ .x = marker.x * @cos(expected_angle) - marker.y * @sin(expected_angle), .y = marker.x * @sin(expected_angle) + marker.y * @cos(expected_angle) };
+        try nearPoint(expected_marker, actual_marker, 0.000001);
+        const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+        try checkBones(animation.assets.?.rig, pose);
+        for (sample.feet, [_]animation.Joint{ .left_toe, .right_toe }) |foot, toe| {
+            try std.testing.expect(foot.locked);
+            const local = foot.local_anchor;
+            const expected = vec.add(vec.fromBox2d(drawn.pos), .{ .x = local.x * @cos(drawn.rotAngle) - local.y * @sin(drawn.rotAngle), .y = local.x * @sin(drawn.rotAngle) + local.y * @cos(drawn.rotAngle) });
+            try nearPoint(expected, animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(toe)], sample.body, sample.facing_right), 0.001);
+        }
+    }
+}
+
+test "rotated rounded triangle keeps a planted toe inside its actual face endpoint" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    box2d.c.b2DestroyBody(floor);
+    const angle: f32 = 0.4;
+    const piece = try box2d.createBody(box2d.createDynamicBodyDef(.{ .x = 0, .y = 0.5 }));
+    box2d.c.b2Body_SetTransform(piece, .{ .x = 0, .y = 0.5 }, box2d.c.b2MakeRot(angle));
+    const vertices = [_]box2d.c.b2Vec2{ .{ .x = -1, .y = -0.2 }, .{ .x = 1, .y = -0.2 }, .{ .x = -1, .y = 0.7 } };
+    const hull = box2d.c.b2ComputeHull(&vertices, 3);
+    const polygon = box2d.c.b2MakePolygon(&hull, 0.01);
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_RUBBLE;
+    shape.filter.maskBits = collision.MASK_RUBBLE;
+    _ = box2d.c.b2CreatePolygonShape(piece, &shape, &polygon);
+    const endpoint = box2d.c.b2Body_GetWorldPoint(piece, .{ .x = 1, .y = -0.21 });
+    // Establish the stance on this slope before positioning its forward toe
+    // beside the endpoint; rotating the sole changes its neutral X offset.
+    const rotation = box2d.c.b2Body_GetRotation(piece);
+    const neutral_floor = 0.5 - 0.21 / rotation.c;
+    for (0..90) |_| animation.updatePlayer(7, .{ .body = .{ .x = 0, .y = neutral_floor - 0.3 }, .supported = true, .ground_y = neutral_floor, .ground_normal = .{ .x = rotation.s, .y = -rotation.c }, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true }, 1.0 / 60.0);
+    const neutral = animation.states.get(7).?;
+    try std.testing.expect(neutral.feet[0].locked and neutral.feet[1].locked);
+    const leg: usize = if (neutral.feet[0].anchor.x > neutral.feet[1].anchor.x) 0 else 1;
+    const body_x = endpoint.x - 0.003 - neutral.feet[leg].anchor.x;
+    const floor_y = neutral_floor + body_x * rotation.s / rotation.c;
+    animation.resetPlayer(7);
+    for (0..90) |_| animation.updatePlayer(7, .{ .body = .{ .x = body_x, .y = floor_y - 0.3 }, .supported = true, .ground_y = floor_y, .ground_normal = .{ .x = rotation.s, .y = -rotation.c }, .vertical_speed_mps = 0, .separation_speed_mps = 0, .facing_right = true }, 1.0 / 60.0);
+    const sample = animation.states.get(7).?;
+    errdefer std.log.err("rounded endpoint {any}, body {any}, feet {any}, surfaces {any}", .{ endpoint, sample.body, sample.feet, sample.sole_surfaces });
+    try std.testing.expect(sample.sole_surfaces[leg * 2] != null);
+    const surface = sample.sole_surfaces[leg * 2].?;
+    try std.testing.expectApproxEqAbs(endpoint.x, surface.maximum_x, 0.00001);
+    try std.testing.expect(sample.feet[leg].locked);
+    const unrounded_endpoint = box2d.c.b2Body_GetWorldPoint(piece, .{ .x = 1, .y = -0.2 });
+    try std.testing.expect(sample.feet[leg].anchor.x > unrounded_endpoint.x);
+    try std.testing.expect(sample.feet[leg].anchor.x <= endpoint.x);
+    for ([_]f64{ 0, 0.5, 1 }) |alpha| {
+        const pose = animation.interpolatedPose(&animation.assets.?, sample, alpha);
+        const toe: animation.Joint = if (leg == 0) .left_toe else .right_toe;
+        try nearPoint(sample.feet[leg].anchor, animation.toWorld(animation.assets.?.rig, pose.joints[@intFromEnum(toe)], sample.body, sample.facing_right), 0.001);
+    }
+}
+
+test "pooled support identity rejects released recycled disabled and destroyed rubble" {
+    const floor = try beginLocomotion();
+    defer box2d.destroyWorld();
+    defer animation.cleanup();
+    runtime.init(std.testing.io);
+    const pool_id = try pool.create(&.{floor});
+    defer {
+        const bodies = pool.takeBodyIds(pool_id) catch unreachable;
+        allocator.allocator.free(bodies);
+    }
+    _ = (try pool.acquire(pool_id, .return_null)).?;
+    for (0..30) |_| advanceRun(0, true);
+    const foot = animation.states.get(7).?.feet[0];
+    try std.testing.expect(foot.locked);
+    const original = foot.support.?;
+    try pool.release(pool_id, floor);
+    try std.testing.expect(!movement.validSupport(original));
+    _ = (try pool.acquire(pool_id, .return_null)).?;
+    try std.testing.expect(!movement.validSupport(original));
+    advanceRun(0, true);
+    const new_foot = animation.states.get(7).?.feet[0];
+    try std.testing.expect(!new_foot.locked or new_foot.support.?.poolActivation != original.poolActivation);
+    const second = movement.supportForShape(original.shapeId).?;
+    _ = (try pool.acquire(pool_id, .recycle_oldest)).?;
+    try std.testing.expect(!movement.validSupport(second));
+    const third = movement.supportForShape(original.shapeId).?;
+    box2d.c.b2Body_Disable(floor);
+    try std.testing.expect(!movement.validSupport(third));
+    advanceRun(0, false);
+    for (animation.states.get(7).?.feet) |released| try std.testing.expect(!released.locked);
+    box2d.c.b2Body_Enable(floor);
+    box2d.c.b2DestroyShape(original.shapeId, true);
+    try std.testing.expect(!movement.validSupport(third));
 }
 
 test "running follows flat to ramp transitions without selecting an airborne pose" {
