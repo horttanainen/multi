@@ -107,6 +107,16 @@ pub fn build(b: *std.Build) !void {
     const test_character = b.step("test-character-animation", "Check character assets, curves, IK, and lifecycle");
     test_character.dependOn(&b.addRunArtifact(character_tests).step);
 
+    const music_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("music_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const test_music = b.step("test-music", "Check music DSP, step timing, and procedural bus rendering");
+    test_music.dependOn(&b.addRunArtifact(music_tests).step);
+
     b.installArtifact(exe);
 
     const run = b.step("run", "Run the game");

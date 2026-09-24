@@ -330,14 +330,27 @@ pub const StepStyleFrame = struct {
 pub const StepSequencer16 = struct {
     step_counter: f32 = 0.0,
     step: u8 = 0,
+    start_pending: bool = false,
 };
 
 pub fn stepSequencer16Reset(sequencer: *StepSequencer16) void {
     sequencer.step_counter = 0.0;
     sequencer.step = 0;
+    sequencer.start_pending = false;
+}
+
+// Opt-in immediate downbeat; reset alone retains the existing delayed start.
+pub fn stepSequencer16Start(sequencer: *StepSequencer16) void {
+    stepSequencer16Reset(sequencer);
+    sequencer.start_pending = true;
 }
 
 pub fn stepSequencer16AdvanceSample(sequencer: *StepSequencer16, bpm_val: f32) ?u8 {
+    if (sequencer.start_pending) {
+        sequencer.start_pending = false;
+        sequencer.step = 1;
+        return 0;
+    }
     const samples_per_step = dsp.SAMPLE_RATE * 60.0 / bpm_val / 4.0;
     sequencer.step_counter += 1.0;
     if (sequencer.step_counter < samples_per_step) return null;

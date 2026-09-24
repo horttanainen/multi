@@ -3,6 +3,7 @@ const dsp = @import("music/dsp.zig");
 const entropy = @import("music/entropy.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
+const procedural_hard_techno = @import("procedural_hard_techno.zig");
 const runtime = @import("runtime.zig");
 
 const SAMPLE_RATE_U32: u32 = 48000;
@@ -15,6 +16,7 @@ const DEFAULT_SEED: u64 = 0xA6A1_6A01_0000_0001;
 const StyleName = enum {
     americana_guitar,
     taiko,
+    hard_techno,
 };
 
 const RenderConfig = struct {
@@ -33,6 +35,12 @@ const RenderConfig = struct {
     taiko_bus_stats: bool = false,
     taiko_isolate_kane: bool = false,
     taiko_isolate_nagado_back: bool = false,
+    techno_bus: procedural_hard_techno.Bus = .mix,
+    kick_drive: f32 = 2.3,
+    kick_decay: f32 = 0.28,
+    rumble_level: f32 = 0.52,
+    techno_options_set: bool = false,
+    instrument_set: bool = false,
 };
 
 const RenderStats = struct {
@@ -41,6 +49,8 @@ const RenderStats = struct {
     non_finite_samples: u64 = 0,
     sum_sq: f64 = 0.0,
     peak_abs: f32 = 0.0,
+    sum: f64 = 0.0,
+    clipped_samples: u64 = 0,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -74,7 +84,9 @@ pub fn main(init: std.process.Init) !void {
     defer file.close(io_value);
 
     try writeWavHeader(file, total_frames);
+    const render_start_ms = std.Io.Clock.awake.now(io_value).toMilliseconds();
     const stats = try writeStyleFrames(file, cfg.style, total_frames);
+    const render_ms = std.Io.Clock.awake.now(io_value).toMilliseconds() - render_start_ms;
 
     if (stats.non_finite_samples > 0) {
         std.log.warn("procedural_music_probe: replaced {d} non-finite samples with silence", .{stats.non_finite_samples});
@@ -95,6 +107,24 @@ pub fn main(init: std.process.Init) !void {
     );
     if (cfg.taiko_bus_stats) {
         logTaikoBusStats(cfg);
+    }
+    if (cfg.style == .hard_techno) {
+        std.log.info("techno_render: bus={s} bpm={d:.3} kicks={d} drive={d:.3} decay={d:.3} rumble={d:.3} dc={d:.7} clipped={d} non_finite={d} render_ms={d}", .{
+            @tagName(cfg.techno_bus),
+            procedural_hard_techno.BASE_BPM * cfg.tempo_scale,
+            procedural_hard_techno.kick_count,
+            cfg.kick_drive,
+            cfg.kick_decay,
+            cfg.rumble_level,
+            stats.sum / @as(f64, @floatFromInt(@max(stats.finite_samples, 1))),
+            stats.clipped_samples,
+            stats.non_finite_samples,
+            render_ms,
+        });
+        if (stats.non_finite_samples > 0 or stats.clipped_samples > 0) {
+            std.log.err("procedural_music_probe: invalid hard-techno output; inspect render statistics", .{});
+            return error.InvalidAudioOutput;
+        }
     }
 }
 
@@ -166,6 +196,7 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--instrument")) {
             const value = try optionValue(args, idx, arg);
             cfg.instrument_flavor = try parseInstrumentFlavorArg(value);
+            cfg.instrument_set = true;
             idx += 2;
             continue;
         }
@@ -194,6 +225,34 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--taiko-isolate-nagado-back")) {
             cfg.taiko_isolate_nagado_back = true;
             idx += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--techno-bus")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.techno_bus = std.meta.stringToEnum(procedural_hard_techno.Bus, value) orelse {
+                std.log.err("procedural_music_probe: unknown techno bus '{s}' (use mix, kick, rumble)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--kick-drive")) {
+            cfg.kick_drive = try parseBoundedFloatArg("kick-drive", try optionValue(args, idx, arg), 1.0, 8.0);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--kick-decay")) {
+            cfg.kick_decay = try parseBoundedFloatArg("kick-decay", try optionValue(args, idx, arg), 0.08, 0.8);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--rumble")) {
+            cfg.rumble_level = try parseBoundedFloatArg("rumble", try optionValue(args, idx, arg), 0.0, 1.0);
+            cfg.techno_options_set = true;
+            idx += 2;
             continue;
         }
 
@@ -228,6 +287,7 @@ fn parseStyleName(name: []const u8) ?StyleName {
     if (std.mem.eql(u8, name, "taiko")) {
         return .taiko;
     }
+    if (std.mem.eql(u8, name, "hard-techno") or std.mem.eql(u8, name, "hard_techno")) return .hard_techno;
     return null;
 }
 
@@ -300,8 +360,16 @@ fn parseInstrumentFlavorName(name: []const u8) ?procedural_americana_guitar.Inst
 }
 
 fn validateRenderConfig(cfg: RenderConfig) !void {
-    if (cfg.taiko_bus_stats and cfg.style != .taiko) {
-        std.log.err("procedural_music_probe: --taiko-bus-stats requires style=taiko", .{});
+    if ((cfg.taiko_bus_stats or cfg.taiko_isolate_kane or cfg.taiko_isolate_nagado_back) and cfg.style != .taiko) {
+        std.log.err("procedural_music_probe: taiko options require style=taiko", .{});
+        return error.InvalidArgument;
+    }
+    if (cfg.techno_options_set and cfg.style != .hard_techno) {
+        std.log.err("procedural_music_probe: techno options require style=hard-techno", .{});
+        return error.InvalidArgument;
+    }
+    if (cfg.instrument_set and cfg.style != .americana_guitar) {
+        std.log.err("procedural_music_probe: --instrument requires style=americana-guitar", .{});
         return error.InvalidArgument;
     }
 
@@ -345,6 +413,17 @@ fn parseSeedArg(arg: []const u8) !u64 {
 
 fn applyStyleSettings(cfg: RenderConfig) void {
     switch (cfg.style) {
+        .hard_techno => {
+            procedural_hard_techno.config = .{
+                .tempo_scale = cfg.tempo_scale,
+                .volume = cfg.volume,
+                .kick_drive = cfg.kick_drive,
+                .kick_decay = cfg.kick_decay,
+                .rumble_level = cfg.rumble_level,
+                .room_mix = cfg.reverb_mix,
+                .bus = cfg.techno_bus,
+            };
+        },
         .americana_guitar => {
             procedural_taiko.collect_bus_stats = false;
             procedural_americana_guitar.bpm = cfg.tempo_scale;
@@ -384,6 +463,7 @@ fn resetStyle(style: StyleName) void {
     switch (style) {
         .americana_guitar => procedural_americana_guitar.reset(),
         .taiko => procedural_taiko.reset(),
+        .hard_techno => procedural_hard_techno.reset(),
     }
 }
 
@@ -391,6 +471,7 @@ fn fillStyleBuffer(style: StyleName, buf: [*]f32, frames: usize) void {
     switch (style) {
         .americana_guitar => procedural_americana_guitar.fillBuffer(buf, frames),
         .taiko => procedural_taiko.fillBuffer(buf, frames),
+        .hard_techno => procedural_hard_techno.fillBuffer(buf, frames),
     }
 }
 
@@ -478,6 +559,8 @@ fn sanitizeSample(stats: *RenderStats, sample: f32) f32 {
     stats.peak_abs = @max(stats.peak_abs, abs_sample);
     const sample_f64: f64 = sample;
     stats.sum_sq += sample_f64 * sample_f64;
+    stats.sum += sample_f64;
+    if (abs_sample > 1.0) stats.clipped_samples += 1;
     return std.math.clamp(sample, -1.0, 1.0);
 }
 
@@ -537,6 +620,7 @@ fn styleLabel(style: StyleName) []const u8 {
     return switch (style) {
         .americana_guitar => "americana-guitar",
         .taiko => "taiko",
+        .hard_techno => "hard-techno",
     };
 }
 
@@ -548,6 +632,7 @@ fn cueLabelForStyle(style: StyleName, cfg: RenderConfig) []const u8 {
     return switch (style) {
         .americana_guitar => guitarCueLabel(cfg.guitar_cue),
         .taiko => taikoCueLabel(cfg.taiko_cue),
+        .hard_techno => "steady",
     };
 }
 
@@ -576,6 +661,7 @@ fn instrumentLabel(cfg: RenderConfig) []const u8 {
     return switch (cfg.style) {
         .americana_guitar => instrumentFlavorLabel(cfg.instrument_flavor),
         .taiko => "taiko-ensemble",
+        .hard_techno => "kick-and-rumble",
     };
 }
 
@@ -593,13 +679,14 @@ fn printUsage() void {
         \\Styles:
         \\  americana-guitar
         \\  taiko
+        \\  hard-techno        150 BPM kick and rumble proof
         \\
         \\Options:
         \\  --duration SECONDS
         \\  --out PATH
         \\  --tempo SCALE       0.35..1.65, default 1.0
-        \\  --reverb VALUE      0..1, scaled inside the selected style
-        \\  --volume VALUE      0..1, style master volume
+        \\  --reverb VALUE      0..1, techno rumble room / other styles' reverb
+        \\  --volume VALUE      0..1, techno master / guitar level / taiko drum mix
         \\  --cue NAME          guitar: open-road, low-drone, rolling-travis, high-lonesome
         \\                      taiko: matsuri, yatai-bayashi, miyake, oroshi,
         \\                             hachijo, bon-odori, furi-uchi
@@ -607,6 +694,10 @@ fn printUsage() void {
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
         \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
+        \\  --techno-bus NAME   mix, kick, rumble (hard-techno only)
+        \\  --kick-drive VALUE  1..8, default 2.3 (hard-techno only)
+        \\  --kick-decay SECS   0.08..0.8 to -60 dB, default 0.28 (hard-techno only)
+        \\  --rumble VALUE      0..1, default 0.52 (hard-techno only)
         \\
     , .{});
 }

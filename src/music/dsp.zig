@@ -381,6 +381,66 @@ pub fn softClip(x: f32) f32 {
     return x * (1.5 - 0.5 * x * x);
 }
 
+// First-order antiderivative antialiasing of softClip. The integral averages
+// the curve over each input interval; this adds about half a sample of delay.
+// Keep the subtraction in f64 to avoid cancellation on slowly changing bass.
+pub const CubicSaturator = struct {
+    previous_input: f64 = 0.0,
+};
+
+fn cubicSaturatorIntegral(input: f64) f64 {
+    const magnitude = @abs(input);
+    if (magnitude >= 1.0) return magnitude - 0.375;
+    const squared = input * input;
+    return squared * (0.75 - 0.125 * squared);
+}
+
+pub fn cubicSaturatorProcess(state: *CubicSaturator, input: f32) f32 {
+    const current: f64 = input;
+    const previous = state.previous_input;
+    state.previous_input = current;
+    const difference = current - previous;
+    if (@abs(difference) < 0.000001) return softClip(@floatCast((current + previous) * 0.5));
+    return @floatCast((cubicSaturatorIntegral(current) - cubicSaturatorIntegral(previous)) / difference);
+}
+
+pub const DuckingEnvelope = struct {
+    amount: f32 = 0.0,
+    hold_remaining: u32 = 0,
+    hold_samples: u32 = 1920,
+    attack_coefficient: f32 = @exp(-INV_SR / 0.001),
+    release_coefficient: f32 = @exp(-INV_SR / 0.08),
+};
+
+pub fn duckingEnvelopeInit(hold_seconds: f32, release_seconds: f32) DuckingEnvelope {
+    if (!std.math.isFinite(hold_seconds) or !std.math.isFinite(release_seconds) or
+        hold_seconds < 0.0 or hold_seconds > 2.0 or release_seconds <= 0.0 or release_seconds > 4.0)
+    {
+        std.log.warn("duckingEnvelopeInit: invalid hold/release ({d}, {d}), using defaults", .{ hold_seconds, release_seconds });
+        return .{};
+    }
+    return .{
+        .hold_samples = @max(1, @as(u32, @intFromFloat(hold_seconds * SAMPLE_RATE))),
+        .release_coefficient = @exp(-INV_SR / release_seconds),
+    };
+}
+
+pub fn duckingEnvelopeTrigger(state: *DuckingEnvelope) void {
+    state.hold_remaining = state.hold_samples;
+}
+
+// Returns gain. The short attack avoids a discontinuity in an already ringing
+// effect return, and release follows the configured fraction of a beat.
+pub fn duckingEnvelopeProcess(state: *DuckingEnvelope) f32 {
+    if (state.hold_remaining > 0) {
+        state.hold_remaining -= 1;
+        state.amount = 1.0 + (state.amount - 1.0) * state.attack_coefficient;
+        return 1.0 - state.amount * 0.98;
+    }
+    state.amount *= state.release_coefficient;
+    return 1.0 - state.amount * 0.98;
+}
+
 pub fn panStereo(sample: f32, pan: f32) [2]f32 {
     return .{
         sample * (0.5 - pan * 0.5),

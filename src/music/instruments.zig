@@ -1,6 +1,70 @@
 const std = @import("std");
 const dsp = @import("dsp.zig");
 
+pub const ElectronicKickParams = struct {
+    frequency_hz: f32 = 51.0,
+    pitch_drop_hz: f32 = 135.0,
+    pitch_decay_seconds: f32 = 0.014,
+    attack_seconds: f32 = 0.0008,
+    decay_seconds: f32 = 0.42, // Body time to -60 dB.
+    click_level: f32 = 0.10,
+};
+
+pub const ElectronicKick = struct {
+    params: ElectronicKickParams = .{},
+    noise: dsp.Rng = dsp.rngInit(0x7EC4_0001),
+    noise_hpf: dsp.HPF = dsp.hpfInit(1800.0),
+    noise_lpf: dsp.LPF = dsp.lpfInit(6500.0),
+    phase: f32 = 0.0,
+    age: u32 = 0,
+    active: bool = false,
+    tail: f32 = 0.0,
+    last_sample: f32 = 0.0,
+};
+
+pub fn electronicKickTrigger(kick: *ElectronicKick, params: ElectronicKickParams) void {
+    if (!std.math.isFinite(params.frequency_hz) or params.frequency_hz < 30.0 or params.frequency_hz > 100.0 or
+        !std.math.isFinite(params.pitch_drop_hz) or params.pitch_drop_hz < 0.0 or params.pitch_drop_hz > 500.0 or
+        !std.math.isFinite(params.pitch_decay_seconds) or params.pitch_decay_seconds < 0.001 or params.pitch_decay_seconds > 0.1 or
+        !std.math.isFinite(params.attack_seconds) or params.attack_seconds < 0.0001 or params.attack_seconds > 0.02 or
+        !std.math.isFinite(params.decay_seconds) or params.decay_seconds < 0.08 or params.decay_seconds > 0.8 or
+        !std.math.isFinite(params.click_level) or params.click_level < 0.0 or params.click_level > 0.3)
+    {
+        std.log.warn("electronicKickTrigger: invalid kick parameters, skipping trigger", .{});
+        return;
+    }
+    kick.params = params;
+    // Carry the end of a long previous hit through a short fade instead of
+    // snapping a nonzero carrier to zero when the phase restarts.
+    kick.tail = kick.last_sample;
+    kick.phase = 0.0;
+    kick.age = 0;
+    kick.active = true;
+}
+
+pub fn electronicKickProcess(kick: *ElectronicKick) f32 {
+    if (!kick.active) return 0.0;
+    const time = @as(f32, @floatFromInt(kick.age)) * dsp.INV_SR;
+    if (time >= kick.params.decay_seconds * 1.5) {
+        kick.active = false;
+        kick.last_sample = 0.0;
+        return 0.0;
+    }
+    const pitch = kick.params.frequency_hz + kick.params.pitch_drop_hz * @exp(-time / kick.params.pitch_decay_seconds);
+    const attack = 1.0 - @exp(-time / kick.params.attack_seconds);
+    const body = @exp(-6.907755 * time / kick.params.decay_seconds);
+    const knock = @sin(kick.phase * 2.0) * @exp(-time / 0.012) * 0.20;
+    const noise = dsp.lpfProcess(&kick.noise_lpf, dsp.hpfProcess(&kick.noise_hpf, dsp.rngFloat(&kick.noise) * 2.0 - 1.0));
+    const click = noise * kick.params.click_level * @exp(-time / 0.0025);
+    const sample = (@sin(kick.phase) * body + knock + click) * attack + kick.tail;
+    kick.tail *= @exp(-dsp.INV_SR / 0.002);
+    kick.phase += pitch * dsp.INV_SR * dsp.TAU;
+    if (kick.phase >= dsp.TAU) kick.phase -= dsp.TAU;
+    kick.age += 1;
+    kick.last_sample = sample;
+    return sample;
+}
+
 const GUITAR_FAUST_STRING_BUFFER_SIZE = 8192;
 const GUITAR_FAUST_PROMOTED_PLUCK_BRIGHTNESS: f32 = 0.68;
 const GUITAR_FAUST_PROMOTED_STRING_DECAY: f32 = 0.7765;
