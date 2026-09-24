@@ -6,6 +6,7 @@ zig-pkg/
 __pycache__/
 *.pyc
 .codex_pdf_tools/
+/agent-temp-files/
 
 videos/
 drafts/

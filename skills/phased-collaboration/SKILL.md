@@ -1,6 +1,6 @@
 ---
 name: phased-collaboration
-description: Follow this user's repository workflow for planned changes, implementation, review iterations, and commits. Work in commit-sized phases, show the plan before each phase, report independent review findings and corrections, and wait for the user's acceptance before committing.
+description: Follow this user's repository workflow for planned changes, implementation, review iterations, and commits. Work in commit-sized phases, show the plan before each phase, report independent review findings and corrections, and wait for explicit user authorization before committing.
 ---
 
 # Phased collaboration
@@ -9,6 +9,25 @@ Apply this workflow to repository changes, including small fixes and tooling or
 documentation work. Ordinary explanations do not need an implementation phase.
 Follow the user's explicit instructions for the current task and carry forward
 plans, feedback, and approvals already given in the conversation.
+
+## Keep temporary work in the repository
+
+Use the gitignored repository-root `agent-temp-files/` directory for all
+agent-owned scratch work: temporary scripts, backups, review snapshots, logs,
+generated artifacts and experiments. Create it when missing and use task-specific
+subfolders. Do not use `/tmp` or `/private/tmp` for this work. Configure helper
+tools' temporary paths to use this directory where supported; if a tool cannot
+use it, explain the limitation before using an outside location. This avoids
+recurring approvals for ordinary scratch-file writes; it does not bypass
+execution permissions or expand task authority.
+
+Never force-add scratch files to Git or treat them as the maintained source.
+When cleaning up, remove only artifacts owned by the current task, preserving
+other work in the directory.
+
+Maintained, reusable agent-only automation is not scratch work. Place it in
+`agent-tests/` according to [agent-automation](../agent-automation/SKILL.md);
+keep its temporary data and generated output in `agent-temp-files/`.
 
 ## Plan before implementing
 
@@ -57,17 +76,17 @@ them, run affected checks and the applicable review workflow, then hand back the
 revised changes with an updated account of findings and fixes. Remain in this
 phase until the user accepts the resulting changes.
 
-Commit only after explicit acceptance of the changes being committed. Approval
-of a plan authorizes implementation, not a commit. Questions, test reports,
-partial approval, silence, or a request for further changes are not acceptance
-of the whole phase. Interpret approval in context; no special approval wording
-is required.
+Commit only when the user explicitly asks to commit the reviewed phase. Approval
+of a plan authorizes implementation, not a commit. Acceptance of the changes
+alone is not commit authorization. Questions, test reports, partial approval,
+silence, or a request for further changes do not authorize a commit. Interpret
+explicit commit requests in context; no special wording is required.
 
-Once the user accepts the phase, make its commit without requesting the same
-authorization again, unless they have asked to delay the commit. Include only
-the accepted phase changes and preserve unrelated work and staging. If further
-changes are needed after acceptance, return those changes for review before
-including them in the commit. Report the commit and the phase it completes.
+Once the user authorizes the commit, make it without requesting the same
+authorization again. Include only the accepted phase changes and preserve
+unrelated work and staging. If further changes are needed after acceptance,
+return those changes for review before including them in the commit. Report
+the commit and the phase it completes.
 
 ## Plan the next phase
 

@@ -1,14 +1,33 @@
 ---
 name: review-before-handoff
-description: Run one independent review of implementation changes in this Zig game before handing them to the user. Check applicable repository skills, reuse of existing code and tooling, and correctness; address actionable findings and validate the fixes. Apply to code, asset-format, and build/tooling changes, or when explicitly requested, rather than ordinary explanations or documentation-only edits.
+description: Run one independent review before handing off substantial or risk-sensitive implementation changes, or when explicitly requested. Address actionable findings and validate fixes. Small mechanical changes and ordinary documentation updates use local inspection and relevant checks, not an automatic reviewer.
 ---
 
 # Review before handoff
 
-Give the user a change that has already received one independent review and a
-correction pass. The reviewer finds problems; the implementing agent owns the
-fixes and verification. This does not replace the user's review or authorize a
-commit. Follow explicit user constraints over skill defaults.
+Match review effort to the change. Always inspect the task's diff and run relevant
+checks; do not launch an independent reviewer for every small edit. When a review
+is warranted, the reviewer finds problems and the implementing agent owns fixes
+and verification. Neither local checks nor independent review replace the user's
+acceptance or authorize a commit.
+
+## Decide whether an independent review is warranted
+
+Use an independent reviewer when the user explicitly requests one, for a
+substantial feature/refactor handoff, or for changes with meaningful behavioral
+risk such as resource ownership, entity lifecycle, cross-component contracts,
+asset/settings integrity or audio-thread synchronization.
+
+Use local inspection and relevant checks for small, self-contained mechanical
+changes: moving an unchanged helper into its caller, straightforward renames,
+formatting and ordinary documentation or instruction updates. Assess actual
+impact, not line count or the folder touched; a mechanical edit in an audio
+module does not automatically need a reviewer, while a small ownership change may.
+
+A minor correction is not a new mandatory review cycle, and calling a small
+task a phase does not make independent review necessary. Follow explicit user
+instructions over these defaults. Apply the workflow below only when an
+independent review is warranted.
 
 ## Implementing agent
 
@@ -38,7 +57,7 @@ commit. Follow explicit user constraints over skill defaults.
    validation script when it covers those requirements. Reuse current results
    when no changes or unresolved concerns invalidate them.
 7. Hand the work to the user using the user-handoff instructions below. Leave
-   the changes uncommitted until the user accepts them; follow
+   the changes uncommitted until the user explicitly asks to commit; follow
    [phased-collaboration](../phased-collaboration/SKILL.md) for phase planning,
    review iterations, acceptance, and commits.
 
