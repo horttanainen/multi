@@ -41,6 +41,7 @@ const RenderConfig = struct {
     rumble_level: f32 = 0.52,
     percussion_level: f32 = 0.65,
     techno_groove: procedural_hard_techno.Groove = .warehouse,
+    techno_arrangement: procedural_hard_techno.Arrangement = .loop,
     techno_options_set: bool = false,
     instrument_set: bool = false,
 };
@@ -111,9 +112,10 @@ pub fn main(init: std.process.Init) !void {
         logTaikoBusStats(cfg);
     }
     if (cfg.style == .hard_techno) {
-        std.log.info("techno_render: bus={s} groove={s} bpm={d:.3} kicks={d} hats_closed={d} hats_open={d} claps={d} metal={d} drive={d:.3} decay={d:.3} rumble={d:.3} percussion={d:.3} dc={d:.7} clipped={d} non_finite={d} render_ms={d}", .{
+        std.log.info("techno_render: bus={s} groove={s} arrangement={s} bpm={d:.3} kicks={d} hats_closed={d} hats_open={d} claps={d} metal={d} drive={d:.3} decay={d:.3} rumble={d:.3} percussion={d:.3} dc={d:.7} clipped={d} non_finite={d} render_ms={d}", .{
             @tagName(cfg.techno_bus),
             @tagName(cfg.techno_groove),
+            @tagName(cfg.techno_arrangement),
             procedural_hard_techno.BASE_BPM * cfg.tempo_scale,
             procedural_hard_techno.kick_count,
             procedural_hard_techno.percussion_counts[0],
@@ -129,6 +131,19 @@ pub fn main(init: std.process.Init) !void {
             stats.non_finite_samples,
             render_ms,
         });
+        if (cfg.techno_arrangement == .track) {
+            for (procedural_hard_techno.section_frames, 0..) |entry, index| {
+                const frame = entry orelse continue; // Partial renders may end before later sections.
+                const section: procedural_hard_techno.TrackSection = @enumFromInt(index);
+                const bar = if (index < procedural_hard_techno.track_sections.len)
+                    procedural_hard_techno.track_sections[index].start_bar
+                else
+                    procedural_hard_techno.TRACK_BARS;
+                std.log.info("techno_section: name={s} bar={d} frame={d} seconds={d:.6}", .{
+                    @tagName(section), bar, frame, @as(f64, @floatFromInt(frame)) / dsp.SAMPLE_RATE,
+                });
+            }
+        }
         if (stats.non_finite_samples > 0 or stats.clipped_samples > 0) {
             std.log.err("procedural_music_probe: invalid hard-techno output; inspect render statistics", .{});
             return error.InvalidAudioOutput;
@@ -139,6 +154,7 @@ pub fn main(init: std.process.Init) !void {
 fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
     var cfg: RenderConfig = .{};
     var style_set = false;
+    var duration_set = false;
     var idx: usize = 1;
 
     while (idx < args.len) {
@@ -169,6 +185,7 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--duration")) {
             const value = try optionValue(args, idx, arg);
             cfg.duration_seconds = try parsePositiveFloatArg("duration", value);
+            duration_set = true;
             idx += 2;
             continue;
         }
@@ -273,6 +290,16 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
             idx += 2;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--arrangement")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.techno_arrangement = std.meta.stringToEnum(procedural_hard_techno.Arrangement, value) orelse {
+                std.log.err("procedural_music_probe: unknown arrangement '{s}' (use loop, track)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--percussion")) {
             cfg.percussion_level = try parseBoundedFloatArg("percussion", try optionValue(args, idx, arg), 0.0, 1.0);
             cfg.techno_options_set = true;
@@ -285,6 +312,11 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
     }
 
     try validateRenderConfig(cfg);
+    if (cfg.style == .hard_techno and cfg.techno_arrangement == .track and !duration_set) {
+        // Include a second of silence after the finite arrangement to verify its end.
+        cfg.duration_seconds = @as(f32, @floatFromInt(procedural_hard_techno.TRACK_BARS)) *
+            4.0 * 60.0 / (procedural_hard_techno.BASE_BPM * cfg.tempo_scale) + 1.0;
+    }
     return cfg;
 }
 
@@ -384,6 +416,10 @@ fn parseInstrumentFlavorName(name: []const u8) ?procedural_americana_guitar.Inst
 }
 
 fn validateRenderConfig(cfg: RenderConfig) !void {
+    if (cfg.techno_arrangement == .track and cfg.techno_groove != .warehouse) {
+        std.log.err("procedural_music_probe: track mode arranges Warehouse/Machine; --groove selects loop patterns only", .{});
+        return error.InvalidArgument;
+    }
     if ((cfg.taiko_bus_stats or cfg.taiko_isolate_kane or cfg.taiko_isolate_nagado_back) and cfg.style != .taiko) {
         std.log.err("procedural_music_probe: taiko options require style=taiko", .{});
         return error.InvalidArgument;
@@ -446,6 +482,7 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .rumble_level = cfg.rumble_level,
                 .percussion_level = cfg.percussion_level,
                 .groove = cfg.techno_groove,
+                .arrangement = cfg.techno_arrangement,
                 .room_mix = cfg.reverb_mix,
                 .bus = cfg.techno_bus,
             };
@@ -658,7 +695,7 @@ fn cueLabelForStyle(style: StyleName, cfg: RenderConfig) []const u8 {
     return switch (style) {
         .americana_guitar => guitarCueLabel(cfg.guitar_cue),
         .taiko => taikoCueLabel(cfg.taiko_cue),
-        .hard_techno => "steady",
+        .hard_techno => if (cfg.techno_arrangement == .track) "warehouse-track" else @tagName(cfg.techno_groove),
     };
 }
 
@@ -708,7 +745,7 @@ fn printUsage() void {
         \\  hard-techno        150 BPM kick, rumble and percussion grooves
         \\
         \\Options:
-        \\  --duration SECONDS
+        \\  --duration SECONDS  default 24; track defaults to 128 bars + 1 second
         \\  --out PATH
         \\  --tempo SCALE       0.35..1.65, default 1.0
         \\  --reverb VALUE      0..1, techno rumble room / other styles' reverb
@@ -722,6 +759,7 @@ fn printUsage() void {
         \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
         \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion
         \\  --groove NAME       warehouse (default), rolling, machine, foundation
+        \\  --arrangement NAME  loop (default), track (128 bars, Warehouse/Machine)
         \\  --percussion VALUE  0..1, default 0.65 (hard-techno only)
         \\  --kick-drive VALUE  1..8, default 2.3 (hard-techno only)
         \\  --kick-decay SECS   0.08..0.8 to -60 dB, default 0.28 (hard-techno only)

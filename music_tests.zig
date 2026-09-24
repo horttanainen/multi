@@ -345,3 +345,103 @@ test "all percussion grooves retain headroom at maximum mix levels" {
         }
     }
 }
+
+test "track sections follow musical boundaries with a quiet break and a clean ending" {
+    const bar_frames = 76800;
+    const end_frame = 128 * bar_frames;
+    procedural_hard_techno.config = .{ .arrangement = .track };
+    procedural_hard_techno.resetWithSeed(12345);
+    var buffer: [2048]f32 = undefined;
+    var opening: [2048]f32 = undefined;
+    var frame: usize = 0;
+    var previous: [2]f32 = .{ 0.0, 0.0 };
+    var drive_energy: f64 = 0.0;
+    var break_energy: f64 = 0.0;
+    var return_energy: f64 = 0.0;
+    while (frame < end_frame + 1024) {
+        const count = @min(buffer.len / 2, end_frame + 1024 - frame);
+        procedural_hard_techno.fillBuffer(&buffer, count);
+        if (frame == 0) opening = buffer;
+        for (0..count) |index| {
+            const absolute_frame = frame + index;
+            const bar = absolute_frame / bar_frames;
+            for (0..2) |channel| {
+                const sample = buffer[index * 2 + channel];
+                try std.testing.expect(std.math.isFinite(sample));
+                try std.testing.expect(@abs(sample) < 0.99);
+                if (bar >= 16 and bar < 24) drive_energy += sample * sample;
+                if (bar >= 80 and bar < 88) break_energy += sample * sample;
+                if (bar >= 88 and bar < 96) return_energy += sample * sample;
+                if (absolute_frame >= end_frame) try std.testing.expectEqual(@as(f32, 0.0), sample);
+                // Exact section boundaries should not abruptly cut ringing audio.
+                if (absolute_frame % bar_frames == 0) {
+                    try std.testing.expect(@abs(sample - previous[channel]) < 0.03);
+                }
+                previous[channel] = sample;
+            }
+        }
+        frame += count;
+    }
+    for ([_]u64{ 0, 8, 40, 56, 80, 88, 120, 128 }, 0..) |bar, index| {
+        try std.testing.expectEqual(@as(?u64, bar * bar_frames), procedural_hard_techno.section_frames[index]);
+    }
+    try std.testing.expectEqual(procedural_hard_techno.TrackSection.finished, procedural_hard_techno.track_section);
+    try std.testing.expectEqual(@as(u64, 480), procedural_hard_techno.kick_count);
+    try std.testing.expect(break_energy < drive_energy * 0.10);
+    try std.testing.expect(return_energy > break_energy * 10.0);
+    procedural_hard_techno.resetWithSeed(12345);
+    procedural_hard_techno.fillBuffer(&buffer, buffer.len / 2);
+    try std.testing.expectEqualSlices(f32, &opening, &buffer);
+}
+
+test "full arrangement retains fractional clock remainder across all 128 bars" {
+    procedural_hard_techno.config = .{ .arrangement = .track, .tempo_scale = 0.93 };
+    procedural_hard_techno.resetWithSeed(54321);
+    const frames_per_bar = 48000.0 * 60.0 / 139.5 * 4.0;
+    advanceTechno(@as(usize, @intFromFloat(@ceil(128.0 * frames_per_bar))) + 16);
+    for ([_]u64{ 0, 8, 40, 56, 80, 88, 120, 128 }, 0..) |bar, index| {
+        try std.testing.expect(procedural_hard_techno.section_frames[index] != null);
+        const actual = procedural_hard_techno.section_frames[index].?;
+        const expected = @as(f64, @floatFromInt(bar)) * frames_per_bar;
+        try std.testing.expect(@abs(@as(f64, @floatFromInt(actual)) - expected) <= 2.0);
+    }
+    try std.testing.expectEqual(@as(u64, 480), procedural_hard_techno.kick_count);
+}
+
+test "arrangement targets fade gradually without weakening the returning kick trigger" {
+    procedural_hard_techno.config = .{ .arrangement = .track };
+    procedural_hard_techno.resetWithSeed(456);
+    advanceTechno(4 * 76800); // Rumble enters at bar four.
+    const before = procedural_hard_techno.layer_levels[0];
+    try std.testing.expectEqual(@as(f32, 0.0), before);
+    advanceTechno(1);
+    try std.testing.expect(procedural_hard_techno.layer_levels[0] > 0.0);
+    try std.testing.expect(procedural_hard_techno.layer_levels[0] - before < 0.001);
+    advanceTechno(4800);
+    try std.testing.expect(procedural_hard_techno.layer_levels[0] > 0.64);
+    const break_plan = procedural_hard_techno.arrangementStep(87, 15);
+    try std.testing.expect(!break_plan.kick_enabled);
+    for (break_plan.layers) |level| try std.testing.expectEqual(@as(f32, 0.0), level);
+    const return_plan = procedural_hard_techno.arrangementStep(88, 0);
+    try std.testing.expect(return_plan.kick_enabled);
+    try std.testing.expectEqual(procedural_hard_techno.Groove.warehouse, return_plan.groove);
+    try std.testing.expectEqual(@as(f32, 1.0), return_plan.layers[0]);
+}
+
+test "track reset and sample output are independent of render chunks and later config edits" {
+    const first = try std.testing.allocator.alloc(f32, 48000 * 16 * 2);
+    defer std.testing.allocator.free(first);
+    const second = try std.testing.allocator.alloc(f32, first.len);
+    defer std.testing.allocator.free(second);
+    renderTechno(first, .{ .arrangement = .track }, 12345, 1024);
+    const entries = procedural_hard_techno.section_frames;
+    const counts = procedural_hard_techno.percussion_counts;
+    renderTechno(second, .{ .arrangement = .track }, 12345, 61);
+    try std.testing.expectEqualSlices(f32, first, second);
+    try std.testing.expectEqualSlices(?u64, &entries, &procedural_hard_techno.section_frames);
+    try std.testing.expectEqualSlices(u64, &counts, &procedural_hard_techno.percussion_counts);
+    procedural_hard_techno.resetWithSeed(12345);
+    procedural_hard_techno.config = .{ .arrangement = .loop, .volume = 0.0 };
+    procedural_hard_techno.fillBuffer(second.ptr, second.len / 2);
+    try std.testing.expectEqualSlices(f32, first, second);
+}

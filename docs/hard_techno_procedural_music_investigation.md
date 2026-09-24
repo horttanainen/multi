@@ -2,11 +2,13 @@
 
 Investigated 2026-09-24 against commit `657ac10` and the existing working tree.
 This document records the preimplementation findings and proposed roadmap.
-Phase 1 is committed with the user's selected tight candidate. Phase 2 adds
-three percussion grooves; the user liked Warehouse and Machine and leans toward
-Warehouse. The user has requested the completed Phase 2 commit; see
-[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-2-percussion-groove) for results,
-validation and current status.
+Phases 1 and 2 are committed with the user's selected tight low end and preferred
+Warehouse groove; Machine was also positively received. Phase 3 adds a complete
+128-bar Warehouse-led arrangement with a Machine contrast section. Validation
+and independent review are complete; the user accepted the handoff and requested
+its commit. Game integration is the next proposed phase. See
+[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-3-complete-arrangement)
+for the full track, transition previews, results and current status.
 
 The user has explicitly made earlier music-generation guidance optional because
 the previous approach gave poor results. Treat this document's musical and

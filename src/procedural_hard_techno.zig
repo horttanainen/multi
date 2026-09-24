@@ -1,5 +1,5 @@
-// A fixed low-end foundation with repeatable percussion grooves. Long-form
-// arrangement and game integration remain separate milestones.
+// Repeatable percussion loops and a finite, phrase-aligned track. The same
+// voices/effects continue through section boundaries; game integration is separate.
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const composition = @import("music/composition.zig");
@@ -8,6 +8,19 @@ const instruments = @import("music/instruments.zig");
 
 pub const Bus = enum { mix, kick, rumble, low_end, hats, clap, metal, percussion };
 pub const Groove = enum { foundation, warehouse, rolling, machine };
+pub const Arrangement = enum { loop, track };
+pub const TrackSection = enum { intro, drive, contrast, pressure, breakdown, returning, outro, finished };
+pub const TRACK_BARS: u64 = 128;
+pub const TrackSectionSpec = struct { section: TrackSection, start_bar: u64, end_bar: u64 };
+pub const track_sections = [_]TrackSectionSpec{
+    .{ .section = .intro, .start_bar = 0, .end_bar = 8 },
+    .{ .section = .drive, .start_bar = 8, .end_bar = 40 },
+    .{ .section = .contrast, .start_bar = 40, .end_bar = 56 },
+    .{ .section = .pressure, .start_bar = 56, .end_bar = 80 },
+    .{ .section = .breakdown, .start_bar = 80, .end_bar = 88 },
+    .{ .section = .returning, .start_bar = 88, .end_bar = 120 },
+    .{ .section = .outro, .start_bar = 120, .end_bar = TRACK_BARS },
+};
 pub const Config = struct {
     tempo_scale: f32 = 1.0,
     volume: f32 = 0.86,
@@ -17,6 +30,7 @@ pub const Config = struct {
     room_mix: f32 = 0.35,
     percussion_level: f32 = 0.65,
     groove: Groove = .warehouse,
+    arrangement: Arrangement = .loop,
     bus: Bus = .mix,
 };
 
@@ -24,6 +38,13 @@ pub var config: Config = .{};
 pub var kick_count: u64 = 0;
 // Closed hats, open hats, claps, metal strikes; counts are independent of solos.
 pub var percussion_counts: [4]u64 = .{0} ** 4;
+pub var current_bar: u64 = 0;
+pub var track_section: TrackSection = .intro;
+// First sample of each section (including finished). Null means not reached.
+pub var section_frames: [8]?u64 = .{null} ** 8;
+pub var frames_rendered: u64 = 0;
+// Rumble, hats, clap, metal. Exposed for transition diagnostics.
+pub var layer_levels: [4]f32 = .{1.0} ** 4;
 pub const BASE_BPM: f32 = 150.0;
 const DELAY_SIZE = 48000;
 const COMBS = .{ 1559, 1747, 1999, 2131 };
@@ -63,6 +84,107 @@ var swing_samples: u32 = 0;
 var hat_closed_decay: f32 = 0.04;
 var hat_open_decay: f32 = 0.22;
 var metal_pan: f32 = 0.0;
+var layer_targets: [4]f32 = .{1.0} ** 4;
+var layer_fade_rate: f32 = 0.0;
+var outro_fade_start: u64 = 0;
+var outro_fade_frames: f64 = 1.0;
+
+pub const TrackStep = struct {
+    section: TrackSection = .finished,
+    groove: Groove = .warehouse,
+    layers: [4]f32 = .{0.0} ** 4,
+    kick_enabled: bool = false,
+    fill: bool = false,
+};
+
+pub fn arrangementStep(bar: u64, step: u8) TrackStep {
+    if (step >= 16) {
+        std.log.warn("procedural_hard_techno.arrangementStep: invalid step={d}", .{step});
+        return .{};
+    }
+    if (bar >= TRACK_BARS) return .{};
+    var section: ?TrackSection = null;
+    for (track_sections) |entry| {
+        if (bar >= entry.end_bar) continue;
+        section = entry.section;
+        break;
+    }
+    const selected = section orelse {
+        std.log.warn("procedural_hard_techno.arrangementStep: no section for bar={d}", .{bar});
+        return .{};
+    };
+    var plan: TrackStep = .{ .section = selected, .layers = .{1.0} ** 4, .kick_enabled = true };
+    switch (selected) {
+        .intro => {
+            plan.layers = if (bar < 4) .{ 0.0, 0.25, 0.0, 0.0 } else .{ 0.65, 0.60, 0.0, 0.0 };
+        },
+        .drive => {
+            if (bar < 16) plan.layers = .{ 1.0, 0.78, 0.75, 0.0 };
+            if (bar >= 16 and bar < 32) plan.layers[3] = 0.55;
+            plan.fill = bar == 31 or bar == 39;
+        },
+        .contrast => {
+            plan.groove = .machine;
+            plan.layers = .{ 0.85, 0.80, 0.90, 1.0 };
+            plan.fill = bar == 55;
+        },
+        .pressure => {
+            plan.layers[3] = 0.80;
+            if (bar >= 64 and bar < 72) plan.layers = .{ 1.0, 0.90, 0.75, 0.55 };
+            plan.fill = bar == 71 or bar == 79;
+        },
+        .breakdown => {
+            plan.kick_enabled = false;
+            plan.layers = if (bar < 84) .{ 0.25, 0.45, 0.0, 0.50 } else .{ 0.0, 0.70, 0.65, 0.75 };
+            plan.fill = bar >= 86;
+            if (bar == 87 and step >= 12) plan.layers = .{0.0} ** 4;
+        },
+        .returning => {
+            // Re-establish the preferred groove before small late-phrase answers.
+            plan.layers[3] = if (bar < 104) 0.55 else 1.0;
+            plan.fill = bar == 103 or bar == 119;
+        },
+        .outro => {
+            plan.layers = if (bar < 124) .{ 0.70, 0.55, 0.0, 0.40 } else .{ 0.35, 0.0, 0.0, 0.0 };
+        },
+        .finished => return .{},
+    }
+    return plan;
+}
+
+fn arrangePercussion(event: *PercussionStep, plan: TrackStep, bar: u64, step: u8) void {
+    if (plan.section == .finished) {
+        event.* = .{};
+        return;
+    }
+    if (plan.section == .intro and bar < 4) event.open = 0.0;
+    if (plan.section == .breakdown) {
+        event.open = 0.0;
+        event.clap = 0.0;
+        event.metal = if (step == 2 or step == 10) 0.30 else 0.0;
+        if (bar == 87 and step >= 12) {
+            event.* = .{};
+            return;
+        }
+    }
+    if (plan.fill and step >= 12) {
+        event.closed = if (step % 2 == 0) 0.62 else 0.38;
+        event.open = 0.0;
+        if (step == 14) event.clap = 0.38;
+        if (step == 15) event.metal = 0.48;
+    }
+    // The last two bars of the break build before leaving a beat of space.
+    if (plan.section == .breakdown and bar >= 86 and step % 2 == 0) {
+        event.clap = 0.22 + @as(f32, @floatFromInt(step)) * 0.018;
+    }
+    // Unheard voices are not newly triggered, but their existing tails continue.
+    if (plan.layers[1] == 0.0) {
+        event.closed = 0.0;
+        event.open = 0.0;
+    }
+    if (plan.layers[2] == 0.0) event.clap = 0.0;
+    if (plan.layers[3] == 0.0) event.metal = 0.0;
+}
 
 pub const PercussionStep = struct {
     closed: f32 = 0.0,
@@ -128,6 +250,10 @@ pub fn resetWithSeed(seed: u32) void {
     active_config.rumble_level = bounded("rumble", config.rumble_level, 0.0, 1.0, 0.52);
     active_config.room_mix = bounded("room", config.room_mix, 0.0, 1.0, 0.35);
     active_config.percussion_level = bounded("percussion", config.percussion_level, 0.0, 1.0, 0.65);
+    if (config.arrangement == .track and config.groove != .warehouse) {
+        std.log.warn("procedural_hard_techno.reset: track mode uses Warehouse/Machine; ignoring loop groove", .{});
+        active_config.groove = .warehouse;
+    }
     var noise_seed = seed;
     if (noise_seed == 0) {
         std.log.warn("procedural_hard_techno.resetWithSeed: zero noise seed, using default", .{});
@@ -145,6 +271,13 @@ pub fn resetWithSeed(seed: u32) void {
     metal = .{ .base_freq = 510.0, .volume = 0.90 };
     metal_pan = 0.0;
     steps_elapsed = 0;
+    current_bar = 0;
+    track_section = .intro;
+    section_frames = .{null} ** 8;
+    frames_rendered = 0;
+    layer_levels = if (active_config.arrangement == .track) .{0.0} ** 4 else .{1.0} ** 4;
+    layer_targets = layer_levels;
+    outro_fade_start = 0;
     pending_percussion = null;
     pending_delay = 0;
     percussion_counts = .{0} ** 4;
@@ -161,6 +294,8 @@ pub fn resetWithSeed(seed: u32) void {
     rumble_output_dc = dsp.hpfInit(20.0);
     const beat_seconds = 60.0 / (BASE_BPM * active_config.tempo_scale);
     const beat_samples = beat_seconds * dsp.SAMPLE_RATE;
+    layer_fade_rate = 1.0 - @exp(-dsp.INV_SR / 0.020);
+    outro_fade_frames = @as(f64, beat_samples) * 16.0;
     swing_samples = @intFromFloat(@round(beat_samples * 0.25 * 0.16));
     hat_closed_decay = beat_seconds * 0.10;
     hat_open_decay = beat_seconds * 0.55;
@@ -180,14 +315,35 @@ fn bounded(label: []const u8, value: f32, low: f32, high: f32, fallback: f32) f3
 }
 
 fn advanceClock() void {
+    if (active_config.arrangement == .track and track_section == .finished) return;
     const step = composition.stepSequencer16AdvanceSample(&sequencer, BASE_BPM * active_config.tempo_scale) orelse return;
-    if (step % 4 == 0) {
+    current_bar = steps_elapsed / 16;
+    var groove = active_config.groove;
+    var kick_enabled = true;
+    var plan: TrackStep = .{};
+    if (active_config.arrangement == .track) {
+        plan = arrangementStep(current_bar, step);
+        track_section = plan.section;
+        const section_index = @intFromEnum(track_section);
+        if (section_frames[section_index] == null) section_frames[section_index] = frames_rendered;
+        layer_targets = plan.layers;
+        groove = plan.groove;
+        kick_enabled = plan.kick_enabled;
+        if (current_bar == 124 and step == 0) outro_fade_start = frames_rendered;
+        if (track_section == .finished) {
+            pending_percussion = null;
+            return;
+        }
+    }
+    if (kick_enabled and step % 4 == 0) {
         instruments.electronicKickTrigger(&kick, .{ .decay_seconds = active_config.kick_decay });
         dsp.duckingEnvelopeTrigger(&ducker);
         kick_count += 1;
     }
-    pending_percussion = grooveStep(active_config.groove, steps_elapsed / 16, step);
-    pending_delay = if (active_config.groove == .rolling and step % 2 == 1) swing_samples else 0;
+    var event = grooveStep(groove, current_bar, step);
+    if (active_config.arrangement == .track) arrangePercussion(&event, plan, current_bar, step);
+    pending_percussion = event;
+    pending_delay = if (groove == .rolling and step % 2 == 1) swing_samples else 0;
     steps_elapsed += 1;
 }
 
@@ -225,6 +381,20 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
     const kick_gain = 0.58 / (1.0 + (active_config.kick_drive - 1.0) * 0.045);
     for (0..frames) |frame| {
         advanceClock();
+        if (active_config.arrangement == .track and track_section == .finished) {
+            buffer[frame * 2] = 0.0;
+            buffer[frame * 2 + 1] = 0.0;
+            frames_rendered += 1;
+            continue;
+        }
+        var master_fade: f32 = 1.0;
+        if (active_config.arrangement == .track) {
+            composition.easeLevels(4, &layer_levels, &layer_targets, layer_fade_rate);
+            if (current_bar >= 124) {
+                const elapsed: f64 = @floatFromInt(frames_rendered - outro_fade_start);
+                master_fade = @floatCast(@max(0.0, 1.0 - elapsed / outro_fade_frames));
+            }
+        }
         triggerPendingPercussion();
         const raw = instruments.electronicKickProcess(&kick);
         const driven = dsp.cubicSaturatorProcess(&kick_drive, raw * active_config.kick_drive);
@@ -243,15 +413,21 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         // Nonlinear shaping and ducking can reintroduce DC after the input
         // high-pass. Remove it from the final return as well.
         const ducked = filtered * dsp.duckingEnvelopeProcess(&ducker);
-        const rumble_bus = dsp.hpfProcess(&rumble_output_dc, ducked) * 0.30 * active_config.rumble_level;
+        var rumble_bus = dsp.hpfProcess(&rumble_output_dc, ducked) * 0.30 * active_config.rumble_level;
+        if (active_config.arrangement == .track) rumble_bus *= layer_levels[0];
         const closed = dsp.panStereo(instruments.hiHatProcess(&closed_hat, &closed_noise) * 2.0, -0.24);
         const open = dsp.panStereo(instruments.hiHatProcess(&open_hat, &open_noise) * 2.0, 0.20);
         const clap_sample = instruments.electronicClapProcess(&clap, &clap_noise);
         const metal_sample = dsp.panStereo(instruments.atariganeProcess(&metal, &metal_noise) * 2.0, metal_pan);
         for (0..2) |channel| {
-            const hats_bus = (closed[channel] + open[channel]) * 0.75 * active_config.percussion_level;
-            const clap_bus = clap_sample * 0.45 * active_config.percussion_level;
-            const metal_bus = metal_sample[channel] * 0.50 * active_config.percussion_level;
+            var hats_bus = (closed[channel] + open[channel]) * 0.75 * active_config.percussion_level;
+            var clap_bus = clap_sample * 0.45 * active_config.percussion_level;
+            var metal_bus = metal_sample[channel] * 0.50 * active_config.percussion_level;
+            if (active_config.arrangement == .track) {
+                hats_bus *= layer_levels[1];
+                clap_bus *= layer_levels[2];
+                metal_bus *= layer_levels[3];
+            }
             const percussion = hats_bus + clap_bus + metal_bus;
             const selected = switch (active_config.bus) {
                 .mix => kick_bus + rumble_bus + percussion,
@@ -263,7 +439,8 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
                 .metal => metal_bus,
                 .percussion => percussion,
             };
-            buffer[frame * 2 + channel] = selected * active_config.volume;
+            buffer[frame * 2 + channel] = selected * active_config.volume * master_fade;
         }
+        frames_rendered += 1;
     }
 }

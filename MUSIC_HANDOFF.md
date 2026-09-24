@@ -16,16 +16,18 @@ Prepared 2026-09-24. This folder is the dedicated music worktree.
   the user's request. That commit is the implementation baseline.
 - Phase 1 was accepted and committed as `2ecaf4e` on `codex/hard-techno`.
   The user selected the first (tight) low-end candidate.
-- Phase 2 is complete and independently reviewed. The user liked Warehouse and
-  Machine, leaning toward Warehouse as the best, then explicitly requested
-  the Phase 2 commit. Warehouse remains the default.
+- Phase 2 was accepted and committed as `26e70e2`. The user liked Warehouse and
+  Machine, leaning toward Warehouse as the best. Warehouse remains the loop default.
+- Phase 3 is implemented, validated and independently reviewed. The user accepted
+  the handoff and explicitly requested its commit. Phase 4 is proposed below;
+  implementation has not started.
 
 The user wants better procedural music and proposed a hard techno generator,
 with shared-library improvements where useful. They selected a separate folder
 so this work is easy to track while another agent works on other game features.
-The next proposed milestone is Phase 3 below; it has not started. Develop the
-arrangement around Warehouse once the user requests the next phase. The previous
-bass/acid plan remains optional under the user's sound-design guidance.
+The completed Phase 3 milestone is a Warehouse-led arrangement with a short
+Machine section. The previous bass/acid plan remains optional under the user's
+sound-design guidance. Game integration remains the next proposed milestone.
 Workflow skills now distinguish accepting changes from explicitly authorizing
 a commit; they also reserve independent review for substantial or risky changes.
 
@@ -57,6 +59,85 @@ Prioritize a good repeating groove, controlled low-frequency mixing, and
 deliberate arrangement. Keep the pulse stable and vary timbre, accents, motifs,
 and layer entrances at musical boundaries. Human listening is an acceptance
 criterion; level and spectral metrics alone cannot decide whether it sounds good.
+
+## Phase 3: complete arrangement
+
+**Outcome and commit boundary:** a finite 128-bar track, retained loop mode,
+section timing diagnostics, focused arrangement tests, and an extended audition
+recipe for full tracks and transition previews. The user requested implementation
+after the concrete plan, then explicitly requested the completed phase's commit.
+
+The arrangement uses the selected tight low end and the existing voices/effects.
+`StepSequencer16` provides the clock; `composition.easeLevels` smooths layer
+changes over roughly 20 ms. Section changes preserve synthesis/effect state.
+An eight-bar break omits kick triggers, a short clap build leaves one beat of
+space before the return, and the final four bars fade to zero. Playback remains
+silent after bar 128 until reset. Noise seeds change timbre, while the score and
+section timeline stay repeatable.
+
+| Section | Bars (one-based) | Start at 150 BPM | Development |
+| --- | --- | --- | --- |
+| Intro | 1–8 | 0:00.0 | Tight kick, restrained hats, then rumble |
+| Drive | 9–40 | 0:12.8 | Warehouse enters and gradually fills out |
+| Contrast | 41–56 | 1:04.0 | Machine percussion with a lighter rumble balance |
+| Pressure | 57–80 | 1:29.6 | Warehouse returns, with an eight-bar reduction and fills |
+| Breakdown | 81–88 | 2:08.0 | Kick drops out; percussion builds toward the return |
+| Return | 89–120 | 2:20.8 | Full Warehouse pulse, then late-phrase accents |
+| Outro | 121–128 | 3:12.0 | Layers withdraw; the master fades from 3:18.4 |
+| Finished | — | 3:24.8 | Silence |
+
+Listen to [the full track](agent-temp-files/hard-techno/phase3/track_seed_12345_matched.wav)
+or [the transition previews](agent-temp-files/hard-techno/phase3/transitions.wav).
+The full file includes one second of trailing silence for the ending check.
+The preview pack has four excerpts, introduced by one through four beeps:
+
+| Cue | Preview | Start in pack | Duration |
+| --- | --- | --- | --- |
+| 1 | Main groove entry | 0.18 s | 9.6 s |
+| 2 | Machine contrast | 10.66 s | 9.6 s |
+| 3 | Break and return | 21.24 s | 22.4 s |
+| 4 | Ending | 44.72 s | 10.6 s |
+
+The preview segments retain the full track's constant gain, preserving the
+quieter break. Three seeds (12345, 54321, 98765) were rendered and matched to
+-18.01 LUFS. Raw true peaks range from -3.60 to -3.32 dBTP. The raw/stem paths,
+commands, section frames, loudness measurements and checks are recorded in
+[audition.json](agent-temp-files/hard-techno/phase3/audition.json).
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 3
+zig build test-music
+zig build procedural-music-probe -- hard-techno --arrangement track --seed 12345 --out agent-temp-files/hard-techno/full_track.wav
+```
+
+`--arrangement track` defaults to the full 128 bars at the chosen tempo, plus one
+second of silence. Explicit `--duration` supports partial renders. Track mode
+uses the fixed Warehouse/Machine form; `--groove` selects patterns in loop mode.
+`--arrangement loop` is still the default, preserving earlier audition commands.
+
+Completed validation: all 19 music tests and the build pass. Tests cover exact
+section samples, fractional timing across all 128 bars at 139.5 BPM, quiet
+break/return energy, boundary continuity, finite/headroom behavior, the silent
+ending and subsequent reset, gain smoothing, chunk invariance, and reset-time
+configuration snapshots. All seven full-track mix/stem renders are finite and
+unclipped. Three seeds have identical section traces and 480 kicks. The primary
+track's four stems sum within 3 PCM LSB; measured section-boundary jumps are at
+most 0.0031 full scale. Full-track rendering/writing took 1.13–1.17 seconds;
+this does not measure the game callback.
+
+All ten Phase 2 loop mixes/stems remain byte-identical after regenerating them
+with the updated audition recipe; see
+[regression.json](agent-temp-files/hard-techno/phase3/regression.json).
+Formatting and diff checks pass. The final prescribed smoke run contains
+`info: Ran successfully for 5 seconds` with no warnings, errors, panics or crashes
+in [smoke_test.log](agent-temp-files/smoke_test.log).
+
+One independent read-only review covered the four code/test/helper files and
+applicable skills. It found no actionable issues and independently verified the
+silent endings, exact stereo preview excerpts, loop regression bytes and render
+receipts. No review-driven corrections were needed. Documentation was inspected
+locally. Musical-quality feedback remains for user listening; game integration
+and audio-callback performance checks belong to the proposed next phase.
 
 ## Phase 2: percussion groove
 
@@ -138,11 +219,8 @@ change either sound. No synthesis edits or new renders were needed to apply it;
 Warehouse was already the default. No musical-quality verdict is inferred from
 metrics.
 
-Proposed Phase 3 direction: develop a three-minute arrangement around Warehouse,
-using Machine's sparser metallic character for occasional contrasting sections.
-Keep the selected tight low end and use deliberate phrase-boundary entrances,
-short breaks, fills and returns. Avoid automatic pattern rotation. This remains
-a proposal for the next phase; Phase 3 has not started.
+This feedback became the Warehouse-led Phase 3 arrangement described above,
+with one Machine contrast section and deliberate phrase-boundary changes.
 
 ## Phase 1 results and listening
 
@@ -272,12 +350,35 @@ Validation:
 - Use the user's preference for the tight candidate as the baseline for further
   listening comparisons of kick weight, attack, rumble balance, and groove.
 
-## Later phases
+## Proposed Phase 4: game integration
+
+**Outcome and commit boundary:** make Hard Techno selectable and configurable in
+the game, with persisted settings and safe changes during playback. Reuse the
+existing music owner, settings serialization, menu components and procedural
+generator. This is the next proposed phase, not yet authorized for implementation.
+
+- Extend `src/music.zig`, `src/settings.zig` and `src/musicConfigMenu.zig` to
+  register Hard Techno and expose loop/track playback, groove, drive and rumble
+  controls alongside the existing shared volume, tempo and reverb controls.
+  Start with Warehouse loop playback; track playback repeats after its ending
+  so gameplay does not remain silent after 128 bars.
+- Apply style/configuration changes through a synchronized handoff owned by
+  the music component. Keep synthesis, reset and audio-callback access consistent;
+  inspect the existing SDL stream synchronization before choosing the mechanism.
+- Use the existing probe for matching runtime/offline settings and consistent
+  master-volume behavior. Keep the finite offline track available for auditions.
+- Verify style switching, live controls, ending/restart, saved-settings reload,
+  master mute and old-style regressions. Measure callback workload during play,
+  then run formatting, focused tests, build, smoke and independent review.
+  User testing should include selecting Hard Techno in the music menu, trying
+  both playback modes, adjusting controls, and restarting to verify persistence.
+
+## Phase roadmap
 
 | Phase | Deliverable | Main validation |
 | --- | --- | --- |
-| 2. Complete groove (complete; Warehouse preferred) | Three percussion grooves over the selected tight foundation, hats with choking, clap, sparse metallic percussion, and shared envelope release/idle fixes. Machine is also positively received; a tonal part remains optional. | Matched 16-bar mixes and isolated buses; 15 focused tests, unchanged low-end/legacy renders, build/smoke and independent review completed; user requested commit. |
-| 3. Musical development (proposed) | Warehouse-led arrangement with occasional Machine contrast, phrase-aligned builds, breaks, fills and controlled returns; reuse the step/bar clock and suitable cue helpers. | At least three-minute renders over several seeds; transition alignment, continuity, and whole-passage listening. |
+| 2. Complete groove (committed; Warehouse preferred) | Three percussion grooves over the selected tight foundation, hats with choking, clap, sparse metallic percussion, and shared envelope release/idle fixes. Machine is also positively received; a tonal part remains optional. | Matched 16-bar mixes and isolated buses; 15 focused tests, unchanged low-end/legacy renders, build/smoke and independent review completed. |
+| 3. Musical development (accepted; commit requested) | 128-bar Warehouse-led arrangement with one Machine contrast section, phrase-aligned builds, break, fills, return and ending; existing step clock and layer smoothing. | Three full-track seeds and transition previews; 19 tests; section alignment, continuity, ending, reset, bus summing, loop regressions, build/smoke and independent review completed. |
 | 4. Game integration | Playback style, persisted settings, existing menu controls, safe live-setting handoff, and consistent probe master gain. | Style switching, live changes, save/reload, runtime/offline comparison, callback performance, and existing-style regressions. |
 
 These are proposed phases. Present the concrete plan before each phase; agree
@@ -361,7 +462,7 @@ user accepts and commits a phase; shared settings/build changes may need
 reconciliation then. Do not merge into the other agent's active working tree
 as part of music implementation.
 
-Suggested prompt when resuming after listening:
+Suggested prompt to authorize the next phase:
 
-> Read MUSIC_HANDOFF.md. Present the concrete Phase 3 arrangement plan around
-> Warehouse with occasional Machine contrast before starting implementation.
+> Read MUSIC_HANDOFF.md and implement the proposed Phase 4 game integration.
+> Keep those changes uncommitted for review until I request their commit.
