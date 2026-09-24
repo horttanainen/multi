@@ -16,6 +16,7 @@ const viewport = @import("viewport.zig");
 const renderer = @import("renderer.zig");
 const sprite = @import("sprite.zig");
 const collision = @import("collision.zig");
+const character_art = @import("character_art.zig");
 
 pub const Joint = enum(u8) {
     pelvis,
@@ -53,7 +54,7 @@ pub const Control = enum(u8) {
     right_hand_x,
     right_hand_y,
 };
-pub const View = enum { sprites, stick, overlay };
+pub const View = enum { sprites, stick, artwork, overlay };
 pub const Playback = enum { locomotion, neutral, run };
 pub const Action = enum { grounded, jump, fall, land, kneel };
 pub const WallAction = enum { none, brace, push, slide, jump };
@@ -229,6 +230,7 @@ pub const FramePose = struct {
     weapon: AttachmentTransform,
     weapon_facing_right: bool,
     weapon_stowed: bool = false,
+    weapon_stow_weight: f32 = 0,
 };
 pub const Pose = struct {
     joints: [jointCount]vec.Vec2,
@@ -240,7 +242,7 @@ pub const LimbSolution = struct { middle: vec.Vec2, end: vec.Vec2, clamped: bool
 
 pub var assets: ?Assets = null;
 pub var states: std.AutoArrayHashMapUnmanaged(usize, PlayerState) = .empty;
-pub var view: View = .sprites;
+pub var view: View = .artwork;
 pub var playback: Playback = .locomotion;
 pub var show_diagnostics = false;
 pub var diagnostic: Diagnostic = .{};
@@ -690,7 +692,13 @@ pub fn replaceAssets(files: data.CharacterAnimationData, detail: *Diagnostic) !v
 }
 
 fn loadAssets() !void {
-    try replaceAssets(try data.loadCharacterAnimationData(allocator, &diagnostic), &diagnostic);
+    var replacement = try prepareAssets(try data.loadCharacterAnimationData(allocator, &diagnostic), &diagnostic);
+    errdefer replacement.arena.deinit();
+    var art = try character_art.prepare(try data.loadCharacterArtData(allocator, &diagnostic), replacement.rig, &diagnostic);
+    errdefer character_art.destroy(&art);
+    try character_art.loadSprites(&art, &diagnostic);
+    installAssets(replacement);
+    character_art.install(art);
 }
 
 pub fn reload() void {
@@ -700,6 +708,7 @@ pub fn reload() void {
         return;
     };
     std.log.info("character_animation: loaded {s} / {s}", .{ assets.?.rig.id, assets.?.motion.id });
+    std.log.info("character_art: loaded {s} ({d} parts)", .{ character_art.assets.?.id, character_art.assets.?.parts.len });
 }
 
 pub fn configure(args: []const []const u8) !void {
@@ -712,6 +721,10 @@ pub fn configure(args: []const []const u8) !void {
         }
         if (std.mem.eql(u8, arg, "--character-animation-overlay")) {
             view = .overlay;
+            review_enabled = true;
+        }
+        if (std.mem.eql(u8, arg, "--character-artwork")) {
+            view = .artwork;
             review_enabled = true;
         }
         if (std.mem.eql(u8, arg, "--character-animation-neutral")) playback = .neutral;
@@ -754,6 +767,7 @@ pub fn clearPlayers() void {
 
 pub fn cleanup() void {
     clearPlayers();
+    character_art.cleanup();
     if (assets != null) assets.?.arena.deinit();
     assets = null;
     if (slow_motion) time.setSimulationScale(1);
@@ -1840,6 +1854,7 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
     const angle = if (forced_aim != null or state.weapon_angle == null) null else std.math.lerp(state.previous_weapon_angle orelse state.weapon_angle.?, state.weapon_angle.?, @as(f32, @floatCast(alpha)));
     var frame = solveAimedPose(set, pose, vec.fromBox2d(body.pos), state.facing_right, direction, weight, angle);
     const stow = if (forced_aim != null or playback != .locomotion) 0 else std.math.lerp(state.previous_stow_weight, state.stow_weight, @as(f32, @floatCast(alpha))) * (1 - weight);
+    frame.weapon_stow_weight = stow;
     if (stow == 0) return frame;
     const holster = attachmentToWorld(set.rig, attachmentTransform(set.rig, frame.pose, "weapon_holster").?, frame.body, frame.facing_right);
     frame.weapon.position = vec.add(frame.weapon.position, vec.mul(vec.subtract(holster.position, frame.weapon.position), stow));
@@ -1919,7 +1934,8 @@ pub fn reviewAction(action: ReviewAction) void {
         .view => {
             view = switch (view) {
                 .sprites => .stick,
-                .stick => .overlay,
+                .stick => .artwork,
+                .artwork => .overlay,
                 .overlay => .sprites,
             };
         },
@@ -1945,7 +1961,7 @@ pub fn reviewAction(action: ReviewAction) void {
 }
 
 pub fn hideSprites() bool {
-    return assets != null and view == .stick;
+    return assets != null and view != .sprites;
 }
 
 pub fn captureReady() bool {
@@ -2015,45 +2031,14 @@ pub fn drawAll() !void {
         };
         if (p.isDead) continue;
         const frame = playerFrame(player_id, .render, null) orelse continue;
+        const artwork = (view == .artwork or view == .overlay) and character_art.assets != null;
+        if (artwork) try character_art.draw(player_id, set.rig, frame);
         const pose = frame.pose;
         var points: [jointCount][2]f32 = undefined;
         for (pose.joints, 0..) |point, index| points[index] = toScreen(toWorld(set.rig, point, frame.body, state.facing_right));
         const width = @max(1.25 / renderer.zoom, set.rig.line_width * conv.met2pix);
-        const carrying = player.usesProceduralWeapon(p);
-        const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint; // Validated at load.
-        // Left/right identify anatomical limbs. Turning exchanges their depth,
-        // while the weapon remains attached to the same named hand.
-        for ([_]bool{ true, false }) |far| {
-            const right = far == state.facing_right;
-            // Keep the torso between far and near limbs, in the player's color.
-            if (!far) {
-                try gpu.setRenderDrawColor(limbColor(p.color, false));
-                for ([_]Joint{ .chest, .neck }) |joint| {
-                    const parent = set.rig.joints[@intFromEnum(joint)].parent.?;
-                    try drawSegment(points[@intFromEnum(parent)], points[@intFromEnum(joint)], width);
-                }
-                try drawRing(points[@intFromEnum(Joint.head)], set.rig.head_radius * conv.met2pix, width * 0.75);
-                const head = pose.joints[@intFromEnum(Joint.head)];
-                const eye = toScreen(toWorld(set.rig, vec.add(head, .{ .x = set.rig.head_radius * 0.43, .y = set.rig.head_radius * 0.15 }), frame.body, state.facing_right));
-                try drawSegment(.{ eye[0] - width * 0.2, eye[1] }, .{ eye[0] + width * 0.2, eye[1] }, width * 0.6);
-                if (carrying and frame.weapon_stowed) try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
-            }
-            // Insert the weapon under its hand, using the same solved render pose.
-            const weapon_layer = right == (weapon_joint == .right_hand);
-            if (carrying and !frame.weapon_stowed and weapon_layer) {
-                try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
-            }
-            try gpu.setRenderDrawColor(limbColor(p.color, far));
-            for (set.rig.joints) |joint| {
-                if (joint.id == .pelvis or joint.id == .chest or joint.id == .neck or joint.id == .head) continue;
-                const right_joint = @intFromEnum(joint.id) >= @intFromEnum(Joint.right_shoulder);
-                if (right_joint != right) continue;
-                try drawSegment(points[@intFromEnum(joint.parent.?)], points[@intFromEnum(joint.id)], width);
-            }
-            const ankle: Joint = if (right) .right_ankle else .left_ankle;
-            const heel: Joint = if (right) .right_heel else .left_heel;
-            try drawSegment(points[@intFromEnum(ankle)], points[@intFromEnum(heel)], width * 0.6);
-            if (carrying and !frame.weapon_stowed and weapon_layer) try drawRing(points[@intFromEnum(weapon_joint)], width * 0.6, width * 0.55);
+        if (view != .artwork or !artwork) {
+            try drawStickPose(player_id, set.rig, frame, points, width, p.color, player.usesProceduralWeapon(p) and !artwork);
         }
         if (!show_diagnostics) continue;
         try drawDiagnostics(set.rig, pose, points, frame.body, state.facing_right, width);
@@ -2069,6 +2054,44 @@ pub fn drawAll() !void {
             if (contact == null) continue;
             try drawRing(toScreen(contact.?), width * 2, width * 0.6);
         }
+    }
+}
+
+fn drawStickPose(player_id: usize, rig: Rig, frame: FramePose, points: [jointCount][2]f32, width: f32, color: sprite.Color, carrying: bool) !void {
+    const weapon_joint = rig.attachments.get("weapon_hand").?.joint; // Validated at load.
+    // Left/right identify anatomical limbs. Turning exchanges their depth,
+    // while the weapon remains attached to the same named hand.
+    for ([_]bool{ true, false }) |far| {
+        const right = far == frame.facing_right;
+        // Keep the torso between far and near limbs, in the player's color.
+        if (!far) {
+            try gpu.setRenderDrawColor(limbColor(color, false));
+            for ([_]Joint{ .chest, .neck }) |joint| {
+                const parent = rig.joints[@intFromEnum(joint)].parent.?;
+                try drawSegment(points[@intFromEnum(parent)], points[@intFromEnum(joint)], width);
+            }
+            try drawRing(points[@intFromEnum(Joint.head)], rig.head_radius * conv.met2pix, width * 0.75);
+            const head = frame.pose.joints[@intFromEnum(Joint.head)];
+            const eye = toScreen(toWorld(rig, vec.add(head, .{ .x = rig.head_radius * 0.43, .y = rig.head_radius * 0.15 }), frame.body, frame.facing_right));
+            try drawSegment(.{ eye[0] - width * 0.2, eye[1] }, .{ eye[0] + width * 0.2, eye[1] }, width * 0.6);
+            if (carrying and frame.weapon_stowed) try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
+        }
+        // Insert the weapon under its hand, using the same solved render pose.
+        const weapon_layer = right == (weapon_joint == .right_hand);
+        if (carrying and !frame.weapon_stowed and weapon_layer) {
+            try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
+        }
+        try gpu.setRenderDrawColor(limbColor(color, far));
+        for (rig.joints) |joint| {
+            if (joint.id == .pelvis or joint.id == .chest or joint.id == .neck or joint.id == .head) continue;
+            const right_joint = @intFromEnum(joint.id) >= @intFromEnum(Joint.right_shoulder);
+            if (right_joint != right) continue;
+            try drawSegment(points[@intFromEnum(joint.parent.?)], points[@intFromEnum(joint.id)], width);
+        }
+        const ankle: Joint = if (right) .right_ankle else .left_ankle;
+        const heel: Joint = if (right) .right_heel else .left_heel;
+        try drawSegment(points[@intFromEnum(ankle)], points[@intFromEnum(heel)], width * 0.6);
+        if (carrying and !frame.weapon_stowed and weapon_layer) try drawRing(points[@intFromEnum(weapon_joint)], width * 0.6, width * 0.55);
     }
 }
 

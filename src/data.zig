@@ -259,6 +259,7 @@ pub const characterLocomotionPath = "character_locomotion/run.json";
 pub const characterActionsPath = "character_actions/airborne.json";
 pub const characterAimingPath = "character_actions/aiming.json";
 pub const characterWallsPath = "character_actions/walls.json";
+pub const characterArtPath = "character_art/curb_rat_v1/manifest.json";
 const maximumCharacterAssetBytes = 1024 * 1024;
 const CharacterControlValue = struct { binding: character_animation.Control, value: f32 };
 
@@ -377,6 +378,41 @@ pub const CharacterAssetDiagnostic = struct {
     length: usize = 0,
 };
 
+pub const CharacterArtDepth = enum { center, left, right };
+pub const CharacterArtLayer = struct { role: enum { skin, fixed }, file: []const u8 };
+pub const CharacterArtPart = struct {
+    pivot: [2]f32,
+    axis_end: [2]f32,
+    meters_per_pixel: f32,
+    source: []const u8,
+    layers: [2]CharacterArtLayer,
+    contacts: ?struct { heel: [2]f32, toe: [2]f32 } = null,
+};
+pub const CharacterArtParts = std.json.ArrayHashMap(CharacterArtPart);
+pub const CharacterArtBinding = struct {
+    id: []const u8,
+    part: []const u8,
+    anchor: character_animation.Joint,
+    axis: [2]character_animation.Joint,
+    depth: CharacterArtDepth,
+    length_mode: enum { rig_bone, decorative },
+};
+pub const CharacterArtManifest = struct {
+    schema_version: u32,
+    id: []const u8,
+    rig: []const u8,
+    source_coordinates: enum { x_right_y_down_pixels },
+    pose_coordinates: enum { world_x_right_y_down_meters },
+    placement: enum { uniform_scale_then_facing_mirror_then_axis_rotation_then_anchor_translation },
+    far_skin_multiplier: f32,
+    parts: CharacterArtParts,
+    bindings: []const CharacterArtBinding,
+    draw_order: []const []const u8,
+    weapon_hand: struct { attachment: []const u8, part: []const u8, orientation: enum { weapon_transform } },
+    notes: []const []const u8,
+};
+pub const CharacterArtData = struct { arena: std.heap.ArenaAllocator, manifest: CharacterArtManifest };
+
 pub fn invalidCharacterAsset(detail: *CharacterAssetDiagnostic, comptime format: []const u8, args: anytype) error{InvalidCharacterAsset} {
     const message = std.fmt.bufPrint(&detail.message, format, args) catch fallback: {
         const fallback_message = "asset diagnostic exceeded 512 bytes";
@@ -407,6 +443,16 @@ fn validateCharacterJsonShape(comptime T: type, value: std.json.Value, path: []c
     switch (@typeInfo(T)) {
         .@"struct" => |info| {
             if (value != .object) return invalidCharacterAsset(detail, "{s}: expected an object", .{path});
+            // std.json.ArrayHashMap serializes named entries, not its backing map.
+            if (T == CharacterArtParts) {
+                if (value.object.count() > 64) return invalidCharacterAsset(detail, "{s}: exceeds 64 parts", .{path});
+                for (value.object.keys(), value.object.values()) |name, child| {
+                    var buffer: [384]u8 = undefined;
+                    const child_path = try characterFieldPath(&buffer, path, name, detail);
+                    try validateCharacterJsonShape(CharacterArtPart, child, child_path, detail);
+                }
+                return;
+            }
             inline for (info.fields) |field| {
                 var buffer: [384]u8 = undefined;
                 const child_path = try characterFieldPath(&buffer, path, field.name, detail);
@@ -514,6 +560,20 @@ pub fn loadCharacterAnimationData(memory: std.mem.Allocator, detail: *CharacterA
     const walls_bytes = try readCharacterAsset(characterWallsPath, memory, detail);
     defer memory.free(walls_bytes);
     return parseCharacterAnimationData(memory, rig_bytes, motion_bytes, locomotion_bytes, actions_bytes, aiming_bytes, walls_bytes, detail);
+}
+
+pub fn parseCharacterArtData(memory: std.mem.Allocator, bytes: []const u8, detail: *CharacterAssetDiagnostic) !CharacterArtData {
+    var arena = std.heap.ArenaAllocator.init(memory);
+    errdefer arena.deinit();
+    detail.* = .{ .file = characterArtPath };
+    const manifest = try parseCharacterAsset(CharacterArtManifest, arena.allocator(), bytes, detail);
+    return .{ .arena = arena, .manifest = manifest };
+}
+
+pub fn loadCharacterArtData(memory: std.mem.Allocator, detail: *CharacterAssetDiagnostic) !CharacterArtData {
+    const bytes = try readCharacterAsset(characterArtPath, memory, detail);
+    defer memory.free(bytes);
+    return parseCharacterArtData(memory, bytes, detail);
 }
 
 pub fn loadMovementData(path: []const u8) !MovementData {

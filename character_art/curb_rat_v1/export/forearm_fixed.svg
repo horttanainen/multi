@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="90" viewBox="0 0 80 90">
+  <title>Generated: source/forearm.svg / fixed; edit the source</title>
+  <g id="fixed" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 68 L32 56 Q25 42 29 28 L31 12 Q40 6 48 14 L51 28 Q53 42 47 56 L47 66" fill="none" stroke="#161d26" stroke-width="3" />
+    <path d="M32 59 L47 57 L48 66 L34 70 Z" fill="#202b34" stroke="#161d26" stroke-width="1.8" />
+    <path d="M36 62 L44 61" fill="none" stroke="#7a8a87" stroke-width="1.3" />
+  </g>
+</svg>

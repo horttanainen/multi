@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="170" viewBox="0 0 150 170">
+  <title>Generated: source/head.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round" transform="translate(-115 -22)">
+    <path d="M174 158 Q151 143 140 124 Q125 108 127 82 Q129 53 151 42 Q177 27 207 40 Q231 48 239 67 L243 86 L244 103 L243.5 110 L247 116 L242.5 120 L240 125 L244 130 L242 140 L232 143 Q225 157 208 164 L194 175 Z" fill="#f3f3f3" stroke="none" stroke-width="3.7" />
+    <path d="M135 80 Q139 53 160 46 Q184 37 204 47 Q221 54 229 70 L214 65 Q188 56 165 64 L146 82 Z" fill="#ffffff" stroke="none" />
+    <path d="M134 108 L149 113 L158 135 L178 151 L196 155 L208 153 L225 146 Q217 157 206 162 L194 175 L174 159 L152 143 L140 125 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M157 99 Q145 92 143 104 Q141 117 153 123 L162 118 L166 111" fill="#f3f3f3" stroke="none" stroke-width="2.5" />
+    <path d="M149 104 L157 107 L152 113" fill="none" stroke="#747474" stroke-width="2" />
+    <path d="M243.5 112 L246 116 L241.5 119 L240 119 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M174 125 L189 132" fill="none" stroke="#747474" stroke-width="1.9" />
+    <path d="M208 129 L214 131 M217 151 L224 154" fill="none" stroke="#747474" stroke-width="2" />
+  </g>
+</svg>

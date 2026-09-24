@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="140" viewBox="0 0 90 140">
+  <title>Generated: source/thigh.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 15 Q40 6 54 17 L57 47 Q55 73 51 92 L51 115 Q40 130 29 115 L27 94 L23 61 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M26 58 L36 61 Q32 81 35 100 L37 119 L30 116 L27 95 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M44 73 L49 91 L46 107 L39 115 L37 105 Z" fill="#ffffff" stroke="none" />
+    <path d="M39 75 Q45 87 42 97" fill="none" stroke="#747474" stroke-width="1.8" />
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="75" viewBox="0 0 80 75">
+  <title>Generated: source/hand_open.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 12 L46 12 L48 24 L59 36 Q62 41 57 42 L49 35 L55 47 Q56 52 52 53 L42 40 L46 57 Q44 62 40 57 L32 39 L32 28 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M32 13 L36 15 L36 29 L40 37 L39 46 L33 38 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M38 26 L44 30 M41 33 L46 36" fill="none" stroke="#747474" stroke-width="1.6" />
+  </g>
+</svg>

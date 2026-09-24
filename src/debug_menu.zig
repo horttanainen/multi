@@ -8,10 +8,10 @@ const player_input = @import("player_input.zig");
 
 var items = [_]menu.Item{
     .{ .label = "Close-up zoom", .shortcut = sdl.c.SDL_SCANCODE_Z, .font = .small, .kind = .{ .button = actionZoom } },
-    .{ .label = "Sprites / stick / overlay", .shortcut = sdl.c.SDL_SCANCODE_V, .font = .small, .kind = .{ .button = actionView } },
+    .{ .label = "Artwork / overlay / sprites / stick", .shortcut = sdl.c.SDL_SCANCODE_V, .font = .small, .kind = .{ .button = actionView } },
     .{ .label = "Movement / standing / reference run", .shortcut = sdl.c.SDL_SCANCODE_P, .font = .small, .kind = .{ .button = actionPose } },
     .{ .label = "Joints and targets", .shortcut = sdl.c.SDL_SCANCODE_D, .font = .small, .kind = .{ .button = actionDiagnostics } },
-    .{ .label = "Reload animation JSON", .shortcut = sdl.c.SDL_SCANCODE_R, .font = .small, .kind = .{ .button = actionReload } },
+    .{ .label = "Reload animation and artwork", .shortcut = sdl.c.SDL_SCANCODE_R, .font = .small, .kind = .{ .button = actionReload } },
     .{ .label = "Slow motion", .shortcut = sdl.c.SDL_SCANCODE_S, .font = .small, .kind = .{ .button = actionSlowMotion } },
     .{ .label = "Aiming", .shortcut = sdl.c.SDL_SCANCODE_F, .font = .small, .kind = .{ .button = actionAimMode } },
     .{ .label = "Movement input", .shortcut = sdl.c.SDL_SCANCODE_M, .font = .small, .kind = .{ .button = actionMovementMode } },

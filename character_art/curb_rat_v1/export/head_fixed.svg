@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="170" viewBox="0 0 150 170">
+  <title>Generated: source/head.svg / fixed; edit the source</title>
+  <g id="fixed" stroke-linecap="round" stroke-linejoin="round" transform="translate(-115 -22)">
+    <path d="M174 158 Q151 143 140 124 Q125 108 127 82 Q129 53 151 42 Q177 27 207 40 Q231 48 239 67 L243 86 L244 103 L243.5 110 L247 116 L242.5 120 L240 125 L244 130 L242 140 L232 143 Q225 157 208 164 L194 175 Z" fill="none" stroke="#161d26" stroke-width="3.7" />
+    <path d="M151 86 L199 83 L209 88 L205 97 L182 94 L151 94 Z" fill="#111c28" stroke="#161d26" stroke-width="2.2" />
+    <path d="M198 81 L236 80 L248 87 L248 105 L231 116 L210 111 L201 98 L193 94 Z" fill="#111c28" stroke="#161d26" stroke-width="3.4" />
+    <path d="M204 88 L234 86 L241 90 L239 96 L214 101 L208 97 Z" fill="#2b3e4a" stroke="none" />
+    <path d="M209 88 L234 87 M158 89 L182 88" fill="none" stroke="#b1e5b6" stroke-width="2" />
+    <path d="M239 98 L244 95 L243 102 L235 109 Z" fill="#344853" stroke="none" />
+    <path d="M157 99 Q145 92 143 104 Q141 117 153 123 L162 118 L166 111" fill="none" stroke="#161d26" stroke-width="2.5" />
+    <path d="M238 115.5 Q236.7 119.1 238 123 Q239.5 120.8 239.2 116.1 Z" fill="#293332" stroke="none" />
+    <path d="M212 132 Q227 138 242 128 L239 140 L229 148 L218 144 Z" fill="#293332" stroke="#161d26" stroke-width="2.2" />
+    <path d="M222 137 L228 137 L227 145 L223 143 Z M232 136 L238 132 L237 139 L232 142 Z" fill="#e2dfb7" stroke="none" />
+  </g>
+</svg>

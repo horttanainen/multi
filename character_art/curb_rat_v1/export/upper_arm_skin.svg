@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="106" viewBox="0 0 80 106">
+  <title>Generated: source/upper_arm.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 15 Q38 5 50 16 Q58 25 53 39 L49 63 L49 83 Q39 95 30 83 L28 63 L24 41 Q20 25 26 15 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M26 25 L31 29 L31 42 L36 48 L33 70 L36 88 L30 83 L28 63 L24 41 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M33 17 Q46 12 51 25 L48 36 L40 42 L31 36 Z M41 48 L48 45 L43 65 L36 72 L35 63 Z" fill="#ffffff" stroke="none" />
+    <path d="M28 37 Q38 46 48 38 M42 54 Q42 65 36 70" fill="none" stroke="#747474" stroke-width="1.8" />
+  </g>
+</svg>

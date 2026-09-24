@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="60" viewBox="0 0 90 60">
+  <title>Generated: source/foot.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 8 L32 8 L35 18 L46 16 L58 11 Q65 11 65 17 L54 23 L66 21 Q74 21 73 28 L67 32 L54 28 L62 29 Q66 31 60 32 L49 31 L33 32 L16 32 Q11 32 14 25 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M18 20 L25 25 L31 31 L47 30 L60 31 L49 30 L32 31 L17 31 L15 30 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M30 18 L44 21 L57 15 L60 17 L46 24 L35 24 Z M43 25 L64 24 L68 27 L62 29 L47 28 Z" fill="#ffffff" stroke="none" />
+    <path d="M28 21 L39 26 L51 21 M35 29 L50 31" fill="none" stroke="#747474" stroke-width="1.4" />
+  </g>
+</svg>

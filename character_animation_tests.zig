@@ -25,6 +25,7 @@ const time = @import("src/time.zig");
 const audio = @import("src/audio.zig");
 const conv = @import("src/conversion.zig");
 const pool = @import("src/pool.zig");
+const character_art = @import("src/character_art.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -35,6 +36,272 @@ const motion_json = @embedFile("character_motions/run_reference.json");
 const original_motion_json = @embedFile("tests/fixtures/character_run_reference_v1.json");
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
+const art_json = @embedFile("character_art/curb_rat_v1/manifest.json");
+
+fn loadArt(rig: animation.Rig) !character_art.Pack {
+    var detail: data.CharacterAssetDiagnostic = .{};
+    return character_art.prepare(try data.parseCharacterArtData(std.testing.allocator, art_json, &detail), rig, &detail);
+}
+
+test "art files use shared strict decoding and own their data after input is freed" {
+    runtime.init(std.testing.io);
+    var set = try load();
+    defer set.arena.deinit();
+    var detail: data.CharacterAssetDiagnostic = .{};
+    const files = parsed: {
+        const bytes = try std.testing.allocator.dupe(u8, art_json);
+        defer std.testing.allocator.free(bytes);
+        break :parsed try data.parseCharacterArtData(std.testing.allocator, bytes, &detail);
+    };
+    var pack = try character_art.prepare(files, set.rig, &detail);
+    defer character_art.destroy(&pack);
+    try std.testing.expectEqualStrings("curb_rat_v1", pack.id);
+    try std.testing.expectEqual(@as(usize, 10), pack.parts.len);
+    try std.testing.expectEqual(@as(usize, 15), pack.bindings.len);
+    try std.testing.expectEqualStrings("character_art/curb_rat_v1/export/head_skin.svg", pack.parts[0].paths[0]);
+    var disk = try data.loadCharacterArtData(std.testing.allocator, &detail);
+    defer disk.arena.deinit();
+    try std.testing.expectEqualStrings(pack.id, disk.manifest.id);
+}
+
+test "invalid art candidates preserve the installed pack and report named fields" {
+    const previous_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = previous_log_level;
+    var set = try load();
+    defer set.arena.deinit();
+    character_art.install(try loadArt(set.rig));
+    defer character_art.cleanup();
+    const original = character_art.assets.?.parts.ptr;
+    const cases = [_][3][]const u8{
+        .{ "\"schema_version\": 1", "\"schema_version\": 2", "schema" },
+        .{ "\"rig\": \"humanoid_v1\"", "\"rig\": \"unknown\"", "rig" },
+        .{ "\"attachment\": \"weapon_hand\"", "\"attachment\": \"grapple_hand\"", "weapon_hand.attachment" },
+        .{ "\"meters_per_pixel\": 0.003225", "\"meters_per_pixel\": -1", "parts.head" },
+        .{ "\"meters_per_pixel\": 0.003225", "\"meters_per_pixel\": \"0.003225\"", "parts.head.meters_per_pixel" },
+        .{ "\"meters_per_pixel\": 0.003225", "\"meters_per_pixel\": 1e999", "finite" },
+        .{ "\"meters_per_pixel\": 0.003225", "\"misspelled_scale\": 0.003225", "meters_per_pixel" },
+        .{ "\"far_skin_multiplier\": 0.65", "\"far_skin_multiplier\": 2", "far_skin_multiplier" },
+        .{ "\"export/head_skin.svg\"", "\"../head.svg\"", "relative layer path" },
+        .{ "\"part\": \"forearm\"", "\"part\": \"missing\"", "unknown part" },
+        .{ "\"role\": \"skin\"", "\"role\": \"fixed\"", "skin then fixed" },
+        .{ "\"holstered_weapon\"", "\"missing_binding\"", "unknown binding" },
+        .{ "\"near_foot\"", "\"near_shin\"", "duplicate binding" },
+        .{ "\"length_mode\": \"rig_bone\"", "\"length_mode\": \"typo\"", "length_mode" },
+        .{ "\"meters_per_pixel\": 0.005", "\"meters_per_pixel\": 0.007", "length differs" },
+    };
+    for (cases) |case| {
+        var detail: data.CharacterAssetDiagnostic = .{};
+        const bytes = try std.mem.replaceOwned(u8, std.testing.allocator, art_json, case[0], case[1]);
+        defer std.testing.allocator.free(bytes);
+        const files = data.parseCharacterArtData(std.testing.allocator, bytes, &detail) catch |err| {
+            try std.testing.expectEqual(error.InvalidCharacterAsset, err);
+            try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], case[2]) != null);
+            try std.testing.expect(original == character_art.assets.?.parts.ptr);
+            continue;
+        };
+        try std.testing.expectError(error.InvalidCharacterAsset, character_art.prepare(files, set.rig, &detail));
+        try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], case[2]) != null);
+        try std.testing.expect(original == character_art.assets.?.parts.ptr);
+    }
+}
+
+test "art SVGs decode in SDL with matching canvases neutral skin and visible fixed details" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    for (pack.parts) |part| {
+        var canvas: [2]c_int = undefined;
+        for (part.paths, 0..) |path, layer| {
+            const terminated = try std.testing.allocator.dupeZ(u8, path);
+            defer std.testing.allocator.free(terminated);
+            const surface = try sdl.image.load(terminated);
+            defer sdl.destroySurface(surface);
+            if (layer == 0) canvas = .{ surface.w, surface.h };
+            try std.testing.expectEqual(canvas, [2]c_int{ surface.w, surface.h });
+            var visible: usize = 0;
+            var transparent: usize = 0;
+            var y: c_int = 0;
+            while (y < surface.h) : (y += 1) {
+                var x: c_int = 0;
+                while (x < surface.w) : (x += 1) {
+                    var color: sdl.Color = undefined;
+                    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, x, y, &color.r, &color.g, &color.b, &color.a));
+                    if (color.a == 0) {
+                        transparent += 1;
+                        continue;
+                    }
+                    visible += 1;
+                    if (layer != 0) continue;
+                    try std.testing.expectEqual(color.r, color.g);
+                    try std.testing.expectEqual(color.g, color.b);
+                }
+            }
+            try std.testing.expect(transparent > 0);
+            if (layer == 1) try std.testing.expect(visible > 0);
+        }
+    }
+}
+
+test "art follows the canonical weapon attachment when the rig assigns it to the left hand" {
+    var set = try load();
+    defer set.arena.deinit();
+    set.rig.attachments.getPtr("weapon_hand").?.joint = .left_hand;
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    try std.testing.expectEqual(animation.Joint.left_hand, pack.weapon_joint);
+    for ([_]bool{ false, true }) |facing| {
+        const frame = animation.solveAimedPose(&set, animation.evaluatePose(&set, 0, .neutral), vec.zero, facing, vec.east, 0, null);
+        const joints = character_art.worldJoints(set.rig, frame);
+        for (pack.bindings, 0..) |binding, index| {
+            const placed = character_art.placePart(&pack, index, joints, frame, true);
+            if (binding.anchor != .left_hand) {
+                try std.testing.expect(placed.part != pack.grip_part);
+                continue;
+            }
+            try std.testing.expectEqual(pack.grip_part, placed.part);
+            try nearPoint(frame.weapon.position, placed.position, 0.000001);
+            try std.testing.expectEqual(character_art.isFar(.left, facing), placed.far);
+        }
+    }
+}
+
+test "interpolated holster and unholster artwork keeps the hand on its solved wrist" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const old_alpha = time.alpha;
+    defer time.alpha = old_alpha;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    var pack = try loadArt(animation.assets.?.rig);
+    defer character_art.destroy(&pack);
+    const anim_state = animation.states.getPtr(7).?;
+    anim_state.aim_weight = 0;
+    anim_state.previous_aim_weight = 0;
+    for ([_]bool{ false, true }) |facing| {
+        anim_state.facing_right = facing;
+        for ([_][2]f32{ .{ 0, 1 }, .{ 1, 0 } }) |transition| {
+            anim_state.previous_stow_weight = transition[0];
+            anim_state.stow_weight = transition[1];
+            for ([_]f64{ 0, 0.1, 0.25, 0.5, 0.75, 0.9, 1 }) |alpha| {
+                time.alpha = alpha;
+                const frame = animation.playerFrame(7, .render, null).?;
+                const expected = std.math.lerp(transition[0], transition[1], @as(f32, @floatCast(alpha)));
+                try std.testing.expectApproxEqAbs(expected, frame.weapon_stow_weight, 0.000001);
+                const joints = character_art.worldJoints(animation.assets.?.rig, frame);
+                for (pack.bindings, 0..) |binding, index| {
+                    if (binding.anchor != pack.weapon_joint) continue;
+                    const placed = character_art.placePart(&pack, index, joints, frame, true);
+                    if (expected == 0) {
+                        try std.testing.expectEqual(pack.grip_part, placed.part);
+                        try nearPoint(frame.weapon.position, placed.position, 0.000001);
+                        continue;
+                    }
+                    try std.testing.expectEqual(binding.part, placed.part);
+                    try nearPoint(joints[@intFromEnum(binding.anchor)], placed.position, 0.000001);
+                    try std.testing.expect(vec.magnitude(vec.subtract(frame.weapon.position, placed.position)) > 0.001);
+                }
+            }
+        }
+    }
+}
+
+// Exercise the shared integer sprite placement. World-anchor truncation (<1px),
+// the rotated difference of two rounded source points (<=sqrt(2)px) and the
+// integer placedPoint result (<1px) together permit less than 3.5px per axis.
+fn placedArtPoint(part: data.CharacterArtPart, placed: character_art.PlacedPart, source: [2]f32) vec.Vec2 {
+    var visual: sprite.Sprite = undefined;
+    visual.sizeP = .{ .x = 240, .y = 240 }; // Canvas width cancels around the mirrored pivot.
+    const scale = part.meters_per_pixel * conv.met2pix;
+    const pivot: vec.IVec2 = .{ .x = @intFromFloat(@round(part.pivot[0] * scale)), .y = @intFromFloat(@round(part.pivot[1] * scale)) };
+    const pixel: vec.IVec2 = .{ .x = @intFromFloat(@round(source[0] * scale)), .y = @intFromFloat(@round(source[1] * scale)) };
+    const placement = sprite.placeAtAnchor(visual, pivot, conv.m2Pixel(vec.toBox2d(placed.position)), placed.angle, !placed.facing_right);
+    return conv.pixel2M(sprite.placedPoint(visual, placement, pixel));
+}
+
+test "art feet follow solved heel and toe contacts throughout running on both facings and scales" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const previous_scale = conv.met2pix;
+    defer conv.met2pix = previous_scale;
+    for ([_]f32{ 40, 80, 160 }) |scale| {
+        conv.met2pix = scale;
+        for ([_]bool{ false, true }) |facing| {
+            for (0..120) |sample| {
+                const frame: animation.FramePose = .{ .pose = animation.evaluatePose(&set, @as(f64, @floatFromInt(sample)) / 120, .run), .body = .{ .x = 2.1, .y = -1.7 }, .facing_right = facing, .weapon = .{ .position = vec.zero, .angle = 0 }, .weapon_facing_right = facing };
+                const joints = character_art.worldJoints(set.rig, frame);
+                for (pack.bindings, 0..) |binding, index| {
+                    const definition = pack.parts[binding.part].definition;
+                    if (definition.contacts == null) continue;
+                    const contacts = definition.contacts.?;
+                    const placed = character_art.placePart(&pack, index, joints, frame, false);
+                    try nearPoint(joints[@intFromEnum(binding.axis[0])], placedArtPoint(definition, placed, contacts.heel), 3.5 / scale);
+                    try nearPoint(joints[@intFromEnum(binding.axis[1])], placedArtPoint(definition, placed, contacts.toe), 3.5 / scale);
+                }
+            }
+        }
+    }
+}
+
+test "art grip follows the actual weapon attachment and anatomical depth through turning and holstering" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    for ([_]animation.Joint{ .right_hand, .left_hand }) |weapon_joint| {
+        pack.weapon_joint = weapon_joint;
+        for ([_]bool{ false, true }) |facing| {
+            for ([_]bool{ false, true }) |weapon_facing| {
+                for ([_]f32{ -2.8, -1.5, 0, 1.4, 3.1 }) |angle| {
+                    var frame: animation.FramePose = .{ .pose = animation.evaluatePose(&set, 0, .neutral), .body = .{ .x = 2, .y = 3 }, .facing_right = facing, .weapon = .{ .position = .{ .x = 2.8, .y = 1.9 }, .angle = angle }, .weapon_facing_right = weapon_facing };
+                    const joints = character_art.worldJoints(set.rig, frame);
+                    var grips: usize = 0;
+                    for (pack.bindings, 0..) |binding, index| {
+                        const placed = character_art.placePart(&pack, index, joints, frame, true);
+                        try std.testing.expectEqual(character_art.isFar(binding.depth, facing), placed.far);
+                        if (binding.anchor != weapon_joint) {
+                            try std.testing.expect(placed.part != pack.grip_part);
+                            continue;
+                        }
+                        grips += 1;
+                        try std.testing.expectEqual(pack.grip_part, placed.part);
+                        try nearPoint(frame.weapon.position, placed.position, 0.000001);
+                        try std.testing.expectApproxEqAbs(@as(f32, 0), @sin(placed.angle - angle), 0.000001);
+                        try std.testing.expectApproxEqAbs(@as(f32, 1), @cos(placed.angle - angle), 0.000001);
+                        try std.testing.expectEqual(weapon_facing, placed.facing_right);
+                        frame.weapon_stowed = true;
+                        const stowed = character_art.placePart(&pack, index, joints, frame, true);
+                        try std.testing.expectEqual(binding.part, stowed.part);
+                        try nearPoint(joints[@intFromEnum(weapon_joint)], stowed.position, 0.000001);
+                        frame.weapon_stowed = false;
+                    }
+                    try std.testing.expectEqual(@as(usize, 1), grips);
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(sprite.Color{ .r = 33, .g = 65, .b = 130 }, character_art.skinColor(.{ .r = 50, .g = 100, .b = 200 }, 0.65));
+}
+
+test "shared debug menu cycles artwork overlay sprites and stick without changing locomotion" {
+    resetMenuInput();
+    defer resetMenuInput();
+    const previous = animation.view;
+    defer animation.view = previous;
+    const playback = animation.playback;
+    animation.view = .artwork;
+    for ([_]animation.View{ .overlay, .sprites, .stick, .artwork }) |expected| {
+        debug_menu.open();
+        try menu.handleKey(sdl.c.SDL_SCANCODE_V, false);
+        try std.testing.expectEqual(expected, animation.view);
+        try std.testing.expectEqual(playback, animation.playback);
+        try std.testing.expect(!menu.isOpen());
+        menu.beginFrame();
+    }
+}
 
 test "directional profiles preserve defaults and allow aiming independent of movement mechanism" {
     runtime.init(std.testing.io);

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="140" viewBox="0 0 80 140">
+  <title>Generated: source/shin.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M30 17 Q40 9 50 18 L49 36 Q55 56 49 75 L46 112 Q41 124 34 113 L31 81 Q22 60 30 39 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M31 29 L37 34 Q29 57 37 79 L39 115 L34 112 L31 81 Q24 61 30 40 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M42 17 L48 20 L46 28 L39 31 L35 26 Z" fill="#ffffff" stroke="none" />
+    <path d="M36 30 L45 30 M44 49 Q47 59 42 75 M39 94 L40 104" fill="none" stroke="#747474" stroke-width="1.8" />
+  </g>
+</svg>

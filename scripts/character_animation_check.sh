@@ -25,6 +25,7 @@ echo "Formatting project sources"
 bash scripts/format.sh
 
 echo "Checking character assets, curves, IK, and lifecycle"
+python3 scripts/export_character_art.py --check
 zig build test-character-animation --summary new 2>&1 | tee "$CHARACTER_LOG_DIR/tests.log"
 
 if [[ "$CHARACTER_UNIT_ONLY" == true ]]; then
@@ -39,7 +40,7 @@ echo "Running the five-second character animation smoke test"
 CHARACTER_DEFAULT_CAPTURE=false
 if [[ $# -eq 0 ]]; then
   CHARACTER_DEFAULT_CAPTURE=true
-  bash scripts/smoke_test.sh --character-animation --character-animation-close \
+  bash scripts/smoke_test.sh --character-artwork --character-animation-close \
     --character-animation-capture "$CHARACTER_LOG_DIR/preview.png" 2>&1 | tee "$CHARACTER_LOG_DIR/smoke.log"
 else
   bash scripts/smoke_test.sh "$@" 2>&1 | tee "$CHARACTER_LOG_DIR/smoke.log"

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="80" viewBox="0 0 90 80">
+  <title>Generated: source/pelvis.svg / fixed; edit the source</title>
+  <g id="fixed" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 12 Q40 24 65 12 L75 31 L71 47 Q56 53 41 48 Q27 52 12 47 L10 31 Z" fill="#364858" stroke="none" />
+    <path d="M17 12 Q40 24 65 12 L68 24 Q40 36 13 25 Z" fill="#242735" stroke="#161d26" stroke-width="3" />
+    <path d="M15 28 L11 44 M69 27 L73 42" fill="none" stroke="#161d26" stroke-width="3" />
+    <path d="M59 18 L66 16 L69 25 L62 28 Z" fill="#e1b866" stroke="#161d26" stroke-width="1.5" />
+  </g>
+</svg>

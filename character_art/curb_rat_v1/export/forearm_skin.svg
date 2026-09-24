@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="90" viewBox="0 0 80 90">
+  <title>Generated: source/forearm.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 12 Q40 6 48 14 L51 28 Q53 42 47 56 L47 68 L34 72 L32 56 Q25 42 29 28 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M31 18 L35 22 L34 38 L39 53 L39 69 L34 70 L32 56 Q26 42 29 28 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M32 25 Q44 24 48 38 L45 45 L38 33 Z" fill="#ffffff" stroke="none" />
+    <path d="M35 22 L44 23 M38 29 Q45 37 44 47" fill="none" stroke="#747474" stroke-width="1.8" />
+  </g>
+</svg>

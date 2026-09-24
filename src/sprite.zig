@@ -80,6 +80,7 @@ pub const SerializableEntity = struct {
 pub const Backing = enum {
     immutable,
     mutable,
+    standalone,
 };
 
 pub var sprites = thread_safe.ThreadSafeAutoArrayHashMap(u64, Sprite).init(allocator);
@@ -378,11 +379,15 @@ pub fn placedPoint(s: Sprite, placement: AnchoredPlacement, point: vec.IVec2) ve
 }
 
 pub fn drawPlaced(s: Sprite, placement: AnchoredPlacement) !void {
+    try drawPlacedTinted(s, placement, null);
+}
+
+pub fn drawPlacedTinted(s: Sprite, placement: AnchoredPlacement, color: ?Color) !void {
     // Anchor placement already determines the origin; sprite.offset applies to
     // center-based drawing, not to marker-based drawing.
     var anchored = s;
     anchored.offset = .{ .x = 0, .y = 0 };
-    try drawWithOptions(anchored, placement.centerPosition, placement.angle, false, placement.flip, 0, null, placement.pivot);
+    try drawWithOptions(anchored, placement.centerPosition, placement.angle, false, placement.flip, 0, color, placement.pivot);
 }
 
 pub fn drawWithOptions(sprite: Sprite, centerPos: vec.IVec2, angle: f32, highlight: bool, flip: bool, fog: f32, maybeColor: ?Color, pivot: ?sdl.Point) !void {
@@ -565,10 +570,10 @@ pub fn createFromOwnedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Su
             defer destroyRuntimeAtlasSurface(runtimeSurface);
             break :blk try tex.addToAtlas(runtimeSurface.surface);
         },
-        .mutable => blk: {
+        .mutable, .standalone => blk: {
             const runtimeSurface = try createRuntimeAtlasSurface(surface, renderedScale, config.runtimeAtlas);
             defer destroyRuntimeAtlasSurface(runtimeSurface);
-            break :blk try tex.createMutableTexture(runtimeSurface.surface);
+            break :blk if (backing == .standalone) try tex.createStandaloneTexture(runtimeSurface.surface) else try tex.createMutableTexture(runtimeSurface.surface);
         },
     };
     errdefer tex.destroyTexture(texture);
@@ -596,11 +601,11 @@ fn createFromLoadedSurfaceWithBacking(imagePath: []const u8, surface: *sdl.Surfa
 fn createTextureForImage(imagePath: []const u8, surface: *sdl.Surface, scale: vec.Vec2, backing: Backing, atlasConfig: config.RuntimeAtlasConfig) !TextureForImage {
     return switch (backing) {
         .immutable => createImmutableTextureForImage(imagePath, surface, scale, atlasConfig),
-        .mutable => blk: {
+        .mutable, .standalone => blk: {
             const runtimeSurface = try createRuntimeAtlasSurface(surface, scale, atlasConfig);
             defer destroyRuntimeAtlasSurface(runtimeSurface);
             break :blk .{
-                .texture = try tex.createMutableTexture(runtimeSurface.surface),
+                .texture = if (backing == .standalone) try tex.createStandaloneTexture(runtimeSurface.surface) else try tex.createMutableTexture(runtimeSurface.surface),
                 .geometryId = uuid.generate(),
             };
         },
@@ -736,7 +741,11 @@ pub fn createCopy(spriteUuid: u64) !u64 {
         std.log.warn("createCopy: sprite {d} not found", .{spriteUuid});
         return error.SpriteNotFound;
     };
-    const backing: Backing = if (tex.isImmutableAtlasTexture(originalSprite.texture)) .immutable else .mutable;
+    const backing: Backing = switch (originalSprite.texture.backing) {
+        .immutable_atlas => .immutable,
+        .mutable_atlas => .mutable,
+        .standalone => .standalone,
+    };
     return createCopyWithBacking(spriteUuid, backing);
 }
 
@@ -806,10 +815,10 @@ pub fn createCopyWithBacking(spriteUuid: u64, backing: Backing) !u64 {
             defer destroyRuntimeAtlasSurface(runtimeSurface);
             break :blk try tex.addToAtlas(runtimeSurface.surface);
         },
-        .mutable => blk: {
+        .mutable, .standalone => blk: {
             const runtimeSurface = try createRuntimeAtlasSurface(copiedSurface, originalSprite.scale, atlasConfig);
             defer destroyRuntimeAtlasSurface(runtimeSurface);
-            break :blk try tex.createMutableTexture(runtimeSurface.surface);
+            break :blk if (backing == .standalone) try tex.createStandaloneTexture(runtimeSurface.surface) else try tex.createMutableTexture(runtimeSurface.surface);
         },
     };
     errdefer tex.destroyTexture(copiedTexture);
@@ -1642,6 +1651,15 @@ fn cleanupOne(s: Sprite) void {
     allocator.free(s.imgPath);
     tex.destroyTexture(s.texture);
     sdl.destroySurface(s.surface);
+}
+
+// For owned resources replaced outside draw submission (for example asset reload).
+pub fn destroy(spriteUuid: u64) void {
+    const entry = sprites.fetchSwapRemoveLocking(spriteUuid) orelse {
+        std.log.warn("sprite.destroy: sprite {d} is missing", .{spriteUuid});
+        return;
+    };
+    cleanupOne(entry.value);
 }
 
 pub fn clearTextureCache() void {

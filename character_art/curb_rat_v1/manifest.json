@@ -1,0 +1,440 @@
+{
+  "schema_version": 1,
+  "id": "curb_rat_v1",
+  "rig": "humanoid_v1",
+  "source_coordinates": "x_right_y_down_pixels",
+  "pose_coordinates": "world_x_right_y_down_meters",
+  "placement": "uniform_scale_then_facing_mirror_then_axis_rotation_then_anchor_translation",
+  "far_skin_multiplier": 0.65,
+  "parts": {
+    "head": {
+      "pivot": [
+        79,
+        148
+      ],
+      "axis_end": [
+        79,
+        125
+      ],
+      "meters_per_pixel": 0.003225,
+      "source": "source/head.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/head_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/head_fixed.svg"
+        }
+      ]
+    },
+    "torso": {
+      "pivot": [
+        42,
+        145
+      ],
+      "axis_end": [
+        42,
+        50
+      ],
+      "meters_per_pixel": 0.004526315789473684,
+      "source": "source/torso.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/torso_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/torso_fixed.svg"
+        }
+      ]
+    },
+    "pelvis": {
+      "pivot": [
+        41,
+        25
+      ],
+      "axis_end": [
+        41,
+        5
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/pelvis.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/pelvis_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/pelvis_fixed.svg"
+        }
+      ]
+    },
+    "thigh": {
+      "pivot": [
+        40,
+        22
+      ],
+      "axis_end": [
+        40,
+        114
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/thigh.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/thigh_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/thigh_fixed.svg"
+        }
+      ]
+    },
+    "shin": {
+      "pivot": [
+        40,
+        22
+      ],
+      "axis_end": [
+        40,
+        114
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/shin.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/shin_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/shin_fixed.svg"
+        }
+      ]
+    },
+    "upper_arm": {
+      "pivot": [
+        40,
+        24
+      ],
+      "axis_end": [
+        40,
+        82
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/upper_arm.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/upper_arm_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/upper_arm_fixed.svg"
+        }
+      ]
+    },
+    "forearm": {
+      "pivot": [
+        40,
+        18
+      ],
+      "axis_end": [
+        40,
+        70
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/forearm.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/forearm_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/forearm_fixed.svg"
+        }
+      ]
+    },
+    "hand_open": {
+      "pivot": [
+        40,
+        25
+      ],
+      "axis_end": [
+        40,
+        45
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/hand_open.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/hand_open_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/hand_open_fixed.svg"
+        }
+      ]
+    },
+    "hand_grip": {
+      "pivot": [
+        40,
+        30
+      ],
+      "axis_end": [
+        60,
+        30
+      ],
+      "meters_per_pixel": 0.005,
+      "source": "source/hand_grip.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/hand_grip_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/hand_grip_fixed.svg"
+        }
+      ]
+    },
+    "foot": {
+      "pivot": [
+        26,
+        17
+      ],
+      "axis_end": [
+        70,
+        17
+      ],
+      "meters_per_pixel": 0.005,
+      "contacts": {
+        "heel": [
+          12,
+          32
+        ],
+        "toe": [
+          56,
+          32
+        ]
+      },
+      "source": "source/foot.svg",
+      "layers": [
+        {
+          "role": "skin",
+          "file": "export/foot_skin.svg"
+        },
+        {
+          "role": "fixed",
+          "file": "export/foot_fixed.svg"
+        }
+      ]
+    }
+  },
+  "bindings": [
+    {
+      "id": "torso",
+      "part": "torso",
+      "anchor": "pelvis",
+      "axis": [
+        "pelvis",
+        "chest"
+      ],
+      "depth": "center",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "head",
+      "part": "head",
+      "anchor": "neck",
+      "axis": [
+        "neck",
+        "head"
+      ],
+      "depth": "center",
+      "length_mode": "decorative"
+    },
+    {
+      "id": "pelvis",
+      "part": "pelvis",
+      "anchor": "pelvis",
+      "axis": [
+        "pelvis",
+        "chest"
+      ],
+      "depth": "center",
+      "length_mode": "decorative"
+    },
+    {
+      "id": "left_thigh",
+      "part": "thigh",
+      "anchor": "pelvis",
+      "axis": [
+        "pelvis",
+        "left_knee"
+      ],
+      "depth": "left",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "left_shin",
+      "part": "shin",
+      "anchor": "left_knee",
+      "axis": [
+        "left_knee",
+        "left_ankle"
+      ],
+      "depth": "left",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "left_foot",
+      "part": "foot",
+      "anchor": "left_ankle",
+      "axis": [
+        "left_heel",
+        "left_toe"
+      ],
+      "depth": "left",
+      "length_mode": "decorative"
+    },
+    {
+      "id": "left_upper_arm",
+      "part": "upper_arm",
+      "anchor": "left_shoulder",
+      "axis": [
+        "left_shoulder",
+        "left_elbow"
+      ],
+      "depth": "left",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "left_forearm",
+      "part": "forearm",
+      "anchor": "left_elbow",
+      "axis": [
+        "left_elbow",
+        "left_hand"
+      ],
+      "depth": "left",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "left_hand_open",
+      "part": "hand_open",
+      "anchor": "left_hand",
+      "axis": [
+        "left_elbow",
+        "left_hand"
+      ],
+      "depth": "left",
+      "length_mode": "decorative"
+    },
+    {
+      "id": "right_thigh",
+      "part": "thigh",
+      "anchor": "pelvis",
+      "axis": [
+        "pelvis",
+        "right_knee"
+      ],
+      "depth": "right",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "right_shin",
+      "part": "shin",
+      "anchor": "right_knee",
+      "axis": [
+        "right_knee",
+        "right_ankle"
+      ],
+      "depth": "right",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "right_foot",
+      "part": "foot",
+      "anchor": "right_ankle",
+      "axis": [
+        "right_heel",
+        "right_toe"
+      ],
+      "depth": "right",
+      "length_mode": "decorative"
+    },
+    {
+      "id": "right_upper_arm",
+      "part": "upper_arm",
+      "anchor": "right_shoulder",
+      "axis": [
+        "right_shoulder",
+        "right_elbow"
+      ],
+      "depth": "right",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "right_forearm",
+      "part": "forearm",
+      "anchor": "right_elbow",
+      "axis": [
+        "right_elbow",
+        "right_hand"
+      ],
+      "depth": "right",
+      "length_mode": "rig_bone"
+    },
+    {
+      "id": "right_hand_open",
+      "part": "hand_open",
+      "anchor": "right_hand",
+      "axis": [
+        "right_elbow",
+        "right_hand"
+      ],
+      "depth": "right",
+      "length_mode": "decorative"
+    }
+  ],
+  "draw_order": [
+    "far_thigh",
+    "far_shin",
+    "far_foot",
+    "far_upper_arm",
+    "far_forearm",
+    "far_weapon",
+    "far_hand_open",
+    "torso",
+    "head",
+    "near_thigh",
+    "near_shin",
+    "near_foot",
+    "pelvis",
+    "holstered_weapon",
+    "near_upper_arm",
+    "near_forearm",
+    "near_weapon",
+    "near_hand_open"
+  ],
+  "weapon_hand": {
+    "attachment": "weapon_hand",
+    "part": "hand_grip",
+    "orientation": "weapon_transform"
+  },
+  "notes": [
+    "Runtime artwork for the existing procedural humanoid rig.",
+    "Anatomical right is far when facing right; turning exchanges depth, never hand identity.",
+    "Fixed layers retain colors; only skin layers receive player tint and depth shading.",
+    "Head is decorative and intentionally larger than the debug head ring.",
+    "Foot contacts match the existing heel and toe; claw tips extend beyond that support span."
+  ]
+}

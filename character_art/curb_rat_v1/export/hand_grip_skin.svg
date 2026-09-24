@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="65" viewBox="0 0 80 65">
+  <title>Generated: source/hand_grip.svg / skin; edit the source</title>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25 23 L34 21 L39 16 Q44 14 48 20 L53 22 L53 37 Q49 43 42 41 L31 38 L25 35 Z" fill="#f3f3f3" stroke="none" />
+    <path d="M26 30 L34 31 L39 37 L49 37 L48 41 L40 41 L31 38 L25 35 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M37 20 L43 25 L50 25 M40 29 L51 30 M40 34 L51 35" fill="none" stroke="#747474" stroke-width="1.6" />
+  </g>
+</svg>

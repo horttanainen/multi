@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="170" viewBox="0 0 100 170">
+  <title>Curb Rat / torso</title>
+  <desc>Editable articulated part. Skin is player-tinted; fixed details retain their colors. Pivots are in ../manifest.json.</desc>
+  <g id="skin" stroke-linecap="round" stroke-linejoin="round" transform="translate(-142 -146)">
+    <path d="M176 154 L199 156 L198 174 Q215 178 222 193 Q226 204 220 216 L214 230 L208 248 L209 276 L214 289 L191 301 L165 289 L159 274 L166 246 Q158 236 155 219 L155 201 Q156 183 171 177 Z" fill="#f3f3f3" stroke="none" stroke-width="3.2" />
+    <path d="M176 174 L184 172 L181 191 L169 209 L173 231 L180 248 L175 276 L183 291 L167 285 L165 273 L172 246 Q161 234 161 219 L161 200 Q164 184 176 174 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M195 179 Q211 181 218 195 L218 207 L208 211 L202 202 Z" fill="#ffffff" stroke="none" />
+    <path d="M205 212 Q215 216 222 205 L219 217 L211 226 L201 225 Z M209 232 L216 230 L213 241 L205 244 Z M205 249 L211 247 L209 258 L202 261 Z" fill="#b8b8b8" stroke="none" />
+    <path d="M191 174 L199 184 L211 189 M204 211 Q214 218 221 207 M201 231 L209 236 M198 245 L205 249 M195 261 L202 270" fill="none" stroke="#747474" stroke-width="1.8" />
+    <path d="M163 215 Q162 225 169 233 M172 244 L176 249" fill="none" stroke="#747474" stroke-width="1.6" />
+    <path d="M205 269 L204 274" fill="none" stroke="#747474" stroke-width="2.5" />
+  </g>
+  <g id="fixed" stroke-linecap="round" stroke-linejoin="round" transform="translate(-142 -146)">
+    <path d="M176 154 L199 156 L198 174 Q215 178 222 193 Q226 204 220 216 L214 230 L208 248 L209 276 L214 289 L191 301 L165 289 L159 274 L166 246 Q158 236 155 219 L155 201 Q156 183 171 177 Z" fill="none" stroke="#161d26" stroke-width="3.2" />
+  </g>
+</svg>

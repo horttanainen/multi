@@ -78,7 +78,10 @@ fn createGpuTexture(device: *c.SDL_GPUDevice, w: u32, h: u32) !*c.SDL_GPUTexture
         .sample_count = c.SDL_GPU_SAMPLECOUNT_1,
         .props = 0,
     };
-    return c.SDL_CreateGPUTexture(device, &tex_info) orelse return error.CreateGPUTextureFailed;
+    return c.SDL_CreateGPUTexture(device, &tex_info) orelse {
+        std.log.warn("createGpuTexture: {s}", .{c.SDL_GetError()});
+        return error.CreateGPUTextureFailed;
+    };
 }
 
 /// Add a surface to the texture atlas. Returns an atlas-backed Texture.
@@ -110,7 +113,7 @@ pub fn addToAtlas(surface: *sdl.Surface) !*Texture {
     return texture;
 }
 
-/// Create a standalone GPU texture (not in atlas). Used for ephemeral textures like text.
+/// Create a standalone GPU texture, independent of atlas resets and caching.
 pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
     const device = gpu.getDevice();
     const allocator = gpu.getAllocator();
@@ -123,8 +126,10 @@ pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
     const h: u32 = @intCast(rgba_surface.*.h);
 
     const gpu_texture = try createGpuTexture(device, w, h);
+    errdefer c.SDL_ReleaseGPUTexture(device, gpu_texture);
 
     const texture = try allocator.create(Texture);
+    errdefer allocator.destroy(texture);
     texture.* = .{
         .width = @intCast(w),
         .height = @intCast(h),
@@ -132,7 +137,7 @@ pub fn createStandaloneTexture(surface: *sdl.Surface) !*Texture {
         .standalone_gpu_texture = gpu_texture,
     };
 
-    uploadTextureImmediate(device, gpu_texture, rgba_surface);
+    try uploadTextureImmediate(device, gpu_texture, rgba_surface);
     return texture;
 }
 
@@ -225,11 +230,12 @@ pub fn flushPendingUploads() void {
     pendingTextureUploads.deinit(gpu.getAllocator());
 }
 
-fn submitUploadAndTrackBuffer(device: *c.SDL_GPUDevice, cmd: *c.SDL_GPUCommandBuffer, transfer_buf: *c.SDL_GPUTransferBuffer) void {
+// Consumes the command and transfer buffer on both success and failure.
+fn submitUploadAndTrackBuffer(device: *c.SDL_GPUDevice, cmd: *c.SDL_GPUCommandBuffer, transfer_buf: *c.SDL_GPUTransferBuffer) !void {
     const fence = c.SDL_SubmitGPUCommandBufferAndAcquireFence(cmd) orelse {
         std.log.warn("submitUploadAndTrackBuffer: failed to submit texture upload command buffer", .{});
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return error.SubmitTextureUploadFailed;
     };
 
     pendingTextureUploads.append(gpu.getAllocator(), .{
@@ -241,7 +247,7 @@ fn submitUploadAndTrackBuffer(device: *c.SDL_GPUDevice, cmd: *c.SDL_GPUCommandBu
         _ = c.SDL_WaitForGPUFences(device, true, @ptrCast(&fenceToWait), 1);
         c.SDL_ReleaseGPUFence(device, fence);
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return err;
     };
 
     cleanupPendingUploads(device, false);
@@ -276,6 +282,7 @@ fn moveTextureToStandalone(texture: *Texture, rgba_surface: *sdl.Surface) !void 
     const h: u32 = @intCast(texture.height);
     const gpu_texture = try createGpuTexture(device, w, h);
     errdefer c.SDL_ReleaseGPUTexture(device, gpu_texture);
+    try uploadTextureImmediate(device, gpu_texture, rgba_surface);
 
     texture.atlas_x = 0;
     texture.atlas_y = 0;
@@ -283,8 +290,6 @@ fn moveTextureToStandalone(texture: *Texture, rgba_surface: *sdl.Surface) !void 
     texture.atlas_generation = 0;
     texture.owns_atlas_region = true;
     texture.standalone_gpu_texture = gpu_texture;
-
-    uploadTextureImmediate(device, gpu_texture, rgba_surface);
 }
 
 pub fn ensureMutableTexture(texture: *Texture, surface: *sdl.Surface) !void {
@@ -384,7 +389,7 @@ pub fn reuploadTexture(texture: *Texture, surface: *sdl.Surface) !void {
 
     const tex_atlas = atlasForTexture(texture);
     if (tex_atlas == null) {
-        uploadTextureImmediate(device, texture.standalone_gpu_texture.?, rgba_surface);
+        try uploadTextureImmediate(device, texture.standalone_gpu_texture.?, rgba_surface);
         return;
     }
 
@@ -425,7 +430,7 @@ pub fn reuploadTextureRegion(texture: *Texture, surface: *sdl.Surface, rect: sdl
         return;
     }
 
-    uploadTextureRegionImmediate(device, texture.standalone_gpu_texture.?, rgba_surface, @intCast(rect.x), @intCast(rect.y));
+    try uploadTextureRegionImmediate(device, texture.standalone_gpu_texture.?, rgba_surface, @intCast(rect.x), @intCast(rect.y));
 }
 
 fn uploadTextureRegionFromBgraSurface(texture: *Texture, surface: *sdl.Surface, rect: sdl.Rect) void {
@@ -502,7 +507,7 @@ fn uploadTextureRegionFromBgraSurface(texture: *Texture, surface: *sdl.Surface, 
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf) catch return; // Submission logs the failure.
 }
 
 /// Upload surface pixel data to a sub-region of the atlas texture.
@@ -558,7 +563,7 @@ fn uploadToAtlasRegion(device: *c.SDL_GPUDevice, tex_atlas: *Atlas, rgba_surface
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
+    submitUploadAndTrackBuffer(device, cmd, transfer_buf) catch return; // Submission logs the failure.
 }
 
 fn createAtlasClearStripe(width: u32, height: u32, label: []const u8) ?*sdl.Surface {
@@ -655,7 +660,7 @@ pub fn clearMutableAtlasTexture() void {
     clearAtlasTexture(gpu.getMutableAtlas(), "mutable");
 }
 
-fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32) void {
+fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface, dst_x: u32, dst_y: u32) !void {
     const w: u32 = @intCast(rgba_surface.*.w);
     const h: u32 = @intCast(rgba_surface.*.h);
     const pitch: u32 = @intCast(rgba_surface.*.pitch);
@@ -666,28 +671,36 @@ fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GP
         .size = data_size,
         .props = 0,
     };
-    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &transfer_info) orelse return;
+    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &transfer_info) orelse {
+        std.log.warn("uploadTextureRegionImmediate: transfer allocation failed: {s}", .{c.SDL_GetError()});
+        return error.CreateGPUTransferBufferFailed;
+    };
 
     const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse {
+        std.log.warn("uploadTextureRegionImmediate: transfer mapping failed: {s}", .{c.SDL_GetError()});
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return error.MapGPUTransferBufferFailed;
     };
     const pixels: [*]const u8 = @ptrCast(rgba_surface.*.pixels orelse {
+        std.log.warn("uploadTextureRegionImmediate: surface pixels missing", .{});
         c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return error.SurfacePixelsMissing;
     });
     const dst: [*]u8 = @ptrCast(mapped);
     @memcpy(dst[0..data_size], pixels[0..data_size]);
     c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
 
     const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse {
+        std.log.warn("uploadTextureRegionImmediate: command allocation failed: {s}", .{c.SDL_GetError()});
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return error.AcquireGPUCommandBufferFailed;
     };
     const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
+        std.log.warn("uploadTextureRegionImmediate: copy pass failed: {s}", .{c.SDL_GetError()});
+        _ = c.SDL_CancelGPUCommandBuffer(cmd);
         c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
+        return error.BeginGPUCopyPassFailed;
     };
 
     const src = c.SDL_GPUTextureTransferInfo{
@@ -709,65 +722,12 @@ fn uploadTextureRegionImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GP
     };
     c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
     c.SDL_EndGPUCopyPass(copy_pass);
-    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
+    try submitUploadAndTrackBuffer(device, cmd, transfer_buf);
 }
 
 /// Upload surface pixel data to a standalone GPU texture (full replacement).
-fn uploadTextureImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface) void {
-    const w: u32 = @intCast(rgba_surface.*.w);
-    const h: u32 = @intCast(rgba_surface.*.h);
-    const pitch: u32 = @intCast(rgba_surface.*.pitch);
-    const data_size: u32 = pitch * h;
-
-    const transfer_info = c.SDL_GPUTransferBufferCreateInfo{
-        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = data_size,
-        .props = 0,
-    };
-    const transfer_buf = c.SDL_CreateGPUTransferBuffer(device, &transfer_info) orelse return;
-
-    const mapped = c.SDL_MapGPUTransferBuffer(device, transfer_buf, false) orelse {
-        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
-    };
-    const pixels: [*]const u8 = @ptrCast(rgba_surface.*.pixels orelse {
-        c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
-        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
-    });
-    const dst: [*]u8 = @ptrCast(mapped);
-    @memcpy(dst[0..data_size], pixels[0..data_size]);
-    c.SDL_UnmapGPUTransferBuffer(device, transfer_buf);
-
-    const cmd = c.SDL_AcquireGPUCommandBuffer(device) orelse {
-        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
-    };
-    const copy_pass = c.SDL_BeginGPUCopyPass(cmd) orelse {
-        c.SDL_ReleaseGPUTransferBuffer(device, transfer_buf);
-        return;
-    };
-
-    const src = c.SDL_GPUTextureTransferInfo{
-        .transfer_buffer = transfer_buf,
-        .offset = 0,
-        .pixels_per_row = pitch / 4,
-        .rows_per_layer = h,
-    };
-    const dst_region = c.SDL_GPUTextureRegion{
-        .texture = gpu_texture,
-        .mip_level = 0,
-        .layer = 0,
-        .x = 0,
-        .y = 0,
-        .z = 0,
-        .w = w,
-        .h = h,
-        .d = 1,
-    };
-    c.SDL_UploadToGPUTexture(copy_pass, &src, &dst_region, false);
-    c.SDL_EndGPUCopyPass(copy_pass);
-    submitUploadAndTrackBuffer(device, cmd, transfer_buf);
+fn uploadTextureImmediate(device: *c.SDL_GPUDevice, gpu_texture: *c.SDL_GPUTexture, rgba_surface: *sdl.Surface) !void {
+    try uploadTextureRegionImmediate(device, gpu_texture, rgba_surface, 0, 0);
 }
 
 fn atlasForDumpTarget(target: AtlasDumpTarget) *Atlas {

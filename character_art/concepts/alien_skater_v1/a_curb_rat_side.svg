@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="570" viewBox="0 0 400 570">
+  <title>Curb Rat — right-facing side-profile appearance study</title>
+  <desc>White alien skater with a skinny muscular build, black wraparound sunglasses, a subtle pointed nose with one visible vertical nostril slit, cut-off denim shorts and bare three-toed alien feet with sharp nails. Complete character drawing for appearance review.</desc>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- The far arm sits behind the torso in profile. -->
+    <path d="M181 182 Q168 181 163 196 L154 236 Q151 247 159 260 L176 290 L175 306 L179 320 Q184 325 186 319 L184 308 L190 320 Q195 323 197 316 L190 298 L190 287 L175 247 L188 212 Z" fill="#b8b8b8" stroke="#161d26" stroke-width="3"/>
+    <path d="M166 203 L161 238 Q159 247 166 257 L184 289 L183 301 L188 309 L190 298 L190 287 L175 247 L187 214 Z" fill="#747474"/>
+    <path d="M158 245 L169 247 M179 295 L186 299" fill="none" stroke="#747474" stroke-width="2"/>
+    <!-- Far leg and bare three-toed foot, behind the near leg. -->
+    <path d="M161 329 L190 335 L177 395 L161 435 L153 497 L163 511 L149 520 L136 508 L140 438 L153 391 Z" fill="#b8b8b8" stroke="#161d26" stroke-width="3"/>
+    <path d="M174 352 L182 350 L169 394 L154 437 L147 494 L151 505 L141 507 L146 436 L159 392 Z" fill="#747474"/>
+    <path d="M150 400 L162 397 L167 405 M147 434 L155 437" fill="none" stroke="#747474" stroke-width="2"/>
+    <path d="M139 493 L152 495 L159 504 L177 503 L193 499 Q201 498 204 503 Q207 508 199 512 L185 515 L207 512 Q217 512 219 518 Q220 524 211 527 L190 526 L204 528 Q211 531 207 535 Q204 538 197 535 L178 529 L154 531 L135 526 Q130 522 134 511 Z" fill="#b8b8b8"/>
+    <path d="M152 495 L159 504 L177 503 L193 499 Q201 498 204 503 Q207 508 199 512 L185 515 L207 512 Q217 512 219 518 Q220 524 211 527 L190 526 L204 528 Q211 531 207 535 Q204 538 197 535 L178 529 L154 531 L135 526 Q130 522 134 511 L139 493" fill="none" stroke="#161d26" stroke-width="2.8"/>
+    <path d="M140 506 L148 511 L157 521 L179 524 L196 532 L178 528 L154 528 L138 524 Z" fill="#747474"/>
+    <path d="M151 503 Q165 511 184 507 M163 516 L183 517 M166 522 L181 525" fill="none" stroke="#747474" stroke-width="1.6"/>
+    <!-- Each toe has its own pointed nail; the far foot remains behind the near foot. -->
+    <g fill="#aaa996" stroke="#161d26" stroke-width="1.8" stroke-linejoin="miter">
+      <path d="M198 501 Q207 498 217 497 Q213 504 204 510 Q199 510 198 505 Z"/>
+      <path d="M212 514 Q221 511 231 515 L220 524 Q215 526 212 520 Z"/>
+      <path d="M202 530 Q211 529 219 533 L210 538 Q204 540 202 535 Z"/>
+    </g>
+    <path d="M201 502 L213 499 L205 505 Z M215 515 L226 515 L220 519 Z M205 531 L215 533 L210 535 Z" fill="#d0ceba"/>
+    <!-- Near leg: one visible knee and calf silhouette. -->
+    <path d="M184 335 L211 334 Q216 350 219 369 L225 397 Q228 409 220 420 Q216 429 215 441 Q217 454 209 473 L207 493 L218 508 L209 519 L190 510 L188 461 Q183 445 192 428 L202 404 L188 369 Z" fill="#f3f3f3" stroke="#161d26" stroke-width="3.2"/>
+    <path d="M187 348 L198 350 Q211 373 209 399 L198 425 Q187 442 196 459 L199 489 L209 506 L198 508 L194 492 L190 460 Q184 443 196 423 L206 404 L194 369 Z" fill="#b8b8b8"/>
+    <path d="M211 387 L220 395 L220 406 L211 412 L206 405 Z" fill="#ffffff"/>
+    <path d="M202 366 Q211 378 210 387 M209 418 L216 417 M205 434 Q209 445 201 459 M198 478 L200 488" fill="none" stroke="#747474" stroke-width="2"/>
+    <!-- Bare alien foot: three separate toes, visible tendons and sharp nails. -->
+    <path d="M193 491 L205 493 L213 503 L230 501 L246 495 Q255 494 258 500 Q262 506 252 510 L238 513 L261 509 Q272 509 274 516 Q276 523 265 526 L241 524 L256 526 Q263 529 259 534 Q255 538 247 535 L225 529 L208 531 L190 526 Q184 523 188 511 Z" fill="#f3f3f3"/>
+    <path d="M205 493 L213 503 L230 501 L246 495 Q255 494 258 500 Q262 506 252 510 L238 513 L261 509 Q272 509 274 516 Q276 523 265 526 L241 524 L256 526 Q263 529 259 534 Q255 538 247 535 L225 529 L208 531 L190 526 Q184 523 188 511 L193 491" fill="none" stroke="#161d26" stroke-width="2.8"/>
+    <path d="M193 504 L202 512 L211 521 L227 522 L250 531 L256 533 L249 533 L225 527 L209 528 L193 524 L190 519 Z" fill="#b8b8b8"/>
+    <path d="M207 504 Q226 509 246 501 L250 503 L234 509 L220 513 Z M225 514 L258 514 L266 517 L262 520 L238 519 Z" fill="#ffffff"/>
+    <path d="M210 506 Q222 511 239 505 M215 514 L238 516 M218 521 L236 524" fill="none" stroke="#b8b8b8" stroke-width="1.8"/>
+    <path d="M235 503 L239 508 M248 515 L247 522 M240 526 L239 530" fill="none" stroke="#747474" stroke-width="1.6"/>
+    <!-- Pale horn nails retain their color when the skin is player-tinted. -->
+    <g fill="#d5d0b6" stroke="#161d26" stroke-width="2" stroke-linejoin="miter">
+      <path d="M252 499 Q261 495 273 493 Q269 501 260 508 Q254 509 252 503 Z"/>
+      <path d="M267 512 Q277 509 287 513 L276 523 Q271 526 268 521 Z"/>
+      <path d="M254 528 Q264 526 274 531 L263 537 Q257 539 254 534 Z"/>
+    </g>
+    <path d="M255 500 L268 496 L260 503 Z M270 513 L282 513 L276 518 Z M257 529 L269 531 L263 534 Z" fill="#f6f0d7"/>
+    <path d="M255 505 L259 508 M270 520 L275 523 M257 533 L262 536" fill="none" stroke="#8f927e" stroke-width="1.3"/>
+    <!-- Lean muscle definition: capped shoulder, compact chest and narrow waist. -->
+    <path d="M176 154 L199 156 L198 174 Q215 178 222 193 Q226 204 220 216 L214 230 L208 248 L209 276 L214 289 L191 301 L165 289 L159 274 L166 246 Q158 236 155 219 L155 201 Q156 183 171 177 Z" fill="#f3f3f3" stroke="#161d26" stroke-width="3.2"/>
+    <path d="M176 174 L184 172 L181 191 L169 209 L173 231 L180 248 L175 276 L183 291 L167 285 L165 273 L172 246 Q161 234 161 219 L161 200 Q164 184 176 174 Z" fill="#b8b8b8"/>
+    <path d="M195 179 Q211 181 218 195 L218 207 L208 211 L202 202 Z" fill="#ffffff"/>
+    <path d="M205 212 Q215 216 222 205 L219 217 L211 226 L201 225 Z M209 232 L216 230 L213 241 L205 244 Z M205 249 L211 247 L209 258 L202 261 Z" fill="#b8b8b8"/>
+    <path d="M191 174 L199 184 L211 189 M204 211 Q214 218 221 207 M201 231 L209 236 M198 245 L205 249 M195 261 L202 270" fill="none" stroke="#747474" stroke-width="1.8"/>
+    <path d="M163 215 Q162 225 169 233 M172 244 L176 249" fill="none" stroke="#747474" stroke-width="1.6"/>
+    <path d="M205 269 L204 274" fill="none" stroke="#747474" stroke-width="2.5"/>
+    <!-- Cut-offs from the side: one main side pocket and offset cuffs. -->
+    <path d="M162 281 Q184 290 208 280 L216 300 L218 328 L218 348 L209 346 L203 353 L192 347 L186 351 L181 339 L175 349 L166 346 L161 353 L152 348 L146 350 L148 313 Z" fill="#364858" stroke="#161d26" stroke-width="3.5"/>
+    <path d="M164 282 Q186 290 208 280 L211 290 Q190 302 159 292 Z" fill="#242735" stroke="#161d26" stroke-width="2"/>
+    <path d="M158 302 L171 305 L165 334 L153 338 Z" fill="#273442"/>
+    <path d="M178 304 L202 300 L207 328 L196 339 L181 334 Z" fill="#607783"/>
+    <path d="M175 300 L169 331 M213 305 L209 329 M185 339 L193 343 M151 341 L161 339" fill="none" stroke="#202a36" stroke-width="2"/>
+    <path d="M181 307 L198 305 L200 322 L184 327 Z" fill="#364858" stroke="#202a36" stroke-width="1.8"/>
+    <path d="M183 311 L194 311 L190 320" fill="none" stroke="#b1b5a2" stroke-width="1.5"/>
+    <path d="M204 287 L211 285 L214 294 L207 297 Z" fill="#e1b866" stroke="#161d26" stroke-width="1.5"/>
+    <path d="M195 336 L205 332 M196 340 L208 336" fill="none" stroke="#e1b866" stroke-width="2.4"/>
+    <!-- Near arm overlaps the side of the torso, not a second frontal shoulder. -->
+    <path d="M181 188 Q196 180 206 193 Q211 202 207 213 Q208 225 203 236 L199 249 L211 267 Q220 276 220 288 L223 306 L235 318 Q239 324 233 326 L223 319 L230 332 Q231 338 226 338 L214 322 L219 341 Q217 347 212 341 L204 320 L204 306 L201 295 L183 265 Q177 257 180 247 L176 224 Q169 198 181 188 Z" fill="#f3f3f3" stroke="#161d26" stroke-width="3.4"/>
+    <path d="M180 197 Q178 207 181 216 L188 224 L185 244 L186 258 L205 292 L209 308 L214 319 L212 328 L206 318 L206 306 L201 295 L183 265 Q177 256 180 247 L176 223 Q171 207 180 197 Z" fill="#b8b8b8"/>
+    <path d="M187 191 Q200 188 204 199 Q208 208 201 215 L193 219 L184 210 Z M194 226 Q201 221 202 227 L197 243 L191 248 L189 240 Z" fill="#ffffff"/>
+    <path d="M192 220 L201 218 L199 224 L193 228 Z M190 267 Q201 271 207 284 L204 288 L195 278 Z" fill="#b8b8b8"/>
+    <path d="M182 211 Q190 221 201 215 M196 231 Q194 242 188 245 M193 254 L201 258 M193 267 Q206 270 211 282 M209 307 L215 311 M215 314 L221 320" fill="none" stroke="#747474" stroke-width="1.9"/>
+    <path d="M201 291 L218 286 L221 297 L204 302 Z" fill="#202b34" stroke="#161d26" stroke-width="2"/>
+    <path d="M205 294 L216 291" fill="none" stroke="#7a8a87" stroke-width="1.3"/>
+    <!-- The skull and face are redrawn in profile, with only the near lens visible. -->
+    <path d="M174 158 Q151 143 140 124 Q125 108 127 82 Q129 53 151 42 Q177 27 207 40 Q231 48 239 67 L243 86 L244 103 L243.5 110 L247 116 L242.5 120 L240 125 L244 130 L242 140 L232 143 Q225 157 208 164 L194 175 Z" fill="#f3f3f3" stroke="#161d26" stroke-width="3.7"/>
+    <path d="M135 80 Q139 53 160 46 Q184 37 204 47 Q221 54 229 70 L214 65 Q188 56 165 64 L146 82 Z" fill="#ffffff"/>
+    <path d="M134 108 L149 113 L158 135 L178 151 L196 155 L208 153 L225 146 Q217 157 206 162 L194 175 L174 159 L152 143 L140 125 Z" fill="#b8b8b8"/>
+    <!-- Thick temple arm and a single black wraparound lens. -->
+    <path d="M151 86 L199 83 L209 88 L205 97 L182 94 L151 94 Z" fill="#111c28" stroke="#161d26" stroke-width="2.2"/>
+    <path d="M198 81 L236 80 L248 87 L248 105 L231 116 L210 111 L201 98 L193 94 Z" fill="#111c28" stroke="#161d26" stroke-width="3.4"/>
+    <path d="M204 88 L234 86 L241 90 L239 96 L214 101 L208 97 Z" fill="#2b3e4a"/>
+    <path d="M209 88 L234 87 M158 89 L182 88" fill="none" stroke="#b1e5b6" stroke-width="2"/>
+    <path d="M239 98 L244 95 L243 102 L235 109 Z" fill="#344853"/>
+    <!-- Small ear, long cheek and the grin at the front edge of the face. -->
+    <path d="M157 99 Q145 92 143 104 Q141 117 153 123 L162 118 L166 111" fill="#f3f3f3" stroke="#161d26" stroke-width="2.5"/>
+    <path d="M149 104 L157 107 L152 113" fill="none" stroke="#747474" stroke-width="2"/>
+    <!-- A shallow pointed ridge; only the near-side nostril is visible in profile. -->
+    <path d="M243.5 112 L246 116 L241.5 119 L240 119 Z" fill="#b8b8b8"/>
+    <path d="M238 115.5 Q236.7 119.1 238 123 Q239.5 120.8 239.2 116.1 Z" fill="#293332"/>
+    <path d="M174 125 L189 132" fill="none" stroke="#747474" stroke-width="1.9"/>
+    <path d="M212 132 Q227 138 242 128 L239 140 L229 148 L218 144 Z" fill="#293332" stroke="#161d26" stroke-width="2.2"/>
+    <path d="M222 137 L228 137 L227 145 L223 143 Z M232 136 L238 132 L237 139 L232 142 Z" fill="#e2dfb7"/>
+    <path d="M208 129 L214 131 M217 151 L224 154" fill="none" stroke="#747474" stroke-width="2"/>
+  </g>
+</svg>

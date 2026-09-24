@@ -47,6 +47,19 @@ and blocking against the same supporting body's upright, and correct blood
 colors on SVG objects. Independent review and validation are complete; the user
 has authorized the phase commit.
 See [character_animation_rubble.md](character_animation_rubble.md).
+Body artwork is accepted ahead of Blender authoring. The approved design is:
+a shirtless alien skater, 1990s sunglasses and white/grey skin for player-color
+tinting. The user selected Curb Rat (A). Its current side profile has a subtle
+pointed nose with one visible vertical nostril slit, muscles on a skinny frame,
+and bare three-toed alien feet with sharp nails. Appearance, segment preparation
+and runtime integration are accepted, including the head at 75% of its initial
+integration size and removal of the temporary GPU-failure test hook. The segments
+use the existing solved poses, asset loading, sprite renderer and debug menu.
+Independent review, corrections and validation are complete: 101 tests and the
+build/smoke check passed. The user has authorized the artwork commit. See the
+[runtime artwork notes](character_animation_artwork.md), the
+[art pack](../character_art/curb_rat_v1/README.md), and the
+[first appearance study](../character_art/concepts/alien_skater_v1/README.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
 The accepted running implementation is documented in
@@ -322,6 +335,9 @@ Split this work into independently reviewed commits:
   pool and rubble owners; review and commit separately from static terrain.
 
 ### 4. Blender authoring after the setup works
+
+Proposed next phase now that body artwork is accepted; implementation awaits
+the user's go-ahead. Begin with the running profile as one reviewable commit.
 
 Build a prepared Blender scene with a planar skeleton, named target controls, IK preview, useful animation layout, and a limited set of custom properties for locomotion settings.
 

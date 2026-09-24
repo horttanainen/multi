@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="140" viewBox="0 0 90 140">
+  <title>Generated: source/thigh.svg / fixed; edit the source</title>
+  <g id="fixed" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M27 65 L27 94 L29 112 M54 66 L51 94 L51 112" fill="none" stroke="#161d26" stroke-width="3" />
+    <path d="M21 12 Q40 4 58 15 L63 61 L58 67 L51 64 L46 71 L36 66 L30 70 L25 64 L18 68 Z" fill="#364858" stroke="none" />
+    <path d="M23 22 L28 27 L27 61 L21 64 Z" fill="#273442" stroke="none" />
+    <path d="M35 26 L54 22 L56 50 L44 59 L35 55 Z" fill="#607783" stroke="none" />
+    <path d="M34 27 L51 25 L52 43 L36 48 Z" fill="#364858" stroke="#202a36" stroke-width="1.8" />
+    <path d="M37 31 L48 31 L44 40" fill="none" stroke="#b1b5a2" stroke-width="1.5" />
+    <path d="M20 27 L18 68 L25 64 L30 70 L36 66 L46 71 L51 64 L58 67 L63 61 L60 27" fill="none" stroke="#161d26" stroke-width="3" />
+    <path d="M47 58 L56 54 M48 62 L59 58" fill="none" stroke="#e1b866" stroke-width="2" />
+  </g>
+</svg>
