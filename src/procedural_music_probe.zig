@@ -47,8 +47,11 @@ const RenderConfig = struct {
     techno_arrangement: procedural_hard_techno.Arrangement = .loop,
     techno_lead: procedural_hard_techno.Lead = .off,
     lead_level: f32 = 0.75,
+    lead_pattern: procedural_hard_techno.LeadPattern = .original,
+    lead_transpose: i8 = 0,
     // Preserve earlier percussion/lead auditions unless bass is requested.
     bass_level: f32 = 0.0,
+    bass_octaves: u8 = 0,
     techno_options_set: bool = false,
     instrument_set: bool = false,
 };
@@ -331,9 +334,47 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--lead")) {
             const value = try optionValue(args, idx, arg);
             cfg.techno_lead = std.meta.stringToEnum(procedural_hard_techno.Lead, value) orelse {
-                std.log.err("procedural_music_probe: unknown lead '{s}' (use off, razor, hollow, wide, machine, buzz, iron, corrosion)", .{value});
+                std.log.err("procedural_music_probe: unknown lead '{s}' (use off, razor, hollow, wide, machine, buzz, iron, corrosion, bass_synth)", .{value});
                 return error.InvalidArgument;
             };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--lead-pattern")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.lead_pattern = std.meta.stringToEnum(procedural_hard_techno.LeadPattern, value) orelse {
+                std.log.err("procedural_music_probe: unknown lead pattern '{s}' (use original, bassline)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--lead-transpose")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.lead_transpose = std.fmt.parseInt(i8, value, 10) catch |err| {
+                std.log.err("procedural_music_probe: invalid lead transpose '{s}': {}", .{ value, err });
+                return error.InvalidArgument;
+            };
+            if (cfg.lead_transpose < -24 or cfg.lead_transpose > 0) {
+                std.log.err("procedural_music_probe: lead transpose={d} outside supported range -24..0", .{cfg.lead_transpose});
+                return error.InvalidArgument;
+            }
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--bass-octaves")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.bass_octaves = std.fmt.parseInt(u8, value, 10) catch |err| {
+                std.log.err("procedural_music_probe: invalid bass octaves '{s}': {}", .{ value, err });
+                return error.InvalidArgument;
+            };
+            if (cfg.bass_octaves > 3) {
+                std.log.err("procedural_music_probe: bass octaves={d} outside supported range 0..3", .{cfg.bass_octaves});
+                return error.InvalidArgument;
+            }
             cfg.techno_options_set = true;
             idx += 2;
             continue;
@@ -535,7 +576,10 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .arrangement = cfg.techno_arrangement,
                 .lead = cfg.techno_lead,
                 .lead_level = cfg.lead_level,
+                .lead_pattern = cfg.lead_pattern,
+                .lead_transpose = cfg.lead_transpose,
                 .bass_level = cfg.bass_level,
+                .bass_octaves = cfg.bass_octaves,
                 .room_mix = cfg.reverb_mix,
                 .bus = cfg.techno_bus,
             };
@@ -813,10 +857,13 @@ fn printUsage() void {
         \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass
         \\  --metal-voice NAME  noise_burst, snare (default)
         \\  --bass-level VALUE  0..1, default 0 (off); use 0.65 for the game bass mix
+        \\  --bass-octaves N    0..3, transpose the sustained bass part (default 0)
         \\  --groove NAME       warehouse (default), rolling, machine, foundation
         \\  --arrangement NAME  loop (default), track (128 bars, Warehouse/Machine)
         \\  --percussion VALUE  0..1, default 0.65 (hard-techno only)
-        \\  --lead NAME         off (default), razor, hollow, wide, machine, buzz, iron, corrosion
+        \\  --lead NAME         off (default), razor, hollow, wide, machine, buzz, iron, corrosion, bass_synth
+        \\  --lead-pattern NAME original (default), bassline (sustained phrase)
+        \\  --lead-transpose N  -24..0 semitones; -24 selects G2, default 0 (G4)
         \\  --lead-level VALUE  0..1, default 0.75 (hard-techno only)
         \\  --master-volume V    0..1, final playback gain (default 1)
         \\  --kick-drive VALUE  1..8, default 2.3 (hard-techno only)

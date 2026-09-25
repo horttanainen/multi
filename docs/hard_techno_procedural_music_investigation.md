@@ -61,8 +61,27 @@ the accepted bass, lead and score remain intact, and taiko keeps its own Atariga
 implementation. All 36 music and two menu tests, seven offline renders and the
 prescribed build/smoke checks pass. Independent review found no actionable issues;
 the subsequent default-selection change is locally checked, with a full Snare
-track preview. The user accepted the result and explicitly requested its commit. See
+track preview. The user accepted the result, committed as `d9269e8`. See
 [Phase 7](../MUSIC_HANDOFF.md#phase-7-electronic-percussion-replacement).
+
+The user selected the sustained bass voice at +12 semitones and +6 dB as the
+replacement game lead. Phase 8 now implements that independent voice with its
+original held phrase, legato, filters, drive, mono routing and kick ducking. The
+original low bass remains underneath. It follows existing lead entrance/rest
+sections; long-term progression remains separate planned work. Older Corrosion
+settings also use the newly selected voice in the game. Corrosion stays available
+in the probe for comparison.
+
+Two comparisons play Corrosion then the new voice: the sustained bass phrase,
+and the original short lead riff. Corrosion retains its original G4 register,
+processing and level; the new voice uses the selected G2 register. Backing is
+identical. The user rejected lowering Corrosion for the comparison, so the old
+lead on its original pattern must now match the accepted recording byte for byte. The first rejected attempt had changed the bass's articulation
+and processing; the new default matches the accepted +12/+6 dB bass recording.
+All 42 music tests, two menu/audio tests, eleven renders and build/smoke checks
+pass. Independent review found no actionable issues. The user accepted the phase and
+explicitly authorized its commit. See
+[Phase 8](../MUSIC_HANDOFF.md#phase-8-the-bass-synth-in-the-lead-register).
 
 The user has explicitly made earlier music-generation guidance optional because
 the previous approach gave poor results. Treat this document's musical and

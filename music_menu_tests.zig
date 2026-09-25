@@ -38,6 +38,10 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     settings.music_volume = 0.5;
     settings.music_reverb_mix = 0.6;
     settings.applyMusic();
+    // Older saved Corrosion choices use the newly selected game voice and phrase.
+    try std.testing.expectEqual(.bass_synth, procedural_hard_techno.config.lead);
+    try std.testing.expectEqual(.bassline, procedural_hard_techno.config.lead_pattern);
+    try std.testing.expectEqual(@as(i8, -24), procedural_hard_techno.config.lead_transpose);
     musicConfigMenu.open(null);
     defer menu.close();
 
@@ -63,6 +67,8 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     tempo.kind.config.value = 1.3;
     musicConfigMenu.sync();
     try std.testing.expectEqual(frames, procedural_hard_techno.frames_rendered);
+    try std.testing.expectEqual(.bass_synth, procedural_hard_techno.config.lead);
+    try std.testing.expectEqual(.bassline, procedural_hard_techno.config.lead_pattern);
 
     try (try itemNamed("Reset Changes")).kind.button();
     try std.testing.expectEqual(@as(f32, 1), tempo.kind.config.value);

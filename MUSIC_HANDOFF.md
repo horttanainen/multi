@@ -39,7 +39,18 @@ Updated 2026-09-25. This folder is the dedicated music worktree.
   accent with electronic percussion. The user likes both candidates and prefers
   Electronic Snare, now the game/probe default. Noise Burst remains an alternative.
   The existing lead, bass and arrangement are preserved. The user accepted the
-  selected Snare track and explicitly authorized the percussion commit.
+  selected Snare track and committed the percussion phase as `d9269e8`.
+- Phase 8 is implemented. The user confirmed that the sustained pattern is the
+  key improvement and selected the new bass-derived voice with that pattern as
+  the Hard Techno lead: one octave above the original bass and 6 dB louder.
+  The background bass keeps its original lower pitch and quieter level (0.65).
+  Corrosion remains available as a probe variant with its original sound.
+  The game integration already matches this final selection, including legacy
+  saved settings. The user accepted the result and explicitly requested its commit.
+- Two comparisons are ready: Corrosion vs the new voice on the sustained pattern,
+  and the same pair on the old lead riff. Corrosion retains its original G4
+  register, effects and level; the selected new voice stays at G2. Backing is
+  identical. Independent review found no actionable issues.
 - Progression across 1–3 minute sections and playback continuity across launches
   remain proposed next work. A future
   lead-only editor must use real synthesis parameter names and useful ranges.
@@ -48,8 +59,9 @@ The user wants better procedural music and proposed a hard techno generator,
 with shared-library improvements where useful. They selected a separate folder
 so this work is easy to track while another agent works on other game features.
 The completed Phase 3 milestone is a Warehouse-led arrangement with a short
-Machine section. Corrosion is the selected synth hook. The sustained bassline is
-accepted; progression and the percussion palette are proposed before lead editing.
+Machine section. The sustained bassline and electronic percussion are accepted. The selected
+one-octave-up, louder bass voice now replaces Corrosion as the game lead;
+progression remains proposed before lead editing.
 Workflow skills now distinguish accepting changes from explicitly authorizing
 a commit; they also reserve independent review for substantial or risky changes.
 
@@ -60,10 +72,11 @@ for future music work.
 
 ## Musical direction
 
-The user explicitly wants dark industrial techno and selected Corrosion after
-favoring Machine and Buzz. Sandstorm was their earlier reference for a rough synth
-lead. Keep the 150 BPM groove, distorted kick, rolling rumble and restrained
-percussion while refining the original repeating lead motif through listening.
+The user explicitly wants dark industrial techno. Their earlier Corrosion choice
+is retained as an alternative; the selected Hard Techno lead now uses the sustained
+bass-derived voice and phrase, one octave higher and 6 dB louder than the original
+background bass. Keep the 150 BPM groove, distorted kick, rolling rumble and
+restrained electronic percussion. Preserve the original quieter low bass underneath.
 Latest palette constraint (2026-09-25): all hard-techno sounds should read as
 machines/synths or a drum kit. The user dislikes background hits that sound like
 wood clanking or taiko/world percussion. No wooden or acoustic world-percussion
@@ -215,6 +228,184 @@ see the next-phase proposal below.
    Avoid a large routing system. Each phase requires listening and appropriate
    technical validation. Do not begin these phases before the bass handoff and
    user steering.
+
+## Phase 8: the bass synth in the lead register
+
+The user confirmed the final setup and requested implementing this phase:
+
+- Lead: the sustained pattern with the selected bass-derived voice, +12 semitones
+  and +6 dB relative to the original bass.
+- Background bass: the original pattern, lower octave and quieter original level,
+  using a separate synth instance. Its level remains 0.65 and bass_octaves stays 0.
+- Corrosion: retained as an alternative voice with its original pitch and processing
+  in the probe. It is not layered into the selected game mix.
+
+The game integration prepared during the comparisons already implements this
+selection. It has been verified against the current personal settings without
+editing them. The user identified the sustained pattern as the key improvement;
+do not restore the short original lead riff as the Hard Techno default.
+
+**Current outcome and commit boundary:** replace Corrosion in normal game playback
+with an independent `SynthBass` instance. Keep the original low bass and drums.
+At the default lead level 0.75, the new lead reproduces the accepted bass at level
+0.65, transposed +12 and raised exactly 6 dB. Preserve its saw/sine blend, filters,
+distortion, envelope, legato, mono routing and kick ducking. It has no lead delay.
+Use the existing lead entrance/rest schedule in Full Track mode and the sustained
+four-bar bass phrase. The original bass continues its existing part.
+
+The generator/probe retains Corrosion and the original lead pattern for explicit
+comparisons. `lead_pattern` chooses `original` or `bassline`; both scores are
+expressed around G4. `lead_transpose` accepts -24..0 semitones, with -24 selecting
+G2. The game applies `bass_synth`, `bassline` and -24 even with older saved
+Corrosion settings. Personal settings are preserved. Pattern/voice changes reset
+playback; live level/tempo edits retain progress and retime held gates. The earlier
+`bass_octaves` audition control remains default zero for the background bass.
+
+No menu editor or new long-term arrangement/progression work is included. Lead
+teases, bass solos and playback continuity remain the next planned work. The user
+accepted this completed phase and explicitly authorized its commit.
+
+### Replacement comparisons and validation
+
+Both comparisons play **Corrosion first at 0:00.18**, then **the new bass-derived
+lead at 0:13.86**, for 12.8 seconds each:
+
+- [Sustained bass pattern in the mix](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/bassline_pattern_mix_comparison.wav)
+- [Old lead pattern in the mix](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/original_pattern_mix_comparison.wav)
+- [Sustained pattern, isolated leads](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/bassline_pattern_solo_comparison.wav)
+- [Old pattern, isolated leads](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/original_pattern_solo_comparison.wav)
+- [Selected full track](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/selected_track_matched.wav)
+
+Corrosion retains its original G4 pitch, patch, effects and level in both pairs;
+the new bass-derived voice stays at the selected G2 pitch and +6 dB gain. The
+original-pattern Corrosion render is checked byte for byte against the accepted
+Phase 7 Snare/Corrosion/bass mix. The sustained-pattern Corrosion render changes
+only the notes, velocities and holds required to play that phrase. The old riff
+retains its short gates for both voices, at each voice's own register.
+
+The previous comparison incorrectly lowered Corrosion to G2; the user rejected
+that interpretation. Those earlier artifacts under `replacement/audition/` are
+superseded. Mixed previews use identical low bass/drum backing and one common
+playback gain. Solo previews likewise share one gain, with distinct output names.
+
+Validation for the replacement:
+
+- 42/42 ReleaseSafe music tests pass. New tests verify the +12/+6 dB reference
+  match, both pattern/voice combinations, chunk/reset/seed behavior, unchanged
+  backing and additive stems, live tempo retiming and maximum mix levels across
+  both registers and tempo limits. The shared bass DSP is unchanged. SyncLead's
+  gate limit expands to 5 seconds so Corrosion can play held notes at slow tempo.
+- 2/2 menu/audio tests pass, including loading old Corrosion settings, choosing
+  the new runtime voice/phrase/register, preserving it through menu edits and
+  checking the actual SDL audio callback and mute.
+- Eleven probe renders are finite and unclipped. The new lead matches the accepted
+  +12 bass stem at +6 dB within 2 PCM16 LSB; each mix equals the identical backing
+  plus its lead within 1 LSB. The full track has 199 lead notes, 258 bass notes,
+  the existing section timing, arranged rests and a silent ending.
+- Format, build and diff checks pass. The prescribed smoke script with an isolated
+  legacy Corrosion settings file reaches the five-second sentinel without warnings,
+  errors or panics. Personal `settings.json` is unchanged.
+- Independent read-only review of the seven source/test/helper files and both
+  documents found no actionable issues. It independently checked the reference
+  gain, all stem sums, distinct mix/solo previews, exact preview excerpts, track
+  rests and ending, and inspected test/build/smoke evidence. A fresh thread hit
+  the session thread limit, so a separate existing reviewer inspected this packet
+  afresh. The later Corrosion register correction is a small helper-only fix;
+  it uses local diff/audio checks and an exact accepted-recording regression,
+  without another independent review. Subjective listening and manual GUI
+  interaction remain user checks.
+
+See [checks](agent-temp-files/hard-techno/phase8/replacement/checks.txt) and the
+[audition receipt](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/audition.json).
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 8 --lead-pattern-comparison --bass-reference agent-temp-files/hard-techno/phase8/sustained/audition/bass_up_one_octave_solo_bass_raw.wav --old-lead-reference agent-temp-files/hard-techno/phase7/selected-snare/audition/snare_mix_raw.wav
+```
+
+Use approved commands directly for validation (`zig build ...`,
+`bash scripts/smoke_test.sh ...`, and the maintained audition helper). Do not wrap
+these in new shell redirections/environment assignments that miss saved approval
+prefixes; collect returned logs separately. The user has repeatedly requested
+reusing the automation skill and existing execution authorizations.
+
+### Earlier pitch-only comparison
+
+This was the comparison before the user selected the replacement above.
+
+Listen to the [sustained bass pitch comparison](agent-temp-files/hard-techno/phase8/sustained/audition/bass_pitch_comparison.wav)
+or [the same comparison with drums](agent-temp-files/hard-techno/phase8/sustained/audition/bass_pitch_in_mix.wav):
+
+| Cue | Bass phrase and register | Start |
+| --- | --- | --- |
+| 1 beep | Accepted original bass, root G1, range F1–D2 | 0:00.18 |
+| 2 beeps | Same sustained part +12 semitones, root G2, range F2–D3 | 0:13.86 |
+| 3 beeps | Same sustained part +24 semitones, root G3, range F3–D4 | 0:27.64 |
+
+Each excerpt is 12.8 seconds. Solo excerpts all receive +10.61 dB; drum-backed
+excerpts all receive −0.41 dB. The original raw bass is byte-identical to
+`agent-temp-files/hard-techno/bassline/sustained/audition/bass_solo_bass_raw.wav`.
+The drum-backed comparison mutes Corrosion and includes one bass part at the
+selected pitch. At this earlier stage, game playback still used Corrosion with the original bass.
+The earlier rejected comparisons under `phase8/audition/` are historical artifacts,
+not the current proposal.
+
+Validation completed for this correction:
+
+- 38/38 music tests pass in ReleaseSafe. The new checks verify sustained energy
+  beyond the rejected short gates, the requested fundamental at 0–3 octaves,
+  unchanged mono routing, deterministic rendering across buffer sizes and an
+  unchanged score. Other buses remain sample-identical when bass pitch changes.
+  Release/retrigger tests extend through MIDI 74; maximum-mix headroom checks
+  cover each shifted register at both tempo limits.
+- Seven audition renders are finite and unclipped. Drum backing remains identical
+  within 2 PCM16 LSB. The full +24-semitone bass stem retains 258 notes, arranged
+  rests, section timing and the silent ending. This is a full bass stem, not a
+  proposed replacement lead arrangement.
+- Before the lead replacement, the Corrosion+bass+Snare full track remained
+  byte-identical to the accepted Phase 7 recording. Personal `settings.json` is untouched.
+- Formatting, build and diff checks pass. The prescribed five-second smoke run
+  with isolated settings reaches the sentinel without warnings, errors or panics.
+  It covers the original game pitch; shifted pitches are exercised by the probe
+  and unit tests.
+- A fresh independent read-only review of the corrected source, tests, helper and
+  documentation found no actionable issues. It independently confirmed both byte
+  comparisons and inspected render/smoke evidence. Listening preference remains
+  the outstanding decision; these changes are uncommitted.
+
+See the [audition receipt](agent-temp-files/hard-techno/phase8/sustained/audition/audition.json),
+[check summary](agent-temp-files/hard-techno/phase8/sustained/checks.txt) and
+[default-track regression](agent-temp-files/hard-techno/phase8/sustained/regression.json).
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 8 --bass-reference agent-temp-files/hard-techno/bassline/sustained/audition/bass_solo_bass_raw.wav --output-dir agent-temp-files/hard-techno/phase8/sustained/audition
+```
+
+### Louder bass audition
+
+The user likes the +12-semitone version. They now request the comparison with a
+louder bass and an explanation of real audio controls that could bring it forward.
+The [louder pitch comparison](agent-temp-files/hard-techno/phase8/louder/bass_pitch_louder_comparison.wav)
+preserves the original / +12 / +24 order and 0:00.18 / 0:13.86 / 0:27.64 starts.
+The bass is raised by 6 dB relative to the fixed drum backing in all three clips.
+The [one-octave before/after](agent-temp-files/hard-techno/phase8/louder/one_octave_before_after.wav)
+plays the previous level first, then the louder mix at 0:13.86.
+
+This is an offline linear remix of the existing stems, not a synth or game change:
+`new_mix = old_mix + (10^(6/20) - 1) * bass_stem`. Pitch, held notes, tone, ducking
+and effects remain intact. All clips retain the previous −0.41 dB playback gain,
+so backing levels remain fixed even between the previous and louder auditions.
+The three remix true peaks are −5.78, −5.80 and −6.09 dBTP, with no clipping.
+Sample comparisons match the requested sum within 0.51 PCM16 LSB; source hashes
+confirm that the recordings were preserved. See the
+[receipt](agent-temp-files/hard-techno/phase8/louder/audition.json).
+
+This small volume-only artifact iteration used local inspection and audio checks;
+no new independent review or game build was needed. The corrected source review
+and build/test/smoke results above remain current. The disposable remix script
+reuses the maintained audition helper's rendering, gain and validation routines.
+Further possible experiments are gain, less kick ducking, less competing rumble,
+higher filter cutoff, EQ, drive or envelope changes; none are implemented here.
+Keep the sustained phrase and legato that the user likes when testing those ideas.
 
 ## Phase 7: electronic percussion replacement
 
@@ -1037,9 +1228,14 @@ Suggested prompt when resuming:
 > music-menu sound sliders have been removed. Corrosion and basic Hard Techno
 > playback are retained. Phase 7 has Noise Burst and Snare replacements for the
 > wooden-sounding background accent. The user prefers Snare (now the default)
-> and also likes Noise Burst. The user accepted this phase and requested its commit.
-> Progression over 1–3 minute sections and playback resume
-> across game launches are proposed next, ahead of any revised lead editor.
+> and also likes Noise Burst. Phase 7 is committed as d9269e8. The user rejected
+> putting the bass patch on the short lead riff. They selected the actual sustained
+> bass phrase at +12 semitones and +6 dB, and requested replacing the game lead.
+> The user confirmed the sustained pattern is the key improvement and requested
+> implementing the final setup. It is implemented with the original quieter low
+> bass underneath, while Corrosion remains a probe variant. Phase 8 is accepted
+> and its commit is authorized. Progression over 1–3 minute sections and playback
+> resume across game launches are proposed next, ahead of a lead editor.
 > Include quiet or filtered lead teases before full entrances and featured solos
 > for the accepted sustained bass, with the lead resting to give it space.
 > All sounds must fit machinery/synths or a drum kit, with no wooden percussion.

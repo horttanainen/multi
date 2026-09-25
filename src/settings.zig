@@ -206,7 +206,7 @@ pub var music_taiko_nagado_mix: f32 = DEFAULT_TAIKO_NAGADO_MIX;
 pub var music_taiko_kane_mix: f32 = DEFAULT_TAIKO_KANE_MIX;
 pub var music_taiko_cue: u8 = DEFAULT_TAIKO_CUE;
 pub var music_americana_guitar_cue: u8 = DEFAULT_AMERICANA_GUITAR_CUE;
-pub var music_hard_techno: procedural_hard_techno.Config = .{ .lead = .corrosion };
+pub var music_hard_techno: procedural_hard_techno.Config = .{ .lead = .bass_synth, .lead_pattern = .bassline, .lead_transpose = -24 };
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
@@ -443,7 +443,9 @@ pub fn applyMusic() void {
     techno.room_mix = music_reverb_mix;
     techno.volume = 0.86;
     techno.bus = .mix;
-    techno.lead = .corrosion;
+    techno.lead = .bass_synth;
+    techno.lead_pattern = .bassline;
+    techno.lead_transpose = -24;
     techno.repeat_track = true;
     if (techno.arrangement == .track) techno.groove = .warehouse;
     if (music.current_style == .hard_techno) {
@@ -662,7 +664,7 @@ fn resetMusicSettings() void {
     music_taiko_kane_mix = DEFAULT_TAIKO_KANE_MIX;
     music_taiko_cue = DEFAULT_TAIKO_CUE;
     music_americana_guitar_cue = DEFAULT_AMERICANA_GUITAR_CUE;
-    music_hard_techno = .{ .lead = .corrosion };
+    music_hard_techno = .{ .lead = .bass_synth, .lead_pattern = .bassline, .lead_transpose = -24 };
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
@@ -696,5 +698,5 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_taiko_kane_mix = std.math.clamp(s.music_taiko_kane_mix orelse DEFAULT_TAIKO_KANE_MIX, 0.0, 1.0);
     music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 6);
     music_americana_guitar_cue = std.math.clamp(s.music_americana_guitar_cue orelse DEFAULT_AMERICANA_GUITAR_CUE, 0, 3);
-    music_hard_techno = procedural_hard_techno.sanitizeConfig(s.music_hard_techno orelse .{ .lead = .corrosion });
+    music_hard_techno = procedural_hard_techno.sanitizeConfig(s.music_hard_techno orelse .{ .lead = .bass_synth, .lead_pattern = .bassline, .lead_transpose = -24 });
 }

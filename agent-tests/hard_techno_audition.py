@@ -16,12 +16,23 @@ Phase 7 compares the old accent with noise-burst/snare replacements, in isolatio
 and in the Warehouse mix, plus Machine mixes and a complete selected Snare track.
 It requires --percussion-reference DIR containing before_mix_raw.wav and
 before_metal_raw.wav rendered with seed 12345, Corrosion, bass 0.65 and 25.6 s.
+Phase 8 compares the actual sustained bass phrase at its original pitch and one
+and two octaves higher, using the bass bus and identical processing. Supply the
+accepted raw bass stem with --bass-reference; octave zero must match it exactly.
+Add --lead-pattern-comparison to phase 8 to compare Corrosion and the selected
+bass-derived lead on both sustained and original patterns. Corrosion retains its
+original G4 pitch/processing/level; the selected bass-derived voice stays at G2.
+In that mode --bass-reference is the accepted raw one-octave-up bass stem;
+the new sustained lead must reproduce it with exactly 6 dB additional gain.
+Also supply --old-lead-reference with the accepted raw Corrosion mix: its original
+pattern render must match that recording byte for byte.
 Requires the project's Zig toolchain and ffmpeg. Writes raw/stem WAVs, logs,
 constant-gain loudness-matched copies and a JSON receipt to --output-dir.
 The default destination is ignored scratch space. No game launch or downloads.
 """
 
 import argparse
+import hashlib
 from array import array
 from contextlib import ExitStack
 import json
@@ -73,7 +84,8 @@ def loudness(path, log_path=None):
 
 
 def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, arrangement="loop",
-           lead="off", lead_level=0.75, bass_level=0.0, metal_voice="snare"):
+           lead="off", lead_level=0.75, bass_level=0.0, metal_voice="snare", bass_octaves=0,
+           lead_pattern="original", lead_transpose=0):
     path = output_dir / f"{name}_{bus}_raw.wav"
     command = [
         "zig", "build", "procedural-music-probe", "-Doptimize=ReleaseFast", "--",
@@ -83,7 +95,8 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "--techno-bus", bus, "--out", str(path),
         "--lead", lead, "--lead-level", str(lead_level),
         "--bass-level", str(bass_level),
-        "--metal-voice", metal_voice,
+        "--metal-voice", metal_voice, "--bass-octaves", str(bass_octaves),
+        "--lead-pattern", lead_pattern, "--lead-transpose", str(lead_transpose),
     ]
     if duration is not None:
         command.extend(["--duration", str(duration)])
@@ -100,7 +113,9 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "rumble": rumble, "groove": groove, "raw": str(path), "command": command,
         "render_stats": stats[0], "raw_loudness": loudness(path),
         "arrangement": arrangement, "sections": sections, "lead": lead, "lead_level": lead_level,
-        "bass_level": bass_level, "metal_voice": metal_voice,
+        "bass_level": bass_level, "metal_voice": metal_voice, "bass_octaves": bass_octaves,
+        "lead_pattern": lead_pattern, "lead_transpose": lead_transpose,
+        "lead_notes": int(re.search(r"techno_lead: tone=\w+ level=[\d.]+ notes=(\d+)", log).group(1)),
         "bass_notes": int(re.search(r"techno_bass: level=[\d.]+ notes=(\d+)", log).group(1)),
     }
 
@@ -436,19 +451,154 @@ def percussion_audition(output_dir, reference_dir):
     return 0
 
 
+def bass_pitch_audition(output_dir, seed, duration, reference_path):
+    reference = read_reference(reference_path, output_dir, "accepted_bass")
+    solos, mixes, checks = [], [], []
+    for octaves, name in ((0, "original_bass"), (1, "bass_up_one_octave"), (2, "bass_up_two_octaves")):
+        solo = render(output_dir, name + "_solo", 2.3, 0.28, 0.52, "warehouse", "bass", duration, seed,
+                      lead="corrosion", bass_level=0.65, bass_octaves=octaves)
+        if octaves == 0:
+            # Anchor the comparison in the actual accepted recording before
+            # interpreting any higher versions as the same bass sound.
+            if Path(solo["raw"]).read_bytes() != Path(reference["raw"]).read_bytes():
+                raise RuntimeError("Original-pitch bass differs from the accepted raw stem; check reference, seed and duration")
+            reference["sha256"] = hashlib.sha256(Path(solo["raw"]).read_bytes()).hexdigest()
+        mix = render(output_dir, name + "_mix", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                     lead="corrosion", lead_level=0, bass_level=0.65, bass_octaves=octaves)
+        solos.append(solo)
+        mixes.append(mix)
+        if octaves > 0:
+            # The drum backing and mix gain are identical across all pitches.
+            checks.append(verify_stems(mix, [mixes[0], dict(solos[0], sum_gain=-1), solo]))
+    packs, orders, gains = {}, {}, {}
+    for name, items in (("bass_pitch_comparison", solos), ("bass_pitch_in_mix", mixes)):
+        # One common gain for the whole set: only the synth's note pitches vary,
+        # with no individual loudness compensation or envelope/effect changes.
+        gain = min([-18.0 - items[0]["raw_loudness"]["integrated_lufs"]] +
+                   [-2.0 - item["raw_loudness"]["true_peak_dbtp"] for item in items])
+        gains[name] = gain
+        for item in items:
+            match_loudness(item, item["raw_loudness"]["integrated_lufs"] + gain, output_dir)
+        packs[name], orders[name] = preview_pack(output_dir, [
+            {"name": item["name"], "path": item["matched"], "start_frame": 0, "end_frame": 614400}
+            for item in items], name)
+    full = render(output_dir, "bass_up_two_octaves_track", 2.3, 0.28, 0.52, "warehouse", "bass", None, seed,
+                  "track", lead="corrosion", bass_level=0.65, bass_octaves=2)
+    full_check = verify_track(full, [])
+    if full["bass_notes"] != 258:
+        raise RuntimeError("Transposition changed the sustained bass score")
+    with wave.open(full["raw"], "rb") as reader:
+        for start, end in ((0, 8), (81, 88), (125, 128)):
+            reader.setpos(start * 76800)
+            if any(pcm16(reader.readframes((end - start) * 76800))):
+                raise RuntimeError(f"Transposed bass played in an arranged rest: bars {start}..{end}")
+    receipt = {"phase": 8, "iteration": "sustained_pitch_only", "seed": seed, "duration": duration,
+               "reference": reference, "original_is_byte_identical": True,
+               "solos": solos, "mixes": mixes, "unchanged_backing_errors_lsb": checks,
+               "comparisons": packs, "comparison_orders": orders, "common_gains_db": gains,
+               "full_bass": full, "full_validation": full_check,
+               "note": "Original sustained bass phrase, original bass routing and patch; only MIDI pitches change. "
+                       "Original / +12 / +24 semitones. No lead echo, no separate low bass doubling. "
+                       "Each comparison uses a common gain; pitch-dependent loudness differences are preserved."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    for name, path in packs.items():
+        print(f"{name}: {path}")
+    return 0
+
+
+def lead_pattern_audition(output_dir, seed, duration, reference_path, old_lead_reference_path):
+    reference = read_reference(reference_path, output_dir, "accepted_octave_bass")
+    old_reference = read_reference(old_lead_reference_path, output_dir, "original_lead_mix")
+    backing = render(output_dir, "backing", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                     lead="corrosion", lead_level=0, bass_level=0.65)
+    mixes, solos, errors = [], [], []
+    for pattern in ("bassline", "original"):
+        for voice in ("corrosion", "bass_synth"):
+            name = pattern + "_" + voice
+            transpose = 0 if voice == "corrosion" else -24
+            mix = render(output_dir, name, 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                         lead=voice, bass_level=0.65, lead_pattern=pattern, lead_transpose=transpose)
+            solo = render(output_dir, name, 2.3, 0.28, 0.52, "warehouse", "lead", duration, seed,
+                          lead=voice, bass_level=0.65, lead_pattern=pattern, lead_transpose=transpose)
+            solo["name"] += "_solo"
+            errors.append(verify_stems(mix, [backing, solo]))
+            mixes.append(mix)
+            solos.append(solo)
+    if Path(mixes[2]["raw"]).read_bytes() != Path(old_reference["raw"]).read_bytes():
+        raise RuntimeError("Original Corrosion mix differs from the accepted recording; check reference, seed and duration")
+    old_reference["sha256"] = hashlib.sha256(Path(mixes[2]["raw"]).read_bytes()).hexdigest()
+    reference_error = verify_stems(solos[1], [dict(reference, sum_gain=10 ** (6 / 20))])
+    full = render(output_dir, "selected_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, seed,
+                  "track", lead="bass_synth", bass_level=0.65, lead_pattern="bassline", lead_transpose=-24)
+    full_solo = render(output_dir, "selected_track", 2.3, 0.28, 0.52, "warehouse", "lead", None, seed,
+                       "track", lead="bass_synth", bass_level=0.65, lead_pattern="bassline", lead_transpose=-24)
+    full_check = verify_track(full, [])
+    verify_track(full_solo, [])
+    if full["lead_notes"] != 199 or full["bass_notes"] != 258:
+        raise RuntimeError("Unexpected lead or bass score count in replacement track")
+    with wave.open(full_solo["raw"], "rb") as reader:
+        for start, end in ((0, 16), (41, 56), (65, 72), (81, 84), (125, 128)):
+            reader.setpos(start * 76800)
+            if any(pcm16(reader.readframes((end - start) * 76800))):
+                raise RuntimeError(f"Replacement lead played in an arranged rest: {start}..{end}")
+    # Keep the prior louder audition's playback gain across every mixed option.
+    mix_gain = min([-0.41] + [-2 - item["raw_loudness"]["true_peak_dbtp"] for item in [*mixes, full]])
+    solo_gain = min([-18 - solos[0]["raw_loudness"]["integrated_lufs"]] +
+                    [-2 - item["raw_loudness"]["true_peak_dbtp"] for item in solos])
+    for item in [*mixes, full]:
+        match_loudness(item, item["raw_loudness"]["integrated_lufs"] + mix_gain, output_dir)
+    for item in solos:
+        match_loudness(item, item["raw_loudness"]["integrated_lufs"] + solo_gain, output_dir)
+    packs, orders = {}, {}
+    for index, pattern in enumerate(("bassline", "original")):
+        for label, items in (("mix", mixes), ("solo", solos)):
+            name = pattern + "_pattern_" + label + "_comparison"
+            packs[name], orders[name] = preview_pack(output_dir, [
+                {"name": item["name"], "path": item["matched"], "start_frame": 0, "end_frame": 614400}
+                for item in items[index * 2:index * 2 + 2]], name)
+    receipt = {"phase": 8, "iteration": "lead_replacement", "seed": seed, "duration": duration,
+               "old_lead_reference": old_reference, "old_lead_is_byte_identical": True,
+               "accepted_octave_bass": reference, "reference_boost_db": 6,
+               "reference_max_error_lsb": reference_error, "backing": backing,
+               "mixes": mixes, "solos": solos, "stem_errors_lsb": errors,
+               "comparisons": packs, "comparison_orders": orders,
+               "common_mix_gain_db": mix_gain, "common_solo_gain_db": solo_gain,
+               "full_track": full, "full_lead": full_solo, "full_validation": full_check,
+               "note": "Each pair is original Corrosion at G4 then the selected bass-derived voice at G2. "
+                       "Corrosion retains its original pitch, patch, effects and level; its original-pattern mix is byte-identical to the accepted recording. "
+                       "Bassline phrase retains holds/legato; original phrase retains its short gates. "
+                       "Both use the same original low bass and drums. New lead matches accepted +12 bass at +6 dB. "
+                       "Game selects bass_synth, bassline pattern, transpose -24; old lead remains probe-selectable."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    for name, path in packs.items():
+        print(f"{name}: {path}")
+    print(f"Selected track: {full['matched']}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6, 7), default=4)
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6, 7, 8), default=4)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--duration", type=float, help="clip length for phases 1/2/4/6 (default 25.6 seconds)")
+    parser.add_argument("--duration", type=float, help="clip length for phases 1/2/4/6/8 (default 25.6 seconds)")
     parser.add_argument("--seed", type=int, default=12345)
-    parser.add_argument("--bass-reference", type=Path, help="previous mix WAV for the phase 6 listening comparison")
+    parser.add_argument("--bass-reference", type=Path, help="previous mix for phase 6, or accepted raw bass stem for phase 8")
+    parser.add_argument("--lead-pattern-comparison", action="store_true",
+                        help="phase 8: compare old/new leads on both patterns; --bass-reference is the raw +12 bass stem")
+    parser.add_argument("--old-lead-reference", type=Path,
+                        help="required with --lead-pattern-comparison: accepted raw Corrosion mix for exact regression")
     parser.add_argument("--percussion-reference", type=Path, help="previous mix/metal render directory for phase 7")
     parser.add_argument("--lead-set", choices=("original", "rough", "industrial"), default="original",
                         help="lead comparison for phase 4 (default original)")
     args = parser.parse_args()
-    if args.bass_reference is not None and args.phase != 6:
-        parser.error("--bass-reference requires --phase 6")
+    if args.lead_pattern_comparison and args.phase != 8:
+        parser.error("--lead-pattern-comparison requires --phase 8")
+    if (args.old_lead_reference is not None) != args.lead_pattern_comparison:
+        parser.error("--old-lead-reference is required with --lead-pattern-comparison and only supported there")
+    if args.bass_reference is not None and args.phase not in (6, 8):
+        parser.error("--bass-reference requires --phase 6 or 8")
+    if args.phase == 8 and args.bass_reference is None:
+        parser.error("phase 8 requires the accepted raw bass stem via --bass-reference")
     if (args.percussion_reference is not None) != (args.phase == 7):
         parser.error("--percussion-reference is required for phase 7 and only supported there")
     if args.phase == 7 and (args.duration is not None or args.seed != 12345):
@@ -464,6 +614,8 @@ def main():
     if not 0 < args.seed < 2**32:
         parser.error("seed must be a nonzero u32")
     default_dir = ROOT / f"agent-temp-files/hard-techno/phase{args.phase}"
+    if args.phase == 8:
+        default_dir = default_dir / ("replacement/original-corrosion" if args.lead_pattern_comparison else "sustained") / "audition"
     if args.phase == 4 and args.lead_set != "original":
         default_dir = default_dir / args.lead_set
     destination = args.output_dir or default_dir
@@ -477,6 +629,10 @@ def main():
         return bass_audition(output_dir, args.seed, args.duration, args.bass_reference)
     if args.phase == 7:
         return percussion_audition(output_dir, args.percussion_reference)
+    if args.phase == 8:
+        if args.lead_pattern_comparison:
+            return lead_pattern_audition(output_dir, args.seed, args.duration, args.bass_reference, args.old_lead_reference)
+        return bass_pitch_audition(output_dir, args.seed, args.duration, args.bass_reference)
     candidates = FOUNDATIONS if args.phase == 1 else GROOVES
     mixes = [render(output_dir, *candidate, "mix", args.duration, args.seed)
              for candidate in candidates]

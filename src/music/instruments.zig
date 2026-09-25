@@ -644,7 +644,7 @@ pub const SynthBass = struct {
 };
 
 pub fn synthBassTrigger(bass: *SynthBass, note: u8, velocity: f32, gate_seconds: f32) void {
-    if (note < 28 or note > 55 or !std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
+    if (note < 28 or note > 74 or !std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
         !std.math.isFinite(gate_seconds) or gate_seconds < 0.01 or gate_seconds > 5.0)
     {
         std.log.warn("synthBassTrigger: invalid note/velocity/gate ({d}, {d}, {d}), skipping note", .{ note, velocity, gate_seconds });
@@ -707,7 +707,7 @@ pub const SyncLead = struct {
 
 pub fn syncLeadTrigger(lead: *SyncLead, note: u8, velocity: f32, gate_seconds: f32) void {
     if (note < 36 or note > 107 or !std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
-        !std.math.isFinite(gate_seconds) or gate_seconds < 0.01 or gate_seconds > 2.0)
+        !std.math.isFinite(gate_seconds) or gate_seconds < 0.01 or gate_seconds > 5.0)
     {
         std.log.warn("syncLeadTrigger: invalid note/velocity/gate ({d}, {d}, {d}), ignoring note", .{ note, velocity, gate_seconds });
         return;

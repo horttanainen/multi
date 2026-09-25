@@ -713,7 +713,7 @@ test "live tempo changes preserve step progress and runtime track repetition res
 }
 
 test "bass gates and retriggers preserve phase and settle to silence" {
-    for ([_]u8{ 28, 31, 43, 55 }) |note| {
+    for ([_]u8{ 28, 31, 43, 55, 62, 74 }) |note| {
         var bass: instruments.SynthBass = .{};
         instruments.synthBassTrigger(&bass, note, 0.0, 0.04);
         for (0..4800) |_| try std.testing.expectEqual(@as(f32, 0), instruments.synthBassProcess(&bass));
@@ -742,6 +742,189 @@ test "bass gates and retriggers preserve phase and settle to silence" {
         }
         try std.testing.expect(energy > 1.0);
         try std.testing.expectEqual(dsp.EnvState.idle, bass.envelope.state);
+    }
+}
+
+test "bass transposition preserves its held score and routing while raising pitch" {
+    const first = try std.testing.allocator.alloc(f32, 307200 * 2);
+    defer std.testing.allocator.free(first);
+    const second = try std.testing.allocator.alloc(f32, first.len);
+    defer std.testing.allocator.free(second);
+    for ([_]u8{ 0, 1, 2, 3 }) |octaves| {
+        const config: procedural_hard_techno.Config = .{ .lead = .corrosion, .bass_octaves = octaves, .bus = .bass };
+        renderTechno(first, config, 12345, 1024);
+        try std.testing.expectEqual(@as(u64, 10), procedural_hard_techno.bass_count);
+        renderTechno(second, config, 12345, 61);
+        try std.testing.expectEqualSlices(f32, first, second);
+        const frequency: f64 = dsp.midiToFreq(31 + octaves * 12);
+        var fundamental: ToneMeter = .{};
+        var octave_below: ToneMeter = .{};
+        var held_energy: f64 = 0;
+        // The first G note holds for a second: inspect well beyond the rejected
+        // lead's 55 ms gate and verify the transposed fundamental in real output.
+        for (9600..24000) |frame| {
+            const sample = first[frame * 2];
+            try std.testing.expectEqual(sample, first[frame * 2 + 1]);
+            measureTone(&fundamental, sample, frame, frequency);
+            measureTone(&octave_below, sample, frame, frequency * 0.5);
+            held_energy += sample * sample;
+        }
+        try std.testing.expect(held_energy > 0.1);
+        try std.testing.expect(toneMagnitude(fundamental) > 10);
+        try std.testing.expect(toneMagnitude(fundamental) > toneMagnitude(octave_below) * 5);
+    }
+    // A pitch change in the bass does not touch any other voice or its gain.
+    for ([_]procedural_hard_techno.Bus{ .kick, .rumble, .percussion, .lead }) |bus| {
+        renderTechno(first, .{ .lead = .corrosion, .bus = bus }, 12345, 1024);
+        renderTechno(second, .{ .lead = .corrosion, .bus = bus, .bass_octaves = 3 }, 12345, 61);
+        try std.testing.expectEqualSlices(f32, first, second);
+    }
+}
+
+test "transposed sustained bass keeps headroom at maximum mix and tempo limits" {
+    var samples: [2048]f32 = undefined;
+    for ([_]u8{ 1, 2, 3 }) |octaves| {
+        for ([_]f32{ 0.35, 1.65 }) |tempo| {
+            procedural_hard_techno.config = .{
+                .lead = .corrosion,
+                .bass_octaves = octaves,
+                .tempo_scale = tempo,
+                .volume = 1,
+                .lead_level = 1,
+                .bass_level = 1,
+                .percussion_level = 1,
+                .kick_drive = 8,
+                .kick_decay = 0.8,
+                .room_mix = 1,
+                .rumble_level = 1,
+                .groove = .machine,
+            };
+            procedural_hard_techno.resetWithSeed(12345);
+            for (0..1200) |_| {
+                procedural_hard_techno.fillBuffer(&samples, samples.len / 2);
+                for (samples) |sample| {
+                    try std.testing.expect(std.math.isFinite(sample));
+                    try std.testing.expect(@abs(sample) < 0.99);
+                }
+            }
+        }
+    }
+}
+
+test "selected bass lead is the accepted one octave bass at six dB higher gain" {
+    const reference = try std.testing.allocator.alloc(f32, 307200 * 2);
+    defer std.testing.allocator.free(reference);
+    const selected = try std.testing.allocator.alloc(f32, reference.len);
+    defer std.testing.allocator.free(selected);
+    renderTechno(reference, .{ .lead = .corrosion, .bass_octaves = 1, .bus = .bass }, 12345, 1024);
+    renderTechno(selected, .{ .lead = .bass_synth, .lead_pattern = .bassline, .lead_transpose = -24, .bus = .lead }, 12345, 61);
+    try std.testing.expectEqual(@as(u64, 10), procedural_hard_techno.lead_count);
+    const boost = std.math.pow(f32, 10, 6.0 / 20.0);
+    for (reference, selected) |bass_sample, lead_sample| {
+        try std.testing.expectApproxEqAbs(bass_sample * boost, lead_sample, 0.0000001);
+    }
+}
+
+test "both lead voices share either phrase with independent unchanged backing" {
+    const baseline = try std.testing.allocator.alloc(f32, 307200 * 2);
+    defer std.testing.allocator.free(baseline);
+    const mix = try std.testing.allocator.alloc(f32, baseline.len);
+    defer std.testing.allocator.free(mix);
+    const stem = try std.testing.allocator.alloc(f32, baseline.len);
+    defer std.testing.allocator.free(stem);
+    const repeated = try std.testing.allocator.alloc(f32, baseline.len);
+    defer std.testing.allocator.free(repeated);
+    renderTechno(baseline, .{ .lead = .corrosion, .lead_level = 0 }, 12345, 1024);
+    for ([_]procedural_hard_techno.Lead{ .corrosion, .bass_synth }) |tone| {
+        for ([_]procedural_hard_techno.LeadPattern{ .original, .bassline }) |pattern| {
+            var cfg: procedural_hard_techno.Config = .{ .lead = tone, .lead_pattern = pattern, .lead_transpose = -24 };
+            renderTechno(mix, cfg, 12345, 1024);
+            try std.testing.expectEqual(@as(u64, if (pattern == .bassline) 10 else 30), procedural_hard_techno.lead_count);
+            renderTechno(repeated, cfg, 12345, 61);
+            try std.testing.expectEqualSlices(f32, mix, repeated);
+            cfg.bus = .lead;
+            renderTechno(stem, cfg, 12345, 97);
+            renderTechno(repeated, cfg, 67890, 61);
+            try std.testing.expectEqualSlices(f32, stem, repeated);
+            for (mix, baseline, stem) |combined, backing, voice| {
+                try std.testing.expectApproxEqAbs(combined, backing + voice, 0.0000002);
+            }
+            cfg.bus = .mix;
+            cfg.lead_level = 0;
+            renderTechno(repeated, cfg, 12345, 61);
+            try std.testing.expectEqualSlices(f32, baseline, repeated);
+        }
+    }
+}
+
+test "selected bass lead preserves the reference through live tempo changes" {
+    const reference = try std.testing.allocator.alloc(f32, 192000);
+    defer std.testing.allocator.free(reference);
+    const selected = try std.testing.allocator.alloc(f32, reference.len);
+    defer std.testing.allocator.free(selected);
+    for ([_][2]f32{ .{ 1.65, 0.35 }, .{ 0.35, 1.65 } }) |tempos| {
+        for ([_]bool{ false, true }) |is_lead| {
+            var cfg: procedural_hard_techno.Config = .{
+                .lead = if (is_lead) .bass_synth else .corrosion,
+                .lead_pattern = .bassline,
+                .lead_transpose = -24,
+                .bass_octaves = 1,
+                .bus = if (is_lead) .lead else .bass,
+                .tempo_scale = tempos[0],
+            };
+            procedural_hard_techno.config = cfg;
+            procedural_hard_techno.resetWithSeed(12345);
+            advanceTechno(@intFromFloat(19200.0 / tempos[0]));
+            const frames = procedural_hard_techno.frames_rendered;
+            cfg.tempo_scale = tempos[1];
+            procedural_hard_techno.applyLiveConfig(cfg);
+            try std.testing.expectEqual(frames, procedural_hard_techno.frames_rendered);
+            const output = if (is_lead) selected else reference;
+            var offset: usize = 0;
+            while (offset < output.len) {
+                const count = @min(2048, output.len - offset);
+                procedural_hard_techno.fillBuffer(output[offset..].ptr, count / 2);
+                offset += count;
+            }
+        }
+        for (reference, selected) |bass_sample, lead_sample| {
+            try std.testing.expectApproxEqAbs(bass_sample * std.math.pow(f32, 10, 6.0 / 20.0), lead_sample, 0.0000001);
+        }
+    }
+}
+
+test "sustained and original lead patterns retain headroom across registers and tempos" {
+    var samples: [2048]f32 = undefined;
+    for ([_]procedural_hard_techno.Lead{ .corrosion, .bass_synth }) |tone| {
+        for ([_]procedural_hard_techno.LeadPattern{ .original, .bassline }) |pattern| {
+            for ([_]i8{ -24, 0 }) |transpose| {
+                for ([_]f32{ 0.35, 1.65 }) |tempo| {
+                    procedural_hard_techno.config = .{
+                        .lead = tone,
+                        .lead_pattern = pattern,
+                        .lead_transpose = transpose,
+                        .tempo_scale = tempo,
+                        .volume = 1,
+                        .lead_level = 1,
+                        .bass_level = 1,
+                        .percussion_level = 1,
+                        .kick_drive = 8,
+                        .kick_decay = 0.8,
+                        .room_mix = 1,
+                        .rumble_level = 1,
+                        .groove = .machine,
+                    };
+                    procedural_hard_techno.resetWithSeed(12345);
+                    for (0..900) |_| {
+                        procedural_hard_techno.fillBuffer(&samples, samples.len / 2);
+                        for (samples) |sample| {
+                            try std.testing.expect(std.math.isFinite(sample));
+                            try std.testing.expect(@abs(sample) < 0.99);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -8,7 +8,8 @@ const instruments = @import("music/instruments.zig");
 
 pub const Bus = enum { mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass };
 pub const Groove = enum { foundation, warehouse, rolling, machine };
-pub const Lead = enum { off, razor, hollow, wide, machine, buzz, iron, corrosion };
+pub const Lead = enum { off, razor, hollow, wide, machine, buzz, iron, corrosion, bass_synth };
+pub const LeadPattern = enum { original, bassline };
 pub const Arrangement = enum { loop, track };
 pub const TrackSection = enum { intro, drive, contrast, pressure, breakdown, returning, outro, finished };
 pub const TRACK_BARS: u64 = 128;
@@ -35,7 +36,12 @@ pub const Config = struct {
     arrangement: Arrangement = .loop,
     lead: Lead = .off,
     lead_level: f32 = 0.75,
+    lead_pattern: LeadPattern = .original,
+    // Both patterns are expressed around G4; -24 selects the accepted G2 register.
+    lead_transpose: i8 = 0,
     bass_level: f32 = 0.65,
+    // Audition the original sustained bass part higher without changing its voice.
+    bass_octaves: u8 = 0,
     repeat_track: bool = false,
     bus: Bus = .mix,
 };
@@ -102,6 +108,7 @@ var outro_fade_elapsed: f64 = 0.0;
 var outro_fade_tempo: f32 = 1.0;
 var outro_fade_frames: f64 = 1.0;
 var lead: instruments.SyncLead = .{};
+var bass_lead: instruments.SynthBass = .{};
 var lead_delay: dsp.DelayLine(DELAY_SIZE) = .{};
 var lead_layer: [1]f32 = .{1.0};
 var lead_target: [1]f32 = .{1.0};
@@ -147,8 +154,7 @@ pub fn leadStep(arrangement: Arrangement, bar: u64, step: u8) NoteStep {
         return .{};
     }
     if (arrangement == .track) {
-        if (bar < 16 or (bar >= 40 and bar < 56) or (bar >= 64 and bar < 72) or
-            (bar >= 80 and bar < 84) or bar >= 124) return .{};
+        if (!leadSectionEnabled(bar)) return .{};
         if (bar >= 84 and bar < 88 and step % 4 != 0) return .{};
         if (bar == 87 and step >= 12) return .{};
     }
@@ -163,6 +169,21 @@ pub fn leadStep(arrangement: Arrangement, bar: u64, step: u8) NoteStep {
     var velocity: f32 = if (step % 4 == 0) 0.95 else 0.76;
     if (arrangement == .track and ((bar >= 84 and bar < 88) or bar >= 120)) velocity *= 0.70;
     return .{ .note = note, .velocity = velocity, .gate_steps = if (step == 14) 1.10 else 0.55 };
+}
+
+fn leadSectionEnabled(bar: u64) bool {
+    return !(bar < 16 or (bar >= 40 and bar < 56) or (bar >= 64 and bar < 72) or
+        (bar >= 80 and bar < 84) or bar >= 124);
+}
+
+pub fn leadPatternStep(pattern: LeadPattern, arrangement: Arrangement, bar: u64, step: u8) NoteStep {
+    if (pattern == .original) return leadStep(arrangement, bar, step);
+    if (arrangement == .track and (!leadSectionEnabled(bar) or (bar == 87 and step >= 12))) return .{};
+    var event = bassStep(.loop, bar, step);
+    const note = event.note orelse return event; // Normal score rest.
+    event.note = note + 36;
+    if (arrangement == .track and ((bar >= 84 and bar < 88) or bar >= 120)) event.velocity *= 0.70;
+    return event;
 }
 
 pub const TrackStep = struct {
@@ -342,7 +363,7 @@ pub fn resetWithSeed(seed: u32) void {
     metal = .{ .tone = active_config.metal_voice };
     metal_pan = 0.0;
     lead = .{ .tone = switch (active_config.lead) {
-        .off, .razor => .razor,
+        .off, .razor, .bass_synth => .razor,
         .hollow => .hollow,
         .wide => .wide,
         .machine => .machine,
@@ -351,6 +372,7 @@ pub fn resetWithSeed(seed: u32) void {
         .corrosion => .corrosion,
     } };
     lead_delay = .{};
+    bass_lead = .{};
     lead_layer = .{1.0};
     lead_target = .{1.0};
     lead_count = 0;
@@ -405,7 +427,9 @@ pub fn sanitizeConfig(value: Config) Config {
     result.room_mix = bounded("room", value.room_mix, 0.0, 1.0, 0.35);
     result.percussion_level = bounded("percussion", value.percussion_level, 0.0, 1.0, 0.65);
     result.lead_level = bounded("lead level", value.lead_level, 0.0, 1.0, 0.75);
+    result.lead_transpose = @intFromFloat(bounded("lead transpose", @floatFromInt(value.lead_transpose), -24, 0, 0));
     result.bass_level = bounded("bass level", value.bass_level, 0.0, 1.0, 0.65);
+    result.bass_octaves = @intFromFloat(bounded("bass octaves", @floatFromInt(value.bass_octaves), 0, 3, 0));
     return result;
 }
 
@@ -414,12 +438,16 @@ pub fn sanitizeConfig(value: Config) Config {
 pub fn applyLiveConfig(value: Config) void {
     const next = sanitizeConfig(value);
     config = next;
-    if (next.arrangement != active_config.arrangement or next.lead != active_config.lead or next.metal_voice != active_config.metal_voice) {
+    if (next.arrangement != active_config.arrangement or next.lead != active_config.lead or
+        next.lead_pattern != active_config.lead_pattern or next.metal_voice != active_config.metal_voice)
+    {
         resetWithSeed(playback_seed);
         return;
     }
     target_config = next;
     active_config.groove = next.groove;
+    active_config.lead_transpose = next.lead_transpose;
+    active_config.bass_octaves = next.bass_octaves;
     active_config.bus = next.bus;
     active_config.repeat_track = next.repeat_track;
     if (next.tempo_scale == active_config.tempo_scale) return;
@@ -428,6 +456,7 @@ pub fn applyLiveConfig(value: Config) void {
     sequencer.step_counter *= active_config.tempo_scale / next.tempo_scale;
     // Held bass gates follow the remaining musical duration when tempo changes.
     bass.gate_left = @intFromFloat(@round(@as(f32, @floatFromInt(bass.gate_left)) * active_config.tempo_scale / next.tempo_scale));
+    bass_lead.gate_left = @intFromFloat(@round(@as(f32, @floatFromInt(bass_lead.gate_left)) * active_config.tempo_scale / next.tempo_scale));
     active_config.tempo_scale = next.tempo_scale;
     const beat_seconds = 60.0 / (BASE_BPM * next.tempo_scale);
     const beat_samples = beat_seconds * dsp.SAMPLE_RATE;
@@ -492,7 +521,7 @@ fn advanceClock() void {
     }
     if (active_config.lead != .off) {
         lead_target[0] = if (active_config.arrangement == .track and current_bar == 87 and step >= 12) 0.0 else 1.0;
-        const note_event = leadStep(active_config.arrangement, current_bar, step);
+        const note_event = leadPatternStep(active_config.lead_pattern, active_config.arrangement, current_bar, step);
         triggerLead(note_event);
     }
     triggerBass(bassStep(active_config.arrangement, current_bar, step));
@@ -506,20 +535,33 @@ fn advanceClock() void {
 fn triggerBass(event: NoteStep) void {
     const note = event.note orelse return; // A rest is an ordinary score event.
     const step_seconds = 60.0 / (BASE_BPM * active_config.tempo_scale * 4.0);
-    instruments.synthBassTrigger(&bass, note, event.velocity, step_seconds * event.gate_steps);
+    const pitched_note = note + active_config.bass_octaves * 12;
+    instruments.synthBassTrigger(&bass, pitched_note, event.velocity, step_seconds * event.gate_steps);
     bass_count += 1;
 }
 
 fn triggerLead(event: NoteStep) void {
     const note = event.note orelse return; // A rest is an ordinary score event.
     const step_seconds = 60.0 / (BASE_BPM * active_config.tempo_scale * 4.0);
-    instruments.syncLeadTrigger(&lead, note, event.velocity, step_seconds * event.gate_steps);
+    const pitched_note: u8 = @intCast(@as(i16, note) + active_config.lead_transpose);
+    if (active_config.lead == .bass_synth) {
+        instruments.synthBassTrigger(&bass_lead, pitched_note, event.velocity, step_seconds * event.gate_steps);
+    } else {
+        instruments.syncLeadTrigger(&lead, pitched_note, event.velocity, step_seconds * event.gate_steps);
+    }
     lead_count += 1;
 }
 
 fn processLead(duck_gain: f32) [2]f32 {
     if (active_config.lead == .off) return .{ 0.0, 0.0 };
     composition.easeLevels(1, &lead_layer, &lead_target, layer_fade_rate);
+    if (active_config.lead == .bass_synth) {
+        // Match the accepted bass stem at bass_level 0.65, raised by exactly 6 dB,
+        // when lead_level is the normal 0.75. Preserve its mono bass processing.
+        const gain = (0.30 * 0.65 * std.math.pow(f32, 10, 6.0 / 20.0) / 0.75) * active_config.lead_level;
+        const sample = instruments.synthBassProcess(&bass_lead) * gain * (0.20 + 0.80 * duck_gain) * lead_layer[0];
+        return .{ sample, sample };
+    }
     const dry = instruments.syncLeadProcess(&lead) * 0.24 * active_config.lead_level;
     const left_echo = dsp.delayLineTapFractional(DELAY_SIZE, &lead_delay, delay_half - 1);
     const right_echo = dsp.delayLineTapFractional(DELAY_SIZE, &lead_delay, delay_three_quarters - 1);
