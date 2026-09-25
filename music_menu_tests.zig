@@ -42,6 +42,7 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     try std.testing.expectEqual(.bass_synth, procedural_hard_techno.config.lead);
     try std.testing.expectEqual(.bassline, procedural_hard_techno.config.lead_pattern);
     try std.testing.expectEqual(@as(i8, -24), procedural_hard_techno.config.lead_transpose);
+    try std.testing.expectEqual(.filtered, procedural_hard_techno.config.transitions);
     musicConfigMenu.open(null);
     defer menu.close();
 

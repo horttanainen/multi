@@ -35,21 +35,25 @@ slider rollback. Final rollback validation passes 33 music tests (the obsolete
 controls test was removed), two menu/SDL tests and build/smoke; both the loop
 and full track remain byte-identical to the accepted sustained-bass renders.
 
-The user's latest request raises progression and repeated openings: their saved
-configuration initially selected the 6.4-second loop (later changed to Full Track), and the existing 204.8-second track
-restarts a fixed score. Random seeds affect noise, not the composition or start.
-The next proposed phase is an ongoing arrangement with shifts every 1–3 minutes
-and periodic playback checkpoints to resume across development relaunches. This
-is recorded planning; no progression or resume changes are included in the bass
-iteration. See the corresponding next-phase proposal in MUSIC_HANDOFF.md.
+The user's progression request calls for continuous music that changes character
+and develops its note/rhythm patterns every 1–3 minutes, with playback continuity
+across development relaunches. The current 204.8-second arrangement still restarts
+a fixed score; its seeds affect noise rather than composition. This work is deferred
+until the current arrangement's lead teases, fades and bass features are settled.
 
-The user additionally requests anticipation before major lead entrances: fade
-the lead in or preview it quietly with a low-pass filter before revealing the
-full Corrosion tone. The sustained bass should also take featured solo sections,
-with the lead resting and competing backing parts reduced. Audition lead teases,
-bass solos and their handoffs as part of the evolving arrangement, preserving the
-accepted voice sounds. These are arrangement requirements in the plan; they are
-not implemented yet and do not reopen the deferred sound-editor work.
+The immediate request is to inspect and plan those transitions. The lead first
+enters at 0:25.6 without a multi-bar build. Lead-free gaps already leave the bass
+playing, but it has no deliberate foreground mix. The ending has a four-bar fade;
+most other layer changes use only 20 ms smoothing. Artist research below refines
+Phase 9 into distinct filtered entrances, sparse phrase teases, bass features
+with reduced backing, and a decisive return after the existing breakdown. Preserve
+the accepted new lead's sustained phrase, +12 pitch/+6 dB balance, and the original
+quieter low bass outside feature windows. The user authorized trying this plan;
+the implementation and listening comparisons are now prepared. All 47 music
+tests, two menu/audio tests and build/smoke pass; independent review found no
+actionable issues. The user liked the complete arrangement and explicitly
+requested committing the phase. See
+[Phase 9](../MUSIC_HANDOFF.md#phase-9-lead-anticipation-fades-and-bass-features).
 
 Additional user direction: remove the wooden/taiko-like character from background
 percussion. All hard-techno sounds should suggest machinery, synths or a drum kit.
@@ -98,6 +102,82 @@ The working artistic assumption is dark, driving techno at 150 BPM, with a
 distorted kick, rolling rumble, sparse percussion, and a restrained acid motif.
 That is a proposed starting point, not a user-selected reference or a definition
 of the genre.
+
+## Arrangement research: lead teases, drops and variation
+
+Research requested by the user on 2026-09-25. These are documented practices from
+particular artists and a producer's arrangement guide, not a universal techno
+formula. Sources were read as written interviews and studio-session reporting;
+the linked videos were not independently auditioned or transcribed here.
+
+### What the sources establish
+
+- **Filter movement can carry a simple hook.** Future Music's account of its own
+  BEC studio session describes a two-note melody and simple bassline, with
+  opening synth cutoff and changing reverb building tension. This provides a
+  concrete example of anticipation through changing the presentation of a small
+  amount of musical material.
+  [BEC studio-session account](https://www.musicradar.com/music-tech/record-everything-all-the-time-and-keep-it-all-8-pro-techno-producers-explain-how-they-create-their-tracks),
+  [original artist demonstration](https://www.youtube.com/watch?v=IN74DuZuQxM).
+- **Withholding weight can make the return significant.** Aril Brikha describes
+  maintaining momentum in “Groove La Chord” by opening/closing the chord filter
+  and adding/removing the ride. He also deliberately filtered away the kick's
+  sub-frequencies for roughly two or three minutes before revealing them. His
+  account also cautions against treating exact bar counts as mandatory: the
+  retained performance was not rigidly arranged at regular intervals.
+  [Aril Brikha interview](https://www.ableton.com/en/blog/aril-brikha-remaking-groove-la-chord-with-live-and-note/).
+- **Movement can happen inside a repeated sequence.** Mathew Jonson discusses
+  rhythmic accents, live changes to synth/EQ/volume/mutes, and unsynchronized
+  filter modulation that gradually emphasizes different parts of a melody.
+  Those are examples of variation at the performance and timbre level; they
+  do not by themselves satisfy our user's separate request for new note patterns.
+  [Mathew Jonson interview](https://www.ableton.com/en/blog/mathew-jonson-rhythm-melody-and-chaos/).
+- **Removing parts is an arrangement method.** Dennis DeSantis proposes starting
+  with a dense arrangement and subtracting material to find combinations,
+  spacing and section lengths that work. This supports exploring the instruments
+  already present before adding further layers.
+  [Arranging as a Subtractive Process](https://makingmusic.ableton.com/arranging-as-a-subtractive-process).
+- **Industrial intensity still benefits from a controlled low end.** David
+  Castellani describes concentrating distortion in upper frequencies and
+  high-passing a parallel distortion feed, alongside hands-on effect automation.
+  This is useful context for preserving kick/bass clarity; it is not a reason
+  to redesign the accepted lead patch during the transition phase.
+  [David Castellani interview](https://blog.native-instruments.com/david-castellani/).
+
+### Our application to the current generator
+
+The following choices were inferred from those practices and the user's listening
+feedback. They form the accepted Phase 9 implementation; the user liked the
+complete updated arrangement and explicitly authorized its commit.
+
+Bring the lead forward using its level, brightness and room in the arrangement.
+First let the listener recognize the sustained phrase through a quieter, darker
+preview; then reveal its accepted sound. For a different return, play a small
+fragment and withhold the rest until the entrance. Keep the remaining notes held,
+so teasing does not recreate the short, percussive articulation the user rejected.
+Extra reverb is optional and deferred initially: the selected voice currently
+has no lead delay, and gain/filter automation can be tested without replacing it.
+
+Give the lower bass its solo by withdrawing the upper lead and easing rumble and
+busy percussion while retaining the kick. Both voices share a patch and phrase
+an octave apart, so their relative prominence deserves special attention in the
+listening comparisons. Restore the original quieter bass balance as the lead
+returns; continuous loud doubling would weaken the change of foreground role.
+
+Use the existing breakdown for the largest drop. Build anticipation while kick
+and low bass rest, briefly withdraw the lead before the downbeat, then restore
+the accepted instruments together. Retain the existing final-beat gap as the
+first candidate. A drop can also be a smaller restoration of low end or drums;
+the bass handoffs need not each interrupt the groove with a large breakdown.
+
+For later continuous generation, audition three timescales: small tone/accent
+movement within phrases; a limited rhythm or note-ending variation every few
+phrases; and a larger change of motif, density or foreground role every 1–3
+minutes. Preserve memorable parts of a motif between variations. The cadence
+and bounded variation rules are our design choices, not artist prescriptions.
+Phase 9 first tests the transitions in the current arrangement; its concrete
+timing, comparison plan and commit boundary are in
+[the handoff](../MUSIC_HANDOFF.md#phase-9-lead-anticipation-fades-and-bass-features).
 
 ## Baseline implementation
 

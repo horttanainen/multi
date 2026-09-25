@@ -11,6 +11,7 @@ pub const Groove = enum { foundation, warehouse, rolling, machine };
 pub const Lead = enum { off, razor, hollow, wide, machine, buzz, iron, corrosion, bass_synth };
 pub const LeadPattern = enum { original, bassline };
 pub const Arrangement = enum { loop, track };
+pub const Transitions = enum { off, gain, filtered };
 pub const TrackSection = enum { intro, drive, contrast, pressure, breakdown, returning, outro, finished };
 pub const TRACK_BARS: u64 = 128;
 pub const TrackSectionSpec = struct { section: TrackSection, start_bar: u64, end_bar: u64 };
@@ -34,6 +35,8 @@ pub const Config = struct {
     metal_voice: instruments.ElectronicAccentTone = .snare,
     groove: Groove = .warehouse,
     arrangement: Arrangement = .loop,
+    // The game opts in; off preserves historical probe recordings exactly.
+    transitions: Transitions = .off,
     lead: Lead = .off,
     lead_level: f32 = 0.75,
     lead_pattern: LeadPattern = .original,
@@ -113,6 +116,66 @@ var lead_delay: dsp.DelayLine(DELAY_SIZE) = .{};
 var lead_layer: [1]f32 = .{1.0};
 var lead_target: [1]f32 = .{1.0};
 var bass: instruments.SynthBass = .{};
+var lead_preview_filters: [2][2]dsp.LPF = .{.{dsp.lpfInit(250.0)} ** 2} ** 2;
+var lead_preview_mix: f32 = 0.0;
+
+pub const TransitionLevels = struct {
+    lead_gain: f32 = 1.0,
+    lead_cutoff_hz: f32 = 3000.0,
+    lead_filter_mix: f32 = 0.0,
+    bass_gain: f32 = 1.0,
+    backing: [4]f32 = .{1.0} ** 4,
+};
+
+// Current sample's arrangement automation, exposed for timing diagnostics.
+pub var transition_levels: TransitionLevels = .{};
+
+fn barRamp(position: f64, start: f64, end: f64) f32 {
+    const t: f32 = @floatCast(std.math.clamp((position - start) / (end - start), 0.0, 1.0));
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn gainDb(db: f32) f32 {
+    return std.math.pow(f32, 10.0, db / 20.0);
+}
+
+// Bars come from the sequencer, including its fractional step progress. Musical
+// fades consequently keep their position through live tempo and buffer changes.
+pub fn transitionLevels(position: f64, mode: Transitions) TransitionLevels {
+    var levels: TransitionLevels = .{};
+    if (mode == .off) return levels;
+    if (!std.math.isFinite(position) or position < 0.0) {
+        std.log.warn("procedural_hard_techno.transitionLevels: invalid position={d}", .{position});
+        return levels;
+    }
+    var tease: ?f32 = null;
+    if (position < 12.0) levels.lead_gain = 0.0;
+    if (position >= 12.0 and position < 16.0) tease = barRamp(position, 12.0, 16.0);
+    if (position >= 38.0 and position < 52.0) levels.lead_gain = 1.0 - barRamp(position, 38.0, 40.0);
+    if (position >= 52.0 and position < 56.0) tease = barRamp(position, 52.0, 56.0);
+    if (position >= 62.0 and position < 70.0) levels.lead_gain = 1.0 - barRamp(position, 62.0, 64.0);
+    if (position >= 70.0 and position < 71.0) tease = barRamp(position, 70.0, 71.0) * 0.65;
+    if (position >= 71.0 and position < 72.0) levels.lead_gain = 0.0;
+    if (position >= 80.0 and position < 84.0) levels.lead_gain = 0.0;
+    if (position >= 84.0 and position < 87.75) tease = barRamp(position, 84.0, 87.75) * 0.85;
+    if (position >= 87.75 and position < 88.0) levels.lead_gain = 0.0;
+
+    const feature = barRamp(position, 38.0, 40.0) * (1.0 - barRamp(position, 52.0, 56.0)) +
+        barRamp(position, 62.0, 64.0) * (1.0 - barRamp(position, 70.0, 72.0));
+    levels.bass_gain = gainDb(2.0 * feature);
+    const reduction = [4]f32{ 0.65, 0.20, 0.28, 0.65 };
+    for (&levels.backing, reduction) |*level, amount| level.* = 1.0 - amount * feature;
+
+    // A normal absence of a tease leaves the accepted lead path fully dry.
+    const opening = tease orelse return levels;
+    levels.lead_gain = gainDb(-18.0 + 18.0 * opening);
+    if (mode == .gain) return levels;
+    levels.lead_cutoff_hz = 250.0 * std.math.pow(f32, 12.0, opening);
+    // Smoothly remove the extra filter before a full reveal; an open filter
+    // alone would still recolor the accepted patch.
+    levels.lead_filter_mix = 1.0 - barRamp(opening, 0.65, 1.0);
+    return levels;
+}
 
 pub const NoteStep = struct {
     note: ?u8 = null,
@@ -184,6 +247,19 @@ pub fn leadPatternStep(pattern: LeadPattern, arrangement: Arrangement, bar: u64,
     event.note = note + 36;
     if (arrangement == .track and ((bar >= 84 and bar < 88) or bar >= 120)) event.velocity *= 0.70;
     return event;
+}
+
+pub fn transitionLeadStep(pattern: LeadPattern, bar: u64, step: u8) NoteStep {
+    if (step >= 16) {
+        std.log.warn("procedural_hard_techno.transitionLeadStep: invalid step={d}", .{step});
+        return .{};
+    }
+    if ((bar >= 12 and bar < 16) or (bar >= 52 and bar < 56)) {
+        return leadPatternStep(pattern, .loop, bar, step);
+    }
+    // Two held notes from the selected phrase, then withhold its completion.
+    if (bar == 70 and (step == 0 or step == 8)) return leadPatternStep(pattern, .loop, bar, step);
+    return leadPatternStep(pattern, .track, bar, step);
 }
 
 pub const TrackStep = struct {
@@ -373,6 +449,9 @@ pub fn resetWithSeed(seed: u32) void {
     } };
     lead_delay = .{};
     bass_lead = .{};
+    lead_preview_filters = .{.{dsp.lpfInit(250.0)} ** 2} ** 2;
+    lead_preview_mix = 0.0;
+    transition_levels = .{};
     lead_layer = .{1.0};
     lead_target = .{1.0};
     lead_count = 0;
@@ -439,7 +518,8 @@ pub fn applyLiveConfig(value: Config) void {
     const next = sanitizeConfig(value);
     config = next;
     if (next.arrangement != active_config.arrangement or next.lead != active_config.lead or
-        next.lead_pattern != active_config.lead_pattern or next.metal_voice != active_config.metal_voice)
+        next.lead_pattern != active_config.lead_pattern or next.metal_voice != active_config.metal_voice or
+        next.transitions != active_config.transitions)
     {
         resetWithSeed(playback_seed);
         return;
@@ -521,7 +601,10 @@ fn advanceClock() void {
     }
     if (active_config.lead != .off) {
         lead_target[0] = if (active_config.arrangement == .track and current_bar == 87 and step >= 12) 0.0 else 1.0;
-        const note_event = leadPatternStep(active_config.lead_pattern, active_config.arrangement, current_bar, step);
+        const note_event = if (active_config.arrangement == .track and active_config.transitions != .off)
+            transitionLeadStep(active_config.lead_pattern, current_bar, step)
+        else
+            leadPatternStep(active_config.lead_pattern, active_config.arrangement, current_bar, step);
         triggerLead(note_event);
     }
     triggerBass(bassStep(active_config.arrangement, current_bar, step));
@@ -554,7 +637,13 @@ fn triggerLead(event: NoteStep) void {
 
 fn processLead(duck_gain: f32) [2]f32 {
     if (active_config.lead == .off) return .{ 0.0, 0.0 };
-    composition.easeLevels(1, &lead_layer, &lead_target, layer_fade_rate);
+    if (active_config.arrangement == .track and active_config.transitions != .off) {
+        // Settle exactly at unity/silence instead of leaving a floating-point
+        // residue after a reveal or rest. Retain the old path for reference renders.
+        lead_layer[0] = approachControl(lead_layer[0], lead_target[0]);
+    } else {
+        composition.easeLevels(1, &lead_layer, &lead_target, layer_fade_rate);
+    }
     if (active_config.lead == .bass_synth) {
         // Match the accepted bass stem at bass_level 0.65, raised by exactly 6 dB,
         // when lead_level is the normal 0.75. Preserve its mono bass processing.
@@ -573,6 +662,21 @@ fn processLead(duck_gain: f32) [2]f32 {
         else => 1.0,
     };
     return .{ (dry + left_echo * 0.20 * echo_gain) * gain, (dry + right_echo * 0.24 * echo_gain) * gain };
+}
+
+fn processLeadPreview(input: [2]f32) [2]f32 {
+    if (active_config.arrangement != .track or active_config.transitions == .off) return input;
+    var output = input;
+    lead_preview_mix = approachControl(lead_preview_mix, transition_levels.lead_filter_mix);
+    const alpha = dsp.lpfInit(transition_levels.lead_cutoff_hz).alpha;
+    for (&output, &lead_preview_filters) |*sample, *filters| {
+        // Keep history warm even during dry playback for continuous filter entry.
+        filters[0].alpha = alpha;
+        filters[1].alpha = alpha;
+        const filtered = dsp.lpfProcess(&filters[1], dsp.lpfProcess(&filters[0], sample.*));
+        sample.* += (filtered - sample.*) * lead_preview_mix;
+    }
+    return output;
 }
 
 fn triggerPendingPercussion() void {
@@ -623,6 +727,13 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
             frames_rendered += 1;
             continue;
         }
+        if (active_config.arrangement == .track and active_config.transitions != .off) {
+            const samples_per_step = dsp.SAMPLE_RATE * 60.0 / (BASE_BPM * active_config.tempo_scale) / 4.0;
+            const position = (@as(f64, @floatFromInt(steps_elapsed - 1)) +
+                @as(f64, sequencer.step_counter / samples_per_step)) / 16.0;
+            transition_levels = transitionLevels(position, active_config.transitions);
+            lead_target[0] = transition_levels.lead_gain;
+        }
         var master_fade: f32 = 1.0;
         if (active_config.arrangement == .track) {
             composition.easeLevels(4, &layer_levels, &layer_targets, layer_fade_rate);
@@ -651,22 +762,22 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         const duck_gain = dsp.duckingEnvelopeProcess(&ducker);
         const ducked = filtered * duck_gain;
         var rumble_bus = dsp.hpfProcess(&rumble_output_dc, ducked) * 0.30 * active_config.rumble_level;
-        if (active_config.arrangement == .track) rumble_bus *= layer_levels[0];
+        if (active_config.arrangement == .track) rumble_bus *= layer_levels[0] * transition_levels.backing[0];
         const closed = dsp.panStereo(instruments.hiHatProcess(&closed_hat, &closed_noise) * 2.0, -0.24);
         const open = dsp.panStereo(instruments.hiHatProcess(&open_hat, &open_noise) * 2.0, 0.20);
         const clap_sample = instruments.electronicClapProcess(&clap, &clap_noise);
         const metal_sample = dsp.panStereo(instruments.electronicAccentProcess(&metal, &metal_noise) * 2.0, metal_pan);
-        const lead_bus = processLead(duck_gain);
+        const lead_bus = processLeadPreview(processLead(duck_gain));
         // Keep some held tone audible under each kick instead of gating it away.
-        const bass_bus = instruments.synthBassProcess(&bass) * active_config.bass_level * 0.30 * (0.20 + 0.80 * duck_gain);
+        const bass_bus = instruments.synthBassProcess(&bass) * active_config.bass_level * 0.30 * (0.20 + 0.80 * duck_gain) * transition_levels.bass_gain;
         for (0..2) |channel| {
             var hats_bus = (closed[channel] + open[channel]) * 0.75 * active_config.percussion_level;
             var clap_bus = clap_sample * 0.45 * active_config.percussion_level;
             var metal_bus = metal_sample[channel] * 0.50 * active_config.percussion_level;
             if (active_config.arrangement == .track) {
-                hats_bus *= layer_levels[1];
-                clap_bus *= layer_levels[2];
-                metal_bus *= layer_levels[3];
+                hats_bus *= layer_levels[1] * transition_levels.backing[1];
+                clap_bus *= layer_levels[2] * transition_levels.backing[2];
+                metal_bus *= layer_levels[3] * transition_levels.backing[3];
             }
             const percussion = hats_bus + clap_bus + metal_bus;
             const selected = switch (active_config.bus) {

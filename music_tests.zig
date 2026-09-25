@@ -1078,3 +1078,178 @@ test "held bass follows tempo changes in both directions and releases at the arr
         for (buffer) |sample| try std.testing.expect(@abs(sample) < 0.000001);
     }
 }
+
+fn renderTechnoWindow(output: []f32, cfg: procedural_hard_techno.Config, start_frame: usize, chunk_frames: usize) void {
+    procedural_hard_techno.config = cfg;
+    procedural_hard_techno.resetWithSeed(12345);
+    advanceTechno(start_frame);
+    var offset: usize = 0;
+    while (offset < output.len) {
+        const frames = @min(chunk_frames, (output.len - offset) / 2);
+        procedural_hard_techno.fillBuffer(output[offset..].ptr, frames);
+        offset += frames * 2;
+    }
+}
+
+test "lead teases preserve held phrasing and leave complete bass solo passages" {
+    var count: usize = 0;
+    for (0..128) |bar| {
+        for (0..16) |step| {
+            const event = procedural_hard_techno.transitionLeadStep(.bassline, bar, @intCast(step));
+            if (event.note == null) continue;
+            count += 1;
+            try std.testing.expect(event.gate_steps >= 4.0);
+            try std.testing.expect(!(bar < 12 or (bar >= 40 and bar < 52) or
+                (bar >= 64 and bar < 70) or bar == 71 or (bar >= 80 and bar < 84) or bar >= 124));
+            if (bar == 70) try std.testing.expect(step == 0 or step == 8);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 221), count);
+    // The short tease ends naturally before the withheld phrase/return.
+    const last_tease = procedural_hard_techno.transitionLeadStep(.bassline, 70, 8);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.02), last_tease.gate_steps, 0.0001);
+}
+
+test "filtered entrances darken the preview and restore the gain-only voice exactly" {
+    const frames = 6 * 76800;
+    const filtered = try std.testing.allocator.alloc(f32, frames * 2);
+    defer std.testing.allocator.free(filtered);
+    const gain_only = try std.testing.allocator.alloc(f32, frames * 2);
+    defer std.testing.allocator.free(gain_only);
+    const repeated = try std.testing.allocator.alloc(f32, frames * 2);
+    defer std.testing.allocator.free(repeated);
+    var cfg: procedural_hard_techno.Config = .{
+        .arrangement = .track,
+        .transitions = .filtered,
+        .lead = .bass_synth,
+        .lead_pattern = .bassline,
+        .lead_transpose = -24,
+        .bus = .lead,
+    };
+    renderTechnoWindow(filtered, cfg, 12 * 76800, 1024);
+    renderTechnoWindow(repeated, cfg, 12 * 76800, 61);
+    try std.testing.expectEqualSlices(f32, filtered, repeated);
+    cfg.transitions = .gain;
+    renderTechnoWindow(gain_only, cfg, 12 * 76800, 97);
+    var filtered_energy: f64 = 0;
+    var gain_energy: f64 = 0;
+    var filtered_changes: f64 = 0;
+    var gain_changes: f64 = 0;
+    for (filtered[0 .. 2 * 76800 * 2], gain_only[0 .. 2 * 76800 * 2], 0..) |a, b, index| {
+        filtered_energy += a * a;
+        gain_energy += b * b;
+        if (index < 2) continue;
+        const filtered_delta = a - filtered[index - 2];
+        const gain_delta = b - gain_only[index - 2];
+        filtered_changes += filtered_delta * filtered_delta;
+        gain_changes += gain_delta * gain_delta;
+    }
+    try std.testing.expect(filtered_energy > 0.0);
+    try std.testing.expect(filtered_energy < gain_energy);
+    // Normalize sample-to-sample variation by energy: filtering must reduce
+    // brightness beyond merely lowering the preview's volume.
+    try std.testing.expect(filtered_changes / filtered_energy < 0.8 * gain_changes / gain_energy);
+    // One bar after reveal, no residual filtering or gain difference remains.
+    try std.testing.expectEqualSlices(f32, gain_only[5 * 76800 * 2 ..], filtered[5 * 76800 * 2 ..]);
+}
+
+test "bass features preserve the original voice and recover its background level" {
+    const frames = 2 * 76800;
+    const original = try std.testing.allocator.alloc(f32, frames * 2);
+    defer std.testing.allocator.free(original);
+    const featured = try std.testing.allocator.alloc(f32, frames * 2);
+    defer std.testing.allocator.free(featured);
+    var cfg: procedural_hard_techno.Config = .{
+        .arrangement = .track,
+        .lead = .bass_synth,
+        .lead_pattern = .bassline,
+        .lead_transpose = -24,
+        .bus = .bass,
+    };
+    for ([_]usize{ 40, 58 }) |bar| {
+        cfg.transitions = .off;
+        renderTechnoWindow(original, cfg, bar * 76800, 1024);
+        cfg.transitions = .filtered;
+        renderTechnoWindow(featured, cfg, bar * 76800, 97);
+        const gain: f32 = if (bar == 40) std.math.pow(f32, 10.0, 2.0 / 20.0) else 1.0;
+        var energy: f64 = 0;
+        for (original, featured) |a, b| {
+            try std.testing.expectApproxEqAbs(a * gain, b, 0.000001);
+            energy += a * a;
+        }
+        try std.testing.expect(energy > 1.0);
+    }
+}
+
+test "live tempo changes retain musical fade position and held lead continuity" {
+    var sample: [2]f32 = undefined;
+    for ([_][2]f32{ .{ 0.35, 1.65 }, .{ 1.65, 0.35 } }) |tempos| {
+        var cfg: procedural_hard_techno.Config = .{
+            .arrangement = .track,
+            .transitions = .filtered,
+            .lead = .bass_synth,
+            .lead_pattern = .bassline,
+            .lead_transpose = -24,
+            .bus = .lead,
+            .tempo_scale = tempos[0],
+        };
+        procedural_hard_techno.config = cfg;
+        procedural_hard_techno.resetWithSeed(12345);
+        advanceTechno(@intFromFloat(13.37 * 76800.0 / tempos[0]));
+        const before = procedural_hard_techno.transition_levels;
+        const notes_before = procedural_hard_techno.lead_count;
+        procedural_hard_techno.fillBuffer(&sample, 1);
+        const last = sample[0];
+        cfg.tempo_scale = tempos[1];
+        procedural_hard_techno.applyLiveConfig(cfg);
+        procedural_hard_techno.fillBuffer(&sample, 1);
+        try std.testing.expectEqual(notes_before, procedural_hard_techno.lead_count);
+        try std.testing.expectApproxEqAbs(before.lead_gain, procedural_hard_techno.transition_levels.lead_gain, 0.0001);
+        try std.testing.expectApproxEqAbs(before.lead_cutoff_hz, procedural_hard_techno.transition_levels.lead_cutoff_hz, 0.1);
+        try std.testing.expect(@abs(last - sample[0]) < 0.005);
+    }
+}
+
+test "arranged transitions keep headroom and drop timing at both tempo limits" {
+    var buffer: [2048]f32 = undefined;
+    for ([_]f32{ 0.35, 1.65 }) |tempo| {
+        procedural_hard_techno.config = .{
+            .arrangement = .track,
+            .transitions = .filtered,
+            .lead = .bass_synth,
+            .lead_pattern = .bassline,
+            .lead_transpose = -24,
+            .tempo_scale = tempo,
+            .volume = 1.0,
+            .lead_level = 1.0,
+            .bass_level = 1.0,
+            .percussion_level = 1.0,
+            .rumble_level = 1.0,
+            .room_mix = 1.0,
+            .kick_drive = 8.0,
+            .kick_decay = 0.8,
+        };
+        procedural_hard_techno.resetWithSeed(12345);
+        const frames_per_bar = 76800.0 / @as(f64, tempo);
+        const frames: usize = @intFromFloat(@ceil(128.0 * frames_per_bar) + 4800);
+        var rendered: usize = 0;
+        var peak: f32 = 0;
+        while (rendered < frames) {
+            const count: usize = @min(1024, frames - rendered);
+            procedural_hard_techno.fillBuffer(&buffer, count);
+            for (buffer[0 .. count * 2]) |value| {
+                try std.testing.expect(std.math.isFinite(value));
+                peak = @max(peak, @abs(value));
+            }
+            rendered += count;
+        }
+        try std.testing.expect(peak < 0.99);
+        try std.testing.expectEqual(@as(u64, 480), procedural_hard_techno.kick_count);
+        try std.testing.expectEqual(@as(u64, 221), procedural_hard_techno.lead_count);
+        try std.testing.expectEqual(@as(u64, 258), procedural_hard_techno.bass_count);
+        const returning = procedural_hard_techno.section_frames[@intFromEnum(procedural_hard_techno.TrackSection.returning)].?;
+        try std.testing.expect(@abs(@as(f64, @floatFromInt(returning)) - 88.0 * frames_per_bar) < 4.0);
+        procedural_hard_techno.fillBuffer(&buffer, 1024);
+        for (buffer) |value| try std.testing.expectEqual(@as(f32, 0.0), value);
+    }
+}

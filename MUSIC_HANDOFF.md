@@ -46,14 +46,21 @@ Updated 2026-09-25. This folder is the dedicated music worktree.
   The background bass keeps its original lower pitch and quieter level (0.65).
   Corrosion remains available as a probe variant with its original sound.
   The game integration already matches this final selection, including legacy
-  saved settings. The user accepted the result and explicitly requested its commit.
+  saved settings. The accepted phase is committed as `f410c7f`.
 - Two comparisons are ready: Corrosion vs the new voice on the sustained pattern,
   and the same pair on the old lead riff. Corrosion retains its original G4
   register, effects and level; the selected new voice stays at G2. Backing is
   identical. Independent review found no actionable issues.
-- Progression across 1–3 minute sections and playback continuity across launches
-  remain proposed next work. A future
-  lead-only editor must use real synthesis parameter names and useful ranges.
+- The user now prioritizes reviewing the current arrangement and implementing
+  the previously requested lead teases, fades and bass solos before continuous
+  evolution. Phase 9 is implemented for listening, with comparisons below;
+  all 47 music tests, two menu tests, build/smoke and independent review are
+  complete. The user liked the complete arrangement and explicitly requested
+  committing this phase.
+- Later continuous music must evolve the note/rhythm patterns themselves, as well
+  as sections and instrumentation, with meaningful changes every 1–3 minutes.
+  Playback continuity across launches remains planned. A future lead-only editor
+  must use real synthesis parameter names and useful ranges.
 
 The user wants better procedural music and proposed a hard techno generator,
 with shared-library improvements where useful. They selected a separate folder
@@ -228,6 +235,151 @@ see the next-phase proposal below.
    Avoid a large routing system. Each phase requires listening and appropriate
    technical validation. Do not begin these phases before the bass handoff and
    user steering.
+
+## Phase 9: lead anticipation, fades and bass features
+
+The user asked to inspect the current arrangement and address their earlier
+transition suggestions before implementing continuously evolving music, then
+requested artist research and authorized trying the resulting plan. The baseline
+is the accepted `f410c7f` lead/bass setup. The user found the short comparisons
+hard to judge but said the complete updated arrangement sounded really good,
+then explicitly requested committing this phase.
+
+Listen to the [current arrangement](agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/selected_track_matched.wav).
+Times below are at the default 150 BPM. Code bar indices are zero-based.
+
+| Baseline point | Time | Behavior before this phase |
+| --- | --- | --- |
+| Low bass enters, bar 8 | 0:12.8 | Quiet held roots, then the accepted phrase from bar 12 |
+| First lead, bar 16 | 0:25.6 | Starts the selected sustained phrase without a multi-bar tease |
+| Lead rests, bars 40–55 | 1:04.0–1:29.6 | Bass continues under Machine drums; no dedicated solo gain/mix |
+| Lead rests, bars 64–71 | 1:42.4–1:55.2 | Bass continues under reduced backing, but no foreground treatment |
+| Breakdown, bars 80–87 | 2:08.0–2:20.8 | Kick and low bass rest; softer lead from bar 84, last-beat cut before return |
+| Return, bar 88 | 2:20.8 | Lead, bass and kick return to normal levels |
+| Ending, bars 124–128 | 3:18.4–3:24.8 | Four-bar master fade; current runtime then restarts the arrangement |
+
+The baseline's 20 ms layer smoothing prevents abrupt parameter steps; it is not a
+musical fade over several bars. Lead note attacks/releases and kick ducking also
+do not provide the requested gradual entrance. The quieter breakdown lead is an
+initial hint, but it has no deliberate filter opening or level build across bars.
+
+**Outcome and commit boundary:** improve anticipation and handoffs in
+this existing arrangement, preserving the accepted lead and low-bass voices and
+full note patterns. Teases may temporarily withhold selected notes. No
+continuous-generation, resume or editor work in this phase.
+
+The user requested research into artists' arrangement practices before coding.
+See [the research and sources](docs/hard_techno_procedural_music_investigation.md#arrangement-research-lead-teases-drops-and-variation).
+The revised proposal gives different transitions different jobs. Filtered
+anticipation, a bass handoff and a drop should have distinct shapes; a uniform
+fade at every boundary would miss the contrast we want. Durations below are our
+listening candidates, not rules attributed to the artists.
+
+1. **First reveal, bars 12–16 (0:19.2–0:25.6):** introduce the accepted lead phrase
+   quietly with its upper harmonics reduced by an additional low-pass filter.
+   Open the cutoff and raise its gain over four bars, reaching the exact accepted
+   voice and level at bar 16. Compare this against a gain-only fade and the
+   untouched original. The full phrase keeps its sustained articulation.
+2. **Bass features, bars 40–55 and 64–71:** withdraw the lead over the preceding
+   one or two bars, ease competing rumble and busy percussion, and keep a driving
+   kick. Feature the original low bass through the space this creates; audition
+   a modest temporary gain lift only if needed. Keep its original octave and
+   phrase. Let the first solo run for twelve bars before a four-bar filtered
+   return tease (bars 52–56). Give the shorter solo six bars before a two-bar
+   fragment tease (bars 70–72): one or two held notes from the existing phrase,
+   followed by a rest before the complete phrase returns. This is an entrance
+   mask, not a replacement bass/lead pattern. Restore the bass's accepted
+   background level as the lead takes over.
+3. **Main drop, bars 80–88 (2:08.0–2:20.8):** retain the kick/low-bass withdrawal
+   and build the existing lead hint from bar 84 through gain/filter movement.
+   Keep the final-beat withdrawal at 2:20.4 and return the full kick, background
+   bass and accepted lead together at 2:20.8. Preserve a decisive downbeat using
+   short click-prevention smoothing; do not spread the impact across a long fade.
+   Check residual rumble/effect tails so the gap and returning low end remain
+   clear. Audition the existing electronic snare/noise as a restrained transition
+   accent only if the filter movement and subtraction need more support.
+4. **Between transitions:** retain the current score, groove and ending. Reserve
+   broader timbre movement and evolving note/rhythm patterns for the continuous
+   generation phase. The return to the accepted voice must remain audible and
+   recognizable; adding new effects to it is not required for this phase.
+5. Provide before/after excerpts of the first entrance, both bass handoffs and
+   the breakdown/return, plus a longer preview of the current arrangement.
+   Judge whether a tease creates expectation, the bass carries its solo and the
+   drop lands clearly. Keep the original reference untouched and use a common
+   playback gain so the transitions' real level contrast survives comparison.
+
+Reuse the existing sequencer, arrangement/layer state, shared filters and audition
+helper. Express automation as gain (dB) and cutoff (Hz) over beats/bars, with smooth
+sample output and no new menu controls. Ensure any extra preview filtering is
+fully and smoothly removed at the reveal so it does not recolor the selected voice.
+Validate timing at both tempo limits, held-note continuity, headroom, stem sums
+and normal mix levels outside the transition/solo windows; then run format,
+build, prescribed smoke and one independent review for the implementation.
+
+### Listening iteration and implementation
+
+- Game playback now selects filtered transitions. The probe's `--transitions`
+  accepts `off` (legacy default), `gain` and `filtered`, so earlier auditions
+  retain their original behavior. Loop mode remains unaffected.
+- Four-bar previews rise from -18 dB to the accepted level; the extra pair of
+  low-pass filters opens from 250 Hz toward 3000 Hz and blends out completely.
+  The short fragment stays quieter; the breakdown build stops below full level
+  before the final-beat withdrawal. Existing drum fills provide its accents.
+- The lead withdraws over bars 38–40 and 62–64. Bass solos receive +2 dB, with
+  rumble/metal at 35%, hats at 80% and clap at 72% of their existing section
+  levels. These amounts ease in/out on the musical clock. Bass returns to its
+  original quieter level at bars 56 and 72. Shared instrument DSP is unchanged.
+- Automation uses fractional sequencer progress, keeping its musical position
+  through live tempo changes. Output smoothing protects rests and reveals, and
+  the preview filter is smoothly bypassed to restore the accepted voice.
+
+Generated audio in `agent-temp-files/hard-techno/phase9/`:
+
+| Preview | Listening order |
+| --- | --- |
+| [First entrance](agent-temp-files/hard-techno/phase9/first_entrance.wav) | Original at 0:00.18, gain fade at 0:17.06, filtered fade at 0:34.04 |
+| [Bass feature](agent-temp-files/hard-techno/phase9/bass_feature.wav) | Original at 0:00.18, new at 0:39.46 |
+| [Short fragment return](agent-temp-files/hard-techno/phase9/fragment_return.wav) | Original at 0:00.18, new at 0:26.66 |
+| [Breakdown and drop](agent-temp-files/hard-techno/phase9/breakdown_drop.wav) | Original at 0:00.18, new at 0:26.66 |
+| [Current arrangement](agent-temp-files/hard-techno/phase9/filtered_matched.wav) | New arrangement from its beginning |
+
+All mixes share -0.41 dB playback gain. The original reference is untouched and
+the legacy re-render matches it byte for byte. The new mix has 221 lead notes
+(22 added tease notes), the original 258 bass notes and 480 kicks. Seven renders
+are finite and unclipped; stems sum within 2 PCM16 LSB, bass-solo lead rests and
+the ending are silent, and section boundaries retain the original timing.
+See [the receipt](agent-temp-files/hard-techno/phase9/audition.json).
+
+Reproduce with:
+
+```sh
+python3 agent-tests/hard_techno_audition.py --phase 9 --arrangement-reference agent-temp-files/hard-techno/phase8/replacement/original-corrosion/audition/selected_track_mix_raw.wav
+```
+
+All 47 ReleaseSafe music tests and both menu/audio tests pass. New regressions
+cover held tease notes/rests, audible filtering beyond simple attenuation, exact
+filter bypass after the reveal, buffer/reset reproducibility, original bass voice
+and level recovery, live tempo continuity, and complete arrangements at both
+tempo limits with maximum mix levels. Two test-only issues were corrected during
+validation: an inferred integer width in the test buffer loop, and an energy
+threshold that measured attenuation instead of brightness. Audio code did not
+need changes for those corrections.
+
+Format, build and diff checks pass. The prescribed smoke test uses an isolated
+copy of the user's settings and reaches the five-second sentinel with no warnings
+or errors. One fresh-context independent review found no actionable findings.
+Its read-only checks also confirmed reference hashes, stem sums, exact filter
+bypass and small sample jumps at every new transition boundary. The final music
+rerun passed after that review. The user accepted the complete arrangement and
+explicitly authorized its commit; no further musical changes were requested.
+
+**Later phase:** continuous generation must develop lead and bass note patterns
+and rhythms, not only mute/unmute the same phrase or vary synthesis noise. Keep
+recognizable motifs with deliberate variations and larger changes every 1–3
+minutes. Use separate timescales for small tone/accent changes, phrase variations
+and larger changes of foreground role. These are design candidates to audition,
+not claims that a particular bar count is standard for all techno. Resume across
+launches remains planned separately from these transitions.
 
 ## Phase 8: the bass synth in the lead register
 
@@ -1234,8 +1386,11 @@ Suggested prompt when resuming:
 > The user confirmed the sustained pattern is the key improvement and requested
 > implementing the final setup. It is implemented with the original quieter low
 > bass underneath, while Corrosion remains a probe variant. Phase 8 is accepted
-> and its commit is authorized. Progression over 1–3 minute sections and playback
-> resume across game launches are proposed next, ahead of a lead editor.
+> and committed as f410c7f. The user now prioritizes the current arrangement's
+> lead teases, fades and bass solos. Phase 9 is implemented, validated and accepted;
+> its commit is explicitly authorized. The complete arrangement was well received.
+> Continuous music comes afterward and must evolve the note/rhythm patterns,
+> not just the instrumentation. Playback resume remains planned ahead of an editor.
 > Include quiet or filtered lead teases before full entrances and featured solos
 > for the accepted sustained bass, with the lead resting to give it space.
 > All sounds must fit machinery/synths or a drum kit, with no wooden percussion.

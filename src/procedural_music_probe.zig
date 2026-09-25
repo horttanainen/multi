@@ -45,6 +45,7 @@ const RenderConfig = struct {
     metal_voice: instruments.ElectronicAccentTone = .snare,
     techno_groove: procedural_hard_techno.Groove = .warehouse,
     techno_arrangement: procedural_hard_techno.Arrangement = .loop,
+    techno_transitions: procedural_hard_techno.Transitions = .off,
     techno_lead: procedural_hard_techno.Lead = .off,
     lead_level: f32 = 0.75,
     lead_pattern: procedural_hard_techno.LeadPattern = .original,
@@ -315,6 +316,16 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
             idx += 2;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--transitions")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.techno_transitions = std.meta.stringToEnum(procedural_hard_techno.Transitions, value) orelse {
+                std.log.err("procedural_music_probe: unknown transitions '{s}' (use off, gain, filtered)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--percussion")) {
             cfg.percussion_level = try parseBoundedFloatArg("percussion", try optionValue(args, idx, arg), 0.0, 1.0);
             cfg.techno_options_set = true;
@@ -574,6 +585,7 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .metal_voice = cfg.metal_voice,
                 .groove = cfg.techno_groove,
                 .arrangement = cfg.techno_arrangement,
+                .transitions = cfg.techno_transitions,
                 .lead = cfg.techno_lead,
                 .lead_level = cfg.lead_level,
                 .lead_pattern = cfg.lead_pattern,
@@ -860,6 +872,7 @@ fn printUsage() void {
         \\  --bass-octaves N    0..3, transpose the sustained bass part (default 0)
         \\  --groove NAME       warehouse (default), rolling, machine, foundation
         \\  --arrangement NAME  loop (default), track (128 bars, Warehouse/Machine)
+        \\  --transitions NAME  off (legacy default), gain, filtered (game); track only
         \\  --percussion VALUE  0..1, default 0.65 (hard-techno only)
         \\  --lead NAME         off (default), razor, hollow, wide, machine, buzz, iron, corrosion, bass_synth
         \\  --lead-pattern NAME original (default), bassline (sustained phrase)

@@ -446,6 +446,7 @@ pub fn applyMusic() void {
     techno.lead = .bass_synth;
     techno.lead_pattern = .bassline;
     techno.lead_transpose = -24;
+    techno.transitions = .filtered;
     techno.repeat_track = true;
     if (techno.arrangement == .track) techno.groove = .warehouse;
     if (music.current_style == .hard_techno) {

@@ -26,6 +26,9 @@ In that mode --bass-reference is the accepted raw one-octave-up bass stem;
 the new sustained lead must reproduce it with exactly 6 dB additional gain.
 Also supply --old-lead-reference with the accepted raw Corrosion mix: its original
 pattern render must match that recording byte for byte.
+Phase 9 compares the accepted arrangement with gain-only and filtered teases,
+bass features and the drop. Supply --arrangement-reference with the phase-8
+selected_track_mix_raw.wav; the legacy render must match it byte for byte.
 Requires the project's Zig toolchain and ffmpeg. Writes raw/stem WAVs, logs,
 constant-gain loudness-matched copies and a JSON receipt to --output-dir.
 The default destination is ignored scratch space. No game launch or downloads.
@@ -85,7 +88,7 @@ def loudness(path, log_path=None):
 
 def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, arrangement="loop",
            lead="off", lead_level=0.75, bass_level=0.0, metal_voice="snare", bass_octaves=0,
-           lead_pattern="original", lead_transpose=0):
+           lead_pattern="original", lead_transpose=0, transitions="off"):
     path = output_dir / f"{name}_{bus}_raw.wav"
     command = [
         "zig", "build", "procedural-music-probe", "-Doptimize=ReleaseFast", "--",
@@ -97,6 +100,7 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "--bass-level", str(bass_level),
         "--metal-voice", metal_voice, "--bass-octaves", str(bass_octaves),
         "--lead-pattern", lead_pattern, "--lead-transpose", str(lead_transpose),
+        "--transitions", transitions,
     ]
     if duration is not None:
         command.extend(["--duration", str(duration)])
@@ -115,6 +119,7 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "arrangement": arrangement, "sections": sections, "lead": lead, "lead_level": lead_level,
         "bass_level": bass_level, "metal_voice": metal_voice, "bass_octaves": bass_octaves,
         "lead_pattern": lead_pattern, "lead_transpose": lead_transpose,
+        "transitions": transitions,
         "lead_notes": int(re.search(r"techno_lead: tone=\w+ level=[\d.]+ notes=(\d+)", log).group(1)),
         "bass_notes": int(re.search(r"techno_bass: level=[\d.]+ notes=(\d+)", log).group(1)),
     }
@@ -576,9 +581,58 @@ def lead_pattern_audition(output_dir, seed, duration, reference_path, old_lead_r
     return 0
 
 
+def transition_audition(output_dir, seed, reference_path):
+    reference = read_reference(reference_path, output_dir, "accepted_arrangement")
+    mixes = [render(output_dir, mode, 2.3, 0.28, 0.52, "warehouse", "mix", None, seed,
+                    "track", lead="bass_synth", bass_level=0.65, lead_pattern="bassline",
+                    lead_transpose=-24, transitions=mode) for mode in ("off", "gain", "filtered")]
+    if Path(mixes[0]["raw"]).read_bytes() != Path(reference["raw"]).read_bytes():
+        raise RuntimeError("Legacy arrangement differs from the accepted recording; check seed and reference")
+    reference["sha256"] = hashlib.sha256(Path(reference["raw"]).read_bytes()).hexdigest()
+    stems = [render(output_dir, "filtered", 2.3, 0.28, 0.52, "warehouse", bus, None, seed,
+                    "track", lead="bass_synth", bass_level=0.65, lead_pattern="bassline",
+                    lead_transpose=-24, transitions="filtered")
+             for bus in ("low_end", "percussion", "lead", "bass")]
+    checks = [verify_track(item, stems[:3] if index == 2 else []) for index, item in enumerate(mixes)]
+    for stem in stems:
+        verify_track(stem, [])
+    if mixes[2]["lead_notes"] != 221 or mixes[2]["bass_notes"] != 258:
+        raise RuntimeError("Unexpected tease or bass score count")
+    with wave.open(stems[2]["raw"], "rb") as reader:
+        # Solo spans must remain lead-free; allow natural release after the tease.
+        for start, end in ((0, 12), (41, 52), (65, 70), (71, 72), (81, 84), (125, 128)):
+            reader.setpos(start * 76800)
+            if any(pcm16(reader.readframes((end - start) * 76800))):
+                raise RuntimeError(f"Lead leaked into arranged rest: bars {start}..{end}")
+    # Preserve the same gain throughout each arrangement and across every candidate.
+    common_gain = min([-0.41] + [-2.0 - item["raw_loudness"]["true_peak_dbtp"] for item in mixes])
+    for item in mixes:
+        match_loudness(item, item["raw_loudness"]["integrated_lufs"] + common_gain, output_dir)
+    packs, orders = {}, {}
+    for name, start, end, items in (
+            ("first_entrance", 10, 20, mixes),
+            ("bass_feature", 36, 60, [mixes[0], mixes[2]]),
+            ("fragment_return", 60, 76, [mixes[0], mixes[2]]),
+            ("breakdown_drop", 78, 94, [mixes[0], mixes[2]])):
+        packs[name], orders[name] = preview_pack(output_dir, [
+            {"name": item["name"], "path": item["matched"],
+             "start_frame": start * 76800, "end_frame": end * 76800} for item in items], name)
+    receipt = {"phase": 9, "seed": seed, "reference": reference,
+               "legacy_is_byte_identical": True, "mixes": mixes, "stems": stems,
+               "validation": checks, "common_gain_db": common_gain,
+               "comparisons": packs, "comparison_orders": orders,
+               "note": "First entrance: original / gain fade / filtered fade. Other pairs: original / new. "
+                       "One common playback gain preserves transition dynamics. Musical judgment remains listening work."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    for name, path in packs.items():
+        print(f"{name}: {path}")
+    print(f"Current arrangement: {mixes[2]['matched']}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6, 7, 8), default=4)
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6, 7, 8, 9), default=4)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--duration", type=float, help="clip length for phases 1/2/4/6/8 (default 25.6 seconds)")
     parser.add_argument("--seed", type=int, default=12345)
@@ -588,9 +642,12 @@ def main():
     parser.add_argument("--old-lead-reference", type=Path,
                         help="required with --lead-pattern-comparison: accepted raw Corrosion mix for exact regression")
     parser.add_argument("--percussion-reference", type=Path, help="previous mix/metal render directory for phase 7")
+    parser.add_argument("--arrangement-reference", type=Path, help="phase 9: accepted raw phase-8 arrangement mix")
     parser.add_argument("--lead-set", choices=("original", "rough", "industrial"), default="original",
                         help="lead comparison for phase 4 (default original)")
     args = parser.parse_args()
+    if (args.arrangement_reference is not None) != (args.phase == 9):
+        parser.error("--arrangement-reference is required for phase 9 and only supported there")
     if args.lead_pattern_comparison and args.phase != 8:
         parser.error("--lead-pattern-comparison requires --phase 8")
     if (args.old_lead_reference is not None) != args.lead_pattern_comparison:
@@ -605,8 +662,8 @@ def main():
         parser.error("phase 7 compares fixed 25.6-second, seed-12345 reference renders; omit --duration and --seed")
     if args.lead_set != "original" and args.phase != 4:
         parser.error("--lead-set requires --phase 4")
-    if args.phase == 3 and args.duration is not None:
-        parser.error("phase 3 renders the complete 128-bar arrangement; omit --duration")
+    if args.phase in (3, 9) and args.duration is not None:
+        parser.error("phases 3/9 render the complete 128-bar arrangement; omit --duration")
     if args.duration is None:
         args.duration = 25.6
     if not math.isfinite(args.duration) or not 12.8 <= args.duration <= 120.0:
@@ -621,6 +678,8 @@ def main():
     destination = args.output_dir or default_dir
     output_dir = destination.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    if args.phase == 9:
+        return transition_audition(output_dir, args.seed, args.arrangement_reference)
     if args.phase == 3:
         return track_audition(output_dir, args.seed)
     if args.phase == 4:
