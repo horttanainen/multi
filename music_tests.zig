@@ -247,6 +247,96 @@ test "clap retrigger is continuous and its tail reaches silence" {
     try std.testing.expectEqual(@as(f32, 0.0), instruments.electronicClapProcess(&clap, &rng));
 }
 
+test "electronic accent retriggers retain continuity and decay to silence" {
+    for ([_]instruments.ElectronicAccentTone{ .noise_burst, .snare }) |tone| {
+        var accent: instruments.ElectronicAccent = .{ .tone = tone };
+        var rng = dsp.rngInit(987);
+        instruments.electronicAccentTrigger(&accent, 0);
+        for (0..2400) |_| try std.testing.expectEqual(@as(f32, 0), instruments.electronicAccentProcess(&accent, &rng));
+        instruments.electronicAccentTrigger(&accent, 1);
+        var previous: f32 = 0;
+        var energy: f64 = 0;
+        for (0..4800) |frame| {
+            if (frame % 1200 == 1199) {
+                instruments.electronicAccentTrigger(&accent, 0.8);
+                const next = instruments.electronicAccentProcess(&accent, &rng);
+                try std.testing.expect(@abs(next - previous) < 0.08);
+                previous = next;
+                continue;
+            }
+            const sample = instruments.electronicAccentProcess(&accent, &rng);
+            try std.testing.expect(std.math.isFinite(sample));
+            try std.testing.expect(@abs(sample) < 0.5);
+            energy += sample * sample;
+            previous = sample;
+        }
+        try std.testing.expect(energy > 0.1);
+        for (0..48000) |_| previous = instruments.electronicAccentProcess(&accent, &rng);
+        try std.testing.expect(!accent.active);
+        try std.testing.expect(@abs(previous) < 0.0000001);
+        instruments.electronicAccentTrigger(&accent, 0.6);
+        try std.testing.expect(@abs(instruments.electronicAccentProcess(&accent, &rng)) < 0.0000001);
+    }
+}
+
+test "accent choices are deterministic and leave the other techno voices unchanged" {
+    const first = try std.testing.allocator.alloc(f32, 48000 * 4 * 2);
+    defer std.testing.allocator.free(first);
+    const second = try std.testing.allocator.alloc(f32, first.len);
+    defer std.testing.allocator.free(second);
+    var config: procedural_hard_techno.Config = .{ .lead = .corrosion, .groove = .machine };
+    for ([_]procedural_hard_techno.Bus{ .low_end, .hats, .clap, .lead }) |bus| {
+        config.bus = bus;
+        config.metal_voice = .noise_burst;
+        renderTechno(first, config, 12345, 1024);
+        config.metal_voice = .snare;
+        renderTechno(second, config, 12345, 61);
+        try std.testing.expectEqualSlices(f32, first, second);
+    }
+    config.bus = .metal;
+    for ([_]instruments.ElectronicAccentTone{ .noise_burst, .snare }) |tone| {
+        config.metal_voice = tone;
+        renderTechno(first, config, 12345, 1024);
+        const counts = procedural_hard_techno.percussion_counts;
+        renderTechno(second, config, 12345, 61);
+        try std.testing.expectEqualSlices(f32, first, second);
+        try std.testing.expectEqualSlices(u64, &counts, &procedural_hard_techno.percussion_counts);
+    }
+    config.metal_voice = .noise_burst;
+    renderTechno(first, config, 12345, 1024);
+    try std.testing.expect(!std.mem.eql(f32, first, second));
+}
+
+test "both electronic accents retain headroom with maximum bass and Corrosion levels" {
+    var samples: [2048]f32 = undefined;
+    for ([_]instruments.ElectronicAccentTone{ .noise_burst, .snare }) |tone| {
+        for ([_]f32{ 0.35, 1.65 }) |tempo| {
+            procedural_hard_techno.config = .{
+                .groove = .machine,
+                .metal_voice = tone,
+                .tempo_scale = tempo,
+                .volume = 1,
+                .kick_drive = 8,
+                .kick_decay = 0.8,
+                .rumble_level = 1,
+                .room_mix = 1,
+                .percussion_level = 1,
+                .lead = .corrosion,
+                .lead_level = 1,
+                .bass_level = 1,
+            };
+            procedural_hard_techno.resetWithSeed(98765);
+            for (0..1200) |_| { // 25.6 seconds includes repeated overlapping accents.
+                procedural_hard_techno.fillBuffer(&samples, samples.len / 2);
+                for (samples) |sample| {
+                    try std.testing.expect(std.math.isFinite(sample));
+                    try std.testing.expect(@abs(sample) < 0.99);
+                }
+            }
+        }
+    }
+}
+
 fn advanceTechno(frames: usize) void {
     var buffer: [1024]f32 = undefined;
     var remaining = frames;

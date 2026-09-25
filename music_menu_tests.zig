@@ -31,6 +31,7 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     try settings.init();
     try std.testing.expectEqual(procedural_hard_techno.Lead.corrosion, settings.music_hard_techno.lead);
     try std.testing.expectEqual(@as(f32, 0.65), settings.music_hard_techno.bass_level);
+    try std.testing.expectEqual(.snare, settings.music_hard_techno.metal_voice);
     settings.music_seed_enabled = true;
     settings.music_seed = 12345;
     settings.music_style = .hard_techno;
@@ -73,6 +74,7 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     // These saved patch values have no editor row and must survive menu sync.
     settings.music_hard_techno.bass_level = 0.4;
     settings.music_hard_techno.groove = .machine;
+    settings.music_hard_techno.metal_voice = .noise_burst;
     musicConfigMenu.sync();
     const playback = try itemNamed("Playback: Loop");
     try playback.kind.button();
@@ -83,6 +85,7 @@ test "music menu preserves the accepted patch while previewing and saving basic 
     try std.testing.expectEqual(@as(f32, 1.2), settings.music_hard_techno.tempo_scale);
     try std.testing.expectEqual(@as(f32, 0.4), settings.music_hard_techno.bass_level);
     try std.testing.expectEqual(procedural_hard_techno.Groove.machine, settings.music_hard_techno.groove);
+    try std.testing.expectEqual(.noise_burst, settings.music_hard_techno.metal_voice);
     try std.testing.expectEqual(procedural_hard_techno.Arrangement.track, settings.music_hard_techno.arrangement);
 
     musicConfigMenu.open(null);

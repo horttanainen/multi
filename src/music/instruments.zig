@@ -938,6 +938,72 @@ pub fn electronicClapProcess(clap: *ElectronicClap, noise_rng: *dsp.Rng) f32 {
     return sample;
 }
 
+pub const ElectronicAccentTone = enum { noise_burst, snare };
+
+// Synthesized accents for electronic grooves. No struck-shell resonators:
+// the noise burst uses ring modulation; the snare adds a short sine body.
+pub const ElectronicAccent = struct {
+    tone: ElectronicAccentTone = .snare,
+    active: bool = false,
+    age: u32 = 0,
+    velocity: f32 = 0,
+    phase: f32 = 0,
+    body_phase: f32 = 0,
+    noise_highpass: dsp.HPF = dsp.hpfInit(1800.0),
+    noise_lowpass: dsp.LPF = dsp.lpfInit(7800.0),
+    output_highpass: dsp.HPF = dsp.hpfInit(100.0),
+    output_lowpass: dsp.LPF = dsp.lpfInit(8000.0),
+    saturator: dsp.CubicSaturator = .{},
+    last_input: f32 = 0,
+    tail: f32 = 0,
+};
+
+pub fn electronicAccentTrigger(accent: *ElectronicAccent, velocity: f32) void {
+    if (!std.math.isFinite(velocity) or velocity < 0 or velocity > 1) {
+        std.log.warn("electronicAccentTrigger: invalid velocity={d}, skipping", .{velocity});
+        return;
+    }
+    // Preserve oscillator/filter state and fade the previous excitation into
+    // the new attack. Fast retriggers must not reset the output waveform.
+    accent.tail = accent.last_input;
+    accent.velocity = velocity;
+    accent.age = 0;
+    accent.active = true;
+}
+
+pub fn electronicAccentProcess(accent: *ElectronicAccent, noise_rng: *dsp.Rng) f32 {
+    var input: f32 = 0;
+    if (accent.active) {
+        const time = @as(f32, @floatFromInt(accent.age)) * dsp.INV_SR;
+        const noise = dsp.lpfProcess(&accent.noise_lowpass, dsp.hpfProcess(&accent.noise_highpass, dsp.rngFloat(noise_rng) * 2 - 1));
+        const attack = 1.0 - @exp(-time / 0.0008);
+        var hit: f32 = 0;
+        switch (accent.tone) {
+            .noise_burst => {
+                accent.phase = @mod(accent.phase + 2350.0 * dsp.INV_SR * dsp.TAU, dsp.TAU);
+                hit = noise * (0.35 + 0.65 * @sin(accent.phase)) * @exp(-time / 0.022) * 2.8;
+            },
+            .snare => {
+                const frequency = 185.0 + 75.0 * @exp(-time / 0.007);
+                accent.phase = @mod(accent.phase + frequency * dsp.INV_SR * dsp.TAU, dsp.TAU);
+                accent.body_phase = @mod(accent.body_phase + frequency * 1.71 * dsp.INV_SR * dsp.TAU, dsp.TAU);
+                const body = (@sin(accent.phase) + 0.35 * @sin(accent.body_phase)) * @exp(-time / 0.025);
+                hit = noise * @exp(-time / 0.040) * 1.8 + body * 0.65;
+            },
+        }
+        input = hit * attack * accent.velocity + accent.tail;
+        accent.tail *= @exp(-dsp.INV_SR / 0.001);
+        // A short final fade makes the finite excitation end at exactly zero.
+        input *= std.math.clamp((0.4 - time) / 0.02, 0.0, 1.0);
+        accent.age += 1;
+        if (accent.age >= 19200) accent.active = false;
+    }
+    accent.last_input = input;
+    const driven = dsp.cubicSaturatorProcess(&accent.saturator, input);
+    // Drain all DSP state even after the finite excitation has ended.
+    return dsp.lpfProcess(&accent.output_lowpass, dsp.hpfProcess(&accent.output_highpass, driven)) * 0.35;
+}
+
 pub const DjembeStroke = enum { bass, tone, slap };
 
 pub const Djembe = struct {

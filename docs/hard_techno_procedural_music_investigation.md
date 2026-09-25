@@ -43,11 +43,26 @@ and periodic playback checkpoints to resume across development relaunches. This
 is recorded planning; no progression or resume changes are included in the bass
 iteration. See the corresponding next-phase proposal in MUSIC_HANDOFF.md.
 
+The user additionally requests anticipation before major lead entrances: fade
+the lead in or preview it quietly with a low-pass filter before revealing the
+full Corrosion tone. The sustained bass should also take featured solo sections,
+with the lead resting and competing backing parts reduced. Audition lead teases,
+bass solos and their handoffs as part of the evolving arrangement, preserving the
+accepted voice sounds. These are arrangement requirements in the plan; they are
+not implemented yet and do not reopen the deferred sound-editor work.
+
 Additional user direction: remove the wooden/taiko-like character from background
 percussion. All hard-techno sounds should suggest machinery, synths or a drum kit.
-The current metal bus uses the shared Atarigane voice; isolate and audition that
-part as the first candidate for replacement or redesign. This requirement is
-recorded for the next sound iteration; percussion is unchanged in the bass work.
+Phase 7 now replaces the metal bus's shared Atarigane voice with an electronic
+accent: a short ring-modulated noise burst or an electronic snare. The user likes
+both and prefers Electronic Snare, now the game and probe default. Noise Burst
+remains an alternative. The old/new mix and isolated comparisons are ready;
+the accepted bass, lead and score remain intact, and taiko keeps its own Atarigane
+implementation. All 36 music and two menu tests, seven offline renders and the
+prescribed build/smoke checks pass. Independent review found no actionable issues;
+the subsequent default-selection change is locally checked, with a full Snare
+track preview. The user accepted the result and explicitly requested its commit. See
+[Phase 7](../MUSIC_HANDOFF.md#phase-7-electronic-percussion-replacement).
 
 The user has explicitly made earlier music-generation guidance optional because
 the previous approach gave poor results. Treat this document's musical and

@@ -12,6 +12,10 @@ Phase 6 adds bass to Corrosion: before/after mixes, solo bass, full track and st
 Use --bass-reference PATH with phase 6 to compare an earlier mix against this version.
 The reference must be outside --output-dir and must not alias an existing output file.
 Phase 5 was the in-game menu work and has no comparison mode here.
+Phase 7 compares the old accent with noise-burst/snare replacements, in isolation
+and in the Warehouse mix, plus Machine mixes and a complete selected Snare track.
+It requires --percussion-reference DIR containing before_mix_raw.wav and
+before_metal_raw.wav rendered with seed 12345, Corrosion, bass 0.65 and 25.6 s.
 Requires the project's Zig toolchain and ffmpeg. Writes raw/stem WAVs, logs,
 constant-gain loudness-matched copies and a JSON receipt to --output-dir.
 The default destination is ignored scratch space. No game launch or downloads.
@@ -69,7 +73,7 @@ def loudness(path, log_path=None):
 
 
 def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, arrangement="loop",
-           lead="off", lead_level=0.75, bass_level=0.0):
+           lead="off", lead_level=0.75, bass_level=0.0, metal_voice="snare"):
     path = output_dir / f"{name}_{bus}_raw.wav"
     command = [
         "zig", "build", "procedural-music-probe", "-Doptimize=ReleaseFast", "--",
@@ -79,6 +83,7 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "--techno-bus", bus, "--out", str(path),
         "--lead", lead, "--lead-level", str(lead_level),
         "--bass-level", str(bass_level),
+        "--metal-voice", metal_voice,
     ]
     if duration is not None:
         command.extend(["--duration", str(duration)])
@@ -95,7 +100,7 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "rumble": rumble, "groove": groove, "raw": str(path), "command": command,
         "render_stats": stats[0], "raw_loudness": loudness(path),
         "arrangement": arrangement, "sections": sections, "lead": lead, "lead_level": lead_level,
-        "bass_level": bass_level,
+        "bass_level": bass_level, "metal_voice": metal_voice,
         "bass_notes": int(re.search(r"techno_bass: level=[\d.]+ notes=(\d+)", log).group(1)),
     }
 
@@ -295,20 +300,29 @@ def lead_audition(output_dir, seed, duration, lead_set):
     return 0
 
 
+def validate_reference(reference_path, output_dir):
+    # Validate before rendering: an input inside the destination (or a hardlink
+    # to one of its files) could be overwritten before the comparison.
+    reference_path = reference_path.resolve()
+    if reference_path.is_relative_to(output_dir.resolve()) or any(
+            path.is_file() and reference_path.samefile(path) for path in output_dir.iterdir()):
+        raise ValueError("Reference must be outside --output-dir and must not alias an existing output file; choose a new output directory")
+    with wave.open(str(reference_path), "rb") as reader:
+        if (reader.getnchannels(), reader.getsampwidth(), reader.getframerate()) != (2, 2, SAMPLE_RATE) or reader.getnframes() < 614400:
+            raise ValueError("Reference must be stereo 48 kHz PCM16 with at least 12.8 seconds of audio")
+    return reference_path
+
+
+def read_reference(reference_path, output_dir, name):
+    reference_path = validate_reference(reference_path, output_dir)
+    return {"name": name, "raw": str(reference_path),
+            "raw_loudness": loudness(reference_path, output_dir / f"{name}.loudness.log")}
+
+
 def bass_audition(output_dir, seed, duration, reference_path=None):
     reference = None
     if reference_path is not None:
-        # Validate before rendering: a prior mix in the output folder would be
-        # truncated by the probe before we could measure or compare it.
-        reference_path = reference_path.resolve()
-        if reference_path.is_relative_to(output_dir.resolve()) or any(
-                path.is_file() and reference_path.samefile(path) for path in output_dir.iterdir()):
-            raise ValueError("Bass reference must be outside --output-dir and must not alias an existing output file; choose a new output directory")
-        with wave.open(str(reference_path), "rb") as reader:
-            if (reader.getnchannels(), reader.getsampwidth(), reader.getframerate()) != (2, 2, SAMPLE_RATE) or reader.getnframes() < 614400:
-                raise ValueError("Bass reference must be stereo 48 kHz PCM16 with at least 12.8 seconds of audio")
-        reference = {"name": "previous_bass", "raw": str(reference_path),
-                     "raw_loudness": loudness(reference_path, output_dir / "reference.loudness.log")}
+        reference = read_reference(reference_path, output_dir, "previous_bass")
     baseline = render(output_dir, "before_bass", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
                       lead="corrosion")
     mix = render(output_dir, "with_bass", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
@@ -370,18 +384,75 @@ def bass_audition(output_dir, seed, duration, reference_path=None):
     return 0
 
 
+def percussion_audition(output_dir, reference_dir):
+    # Check both inputs before writing even a measurement log for either one.
+    for name in ("before_mix_raw.wav", "before_metal_raw.wav"):
+        path = validate_reference(reference_dir / name, output_dir)
+        with wave.open(str(path), "rb") as reader:
+            if reader.getnframes() != 1228800:
+                raise ValueError("Phase 7 references must contain exactly 25.6 seconds")
+    baseline = read_reference(reference_dir / "before_mix_raw.wav", output_dir, "previous_mix")
+    old_metal = read_reference(reference_dir / "before_metal_raw.wav", output_dir, "previous_accent")
+    mixes, solos, machine_mixes, errors = [], [], [], []
+    old_metal["sum_gain"] = -1.0
+    for tone in ("noise_burst", "snare"):
+        mix = render(output_dir, tone, 2.3, 0.28, 0.52, "warehouse", "mix", 25.6, 12345,
+                     lead="corrosion", bass_level=0.65, metal_voice=tone)
+        solo = render(output_dir, f"{tone}_solo", 2.3, 0.28, 0.52, "warehouse", "metal", 25.6, 12345,
+                      lead="corrosion", bass_level=0.65, metal_voice=tone)
+        # Replacing only this bus must leave the rest of the accepted mix intact.
+        errors.append(verify_stems(mix, [baseline, old_metal, solo]))
+        mixes.append(mix)
+        solos.append(solo)
+        machine_mixes.append(render(output_dir, f"{tone}_machine", 2.3, 0.28, 0.52, "machine", "mix", 25.6, 12345,
+                                    lead="corrosion", bass_level=0.65, metal_voice=tone))
+    packs, orders = {}, {}
+    for name, items in (("percussion_comparison", [baseline, *mixes]),
+                        ("accent_comparison", [old_metal, *solos]),
+                        ("machine_comparison", machine_mixes)):
+        target = min([-18.0] + [item["raw_loudness"]["integrated_lufs"] -
+                               item["raw_loudness"]["true_peak_dbtp"] - 2.0 for item in items])
+        for item in items:
+            match_loudness(item, target, output_dir)
+        packs[name], orders[name] = preview_pack(output_dir, [
+            {"name": item["name"], "path": item["matched"], "start_frame": 0, "end_frame": 614400}
+            for item in items], name)
+    full = render(output_dir, "snare_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, 12345,
+                  "track", lead="corrosion", bass_level=0.65)
+    full_check = verify_track(full, [])
+    match_loudness(full, min(-18.0, full["raw_loudness"]["integrated_lufs"] -
+                            full["raw_loudness"]["true_peak_dbtp"] - 2.0), output_dir)
+    receipt = {"phase": 7, "seed": 12345, "bpm": 150, "baseline": baseline,
+               "previous_accent": old_metal, "mixes": mixes, "solos": solos,
+               "machine_mixes": machine_mixes, "replacement_errors_lsb": errors,
+               "comparisons": packs, "comparison_orders": orders,
+               "full_track": full, "full_validation": full_check,
+               "note": "Each comparison uses constant-gain loudness matching. Solo accents are raised independently "
+                       "for listening; raw stems retain mix gain. Electronic Snare is the selected game default; Noise Burst remains an alternative."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    for name, path in packs.items():
+        print(f"{name}: {path}")
+    print(f"Full track: {full['matched']}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6), default=4)
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6, 7), default=4)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--duration", type=float, help="clip length for phases 1/2/4/6 (default 25.6 seconds)")
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--bass-reference", type=Path, help="previous mix WAV for the phase 6 listening comparison")
+    parser.add_argument("--percussion-reference", type=Path, help="previous mix/metal render directory for phase 7")
     parser.add_argument("--lead-set", choices=("original", "rough", "industrial"), default="original",
                         help="lead comparison for phase 4 (default original)")
     args = parser.parse_args()
     if args.bass_reference is not None and args.phase != 6:
         parser.error("--bass-reference requires --phase 6")
+    if (args.percussion_reference is not None) != (args.phase == 7):
+        parser.error("--percussion-reference is required for phase 7 and only supported there")
+    if args.phase == 7 and (args.duration is not None or args.seed != 12345):
+        parser.error("phase 7 compares fixed 25.6-second, seed-12345 reference renders; omit --duration and --seed")
     if args.lead_set != "original" and args.phase != 4:
         parser.error("--lead-set requires --phase 4")
     if args.phase == 3 and args.duration is not None:
@@ -404,6 +475,8 @@ def main():
         return lead_audition(output_dir, args.seed, args.duration, args.lead_set)
     if args.phase == 6:
         return bass_audition(output_dir, args.seed, args.duration, args.bass_reference)
+    if args.phase == 7:
+        return percussion_audition(output_dir, args.percussion_reference)
     candidates = FOUNDATIONS if args.phase == 1 else GROOVES
     mixes = [render(output_dir, *candidate, "mix", args.duration, args.seed)
              for candidate in candidates]

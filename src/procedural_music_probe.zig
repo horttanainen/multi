@@ -42,6 +42,7 @@ const RenderConfig = struct {
     kick_decay: f32 = 0.28,
     rumble_level: f32 = 0.52,
     percussion_level: f32 = 0.65,
+    metal_voice: instruments.ElectronicAccentTone = .snare,
     techno_groove: procedural_hard_techno.Groove = .warehouse,
     techno_arrangement: procedural_hard_techno.Arrangement = .loop,
     techno_lead: procedural_hard_techno.Lead = .off,
@@ -137,6 +138,7 @@ pub fn main(init: std.process.Init) !void {
             stats.non_finite_samples,
             render_ms,
         });
+        std.log.info("techno_accent: voice={s}", .{@tagName(cfg.metal_voice)});
         if (cfg.techno_arrangement == .track) {
             for (procedural_hard_techno.section_frames, 0..) |entry, index| {
                 const frame = entry orelse continue; // Partial renders may end before later sections.
@@ -312,6 +314,16 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--percussion")) {
             cfg.percussion_level = try parseBoundedFloatArg("percussion", try optionValue(args, idx, arg), 0.0, 1.0);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--metal-voice")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.metal_voice = std.meta.stringToEnum(instruments.ElectronicAccentTone, value) orelse {
+                std.log.err("procedural_music_probe: unknown metal voice '{s}' (use noise_burst, snare)", .{value});
+                return error.InvalidArgument;
+            };
             cfg.techno_options_set = true;
             idx += 2;
             continue;
@@ -518,6 +530,7 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .kick_decay = cfg.kick_decay,
                 .rumble_level = cfg.rumble_level,
                 .percussion_level = cfg.percussion_level,
+                .metal_voice = cfg.metal_voice,
                 .groove = cfg.techno_groove,
                 .arrangement = cfg.techno_arrangement,
                 .lead = cfg.techno_lead,
@@ -798,6 +811,7 @@ fn printUsage() void {
         \\  --random-seed       use session randomness instead of fixed seed
         \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
         \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass
+        \\  --metal-voice NAME  noise_burst, snare (default)
         \\  --bass-level VALUE  0..1, default 0 (off); use 0.65 for the game bass mix
         \\  --groove NAME       warehouse (default), rolling, machine, foundation
         \\  --arrangement NAME  loop (default), track (128 bars, Warehouse/Machine)

@@ -26,13 +26,22 @@ Updated 2026-09-25. This folder is the dedicated music worktree.
   Reset Techno Sound action and temporary lead multipliers have been removed at
   the user's request. Volume, Tempo Scale, Reverb and Loop/Full Track remain.
 - Phase 6: the user accepted the sustained legato bass and explicitly requested
-  committing it together with the slider rollback. The commit includes the
+  committing it together with the slider rollback (`316ba59`). The commit includes the
   accepted lead dependencies and basic playback integration. Personal changes
   to `settings.json` stay outside the commit.
 - The user particularly likes the sustained bass voice and thinks it could also
-  work as a lead. Record that as a possible future audition, not a current change.
-- Progression across 1–3 minute sections, playback continuity across launches,
-  and replacing wooden-sounding percussion remain proposed next work. A future
+  work as a lead. They now request bass solos in the upcoming arrangement work:
+  let that voice take the foreground while the Corrosion lead rests.
+- Lead entrances should build anticipation through a quiet fade-in or a muffled,
+  filtered preview before the full lead takes over. Include these teases in the
+  upcoming arrangement work alongside bass solos.
+- Phase 7 is the current implementation: replace the wooden-sounding background
+  accent with electronic percussion. The user likes both candidates and prefers
+  Electronic Snare, now the game/probe default. Noise Burst remains an alternative.
+  The existing lead, bass and arrangement are preserved. The user accepted the
+  selected Snare track and explicitly authorized the percussion commit.
+- Progression across 1–3 minute sections and playback continuity across launches
+  remain proposed next work. A future
   lead-only editor must use real synthesis parameter names and useful ranges.
 
 The user wants better procedural music and proposed a hard techno generator,
@@ -58,9 +67,9 @@ percussion while refining the original repeating lead motif through listening.
 Latest palette constraint (2026-09-25): all hard-techno sounds should read as
 machines/synths or a drum kit. The user dislikes background hits that sound like
 wood clanking or taiko/world percussion. No wooden or acoustic world-percussion
-character. The current metal bus reuses `instruments.Atarigane`; isolate that part
-first and replace or redesign it to meet the requested palette. This is recorded
-feedback, not a percussion change in the sustained-bass iteration.
+character. Phase 7 replaces the hard-techno metal bus's `instruments.Atarigane`
+with a synthesized electronic accent; the shared taiko instrument stays intact.
+This was not a percussion change in the earlier sustained-bass iteration.
 The user selected the first, tight
 kick/rumble candidate: drive 2.3, decay 0.28 seconds, rumble 0.52. In Phase 2,
 they liked the first (Warehouse) and last (Machine) grooves, with Warehouse
@@ -207,11 +216,90 @@ see the next-phase proposal below.
    technical validation. Do not begin these phases before the bass handoff and
    user steering.
 
-### Next phase proposed: evolving playback and continuity across launches
+## Phase 7: electronic percussion replacement
+
+**Outcome and commit boundary:** replace the hard-techno background hit that
+resembled wooden/world percussion, with listening alternatives before proceeding
+to the evolving arrangement. Reuse the existing instrument/DSP owner, metal bus,
+offline probe and audition helper. No new menu controls or arrangement changes.
+
+The previous accent was the same Atarigane voice used by taiko, pitched lower and
+played with muted strikes. Hard Techno now uses `ElectronicAccent` with two tones:
+
+- **Noise Burst:** high-pass-filtered noise ring-modulated at 2,350 Hz, with a
+  short decay and saturation. The user also likes this alternative; audition it
+  through `--metal-voice noise_burst`.
+- **Snare:** filtered noise over a brief downward-pitched sine body, then
+  saturation. The user preferred this final candidate in the isolated comparison;
+  it is now the game and probe default (`--metal-voice snare`).
+
+Both use the existing filters, saturator and independent accent RNG. Retriggers
+preserve oscillator/filter state and fade the previous excitation into the next
+attack. Processing drains the DSP tail after excitation ends. The old Atarigane
+implementation remains available to taiko; Hard Techno no longer calls it.
+Older saved settings gain the default snare voice; no personal settings
+file was edited. The existing numeric controls and saved voice selection work
+through the same config/persistence path, with no sound-editor rows added.
+
+Listen to the [mix comparison](agent-temp-files/hard-techno/phase7/audition/percussion_comparison.wav)
+or the [isolated accent comparison](agent-temp-files/hard-techno/phase7/audition/accent_comparison.wav):
+
+| Cue | Sound | Start |
+| --- | --- | --- |
+| 1 beep | Previous Atarigane accent | 0:00.18 |
+| 2 beeps | Noise Burst | 0:13.86 |
+| 3 beeps | Snare | 0:27.64 |
+
+Each excerpt lasts 12.8 seconds. The isolated accents are raised independently
+for listening; raw stems retain their actual mix gain. The
+[Machine groove comparison](agent-temp-files/hard-techno/phase7/audition/machine_comparison.wav)
+uses the denser accent pattern: Noise Burst first, Snare second. A
+[full Noise Burst track](agent-temp-files/hard-techno/phase7/audition/noise_burst_track_matched.wav)
+is also available. The selected
+[full Electronic Snare track](agent-temp-files/hard-techno/phase7/selected-snare/audition/snare_track_matched.wav)
+uses the same accepted voice as the comparison. All comparisons use constant-gain
+loudness matching.
+
+Validation completed:
+
+- 36/36 music tests in ReleaseSafe and 2/2 menu/SDL tests. New coverage checks
+  accent retriggers/tails, deterministic rendering across buffer sizes, unchanged
+  other voices, both tones at tempo/mix extremes, and old/new settings loading.
+- Seven offline renders are finite and unclipped. For both Warehouse candidates,
+  old mix minus old accent plus new accent reconstructs the new mix within
+  2 PCM16 LSB: the accepted backing, bass and lead remain intact. The full
+  205.8-second Noise Burst render preserves section timing and a silent ending.
+  The selected Snare full-track render and post-selection checks are recorded in
+  [the selection receipt](agent-temp-files/hard-techno/phase7/selected-snare/validation.json).
+- Formatting, build and diff checks pass. The prescribed five-second game smoke
+  uses an isolated Machine-loop fixture so the new accents sound during startup;
+  the sentinel appears without warnings, errors or panics.
+- Reference input protection rejects direct, symbolic-link and hardlink output
+  collisions without changing the reference bytes. The helper validates both
+  phase-7 references before writing comparison logs or renders.
+- One fresh-context independent read-only review found no actionable issues in
+  the accent DSP, routing, settings, CLI or reference protection. It inspected
+  the test/render/smoke evidence without rerunning mutating checks. The user then
+  selected Snare and also approved Noise Burst's sound. The small default-selection
+  change uses local diff inspection and existing validation; no new reviewer is
+  needed. No synthesis parameters or note timing changed.
+
+See the [validation receipt](agent-temp-files/hard-techno/phase7/validation.json)
+and [audition receipt](agent-temp-files/hard-techno/phase7/audition/audition.json).
+Reproduce with the pre-change references retained in ignored scratch space:
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 7 --percussion-reference agent-temp-files/hard-techno/phase7/baseline --output-dir agent-temp-files/hard-techno/phase7/audition
+```
+
+### Following phase: evolving playback and continuity across launches
 
 Latest user feedback: the music sounds like the same short piece on repeat. They
 expect noticeable musical shifts every 1–3 minutes and dislike hearing the same
 opening every time they relaunch during development.
+They also want anticipation before lead entrances: a fade-in or muffled preview
+before the lead takes the foreground. The accepted sustained bass should have
+solo sections of its own.
 
 Initial read-only inspection on 2026-09-25 found `settings.json` selecting Hard
 Techno, `arrangement: loop`, tempo scale 1 and random seed mode. A later read found
@@ -232,6 +320,22 @@ Proposed coherent next phase, before lead knobs:
   and loop modes for auditions and repeatable tests. Honor the newly specified
   machine/drum-kit sound palette; audition a replacement for the wooden-sounding
   background hit before incorporating it into the evolving arrangement.
+- Build anticipation before major lead entrances and returns. Preview the coming
+  motif at low gain, with a low-pass filter attenuating its upper frequencies,
+  or with sparse fragments; gradually raise the gain and/or filter cutoff before
+  revealing the full accepted Corrosion sound on a phrase boundary. Start by
+  auditioning 4–16-bar teases, with duration chosen for the surrounding section.
+  Vary the approach so each entrance does not repeat the same build. Implement
+  this as arrangement automation around the existing voice, preserving its
+  accepted full-strength tone and leaving the deferred editor out of scope.
+- Give the sustained bass deliberate solo sections. Rest the Corrosion lead,
+  reduce competing percussion and rumble where needed, and bring the bass into
+  the foreground through arrangement and controlled mix changes. Keep its
+  accepted sustained/legato sound; audition longer phrases and melodic variants
+  that work as a featured part. A solo can retain the kick and sparse drums:
+  the requirement is that the bass carries the musical focus. Include transitions
+  from the full mix into a bass solo and from a bass solo through a lead tease
+  into the full lead, without forcing that sequence into every section.
 - Persist the composition seed, arrangement decisions and musical position
   periodically as well as at normal shutdown. Resume from a nearby phrase
   boundary with a short fade and appropriate voice/effect warm-up, so force-closing
@@ -245,6 +349,10 @@ Proposed coherent next phase, before lead knobs:
   checks, deterministic reconstruction from saved state, and real relaunch tests
   using isolated settings. Listening must establish audible development over
   several minutes; randomizing noise alone does not meet this requirement.
+  Include focused lead-tease/reveal and bass-solo transitions in the auditions.
+  Check smooth gain/filter changes, solo/reveal headroom and preservation of the
+  accepted full lead and bass tones. Checkpoint reconstruction must also preserve
+  the selected solo/tease stage and its musical progress.
 
 This is recorded planning only. Progression/resume behavior is not implemented
 in the sustained-bass iteration. Exact state format, checkpoint frequency and
@@ -927,7 +1035,12 @@ Suggested prompt when resuming:
 
 > Read MUSIC_HANDOFF.md. The sustained bass is accepted and the experimental
 > music-menu sound sliders have been removed. Corrosion and basic Hard Techno
-> playback are retained. Progression over 1–3 minute sections and playback resume
+> playback are retained. Phase 7 has Noise Burst and Snare replacements for the
+> wooden-sounding background accent. The user prefers Snare (now the default)
+> and also likes Noise Burst. The user accepted this phase and requested its commit.
+> Progression over 1–3 minute sections and playback resume
 > across game launches are proposed next, ahead of any revised lead editor.
+> Include quiet or filtered lead teases before full entrances and featured solos
+> for the accepted sustained bass, with the lead resting to give it space.
 > All sounds must fit machinery/synths or a drum kit, with no wooden percussion.
 > Present the next phase plan before implementing it.

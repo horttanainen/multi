@@ -30,6 +30,7 @@ pub const Config = struct {
     rumble_level: f32 = 0.52,
     room_mix: f32 = 0.35,
     percussion_level: f32 = 0.65,
+    metal_voice: instruments.ElectronicAccentTone = .snare,
     groove: Groove = .warehouse,
     arrangement: Arrangement = .loop,
     lead: Lead = .off,
@@ -83,7 +84,7 @@ var ducker: dsp.DuckingEnvelope = .{};
 var closed_hat: instruments.HiHat = .{};
 var open_hat: instruments.HiHat = .{};
 var clap: instruments.ElectronicClap = .{};
-var metal: instruments.Atarigane = .{};
+var metal: instruments.ElectronicAccent = .{};
 var closed_noise: dsp.Rng = dsp.rngInit(1);
 var open_noise: dsp.Rng = dsp.rngInit(2);
 var clap_noise: dsp.Rng = dsp.rngInit(3);
@@ -338,7 +339,7 @@ pub fn resetWithSeed(seed: u32) void {
     closed_hat = .{ .base_frequency_hz = 4100.0, .noise_mix = 0.82, .curved_decay = true };
     open_hat = .{ .base_frequency_hz = 4300.0, .noise_mix = 0.78, .curved_decay = true };
     clap = .{};
-    metal = .{ .base_freq = 510.0, .volume = 0.90 };
+    metal = .{ .tone = active_config.metal_voice };
     metal_pan = 0.0;
     lead = .{ .tone = switch (active_config.lead) {
         .off, .razor => .razor,
@@ -413,7 +414,7 @@ pub fn sanitizeConfig(value: Config) Config {
 pub fn applyLiveConfig(value: Config) void {
     const next = sanitizeConfig(value);
     config = next;
-    if (next.arrangement != active_config.arrangement or next.lead != active_config.lead) {
+    if (next.arrangement != active_config.arrangement or next.lead != active_config.lead or next.metal_voice != active_config.metal_voice) {
         resetWithSeed(playback_seed);
         return;
     }
@@ -553,8 +554,7 @@ fn triggerPendingPercussion() void {
         percussion_counts[2] += 1;
     }
     if (event.metal > 0.0) {
-        instruments.atariganeDamp(&metal, 0.65);
-        instruments.atariganeTriggerChi(&metal, event.metal);
+        instruments.electronicAccentTrigger(&metal, event.metal);
         metal_pan = event.metal_pan;
         percussion_counts[3] += 1;
     }
@@ -613,7 +613,7 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         const closed = dsp.panStereo(instruments.hiHatProcess(&closed_hat, &closed_noise) * 2.0, -0.24);
         const open = dsp.panStereo(instruments.hiHatProcess(&open_hat, &open_noise) * 2.0, 0.20);
         const clap_sample = instruments.electronicClapProcess(&clap, &clap_noise);
-        const metal_sample = dsp.panStereo(instruments.atariganeProcess(&metal, &metal_noise) * 2.0, metal_pan);
+        const metal_sample = dsp.panStereo(instruments.electronicAccentProcess(&metal, &metal_noise) * 2.0, metal_pan);
         const lead_bus = processLead(duck_gain);
         // Keep some held tone audible under each kick instead of gating it away.
         const bass_bus = instruments.synthBassProcess(&bass) * active_config.bass_level * 0.30 * (0.20 + 0.80 * duck_gain);
