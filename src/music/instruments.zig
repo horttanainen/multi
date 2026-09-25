@@ -628,6 +628,219 @@ fn guitarVelocitySafe(velocity: f32) f32 {
     return std.math.clamp(velocity, 0.0, 1.0);
 }
 
+// Monophonic sustained bass: a saw plus a same-pitch sine. Overlapping notes
+// change pitch without restarting the amplitude or filter envelopes.
+pub const SynthBass = struct {
+    oscillator: dsp.SyncSaw = .{},
+    envelope: dsp.Envelope = dsp.envelopeInit(0.015, 0.18, 0.82, 0.055),
+    lowpass: [2]dsp.LPF = .{dsp.lpfInit(650.0)} ** 2,
+    saturation: dsp.CubicSaturator = .{},
+    output_lowpass: dsp.LPF = dsp.lpfInit(1600.0),
+    output_highpass: dsp.HPF = dsp.hpfInit(25.0),
+    filter_envelope: f32 = 0.0,
+    velocity: f32 = 0.0,
+    target_velocity: f32 = 0.0,
+    gate_left: u32 = 0,
+};
+
+pub fn synthBassTrigger(bass: *SynthBass, note: u8, velocity: f32, gate_seconds: f32) void {
+    if (note < 28 or note > 55 or !std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
+        !std.math.isFinite(gate_seconds) or gate_seconds < 0.01 or gate_seconds > 5.0)
+    {
+        std.log.warn("synthBassTrigger: invalid note/velocity/gate ({d}, {d}, {d}), skipping note", .{ note, velocity, gate_seconds });
+        return;
+    }
+    const legato = bass.gate_left > 0 and bass.envelope.state != .idle and bass.envelope.state != .release;
+    dsp.syncSawConfigure(&bass.oscillator, dsp.midiToFreq(note), 1.0);
+    bass.target_velocity = velocity;
+    bass.gate_left = @intFromFloat(gate_seconds * dsp.SAMPLE_RATE);
+    if (legato) return;
+    bass.filter_envelope = velocity;
+    dsp.envelopeRetrigger(&bass.envelope, 0.015, 0.18, 0.82, 0.055);
+}
+
+pub fn synthBassProcess(bass: *SynthBass) f32 {
+    if (bass.gate_left == 0) dsp.envelopeNoteOff(&bass.envelope);
+    if (bass.gate_left > 0) bass.gate_left -= 1;
+    const envelope = dsp.envelopeProcess(&bass.envelope);
+    bass.velocity += (bass.target_velocity - bass.velocity) * 0.004;
+    bass.filter_envelope *= @exp(-dsp.INV_SR / 0.18);
+    const alpha = dsp.lpfInit(650.0 + 900.0 * bass.filter_envelope).alpha;
+    for (&bass.lowpass) |*filter| filter.alpha = alpha;
+    var raw: f32 = 0.0;
+    if (bass.envelope.state != .idle) {
+        // The rising saw's fundamental is a negative sine. Match that polarity
+        // so the sine reinforces the root instead of cancelling it.
+        const sine: f32 = @floatCast(-@sin(bass.oscillator.phase * std.math.tau));
+        raw = (dsp.syncSawProcess(&bass.oscillator) * 0.65 + sine * 0.45) * envelope * bass.velocity;
+    }
+    const filtered = dsp.lpfProcess(&bass.lowpass[1], dsp.lpfProcess(&bass.lowpass[0], raw));
+    const driven = dsp.cubicSaturatorProcess(&bass.saturation, filtered * 2.2);
+    return dsp.hpfProcess(&bass.output_highpass, dsp.lpfProcess(&bass.output_lowpass, driven)) * 0.5;
+}
+
+pub const SyncLeadTone = enum { razor, hollow, wide, machine, buzz, iron, corrosion };
+
+// Monophonic lead with a pitch-stable sync sweep. Existing envelope, filters
+// and antialiased saturation own those responsibilities; the style owns notes,
+// effect sends and phrase development.
+pub const SyncLead = struct {
+    tone: SyncLeadTone = .razor,
+    oscillators: [2]dsp.SyncSaw = .{ .{}, .{ .phase = 0.37 } },
+    env: dsp.Envelope = dsp.envelopeInit(0.003, 0.09, 0.60, 0.014),
+    highpass: dsp.HPF = dsp.hpfInit(180.0),
+    lowpass: dsp.LPF = dsp.lpfInit(6500.0),
+    saturator: dsp.CubicSaturator = .{},
+    pre_emphasis: dsp.HPF = dsp.hpfInit(650.0),
+    output_saturator: dsp.CubicSaturator = .{},
+    output_dc: dsp.HPF = dsp.hpfInit(20.0),
+    dark_lowpass: dsp.LPF = dsp.lpfInit(3000.0),
+    sub_phase: f64 = 0.0,
+    metal_phase: f64 = 0.0,
+    frequency: f32 = 392.0,
+    velocity: f32 = 0.0,
+    target_velocity: f32 = 0.0,
+    sweep: f32 = 0.0,
+    gate_left: u32 = 0,
+    control_left: u8 = 0,
+};
+
+pub fn syncLeadTrigger(lead: *SyncLead, note: u8, velocity: f32, gate_seconds: f32) void {
+    if (note < 36 or note > 107 or !std.math.isFinite(velocity) or velocity < 0.0 or velocity > 1.0 or
+        !std.math.isFinite(gate_seconds) or gate_seconds < 0.01 or gate_seconds > 2.0)
+    {
+        std.log.warn("syncLeadTrigger: invalid note/velocity/gate ({d}, {d}, {d}), ignoring note", .{ note, velocity, gate_seconds });
+        return;
+    }
+    lead.frequency = dsp.midiToFreq(note);
+    lead.target_velocity = velocity;
+    lead.gate_left = @intFromFloat(gate_seconds * dsp.SAMPLE_RATE);
+    lead.sweep = 1.0;
+    lead.control_left = 0;
+    const cutoff: f32 = switch (lead.tone) {
+        .razor => 6500.0,
+        .hollow => 3600.0,
+        .wide => 5500.0,
+        .machine => 9000.0,
+        .buzz => 10000.0,
+        .iron => 3800.0,
+        .corrosion => 5100.0,
+    };
+    lead.lowpass.alpha = dsp.lpfInit(cutoff).alpha;
+    const industrial = lead.tone == .iron or lead.tone == .corrosion;
+    if (industrial) {
+        lead.pre_emphasis.alpha = dsp.hpfInit(if (lead.tone == .iron) 250.0 else 420.0).alpha;
+        lead.dark_lowpass.alpha = dsp.lpfInit(if (lead.tone == .iron) 3000.0 else 3600.0).alpha;
+    }
+    // Preserve phases, filter state and the current envelope level on retrigger.
+    if (lead.tone == .machine or lead.tone == .buzz or industrial) {
+        // The bias is removed after saturation. Start its integration history
+        // at that bias so a silent voice cannot click on its first attack.
+        if (lead.env.state == .idle) {
+            lead.saturator.previous_input = syncLeadBias(lead.tone);
+            if (lead.tone == .buzz or lead.tone == .corrosion) lead.oscillators[1].phase = @mod(lead.oscillators[0].phase + 0.18, 1.0);
+        }
+        dsp.envelopeRetrigger(&lead.env, 0.0009, 0.04, 0.75, 0.009);
+        return;
+    }
+    dsp.envelopeRetrigger(&lead.env, 0.003, 0.09, 0.60, 0.014);
+}
+
+pub fn syncLeadProcess(lead: *SyncLead) f32 {
+    const industrial = lead.tone == .iron or lead.tone == .corrosion;
+    if (lead.gate_left == 0) dsp.envelopeNoteOff(&lead.env);
+    if (lead.gate_left > 0) lead.gate_left -= 1;
+    const envelope = dsp.envelopeProcess(&lead.env);
+    // Let the output filters settle even while the oscillator is idle.
+    if (lead.env.state == .idle) {
+        _ = dsp.hpfProcess(&lead.pre_emphasis, 0.0);
+        if (lead.tone == .machine or lead.tone == .buzz or industrial) return syncLeadRoughOutput(lead, 0.0);
+        return dsp.lpfProcess(&lead.lowpass, dsp.hpfProcess(&lead.highpass, 0.0));
+    }
+    lead.sweep *= @exp(-dsp.INV_SR / 0.070);
+    lead.velocity += (lead.target_velocity - lead.velocity) * 0.015;
+    if (lead.control_left == 0) {
+        const ratio: f32 = switch (lead.tone) {
+            .razor => 2.0 + lead.sweep * 4.2,
+            .hollow => 1.4 + lead.sweep * 2.1,
+            .wide => 2.5 + lead.sweep * 3.4,
+            .machine => 1.45 + lead.sweep * 0.25,
+            .buzz => 1.0,
+            .iron => 2.4 + lead.sweep * 0.6,
+            .corrosion => 1.0,
+        };
+        dsp.syncSawConfigure(&lead.oscillators[0], lead.frequency, ratio);
+        if (lead.tone == .wide) dsp.syncSawConfigure(&lead.oscillators[1], lead.frequency * 1.003, ratio);
+        // Pitch-locked layers keep a stable mechanical buzz. Subtracting the
+        // offset saw in Buzz produces an 18%-duty pulse with a small saw edge.
+        if (lead.tone == .machine or lead.tone == .buzz or industrial) dsp.syncSawConfigure(&lead.oscillators[1], lead.frequency, 1.0);
+        lead.control_left = 48;
+    }
+    lead.control_left -= 1;
+    var sample = dsp.syncSawProcess(&lead.oscillators[0]);
+    if (lead.tone == .machine or lead.tone == .buzz or industrial) {
+        const second = dsp.syncSawProcess(&lead.oscillators[1]);
+        sample = if (lead.tone == .buzz or lead.tone == .corrosion) sample - second * 0.90 else sample * 0.70 + second * 0.45;
+        if (industrial) {
+            // The octave layer supplies weight before distortion. Multiplying
+            // by a sine adds metallic sidebands without discontinuous resets;
+            // Iron locks to a fifth, Corrosion uses an inharmonic ratio.
+            // Keep these phases across retriggers, like the main oscillators.
+            lead.sub_phase = @mod(lead.sub_phase + @as(f64, lead.frequency) * 0.5 / dsp.SAMPLE_RATE, 1.0);
+            const metal_ratio: f64 = if (lead.tone == .iron) 1.5 else 1.41421356237;
+            lead.metal_phase = @mod(lead.metal_phase + @as(f64, lead.frequency) * metal_ratio / dsp.SAMPLE_RATE, 1.0);
+            const sub: f32 = @floatCast(@sin(lead.sub_phase * std.math.tau));
+            const metal: f32 = @floatCast(@sin(lead.metal_phase * std.math.tau));
+            const ring_depth: f32 = if (lead.tone == .iron) 0.40 else 0.85;
+            sample = sample * (0.65 + ring_depth * metal) + sub * 0.75;
+        }
+        // Distort the gated, mid-emphasized signal: the envelope now changes
+        // harmonic density as well as loudness. Retain a short clean release
+        // at the end so distortion cannot turn note-off into a hard edge.
+        const drive: f32 = switch (lead.tone) {
+            .iron => 6.2,
+            .corrosion => 9.5,
+            .machine => 4.5,
+            else => 7.0,
+        };
+        const bias = syncLeadBias(lead.tone);
+        const emphasized = dsp.hpfProcess(&lead.pre_emphasis, sample);
+        const driven = dsp.cubicSaturatorProcess(&lead.saturator, emphasized * envelope * lead.velocity * drive + bias) - dsp.softClip(bias);
+        const release_gain = @min(1.0, envelope * 6.0);
+        return syncLeadRoughOutput(lead, driven * release_gain * 0.72);
+    }
+    if (lead.tone == .wide) sample = (sample + dsp.syncSawProcess(&lead.oscillators[1])) * 0.65;
+    const drive: f32 = if (lead.tone == .razor) 1.65 else 1.3;
+    const driven = dsp.cubicSaturatorProcess(&lead.saturator, sample * drive);
+    return dsp.lpfProcess(&lead.lowpass, dsp.hpfProcess(&lead.highpass, driven * envelope * lead.velocity));
+}
+
+fn syncLeadBias(tone: SyncLeadTone) f32 {
+    return switch (tone) {
+        .machine => 0.12,
+        .iron => 0.16,
+        .corrosion => 0.25,
+        else => 0.22,
+    };
+}
+
+fn syncLeadRoughOutput(lead: *SyncLead, input: f32) f32 {
+    const filtered = dsp.lpfProcess(&lead.lowpass, dsp.hpfProcess(&lead.highpass, input));
+    // A second antialiased stage adds density and tames filter overshoot.
+    // Remove DC generated by shaping the asymmetric wave, then leave headroom
+    // for that filter's transient. Process the whole chain through idle tails.
+    const drive: f32 = switch (lead.tone) {
+        .iron => 1.8,
+        .corrosion => 2.4,
+        else => 1.1,
+    };
+    var dense = dsp.cubicSaturatorProcess(&lead.output_saturator, filtered * drive);
+    // Darken after the last distortion stage so added density does not become
+    // extra top-end hiss. This filter also runs through the entire idle tail.
+    if (lead.tone == .iron or lead.tone == .corrosion) dense = dsp.lpfProcess(&lead.dark_lowpass, dense);
+    return dsp.hpfProcess(&lead.output_dc, dense) * 0.75;
+}
+
 pub const HiHat = struct {
     env: dsp.Envelope = dsp.envelopeInit(0.001, 0.03, 0.0, 0.02),
     hpf: dsp.HPF = dsp.hpfInit(6000.0),

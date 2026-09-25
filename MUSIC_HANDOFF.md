@@ -1,6 +1,6 @@
 # Procedural hard techno: resume here
 
-Prepared 2026-09-24. This folder is the dedicated music worktree.
+Updated 2026-09-25. This folder is the dedicated music worktree.
 
 ## Workspace and current status
 
@@ -18,16 +18,29 @@ Prepared 2026-09-24. This folder is the dedicated music worktree.
   The user selected the first (tight) low-end candidate.
 - Phase 2 was accepted and committed as `26e70e2`. The user liked Warehouse and
   Machine, leaning toward Warehouse as the best. Warehouse remains the loop default.
-- Phase 3 is implemented, validated and independently reviewed. The user accepted
-  the handoff and explicitly requested its commit. Phase 4 is proposed below;
-  implementation has not started.
+- Phase 3 was accepted and committed as `957e54f`.
+- Phase 4: the user selected the Corrosion synth lead after the dark industrial
+  comparisons. Its shared oscillator also supports the accepted bass voice.
+- Phase 5: basic Hard Techno game playback, settings and audio synchronization
+  are retained. The added lead/drum editing rows, range bars, groove editor,
+  Reset Techno Sound action and temporary lead multipliers have been removed at
+  the user's request. Volume, Tempo Scale, Reverb and Loop/Full Track remain.
+- Phase 6: the user accepted the sustained legato bass and explicitly requested
+  committing it together with the slider rollback. The commit includes the
+  accepted lead dependencies and basic playback integration. Personal changes
+  to `settings.json` stay outside the commit.
+- The user particularly likes the sustained bass voice and thinks it could also
+  work as a lead. Record that as a possible future audition, not a current change.
+- Progression across 1–3 minute sections, playback continuity across launches,
+  and replacing wooden-sounding percussion remain proposed next work. A future
+  lead-only editor must use real synthesis parameter names and useful ranges.
 
 The user wants better procedural music and proposed a hard techno generator,
 with shared-library improvements where useful. They selected a separate folder
 so this work is easy to track while another agent works on other game features.
 The completed Phase 3 milestone is a Warehouse-led arrangement with a short
-Machine section. The previous bass/acid plan remains optional under the user's
-sound-design guidance. Game integration remains the next proposed milestone.
+Machine section. Corrosion is the selected synth hook. The sustained bassline is
+accepted; progression and the percussion palette are proposed before lead editing.
 Workflow skills now distinguish accepting changes from explicitly authorizing
 a commit; they also reserve independent review for substantial or risky changes.
 
@@ -38,10 +51,17 @@ for future music work.
 
 ## Musical direction
 
-Working assumption: dark, driving techno at 150 BPM, distorted kick, rolling
-rumble, restrained percussion, and a short repeating acid motif. The user has
-not selected a particular substyle or supplied reference tracks. This direction
-can be refined through listening examples. The user selected the first, tight
+The user explicitly wants dark industrial techno and selected Corrosion after
+favoring Machine and Buzz. Sandstorm was their earlier reference for a rough synth
+lead. Keep the 150 BPM groove, distorted kick, rolling rumble and restrained
+percussion while refining the original repeating lead motif through listening.
+Latest palette constraint (2026-09-25): all hard-techno sounds should read as
+machines/synths or a drum kit. The user dislikes background hits that sound like
+wood clanking or taiko/world percussion. No wooden or acoustic world-percussion
+character. The current metal bus reuses `instruments.Atarigane`; isolate that part
+first and replace or redesign it to meet the requested palette. This is recorded
+feedback, not a percussion change in the sustained-bass iteration.
+The user selected the first, tight
 kick/rumble candidate: drive 2.3, decay 0.28 seconds, rumble 0.52. In Phase 2,
 they liked the first (Warehouse) and last (Machine) grooves, with Warehouse
 currently preferred. Keep Machine as a positive alternative; no preference for
@@ -59,6 +79,402 @@ Prioritize a good repeating groove, controlled low-frequency mixing, and
 deliberate arrangement. Keep the pulse stable and vary timbre, accents, motifs,
 and layer entrances at musical boundaries. Human listening is an acceptance
 criterion; level and spectral metrics alone cannot decide whether it sounds good.
+
+## Phase 6: independent bassline before the lead editor
+
+**Outcome and commit boundary:** a separate mono bass synth, an original four-bar
+G-minor pattern, arrangement integration, an isolated bass bus and listening
+comparisons. This phase does not implement the revised lead editor or add menu
+knobs. The user has now accepted the sustained bass and explicitly requested a
+commit, including removal of the earlier sound-slider work and retention of the
+accepted lead dependencies and basic playback integration.
+
+### Current iteration: sustained bass counterline
+
+The user found the first bassline too much like separate sounds. They want a low
+synth voice behind the lead, holding notes and following its own pattern. This
+iteration replaces the 48–85 ms plucks with 400–1,000 ms notes at 150 BPM. The
+four-bar pattern has ten notes spanning F1–D2, and small gate overlaps maintain
+legato pitch changes without restarting the amplitude or filter envelope.
+
+The existing `SynthBass` still combines a saw and same-pitch sine, cascaded
+low-pass filters, saturation and DC removal. A 15 ms attack, 82% envelope sustain,
+55 ms release and a 650 Hz filter floor keep the tone present after the onset.
+Overlapping notes preserve oscillator phase and envelope state. Kick ducking
+now retains a quiet bass signal under the kick, with a 20% unducked contribution.
+The mono, dry bass remains separate from the lead voice and pattern. Long gates
+scale with live tempo changes so their remaining musical duration stays aligned.
+The existing oscillator, envelope, filters, saturation, clock and settings paths
+own these changes; there is no new synthesizer framework or UI.
+
+The full track has 258 bass triggers: quiet whole-bar G1 roots at bars 8–11,
+the full pattern from bar 12, no new bass notes in the breakdown at bars 80–87,
+return at bar 88, whole-bar roots at bars 120–123, and no new notes from bar 124.
+Bar numbers are zero-based. Short release/filter tails can cross a section edge.
+The lead's score and processing are unchanged. `low_end` sums kick, rumble and
+bass; all stems share the established headroom gain `1 / (1 + 0.25 * bass_level)`.
+At the default 0.65 level this is approximately -1.31 dB. Zero bass level preserves
+the old bass-free mix. The listening comparison is matched in loudness.
+
+The game enables bass by default in Hard Techno, including old settings without
+this field. The probe defaults to zero for earlier audition compatibility; use
+`--bass-level 0.65` for game balance and `--techno-bus bass` for the isolated part.
+No new controls have been added. User edits in `settings.json` are preserved.
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 6 --output-dir agent-temp-files/hard-techno/bassline/sustained/audition --bass-reference agent-temp-files/hard-techno/bassline/audition/with_bass_mix_raw.wav
+```
+
+The first comparison cue is the previous short-note bass, the second is the new
+sustained bass. The optional reference input must be outside the output directory
+and must not alias an existing output file; it is validated before rendering.
+Its measurement log is written into the new output directory. Raw stems retain mix gain; solo listening
+copies have a separate gain for audibility. The current iteration snapshot is
+`agent-temp-files/hard-techno/bassline/sustained/before/`.
+
+Listen to the [short-note versus sustained comparison](agent-temp-files/hard-techno/bassline/sustained/audition/bass_comparison.wav):
+one beep is the previous short-note version (0.18 s), two beeps is the new held
+version (13.86 s). Both are approximately -18 LUFS. Also available:
+[solo sustained bass](agent-temp-files/hard-techno/bassline/sustained/audition/bass_solo_matched.wav),
+[full track](agent-temp-files/hard-techno/bassline/sustained/audition/bass_track_matched.wav),
+and [entry/return excerpts](agent-temp-files/hard-techno/bassline/sustained/audition/bass_transitions.wav).
+
+Formatting, build and diff checks pass, along with 34 music tests in ReleaseSafe
+and two menu/SDL tests in Debug. A focused audio test verifies that the held tone
+stays audible late in the note, overlapping pitch changes preserve envelope state,
+and release reaches silence. The retrigger continuity check now compares against
+an uninterrupted copy of the waveform rather than confusing a pitch-dependent
+waveform slope with a click. This was a test correction, not a DSP defect.
+
+All six renders are finite/unclipped. Loop and full-track stems sum within two
+PCM LSB, the full track has 258 bass notes and 480 kicks, arranged rests and the
+ending are silent after release tails, and the largest section-boundary jump is
+0.00159 full scale. Bass-off loop and full track remain byte-identical to the
+original Corrosion renders. Maximum-level 25.6-second sweeps across eight lead
+choices and both tempo limits peak at 0.83415. The prescribed five-second menu
+smoke passed with no warnings, errors, panics or crashes, using isolated Hard
+Techno settings. Agent commands did not edit the user's `settings.json`; it changed
+during the iteration to Machine/Full Track with the bass field saved. Those latest
+settings are preserved. Runtime Full Track continues to use its arranged grooves.
+
+One fresh-context independent review covered the four-file iteration delta. It
+found one **P2** in `agent-tests/hard_techno_audition.py`: selecting a reference
+inside the output folder could overwrite it before comparison, yielding a
+misleading current-versus-current comparison. Fixed by validating the reference
+before rendering and rejecting output-directory and file-alias collisions.
+Direct-path, symlink and hardlink tests confirm rejection preserves the reference
+bytes, and the normal separate-directory audition run succeeds. No actionable
+issues were found in the Zig implementation. The reviewer also identified missing
+direct coverage of live held-note retiming; a focused test now exercises slowing
+and speeding up, sustained tone and release at the arranged rest; it passes. While
+adding that test, ReleaseSafe caught a narrow inferred integer in its buffer count;
+the count is now explicitly `usize`. No production DSP fix was needed. No recursive
+review was run.
+See the [validation receipt](agent-temp-files/hard-techno/bassline/sustained/validation.json)
+and [audition receipt](agent-temp-files/hard-techno/bassline/sustained/audition/audition.json).
+Listening acceptance is complete: the user described the sustained bass as very
+good and explicitly requested committing it. The slider rollback and final
+validation are recorded below.
+
+### Previous iteration: short offbeat bass
+
+The initial 19-note pattern used brief plucks and a chromatic pickup. Its full
+track had 491 bass notes. It passed 32 music tests, two menu/SDL tests, six finite
+and unclipped renders, two exact bass-off regressions, and build/smoke checks;
+one independent review found no actionable findings. A maximum-level headroom
+failure was corrected with the shared linear gain reserve. Human listening then
+identified the unwanted percussive articulation, prompting the current iteration.
+Earlier source snapshots, audio and receipts remain under
+`agent-temp-files/hard-techno/bassline/`; the original
+[comparison](agent-temp-files/hard-techno/bassline/audition/bass_comparison.wav)
+and [validation receipt](agent-temp-files/hard-techno/bassline/validation.json)
+are historical evidence, not validation of the sustained iteration.
+
+### Deferred lead-editor plan
+
+The user's newer progression/relaunch request takes priority over this editor;
+see the next-phase proposal below.
+
+1. Expose actual oscillator, sync, modulation, filter, distortion and envelope
+   parameters. Keep Corrosion as a starting preset. Prove useful audible ranges
+   with soloed parameter sweeps before further UI work.
+2. Replace the previous broad controls with a focused lead editor. Remove the
+   added drum/groove editing controls; include solo, held-note preview, comparison
+   with original Corrosion, reset and persistence. Use real parameter names and
+   units, such as pulse width (%), cutoff (Hz), drive (dB) and decay (ms).
+3. Add simple automatic modulation with a source, speed, depth and destination.
+   Avoid a large routing system. Each phase requires listening and appropriate
+   technical validation. Do not begin these phases before the bass handoff and
+   user steering.
+
+### Next phase proposed: evolving playback and continuity across launches
+
+Latest user feedback: the music sounds like the same short piece on repeat. They
+expect noticeable musical shifts every 1–3 minutes and dislike hearing the same
+opening every time they relaunch during development.
+
+Initial read-only inspection on 2026-09-25 found `settings.json` selecting Hard
+Techno, `arrangement: loop`, tempo scale 1 and random seed mode. A later read found
+Full Track selected, with Machine stored as the loop groove. The melodic loop is four
+bars (6.4 seconds at 150 BPM). Track mode currently runs a fixed 128-bar, 204.8-second
+arrangement with entrances, breaks and returns, then the runtime restarts the same
+score. Seed changes vary percussion noise, not the bass/lead patterns or initial
+bar. There is no playback-position persistence. Agent commands did not edit these
+saved settings.
+
+Proposed coherent next phase, before lead knobs:
+
+- Add an ongoing arrangement mode using the existing clock, phrase/section
+  ownership and voices. Select substantial new sections on musical boundaries
+  every roughly 1–3 minutes, with smaller variations between them. Change motif
+  variants, bass movement, groove/layer density and intensity while maintaining
+  musical relationships and avoiding immediate repeats. Preserve finite track
+  and loop modes for auditions and repeatable tests. Honor the newly specified
+  machine/drum-kit sound palette; audition a replacement for the wooden-sounding
+  background hit before incorporating it into the evolving arrangement.
+- Persist the composition seed, arrangement decisions and musical position
+  periodically as well as at normal shutdown. Resume from a nearby phrase
+  boundary with a short fade and appropriate voice/effect warm-up, so force-closing
+  development runs does not keep returning to the intro. For a fresh state, begin
+  in an established musical section instead of always replaying the opening.
+- Keep audio-callback work bounded: capture checkpoint data under the existing
+  synchronization boundary, write it from the main thread, and validate loaded
+  state/version before use. Reuse the settings/filesystem owners where appropriate;
+  keep runtime playback state separate from sound-design defaults and reset.
+- Validate with long renders and a section/phrase trace, transition/headroom
+  checks, deterministic reconstruction from saved state, and real relaunch tests
+  using isolated settings. Listening must establish audible development over
+  several minutes; randomizing noise alone does not meet this requirement.
+
+This is recorded planning only. Progression/resume behavior is not implemented
+in the sustained-bass iteration. Exact state format, checkpoint frequency and
+fresh-start policy should be finalized with the phase implementation plan.
+
+## Phase 4: synth lead auditions
+
+**Outcome and commit boundary:** an original four-bar G-minor riff, lead-tone
+comparisons over the selected Warehouse groove, isolated lead/rhythm buses, and lead
+entrances within the full arrangement. The user requested this missing musical
+layer before proceeding to game integration. Corrosion is the selected lead for
+now; this choice does not freeze its sound design.
+
+### Current iteration: dark industrial
+
+The user likes Machine and Buzz better and requests a rougher, darker industrial
+sound. This iteration keeps the original riff, groove, note timing and arrangement.
+Buzz is the unchanged comparison control; the two new choices build on those
+preferred voices.
+
+| Cue | Tone | Start in comparison | Full 16-bar clip |
+| --- | --- | --- | --- |
+| 1 beep | Buzz: previous version | 0.18 s | [WAV](agent-temp-files/hard-techno/phase4/industrial/buzz_matched.wav) |
+| 2 beeps | Iron: darker Machine with octave weight and dense distortion | 13.86 s | [WAV](agent-temp-files/hard-techno/phase4/industrial/iron_matched.wav) |
+| 3 beeps | Corrosion: heavier Buzz with inharmonic metallic modulation | 27.64 s | [WAV](agent-temp-files/hard-techno/phase4/industrial/corrosion_matched.wav) |
+
+Listen to [the comparison](agent-temp-files/hard-techno/phase4/industrial/lead_comparison.wav),
+[the full Corrosion track](agent-temp-files/hard-techno/phase4/industrial/corrosion_track_matched.wav),
+or [entry/return excerpts](agent-temp-files/hard-techno/phase4/industrial/lead_transitions.wav).
+The full track introduces the lead at 0:25.6. The user selected Corrosion after
+listening. Earlier auditions remain available below. Future iterations can tune
+distortion, metallic modulation, octave weight, filtering, envelopes and mix level
+within the existing synth. The experimental Phase 5 controls were removed at
+the user's request; synthesis parameters are currently code-defined.
+
+Both variants add an octave sine layer before the existing two saturation stages.
+Iron uses a fifth-related modulator; Corrosion uses a stronger inharmonic one.
+Modulator phases persist through retriggers. Extra filtering after distortion
+reduces the bright top end, with all filters continuing through idle tails.
+The existing SyncLead, SyncSaw, envelope, filters, antialiased saturation, delay,
+sidechain and audition helper own this work; no new synthesis subsystem was added.
+No claim is made that the complete nonlinear signal is alias-free.
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 4 --lead-set industrial
+```
+
+This writes to `agent-temp-files/hard-techno/phase4/industrial/`. Direct probe
+choices are `--lead iron` and `--lead corrosion`. Earlier lead sets and the
+lead-off default are preserved. `--groove machine` remains a percussion choice.
+
+All 25 music tests pass, now covering seven tones: gates/retriggers, idle silence,
+DC, zero velocity, additive stems, reset, chunk/seed behavior and maximum mix
+controls at both tempo extremes. A scratch sweep over MIDI 36–107 with retriggers
+measured voice peaks of 0.8747 (Iron) and 0.8744 (Corrosion).
+All 14 audition renders are finite and unclipped; comparison loudness is -18.00,
+-18.00 and -18.01 LUFS. The full track retains 579 lead notes, 480 kicks and its
+silent ending. Stem sums differ by at most 2 PCM LSB and the largest section
+boundary jump is 0.00263 full scale. See the
+[audition receipt](agent-temp-files/hard-techno/phase4/industrial/audition.json).
+
+Twelve [regression comparisons](agent-temp-files/hard-techno/phase4/industrial/regression.json)
+are byte-identical, including all five previous lead mixes, Buzz's lead stem,
+rhythm stems and lead-off loop/full-track mixes. Spectral band measurements show
+about 5 dB less relative energy above 6 kHz for the two new tones than Buzz;
+this confirms darker filtering but does not establish musical quality.
+Formatting, build and diff checks pass. The prescribed smoke test reached its
+five-second sentinel without warnings, errors, panics or crashes.
+One independent read-only review covered the five-file iteration delta against
+the saved baseline. It found no actionable issues, checked phase/filter state,
+shared-component reuse and applicable skills, and independently confirmed all
+12 regression comparisons. No review-driven corrections were needed. The reviewer
+inspected the test/build receipt, render evidence and clean smoke log without
+rerunning mutating checks. Corrosion has full-track coverage; Iron has loop and
+unit-test coverage. The game smoke initializes ambient music, so these new tones
+are validated through the offline probe. The user accepted Corrosion as the
+current lead choice. It is retained in the accepted bass/playback commit; the
+following sections preserve the earlier lead-audition history.
+
+### Previous iteration: mechanical buzz
+
+The user liked the first lead implementation but requested a rougher tone, then
+clarified “more like a machine” and “more buzz”. The riff, groove, timing and
+arrangement stay fixed for this iteration. The first clip is the unchanged Razor
+control; the two new choices focus on a steady buzz and sharp gated attacks.
+
+| Cue | Tone | Start in comparison | Full 16-bar clip |
+| --- | --- | --- | --- |
+| 1 beep | Razor: original swept tone | 0.18 s | [WAV](agent-temp-files/hard-techno/phase4/rough/razor_matched.wav) |
+| 2 beeps | Machine: nearly fixed sync tone with a pitch-locked saw underneath | 13.86 s | [WAV](agent-temp-files/hard-techno/phase4/rough/machine_matched.wav) |
+| 3 beeps | Buzz: narrow pulse and heavier distortion | 27.64 s | [WAV](agent-temp-files/hard-techno/phase4/rough/buzz_matched.wav) |
+
+Listen to [the new comparison](agent-temp-files/hard-techno/phase4/rough/lead_comparison.wav),
+the [full Buzz track](agent-temp-files/hard-techno/phase4/rough/buzz_track_matched.wav),
+or [its entry/return previews](agent-temp-files/hard-techno/phase4/rough/lead_transitions.wav).
+The full track introduces the lead at 0:25.6. Buzz is a provisional full-track
+example; no user preference is inferred from its inclusion.
+
+Machine and Buzz add mid emphasis, asymmetric distortion of the gated signal,
+a second antialiased saturation stage, and final DC removal. Their attack is
+0.9 ms, their release is 9 ms, and their delay return is halved. Buzz forms an
+18%-duty pulse from two offset, pitch-locked band-limited saws with a small saw
+component retained. Machine keeps a small initial sync movement. Both reuse the
+existing oscillator, envelope, filters, saturation and delay components.
+
+Darude describes distortion as the step that gave his early lead its recognizable
+character in [this interview](https://www.bandwagon.asia/articles/edm-legend-darude-on-sandstorm-mental-health-and-more).
+That informed the direction; this is not an exact recreation of his patch.
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 4 --lead-set rough
+zig build procedural-music-probe -- hard-techno --lead buzz --arrangement track --seed 12345 --out agent-temp-files/hard-techno/buzz_track.wav
+```
+
+The rough recipe writes to `agent-temp-files/hard-techno/phase4/rough/` by default,
+preserving earlier auditions. `--lead-set original` retains the original three
+tones. New probe choices are `--lead machine` and `--lead buzz`; the separate
+`--groove machine` still selects the existing percussion pattern.
+
+Current validation: all 25 tests pass. The earlier lead tests now exercise all
+five tones, and a new test covers post-distortion DC removal and zero-velocity
+silence. Stress checks cover both tempo extremes at maximum controls, additive
+stems, gates/retriggers, reset and chunk/seed behavior. A separate sweep across
+MIDI notes 36–107 with retriggers measured voice peaks of 0.8373 (Machine) and
+0.8259 (Buzz). The first shaping attempts exposed filter overshoot and DC;
+output saturation, final DC removal and gain compensation corrected these before
+review. Instrument saturation may reach its unit rails internally; the final
+mixed output is separately checked for clipping and headroom.
+
+All 14 final loop/track/stem renders are finite and unclipped. The comparison
+mixes measure -17.98, -18.00 and -18.00 LUFS. Both new raw mix true peaks are
+-4.78 dBTP. Stem summation differs by at most 2 PCM LSB; the full Buzz track
+retains 579 notes, 480 kicks and the silent ending. Largest section-boundary
+jump is 0.00263 full scale. See the
+[audition receipt](agent-temp-files/hard-techno/phase4/rough/audition.json).
+
+All ten comparison controls are byte-identical, including the three original
+lead mixes, Razor's isolated lead, rhythm stems and lead-off loop/full-track
+renders; see [regression.json](agent-temp-files/hard-techno/phase4/rough/regression.json).
+Formatting, build and diff checks pass. The final prescribed smoke run contains
+the five-second success sentinel with no warnings, errors, panics or crashes.
+One independent read-only review covered the five-file iteration delta against
+the saved pre-iteration files, including phase continuity, saturation/DC removal,
+gain staging, original-tone compatibility and audition paths. It found no
+actionable issues, inspected the final receipts and smoke log, and independently
+byte-compared four controls. No review-driven corrections were needed. Musical
+acceptance remains for user listening; game integration is still a later phase.
+
+### Original lead audition
+
+The reference is the prominent, recognizable synth hook the user describes in
+Darude's Sandstorm. The new notes are an original motif. The three versions use
+the same notes, accents and gates so the comparison isolates their timbres:
+
+| Cue | Tone | Start in comparison | Full 16-bar clip |
+| --- | --- | --- | --- |
+| 1 beep | Razor: bright, strongly swept sync tone | 0.18 s | [WAV](agent-temp-files/hard-techno/phase4/razor_matched.wav) |
+| 2 beeps | Hollow: lower sync range and darker filtering | 13.86 s | [WAV](agent-temp-files/hard-techno/phase4/hollow_matched.wav) |
+| 3 beeps | Wide: two slightly detuned sync voices | 27.64 s | [WAV](agent-temp-files/hard-techno/phase4/wide_matched.wav) |
+
+Listen to [the comparison](agent-temp-files/hard-techno/phase4/lead_comparison.wav).
+There is also a provisional [full Razor track](agent-temp-files/hard-techno/phase4/razor_track_matched.wav)
+and [lead-entry / break-return previews](agent-temp-files/hard-techno/phase4/lead_transitions.wav).
+Razor is the first example, not a user-selected winner. The full track introduces
+the hook at 0:25.6, makes room for the Machine contrast, thins it in the break,
+and brings it back at 2:20.8. It retains the finite ending at 3:24.8.
+
+Shared `dsp.SyncSaw` synthesizes the Fourier coefficients of a saw reset by a
+master oscillator, omits DC, and limits its harmonic set to 48 partials below
+16 kHz. Coefficients interpolate over 1 ms during the sync sweep. This avoids
+directly sampling the reset discontinuities; it is not a claim that the complete
+modulated and saturated signal has no aliasing. The existing `Voice` has fixed
+harmonic weights and does not implement oscillator sync, so it is not reused as
+the oscillator. `instruments.SyncLead` reuses the shared envelope, filters and
+antialiased cubic saturation. The style reuses its step clock, level smoothing,
+kick ducking envelope and delay-line helpers. Notes never consume noise RNG.
+
+For background on oscillator sync and pitch-envelope sweeps, see
+[Roland's oscillator explanation](https://articles.roland.com/exploring-the-sh-4d-oscillators/).
+The saw-specific coefficients here come from the discontinuities of the
+piecewise saw over one master period; this implementation is not a recreation
+of a particular commercial synth preset.
+
+Lead-enabled mixes use a static 0.86 headroom gain on all buses, including solos.
+The rhythm's balance and synthesis stay the same, and lead-level zero retains
+that gain so muting the lead cannot change rhythm loudness. `--lead off` preserves
+the original output. Mix comparisons use constant-gain loudness matching.
+
+```bash
+python3 agent-tests/hard_techno_audition.py --phase 4
+zig build test-music
+zig build procedural-music-probe -- hard-techno --lead razor --arrangement track --seed 12345 --out agent-temp-files/hard-techno/lead_track.wav
+```
+
+New controls: `--lead off|razor|hollow|wide|machine|buzz|iron|corrosion`, `--lead-level 0..1` (default 0.75),
+and `--techno-bus lead`. The compatibility default remains off; pass
+`--lead corrosion` for the selected tone. The phase-4 audition command explicitly
+enables each candidate. Phases 1–3 of the
+recipe remain available. Raw lead stems retain mix gain; see the
+[audition receipt](agent-temp-files/hard-techno/phase4/audition.json).
+
+Original audition validation: all 24 tests, formatting and the build passed. The five new tests cover
+folded-harmonic suppression versus a naive sync oscillator, gate/retrigger
+behavior, reset/chunk/seed determinism, bus summation, full-track lead entry and
+ending, and headroom at both tempo extremes. The initial all-controls-maximum
+test exposed clipping; adding static headroom resolved it. This was an
+implementation finding before independent review.
+
+All 14 loop/full mix/stem renders are finite and unclipped. The three comparison
+mixes measure -17.98, -18.00 and -18.00 LUFS after matching; raw true peaks range
+from -4.82 to -4.75 dBTP. Both loop and full-track stem sums differ by at most
+2 PCM LSB. The full track has 579 lead notes, 480 kicks and exact trailing silence.
+Lead-enabled 25.6-second renders took 216–283 ms, and full-track renders took
+1.50–1.57 seconds. These are offline render/write times, not audio-callback
+deadline measurements. The prescribed smoke run contains the five-second
+success sentinel with no warnings, errors, panics or crashes.
+
+All 13 same-build-mode regressions are byte-identical: ten Phase 2 loops/stems,
+the previous lead-off full track, and the taiko/guitar baselines. See
+[regression.json](agent-temp-files/hard-techno/phase4/regression.json). An initial
+legacy comparison used ReleaseFast against Debug baselines; rerendering with
+the matching Debug mode resolved those numerical differences without code changes.
+
+One independent read-only review covered all six code/test/helper files and the
+applicable skills. It found no actionable issues after inspecting the shared
+owners, sync math, timing, static headroom, CLI and automation. It verified the
+audition and smoke evidence; the final legacy hash receipt was completed after
+its report and sent as follow-up evidence. No review-driven code corrections
+were needed. User listening will determine whether the sound, riff and balance
+work; no musical-quality verdict is inferred from these technical checks.
 
 ## Phase 3: complete arrangement
 
@@ -350,36 +766,81 @@ Validation:
 - Use the user's preference for the tight candidate as the baseline for further
   listening comparisons of kick weight, attack, rumble balance, and groove.
 
-## Proposed Phase 4: game integration
+## Phase 5: basic playback retained; sound sliders removed
 
-**Outcome and commit boundary:** make Hard Techno selectable and configurable in
-the game, with persisted settings and safe changes during playback. Reuse the
-existing music owner, settings serialization, menu components and procedural
-generator. This is the next proposed phase, not yet authorized for implementation.
+The user requested removal of the experimental sound sliders when accepting the
+sustained bassline. Hard Techno remains available under **Game Menu → Music →
+Style: Hard Techno**, with the accepted Corrosion lead and sustained bass.
+Volume, Tempo Scale and Reverb use the original numeric menu controls.
+**Playback: Loop / Full Track** selects the short loop or arranged 128-bar track.
+The added lead/drum rows, range-bar renderer, groove editor, Reset Techno Sound
+and four patch-multiplier controls are removed. The Corrosion synth implementation
+is restored to its accepted pre-slider form. Older settings containing the removed
+`lead_controls` object still load; the unknown fields are ignored.
 
-- Extend `src/music.zig`, `src/settings.zig` and `src/musicConfigMenu.zig` to
-  register Hard Techno and expose loop/track playback, groove, drive and rumble
-  controls alongside the existing shared volume, tempo and reverb controls.
-  Start with Warehouse loop playback; track playback repeats after its ending
-  so gameplay does not remain silent after 128 bars.
-- Apply style/configuration changes through a synchronized handoff owned by
-  the music component. Keep synthesis, reset and audio-callback access consistent;
-  inspect the existing SDL stream synchronization before choosing the mechanism.
-- Use the existing probe for matching runtime/offline settings and consistent
-  master-volume behavior. Keep the finite offline track available for auditions.
-- Verify style switching, live controls, ending/restart, saved-settings reload,
-  master mute and old-style regressions. Measure callback workload during play,
-  then run formatting, focused tests, build, smoke and independent review.
-  User testing should include selecting Hard Techno in the music menu, trying
-  both playback modes, adjusting controls, and restarting to verify persistence.
+Hard Techno saves its own tempo (0.35–1.65, with 1 = 150 BPM) so switching or
+cancelling style previews preserves other styles' wider tempo range. The saved
+loop groove remains usable; Full Track uses its arranged Warehouse/Machine
+sections and repeats after its ending. Changing playback mode restarts the score.
+Tempo and reverb changes preserve position and smooth the effect taps.
+**Reset Changes** restores the complete music-menu snapshot from opening.
+
+The music component retains synchronization for settings, style changes, cue
+requests and file-buffer replacement through the audio stream's recursive lock;
+SDL holds that same lock during its stream callback. See the
+[SDL locking contract](https://wiki.libsdl.org/SDL3/SDL_LockAudioStream).
+Fractional delay reads and tempo retiming remain in the shared DSP and generator
+owners. These support the existing playback controls and held bass notes.
+
+Stored settings gain a nested `music_hard_techno` config; older files load the
+Corrosion and bass defaults. Generator volume remains 0.86 in game. The probe's
+`--master-volume` option reproduces SDL output gain; e.g. use
+`--lead corrosion --volume 0.86 --master-volume 0.5` for the default menu volume.
+Offline tracks remain finite. Startup flags `--music-menu` and
+`--music-settings PATH` support isolated testing and normal menu startup.
+
+The original integration review found one **P2** in `src/musicConfigMenu.zig`:
+cancelling a Hard Techno style preview could overwrite Ambient's saved tempo
+outside the 0.35–1.65 range. The fix retains separate tempo settings. Its tests for
+2.0 and 0.2, including close/reload persistence, remain in the simplified menu.
+
+### Accepted bass and slider rollback validation
+
+- Formatting, build and diff checks pass.
+- `zig build test-music -Doptimize=ReleaseSafe --summary all`: 33 tests pass.
+  The obsolete multiplier-controls test was removed; bass, lead, tempo,
+  headroom and shared-DSP checks remain.
+- `zig build test-music-menu --summary all`: two tests pass. They cover old
+  slider-settings compatibility, basic controls/reset, bass and groove settings
+  preservation, playback/style visibility, tempo-preview restoration and actual
+  dummy SDL playback with rapid tempo/reverb changes and master mute.
+- The 25.6-second Corrosion/bass loop and 205.8-second full track have exactly
+  the same decoded PCM as the accepted sustained-bass audition files. Both
+  renders are finite and unclipped.
+- The prescribed five-second smoke opened the music menu with an isolated
+  Hard Techno fixture. It reached the sentinel without warnings, errors or panics.
+- See [the rollback receipt](agent-temp-files/hard-techno/slider-rollback/validation.json)
+  and logs in the same directory. One fresh-context read-only reviewer found
+  no actionable issues in the rollback, shared menu/settings boundaries or audio
+  synchronization. It independently confirmed both PCM comparisons and inspected
+  validation logs. Manual GUI interaction was not part of that review.
+
+```bash
+zig build test-music -Doptimize=ReleaseSafe --summary all
+zig build test-music-menu --summary all
+zig build
+bash scripts/smoke_test.sh --music-settings agent-temp-files/hard-techno/slider-rollback/smoke-settings.json --music-menu
+```
 
 ## Phase roadmap
 
 | Phase | Deliverable | Main validation |
 | --- | --- | --- |
 | 2. Complete groove (committed; Warehouse preferred) | Three percussion grooves over the selected tight foundation, hats with choking, clap, sparse metallic percussion, and shared envelope release/idle fixes. Machine is also positively received; a tonal part remains optional. | Matched 16-bar mixes and isolated buses; 15 focused tests, unchanged low-end/legacy renders, build/smoke and independent review completed. |
-| 3. Musical development (accepted; commit requested) | 128-bar Warehouse-led arrangement with one Machine contrast section, phrase-aligned builds, break, fills, return and ending; existing step clock and layer smoothing. | Three full-track seeds and transition previews; 19 tests; section alignment, continuity, ending, reset, bus summing, loop regressions, build/smoke and independent review completed. |
-| 4. Game integration | Playback style, persisted settings, existing menu controls, safe live-setting handoff, and consistent probe master gain. | Style switching, live changes, save/reload, runtime/offline comparison, callback performance, and existing-style regressions. |
+| 3. Musical development (committed) | 128-bar Warehouse-led arrangement with one Machine contrast section, phrase-aligned builds, break, fills, return and ending; existing step clock and layer smoothing. | Three full-track seeds and transition previews; 19 tests; section alignment, continuity, ending, reset, bus summing, loop regressions, build/smoke and independent review completed. |
+| 4. Synth hook (accepted with bass commit) | Original-riff lead comparisons, reusable sync oscillator/instrument, isolated lead bus, and phrase-aligned track entrances. Corrosion is selected for now and can be tuned later. | Matched mixes, full Corrosion track, stem sums, 25 tests, 12 control regressions and build/smoke completed; independent review found no actionable issues. |
+| 5. Basic playback (retained; sound sliders removed) | Hard Techno playback, synchronization, settings/reset and repeating runtime track; original numeric controls and Loop/Full Track. | Two menu/SDL tests, exact loop/full-track audio regressions, build and isolated smoke pass; the original P2 tempo-preview fix remains covered. |
+| 6. Independent bassline (sustained iteration accepted) | Separate mono saw/sine bass with held legato notes, four-bar counterline, arrangement, defaults/persistence, bass stem and short-note/sustained comparison. Progression/resume is proposed next, before the lead editor. | 34 music and two menu/SDL tests, six finite/unclipped renders, two exact bass-off regressions, extended headroom sweep and build/smoke pass. Review found one P2 reference-overwrite issue, fixed; live-tempo regression passes in both directions. |
 
 These are proposed phases. Present the concrete plan before each phase; agree
 the next phase with the user before starting it. Approval to implement, acceptance
@@ -462,7 +923,11 @@ user accepts and commits a phase; shared settings/build changes may need
 reconciliation then. Do not merge into the other agent's active working tree
 as part of music implementation.
 
-Suggested prompt to authorize the next phase:
+Suggested prompt when resuming:
 
-> Read MUSIC_HANDOFF.md and implement the proposed Phase 4 game integration.
-> Keep those changes uncommitted for review until I request their commit.
+> Read MUSIC_HANDOFF.md. The sustained bass is accepted and the experimental
+> music-menu sound sliders have been removed. Corrosion and basic Hard Techno
+> playback are retained. Progression over 1–3 minute sections and playback resume
+> across game launches are proposed next, ahead of any revised lead editor.
+> All sounds must fit machinery/synths or a drum kit, with no wooden percussion.
+> Present the next phase plan before implementing it.

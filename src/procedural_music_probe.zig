@@ -1,5 +1,6 @@
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
+const instruments = @import("music/instruments.zig");
 const entropy = @import("music/entropy.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
@@ -26,6 +27,7 @@ const RenderConfig = struct {
     tempo_scale: f32 = 1.0,
     reverb_mix: f32 = 0.35,
     volume: f32 = 0.86,
+    master_volume: f32 = 1.0,
     guitar_cue: procedural_americana_guitar.CuePreset = .open_road,
     taiko_cue: procedural_taiko.CuePreset = .matsuri,
     cue_style: ?StyleName = null,
@@ -42,6 +44,10 @@ const RenderConfig = struct {
     percussion_level: f32 = 0.65,
     techno_groove: procedural_hard_techno.Groove = .warehouse,
     techno_arrangement: procedural_hard_techno.Arrangement = .loop,
+    techno_lead: procedural_hard_techno.Lead = .off,
+    lead_level: f32 = 0.75,
+    // Preserve earlier percussion/lead auditions unless bass is requested.
+    bass_level: f32 = 0.0,
     techno_options_set: bool = false,
     instrument_set: bool = false,
 };
@@ -88,7 +94,7 @@ pub fn main(init: std.process.Init) !void {
 
     try writeWavHeader(file, total_frames);
     const render_start_ms = std.Io.Clock.awake.now(io_value).toMilliseconds();
-    const stats = try writeStyleFrames(file, cfg.style, total_frames);
+    const stats = try writeStyleFrames(file, cfg.style, total_frames, cfg.master_volume);
     const render_ms = std.Io.Clock.awake.now(io_value).toMilliseconds() - render_start_ms;
 
     if (stats.non_finite_samples > 0) {
@@ -144,6 +150,10 @@ pub fn main(init: std.process.Init) !void {
                 });
             }
         }
+        std.log.info("techno_lead: tone={s} level={d:.3} notes={d}", .{
+            @tagName(cfg.techno_lead), cfg.lead_level, procedural_hard_techno.lead_count,
+        });
+        std.log.info("techno_bass: level={d:.3} notes={d}", .{ cfg.bass_level, procedural_hard_techno.bass_count });
         if (stats.non_finite_samples > 0 or stats.clipped_samples > 0) {
             std.log.err("procedural_music_probe: invalid hard-techno output; inspect render statistics", .{});
             return error.InvalidAudioOutput;
@@ -255,7 +265,7 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         if (std.mem.eql(u8, arg, "--techno-bus")) {
             const value = try optionValue(args, idx, arg);
             cfg.techno_bus = std.meta.stringToEnum(procedural_hard_techno.Bus, value) orelse {
-                std.log.err("procedural_music_probe: unknown techno bus '{s}' (use mix, kick, rumble, low_end, hats, clap, metal, percussion)", .{value});
+                std.log.err("procedural_music_probe: unknown techno bus '{s}' (use mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass)", .{value});
                 return error.InvalidArgument;
             };
             cfg.techno_options_set = true;
@@ -302,6 +312,33 @@ fn parseConfig(args: []const []const u8, show_help: *bool) !RenderConfig {
         }
         if (std.mem.eql(u8, arg, "--percussion")) {
             cfg.percussion_level = try parseBoundedFloatArg("percussion", try optionValue(args, idx, arg), 0.0, 1.0);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--lead")) {
+            const value = try optionValue(args, idx, arg);
+            cfg.techno_lead = std.meta.stringToEnum(procedural_hard_techno.Lead, value) orelse {
+                std.log.err("procedural_music_probe: unknown lead '{s}' (use off, razor, hollow, wide, machine, buzz, iron, corrosion)", .{value});
+                return error.InvalidArgument;
+            };
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--bass-level")) {
+            cfg.bass_level = try parseBoundedFloatArg("bass-level", try optionValue(args, idx, arg), 0.0, 1.0);
+            cfg.techno_options_set = true;
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--master-volume")) {
+            cfg.master_volume = try parseBoundedFloatArg("master-volume", try optionValue(args, idx, arg), 0.0, 1.0);
+            idx += 2;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--lead-level")) {
+            cfg.lead_level = try parseBoundedFloatArg("lead-level", try optionValue(args, idx, arg), 0.0, 1.0);
             cfg.techno_options_set = true;
             idx += 2;
             continue;
@@ -483,6 +520,9 @@ fn applyStyleSettings(cfg: RenderConfig) void {
                 .percussion_level = cfg.percussion_level,
                 .groove = cfg.techno_groove,
                 .arrangement = cfg.techno_arrangement,
+                .lead = cfg.techno_lead,
+                .lead_level = cfg.lead_level,
+                .bass_level = cfg.bass_level,
                 .room_mix = cfg.reverb_mix,
                 .bus = cfg.techno_bus,
             };
@@ -579,7 +619,7 @@ fn writeWavHeader(file: std.Io.File, total_frames: u32) !void {
     try file.writeStreamingAll(runtime.io(), &header);
 }
 
-fn writeStyleFrames(file: std.Io.File, style: StyleName, total_frames: u32) !RenderStats {
+fn writeStyleFrames(file: std.Io.File, style: StyleName, total_frames: u32, master_volume: f32) !RenderStats {
     const CHUNK_FRAMES = 1024;
     var samples: [CHUNK_FRAMES * 2]f32 = undefined;
     var bytes: [CHUNK_FRAMES * BYTES_PER_FRAME]u8 = undefined;
@@ -596,8 +636,8 @@ fn writeStyleFrames(file: std.Io.File, style: StyleName, total_frames: u32) !Ren
         var byte_idx: usize = 0;
         for (0..chunk_frames) |frame_idx| {
             const sample_idx = frame_idx * 2;
-            const left = sanitizeSample(&stats, samples[sample_idx]);
-            const right = sanitizeSample(&stats, samples[sample_idx + 1]);
+            const left = sanitizeSample(&stats, samples[sample_idx] * master_volume);
+            const right = sanitizeSample(&stats, samples[sample_idx + 1] * master_volume);
             writeI16Le(bytes[byte_idx .. byte_idx + 2], floatToPcm16(left));
             writeI16Le(bytes[byte_idx + 2 .. byte_idx + 4], floatToPcm16(right));
             byte_idx += BYTES_PER_FRAME;
@@ -757,10 +797,14 @@ fn printUsage() void {
         \\  --seed VALUE        decimal or 0x-prefixed fixed seed
         \\  --random-seed       use session randomness instead of fixed seed
         \\  --taiko-bus-stats   print taiko bus RMS/peak statistics
-        \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion
+        \\  --techno-bus NAME   mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass
+        \\  --bass-level VALUE  0..1, default 0 (off); use 0.65 for the game bass mix
         \\  --groove NAME       warehouse (default), rolling, machine, foundation
         \\  --arrangement NAME  loop (default), track (128 bars, Warehouse/Machine)
         \\  --percussion VALUE  0..1, default 0.65 (hard-techno only)
+        \\  --lead NAME         off (default), razor, hollow, wide, machine, buzz, iron, corrosion
+        \\  --lead-level VALUE  0..1, default 0.75 (hard-techno only)
+        \\  --master-volume V    0..1, final playback gain (default 1)
         \\  --kick-drive VALUE  1..8, default 2.3 (hard-techno only)
         \\  --kick-decay SECS   0.08..0.8 to -60 dB, default 0.28 (hard-techno only)
         \\  --rumble VALUE      0..1, default 0.52 (hard-techno only)

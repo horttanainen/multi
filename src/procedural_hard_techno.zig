@@ -1,13 +1,14 @@
 // Repeatable percussion loops and a finite, phrase-aligned track. The same
-// voices/effects continue through section boundaries; game integration is separate.
+// voices/effects continue through section boundaries and live sound changes.
 const std = @import("std");
 const dsp = @import("music/dsp.zig");
 const composition = @import("music/composition.zig");
 const entropy = @import("music/entropy.zig");
 const instruments = @import("music/instruments.zig");
 
-pub const Bus = enum { mix, kick, rumble, low_end, hats, clap, metal, percussion };
+pub const Bus = enum { mix, kick, rumble, low_end, hats, clap, metal, percussion, lead, bass };
 pub const Groove = enum { foundation, warehouse, rolling, machine };
+pub const Lead = enum { off, razor, hollow, wide, machine, buzz, iron, corrosion };
 pub const Arrangement = enum { loop, track };
 pub const TrackSection = enum { intro, drive, contrast, pressure, breakdown, returning, outro, finished };
 pub const TRACK_BARS: u64 = 128;
@@ -31,11 +32,17 @@ pub const Config = struct {
     percussion_level: f32 = 0.65,
     groove: Groove = .warehouse,
     arrangement: Arrangement = .loop,
+    lead: Lead = .off,
+    lead_level: f32 = 0.75,
+    bass_level: f32 = 0.65,
+    repeat_track: bool = false,
     bus: Bus = .mix,
 };
 
 pub var config: Config = .{};
 pub var kick_count: u64 = 0;
+pub var lead_count: u64 = 0;
+pub var bass_count: u64 = 0;
 // Closed hats, open hats, claps, metal strikes; counts are independent of solos.
 pub var percussion_counts: [4]u64 = .{0} ** 4;
 pub var current_bar: u64 = 0;
@@ -53,6 +60,8 @@ const FEEDBACK = .{ 0.82, 0.84, 0.83, 0.81 };
 const Room = dsp.StereoReverb(COMBS, ALLPASSES);
 
 var active_config: Config = .{};
+var target_config: Config = .{};
+var playback_seed: u32 = 0x7EC4_0001;
 var sequencer: composition.StepSequencer16 = .{};
 var kick: instruments.ElectronicKick = .{};
 var kick_drive: dsp.CubicSaturator = .{};
@@ -60,8 +69,10 @@ var kick_dc: dsp.HPF = dsp.hpfInit(22.0);
 var kick_tone: dsp.LPF = dsp.lpfInit(7500.0);
 var room: Room = dsp.stereoReverbInit(COMBS, ALLPASSES, FEEDBACK);
 var delay: dsp.DelayLine(DELAY_SIZE) = .{};
-var delay_half: usize = 9600;
-var delay_three_quarters: usize = 14400;
+var delay_half: f32 = 9600;
+var delay_three_quarters: f32 = 14400;
+var target_delay_half: f32 = 9600;
+var target_delay_three_quarters: f32 = 14400;
 var send_filter: dsp.LPF = dsp.lpfInit(900.0);
 var rumble_dc: dsp.HPF = dsp.hpfInit(32.0);
 var rumble_drive: dsp.CubicSaturator = .{};
@@ -86,8 +97,72 @@ var hat_open_decay: f32 = 0.22;
 var metal_pan: f32 = 0.0;
 var layer_targets: [4]f32 = .{1.0} ** 4;
 var layer_fade_rate: f32 = 0.0;
-var outro_fade_start: u64 = 0;
+var outro_fade_elapsed: f64 = 0.0;
+var outro_fade_tempo: f32 = 1.0;
 var outro_fade_frames: f64 = 1.0;
+var lead: instruments.SyncLead = .{};
+var lead_delay: dsp.DelayLine(DELAY_SIZE) = .{};
+var lead_layer: [1]f32 = .{1.0};
+var lead_target: [1]f32 = .{1.0};
+var bass: instruments.SynthBass = .{};
+
+pub const NoteStep = struct {
+    note: ?u8 = null,
+    velocity: f32 = 0.0,
+    gate_steps: f32 = 0.55,
+};
+
+// Four-bar G-minor counterline. Held notes overlap slightly so the mono voice
+// stays legato; kick ducking provides the pulse while pitch follows its own part.
+pub fn bassStep(arrangement: Arrangement, bar: u64, step: u8) NoteStep {
+    if (step >= 16) {
+        std.log.warn("procedural_hard_techno.bassStep: invalid step={d}", .{step});
+        return .{};
+    }
+    if (arrangement == .track and (bar < 8 or (bar >= 80 and bar < 88) or bar >= 124)) return .{};
+    // Establish the root quietly on entrance and simplify the outro.
+    if (arrangement == .track and (bar < 12 or bar >= 120)) {
+        if (step != 0) return .{};
+        return .{ .note = 31, .velocity = 0.65, .gate_steps = 16.02 };
+    }
+    const notes = [4][16]u8{
+        .{ 31, 0, 0, 0, 0, 0, 0, 0, 0, 0, 38, 0, 0, 0, 0, 0 },
+        .{ 29, 0, 0, 0, 0, 0, 0, 0, 31, 0, 0, 0, 0, 0, 0, 0 },
+        .{ 31, 0, 0, 0, 0, 0, 0, 0, 34, 0, 0, 0, 36, 0, 0, 0 },
+        .{ 38, 0, 0, 0, 0, 0, 29, 0, 0, 0, 0, 0, 31, 0, 0, 0 },
+    };
+    const note = notes[bar % notes.len][step];
+    if (note == 0) return .{};
+    var next_step: usize = step + 1;
+    while (next_step < 16 and notes[bar % notes.len][next_step] == 0) : (next_step += 1) {}
+    return .{ .note = note, .velocity = if (step == 0) 0.82 else 0.76, .gate_steps = @as(f32, @floatFromInt(next_step - step)) + 0.02 };
+}
+
+// Original four-bar G-minor hook, repeated deliberately. Timbre variants share
+// the same notes and accents so listening compares the sound of the instrument.
+pub fn leadStep(arrangement: Arrangement, bar: u64, step: u8) NoteStep {
+    if (step >= 16) {
+        std.log.warn("procedural_hard_techno.leadStep: invalid step={d}", .{step});
+        return .{};
+    }
+    if (arrangement == .track) {
+        if (bar < 16 or (bar >= 40 and bar < 56) or (bar >= 64 and bar < 72) or
+            (bar >= 80 and bar < 84) or bar >= 124) return .{};
+        if (bar >= 84 and bar < 88 and step % 4 != 0) return .{};
+        if (bar == 87 and step >= 12) return .{};
+    }
+    const notes = [4][16]u8{
+        .{ 67, 0, 67, 70, 0, 0, 67, 0, 65, 0, 67, 67, 0, 0, 74, 0 },
+        .{ 67, 0, 67, 70, 0, 0, 67, 0, 65, 0, 67, 0, 70, 0, 69, 0 },
+        .{ 67, 0, 67, 70, 0, 0, 67, 0, 65, 0, 67, 67, 0, 0, 74, 0 },
+        .{ 70, 0, 0, 69, 0, 0, 67, 0, 65, 0, 67, 0, 0, 0, 62, 0 },
+    };
+    const note = notes[bar % notes.len][step];
+    if (note == 0) return .{};
+    var velocity: f32 = if (step % 4 == 0) 0.95 else 0.76;
+    if (arrangement == .track and ((bar >= 84 and bar < 88) or bar >= 120)) velocity *= 0.70;
+    return .{ .note = note, .velocity = velocity, .gate_steps = if (step == 14) 1.10 else 0.55 };
+}
 
 pub const TrackStep = struct {
     section: TrackSection = .finished,
@@ -242,14 +317,8 @@ pub fn reset() void {
 // Explicit seed reset makes timbre and isolated-bus comparisons repeatable.
 // The fixed score consumes no random numbers; noise belongs to the instrument.
 pub fn resetWithSeed(seed: u32) void {
-    active_config = config;
-    active_config.tempo_scale = bounded("tempo", config.tempo_scale, 0.35, 1.65, 1.0);
-    active_config.volume = bounded("volume", config.volume, 0.0, 1.0, 0.86);
-    active_config.kick_drive = bounded("kick drive", config.kick_drive, 1.0, 8.0, 2.3);
-    active_config.kick_decay = bounded("kick decay", config.kick_decay, 0.08, 0.8, 0.28);
-    active_config.rumble_level = bounded("rumble", config.rumble_level, 0.0, 1.0, 0.52);
-    active_config.room_mix = bounded("room", config.room_mix, 0.0, 1.0, 0.35);
-    active_config.percussion_level = bounded("percussion", config.percussion_level, 0.0, 1.0, 0.65);
+    active_config = sanitizeConfig(config);
+    target_config = active_config;
     if (config.arrangement == .track and config.groove != .warehouse) {
         std.log.warn("procedural_hard_techno.reset: track mode uses Warehouse/Machine; ignoring loop groove", .{});
         active_config.groove = .warehouse;
@@ -259,6 +328,7 @@ pub fn resetWithSeed(seed: u32) void {
         std.log.warn("procedural_hard_techno.resetWithSeed: zero noise seed, using default", .{});
         noise_seed = 0x7EC4_0001;
     }
+    playback_seed = noise_seed;
     kick = .{ .noise = dsp.rngInit(noise_seed) };
     // Independent nonzero streams leave the accepted kick's noise untouched.
     closed_noise = dsp.rngInit((noise_seed ^ 0x4841_5401) | 1);
@@ -270,6 +340,21 @@ pub fn resetWithSeed(seed: u32) void {
     clap = .{};
     metal = .{ .base_freq = 510.0, .volume = 0.90 };
     metal_pan = 0.0;
+    lead = .{ .tone = switch (active_config.lead) {
+        .off, .razor => .razor,
+        .hollow => .hollow,
+        .wide => .wide,
+        .machine => .machine,
+        .buzz => .buzz,
+        .iron => .iron,
+        .corrosion => .corrosion,
+    } };
+    lead_delay = .{};
+    lead_layer = .{1.0};
+    lead_target = .{1.0};
+    lead_count = 0;
+    bass = .{};
+    bass_count = 0;
     steps_elapsed = 0;
     current_bar = 0;
     track_section = .intro;
@@ -277,7 +362,8 @@ pub fn resetWithSeed(seed: u32) void {
     frames_rendered = 0;
     layer_levels = if (active_config.arrangement == .track) .{0.0} ** 4 else .{1.0} ** 4;
     layer_targets = layer_levels;
-    outro_fade_start = 0;
+    outro_fade_elapsed = 0.0;
+    outro_fade_tempo = active_config.tempo_scale;
     pending_percussion = null;
     pending_delay = 0;
     percussion_counts = .{0} ** 4;
@@ -299,16 +385,79 @@ pub fn resetWithSeed(seed: u32) void {
     swing_samples = @intFromFloat(@round(beat_samples * 0.25 * 0.16));
     hat_closed_decay = beat_seconds * 0.10;
     hat_open_decay = beat_seconds * 0.55;
-    delay_half = @intFromFloat(@round(beat_samples * 0.5));
-    delay_three_quarters = @intFromFloat(@round(beat_samples * 0.75));
+    delay_half = @round(beat_samples * 0.5);
+    delay_three_quarters = @round(beat_samples * 0.75);
+    target_delay_half = delay_half;
+    target_delay_three_quarters = delay_three_quarters;
     ducker = dsp.duckingEnvelopeInit(beat_seconds * 0.10, beat_seconds * 0.20);
     kick_count = 0;
     composition.stepSequencer16Start(&sequencer);
 }
 
+pub fn sanitizeConfig(value: Config) Config {
+    var result = value;
+    result.tempo_scale = bounded("tempo", value.tempo_scale, 0.35, 1.65, 1.0);
+    result.volume = bounded("volume", value.volume, 0.0, 1.0, 0.86);
+    result.kick_drive = bounded("kick drive", value.kick_drive, 1.0, 8.0, 2.3);
+    result.kick_decay = bounded("kick decay", value.kick_decay, 0.08, 0.8, 0.28);
+    result.rumble_level = bounded("rumble", value.rumble_level, 0.0, 1.0, 0.52);
+    result.room_mix = bounded("room", value.room_mix, 0.0, 1.0, 0.35);
+    result.percussion_level = bounded("percussion", value.percussion_level, 0.0, 1.0, 0.65);
+    result.lead_level = bounded("lead level", value.lead_level, 0.0, 1.0, 0.75);
+    result.bass_level = bounded("bass level", value.bass_level, 0.0, 1.0, 0.65);
+    return result;
+}
+
+// Caller owns synchronization with fillBuffer. Sound changes preserve score,
+// oscillator and effect state; changing playback mode or patch restarts the score.
+pub fn applyLiveConfig(value: Config) void {
+    const next = sanitizeConfig(value);
+    config = next;
+    if (next.arrangement != active_config.arrangement or next.lead != active_config.lead) {
+        resetWithSeed(playback_seed);
+        return;
+    }
+    target_config = next;
+    active_config.groove = next.groove;
+    active_config.bus = next.bus;
+    active_config.repeat_track = next.repeat_track;
+    if (next.tempo_scale == active_config.tempo_scale) return;
+    // Preserve progress within the step when its duration changes; otherwise
+    // increasing tempo can emit several overdue notes on consecutive samples.
+    sequencer.step_counter *= active_config.tempo_scale / next.tempo_scale;
+    // Held bass gates follow the remaining musical duration when tempo changes.
+    bass.gate_left = @intFromFloat(@round(@as(f32, @floatFromInt(bass.gate_left)) * active_config.tempo_scale / next.tempo_scale));
+    active_config.tempo_scale = next.tempo_scale;
+    const beat_seconds = 60.0 / (BASE_BPM * next.tempo_scale);
+    const beat_samples = beat_seconds * dsp.SAMPLE_RATE;
+    target_delay_half = @round(beat_samples * 0.5);
+    target_delay_three_quarters = @round(beat_samples * 0.75);
+    swing_samples = @intFromFloat(@round(beat_samples * 0.25 * 0.16));
+    hat_closed_decay = beat_seconds * 0.10;
+    hat_open_decay = beat_seconds * 0.55;
+    const timing = dsp.duckingEnvelopeInit(beat_seconds * 0.10, beat_seconds * 0.20);
+    ducker.hold_samples = timing.hold_samples;
+    ducker.release_coefficient = timing.release_coefficient;
+}
+
+fn smoothControls() void {
+    inline for (.{ "volume", "kick_drive", "kick_decay", "rumble_level", "room_mix", "percussion_level", "lead_level", "bass_level" }) |name| {
+        const current = &@field(active_config, name);
+        current.* = approachControl(current.*, @field(target_config, name));
+    }
+    delay_half = approachControl(delay_half, target_delay_half);
+    delay_three_quarters = approachControl(delay_three_quarters, target_delay_three_quarters);
+}
+
+fn approachControl(current: f32, target: f32) f32 {
+    const next = current + (target - current) * 0.001;
+    if (@abs(target - current) < 0.00001 or next == current) return target;
+    return next;
+}
+
 fn bounded(label: []const u8, value: f32, low: f32, high: f32, fallback: f32) f32 {
     if (!std.math.isFinite(value) or value < low or value > high) {
-        std.log.warn("procedural_hard_techno.reset: invalid {s}={d}, using {d}", .{ label, value, fallback });
+        std.log.warn("procedural_hard_techno.sanitizeConfig: invalid {s}={d}, using {d}", .{ label, value, fallback });
         return fallback;
     }
     return value;
@@ -329,7 +478,7 @@ fn advanceClock() void {
         layer_targets = plan.layers;
         groove = plan.groove;
         kick_enabled = plan.kick_enabled;
-        if (current_bar == 124 and step == 0) outro_fade_start = frames_rendered;
+        if (current_bar == 124 and step == 0) outro_fade_elapsed = 0.0;
         if (track_section == .finished) {
             pending_percussion = null;
             return;
@@ -340,11 +489,47 @@ fn advanceClock() void {
         dsp.duckingEnvelopeTrigger(&ducker);
         kick_count += 1;
     }
+    if (active_config.lead != .off) {
+        lead_target[0] = if (active_config.arrangement == .track and current_bar == 87 and step >= 12) 0.0 else 1.0;
+        const note_event = leadStep(active_config.arrangement, current_bar, step);
+        triggerLead(note_event);
+    }
+    triggerBass(bassStep(active_config.arrangement, current_bar, step));
     var event = grooveStep(groove, current_bar, step);
     if (active_config.arrangement == .track) arrangePercussion(&event, plan, current_bar, step);
     pending_percussion = event;
     pending_delay = if (groove == .rolling and step % 2 == 1) swing_samples else 0;
     steps_elapsed += 1;
+}
+
+fn triggerBass(event: NoteStep) void {
+    const note = event.note orelse return; // A rest is an ordinary score event.
+    const step_seconds = 60.0 / (BASE_BPM * active_config.tempo_scale * 4.0);
+    instruments.synthBassTrigger(&bass, note, event.velocity, step_seconds * event.gate_steps);
+    bass_count += 1;
+}
+
+fn triggerLead(event: NoteStep) void {
+    const note = event.note orelse return; // A rest is an ordinary score event.
+    const step_seconds = 60.0 / (BASE_BPM * active_config.tempo_scale * 4.0);
+    instruments.syncLeadTrigger(&lead, note, event.velocity, step_seconds * event.gate_steps);
+    lead_count += 1;
+}
+
+fn processLead(duck_gain: f32) [2]f32 {
+    if (active_config.lead == .off) return .{ 0.0, 0.0 };
+    composition.easeLevels(1, &lead_layer, &lead_target, layer_fade_rate);
+    const dry = instruments.syncLeadProcess(&lead) * 0.24 * active_config.lead_level;
+    const left_echo = dsp.delayLineTapFractional(DELAY_SIZE, &lead_delay, delay_half - 1);
+    const right_echo = dsp.delayLineTapFractional(DELAY_SIZE, &lead_delay, delay_three_quarters - 1);
+    dsp.delayLinePush(DELAY_SIZE, &lead_delay, dry + right_echo * 0.28);
+    // Let the hook cut through between kicks while reserving room for each hit.
+    const gain = (0.25 + 0.75 * duck_gain) * lead_layer[0];
+    const echo_gain: f32 = switch (active_config.lead) {
+        .machine, .buzz, .iron, .corrosion => 0.5,
+        else => 1.0,
+    };
+    return .{ (dry + left_echo * 0.20 * echo_gain) * gain, (dry + right_echo * 0.24 * echo_gain) * gain };
 }
 
 fn triggerPendingPercussion() void {
@@ -376,11 +561,20 @@ fn triggerPendingPercussion() void {
 }
 
 pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
-    // Configuration is snapshotted by reset; no live controls in the offline
-    // proof. Both buses always run, including the kick feed when soloing rumble.
-    const kick_gain = 0.58 / (1.0 + (active_config.kick_drive - 1.0) * 0.045);
+    // Both buses run, including the kick feed when soloing rumble. Live
+    // controls are smoothed per sample, independent of callback chunk size.
     for (0..frames) |frame| {
+        smoothControls();
+        const kick_gain = 0.58 / (1.0 + (active_config.kick_drive - 1.0) * 0.045);
+        // Reserve headroom for the added voice without a nonlinear master
+        // limiter. All stems share this gain; bass level zero keeps the old mix.
+        const output_gain = active_config.volume * @as(f32, if (active_config.lead == .off) 1.0 else 0.86) /
+            (1.0 + active_config.bass_level * 0.25);
         advanceClock();
+        if (active_config.arrangement == .track and track_section == .finished and active_config.repeat_track) {
+            resetWithSeed(playback_seed);
+            advanceClock();
+        }
         if (active_config.arrangement == .track and track_section == .finished) {
             buffer[frame * 2] = 0.0;
             buffer[frame * 2 + 1] = 0.0;
@@ -391,8 +585,8 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         if (active_config.arrangement == .track) {
             composition.easeLevels(4, &layer_levels, &layer_targets, layer_fade_rate);
             if (current_bar >= 124) {
-                const elapsed: f64 = @floatFromInt(frames_rendered - outro_fade_start);
-                master_fade = @floatCast(@max(0.0, 1.0 - elapsed / outro_fade_frames));
+                master_fade = @floatCast(@max(0.0, 1.0 - outro_fade_elapsed / outro_fade_frames));
+                outro_fade_elapsed += @as(f64, active_config.tempo_scale) / outro_fade_tempo;
             }
         }
         triggerPendingPercussion();
@@ -402,8 +596,8 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         const send = dsp.lpfProcess(&send_filter, kick_sample);
         // delayLineTap's zero is the previous sample; subtract one so these
         // taps land at exactly the requested half/three-quarter beat positions.
-        const delayed = dsp.delayLineTap(DELAY_SIZE, &delay, delay_half - 1) * 0.75 +
-            dsp.delayLineTap(DELAY_SIZE, &delay, delay_three_quarters - 1) * 0.35;
+        const delayed = dsp.delayLineTapFractional(DELAY_SIZE, &delay, delay_half - 1) * 0.75 +
+            dsp.delayLineTapFractional(DELAY_SIZE, &delay, delay_three_quarters - 1) * 0.35;
         dsp.delayLinePush(DELAY_SIZE, &delay, send);
         const reverberated = dsp.stereoReverbProcess(COMBS, ALLPASSES, &room, .{ send, send });
         const low_input = dsp.hpfProcess(&rumble_dc, delayed + reverberated[0] * active_config.room_mix * 3.0);
@@ -412,13 +606,17 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
         const kick_bus = kick_sample * kick_gain;
         // Nonlinear shaping and ducking can reintroduce DC after the input
         // high-pass. Remove it from the final return as well.
-        const ducked = filtered * dsp.duckingEnvelopeProcess(&ducker);
+        const duck_gain = dsp.duckingEnvelopeProcess(&ducker);
+        const ducked = filtered * duck_gain;
         var rumble_bus = dsp.hpfProcess(&rumble_output_dc, ducked) * 0.30 * active_config.rumble_level;
         if (active_config.arrangement == .track) rumble_bus *= layer_levels[0];
         const closed = dsp.panStereo(instruments.hiHatProcess(&closed_hat, &closed_noise) * 2.0, -0.24);
         const open = dsp.panStereo(instruments.hiHatProcess(&open_hat, &open_noise) * 2.0, 0.20);
         const clap_sample = instruments.electronicClapProcess(&clap, &clap_noise);
         const metal_sample = dsp.panStereo(instruments.atariganeProcess(&metal, &metal_noise) * 2.0, metal_pan);
+        const lead_bus = processLead(duck_gain);
+        // Keep some held tone audible under each kick instead of gating it away.
+        const bass_bus = instruments.synthBassProcess(&bass) * active_config.bass_level * 0.30 * (0.20 + 0.80 * duck_gain);
         for (0..2) |channel| {
             var hats_bus = (closed[channel] + open[channel]) * 0.75 * active_config.percussion_level;
             var clap_bus = clap_sample * 0.45 * active_config.percussion_level;
@@ -430,16 +628,18 @@ pub fn fillBuffer(buffer: [*]f32, frames: usize) void {
             }
             const percussion = hats_bus + clap_bus + metal_bus;
             const selected = switch (active_config.bus) {
-                .mix => kick_bus + rumble_bus + percussion,
+                .mix => kick_bus + rumble_bus + percussion + lead_bus[channel] + bass_bus,
                 .kick => kick_bus,
                 .rumble => rumble_bus,
-                .low_end => kick_bus + rumble_bus,
+                .low_end => kick_bus + rumble_bus + bass_bus,
                 .hats => hats_bus,
                 .clap => clap_bus,
                 .metal => metal_bus,
                 .percussion => percussion,
+                .lead => lead_bus[channel],
+                .bass => bass_bus,
             };
-            buffer[frame * 2 + channel] = selected * active_config.volume * master_fade;
+            buffer[frame * 2 + channel] = selected * output_gain * master_fade;
         }
         frames_rendered += 1;
     }

@@ -117,6 +117,23 @@ pub fn build(b: *std.Build) !void {
     const test_music = b.step("test-music", "Check music DSP, step timing, and procedural bus rendering");
     test_music.dependOn(&b.addRunArtifact(music_tests).step);
 
+    const music_menu_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("music_menu_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    music_menu_tests.root_module.addOptions("build_options", build_options);
+    music_menu_tests.root_module.linkLibrary(sdl);
+    music_menu_tests.root_module.linkLibrary(sdl_image);
+    music_menu_tests.root_module.linkLibrary(sdl_ttf);
+    music_menu_tests.root_module.linkLibrary(box2d_lib);
+    music_menu_tests.root_module.linkLibrary(triangle_dep.artifact("triangle"));
+    const test_music_menu = b.step("test-music-menu", "Check live music controls, persistence and SDL audio playback");
+    test_music_menu.dependOn(&b.addRunArtifact(music_menu_tests).step);
+
     b.installArtifact(exe);
 
     const run = b.step("run", "Run the game");

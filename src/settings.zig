@@ -12,8 +12,10 @@ const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
+const procedural_hard_techno = @import("procedural_hard_techno.zig");
 
-const SETTINGS_PATH = "settings.json";
+// Tests and tooling may select an isolated settings file before calling init.
+pub var settings_path: []const u8 = "settings.json";
 const DEFAULT_LUT_STRENGTH: f32 = 1.0;
 pub const minCrtBarrel: f32 = 0.0;
 pub const maxCrtBarrel: f32 = 5.0;
@@ -156,6 +158,7 @@ const StoredSettings = struct {
     music_taiko_kane_mix: ?f32 = null,
     music_taiko_cue: ?u8 = null,
     music_americana_guitar_cue: ?u8 = null,
+    music_hard_techno: ?procedural_hard_techno.Config = null,
 };
 
 var lut_strength: f32 = DEFAULT_LUT_STRENGTH;
@@ -203,6 +206,7 @@ pub var music_taiko_nagado_mix: f32 = DEFAULT_TAIKO_NAGADO_MIX;
 pub var music_taiko_kane_mix: f32 = DEFAULT_TAIKO_KANE_MIX;
 pub var music_taiko_cue: u8 = DEFAULT_TAIKO_CUE;
 pub var music_americana_guitar_cue: u8 = DEFAULT_AMERICANA_GUITAR_CUE;
+pub var music_hard_techno: procedural_hard_techno.Config = .{ .lead = .corrosion };
 
 pub fn init() !void {
     lut_strength = DEFAULT_LUT_STRENGTH;
@@ -212,10 +216,10 @@ pub fn init() !void {
     resetMusicSettings();
 
     var json_buf: [16384]u8 = undefined;
-    const json_data = fs.readFile(SETTINGS_PATH, &json_buf) catch |err| switch (err) {
+    const json_data = fs.readFile(settings_path, &json_buf) catch |err| switch (err) {
         error.FileNotFound => return,
         else => {
-            std.log.warn("settings.init: failed to read {s}: {}", .{ SETTINGS_PATH, err });
+            std.log.warn("settings.init: failed to read {s}: {}", .{ settings_path, err });
             return;
         },
     };
@@ -223,7 +227,7 @@ pub fn init() !void {
         .allocate = .alloc_always,
         .ignore_unknown_fields = true,
     }) catch |err| {
-        std.log.warn("settings.init: failed to parse {s}: {}", .{ SETTINGS_PATH, err });
+        std.log.warn("settings.init: failed to parse {s}: {}", .{ settings_path, err });
         return;
     };
     defer parsed.deinit();
@@ -391,6 +395,8 @@ pub fn apply() void {
 }
 
 pub fn applyMusic() void {
+    if (!music.lockForUpdate()) return;
+    defer music.unlockAfterUpdate();
     const style_changed = music.current_style != music_style;
     const seed_changed = entropy.configureFixedSeed(music_seed_enabled, music_seed);
     music.setVolume(music_volume);
@@ -430,6 +436,21 @@ pub fn applyMusic() void {
     procedural_americana_guitar.bpm = music_bpm;
     procedural_americana_guitar.reverb_mix = music_reverb_mix;
     procedural_americana_guitar.selected_cue = @enumFromInt(music_americana_guitar_cue);
+
+    // Shared menu controls remain the master controls. Keep the auditioned
+    // generator gain separate from SDL's user volume, and always play the mix.
+    var techno = music_hard_techno;
+    techno.room_mix = music_reverb_mix;
+    techno.volume = 0.86;
+    techno.bus = .mix;
+    techno.lead = .corrosion;
+    techno.repeat_track = true;
+    if (techno.arrangement == .track) techno.groove = .warehouse;
+    if (music.current_style == .hard_techno) {
+        procedural_hard_techno.applyLiveConfig(techno);
+    } else {
+        procedural_hard_techno.config = techno;
+    }
 
     if (!style_changed and !seed_changed) return;
     music.playStyle(music_style);
@@ -526,6 +547,7 @@ pub fn save() !void {
         .music_taiko_kane_mix = music_taiko_kane_mix,
         .music_taiko_cue = music_taiko_cue,
         .music_americana_guitar_cue = music_americana_guitar_cue,
+        .music_hard_techno = music_hard_techno,
     };
 
     if (has_bg_preset) {
@@ -582,8 +604,8 @@ pub fn save() !void {
         std.log.warn("settings.save: failed to serialize: {}", .{err});
         return err;
     };
-    fs.writeFile(SETTINGS_PATH, contents) catch |err| {
-        std.log.warn("settings.save: failed to write {s}: {}", .{ SETTINGS_PATH, err });
+    fs.writeFile(settings_path, contents) catch |err| {
+        std.log.warn("settings.save: failed to write {s}: {}", .{ settings_path, err });
         return err;
     };
 }
@@ -640,6 +662,7 @@ fn resetMusicSettings() void {
     music_taiko_kane_mix = DEFAULT_TAIKO_KANE_MIX;
     music_taiko_cue = DEFAULT_TAIKO_CUE;
     music_americana_guitar_cue = DEFAULT_AMERICANA_GUITAR_CUE;
+    music_hard_techno = .{ .lead = .corrosion };
 }
 
 fn loadMusicSettings(s: StoredSettings) void {
@@ -673,4 +696,5 @@ fn loadMusicSettings(s: StoredSettings) void {
     music_taiko_kane_mix = std.math.clamp(s.music_taiko_kane_mix orelse DEFAULT_TAIKO_KANE_MIX, 0.0, 1.0);
     music_taiko_cue = std.math.clamp(s.music_taiko_cue orelse DEFAULT_TAIKO_CUE, 0, 6);
     music_americana_guitar_cue = std.math.clamp(s.music_americana_guitar_cue orelse DEFAULT_AMERICANA_GUITAR_CUE, 0, 3);
+    music_hard_techno = procedural_hard_techno.sanitizeConfig(s.music_hard_techno orelse .{ .lead = .corrosion });
 }

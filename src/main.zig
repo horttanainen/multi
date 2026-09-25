@@ -193,6 +193,7 @@ pub fn main(init: std.process.Init) !void {
         try level_overview.configure(args);
         try character_animation.configure(args);
         debug_menu.configure(args);
+        try musicConfigMenu.configureStartup(args);
     }
 
     try window.init();
@@ -242,6 +243,7 @@ pub fn main(init: std.process.Init) !void {
         _ = sdl.addTimer(5000, smokeTestTimerCallback, null);
     }
 
+    if (musicConfigMenu.open_on_start) musicConfigMenu.open(null);
     while (!state.quitGame) {
         const collectFramePerf = projectile.shouldCollectPerfFrameLog();
         const framePerfStart = if (collectFramePerf) perf.begin(.explosion) else 0;

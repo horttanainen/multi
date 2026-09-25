@@ -5,10 +5,49 @@ This document records the preimplementation findings and proposed roadmap.
 Phases 1 and 2 are committed with the user's selected tight low end and preferred
 Warehouse groove; Machine was also positively received. Phase 3 adds a complete
 128-bar Warehouse-led arrangement with a Machine contrast section. Validation
-and independent review are complete; the user accepted the handoff and requested
-its commit. Game integration is the next proposed phase. See
-[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-3-complete-arrangement)
+and independent review are complete; Phase 3 is committed as `957e54f`.
+The user then requested the missing recognizable synth lead. Phase 4 adds lead
+auditions before game integration, which becomes Phase 5. The current iteration
+follows the user's preference for Machine/Buzz and request for darker, rougher
+industrial techno. The user selected Corrosion for now, with further tone tuning
+possible later. Basic Hard Techno game integration is retained, including saved
+settings, playback selection and audio-thread synchronization. The experimental
+lead/drum sliders, range bars and temporary lead multipliers were removed at the
+user's request when accepting the sustained bass. The original style-preview
+tempo-loss fix and its regression coverage remain. See
+[MUSIC_HANDOFF.md](../MUSIC_HANDOFF.md#phase-4-synth-lead-auditions)
 for the full track, transition previews, results and current status.
+
+The user subsequently clarified that only the lead should be editable, that the
+current sliders have too little audible effect, and that controls must name real
+audio parameters. That editor revision is deferred: the user requested
+an independent bassline first, then accepted its sustained iteration. Phase 6 adds a saw/sine bass voice with a bass bus,
+game defaults and before/after auditions. The user found the first short-note
+pattern too percussive, so the current iteration uses sustained legato notes and
+an independent four-bar counterline behind the lead. See
+[the current phase](../MUSIC_HANDOFF.md#phase-6-independent-bassline-before-the-lead-editor).
+The sustained iteration passes 34 music tests, two menu tests, six finite/unclipped
+renders, bass-off regression comparisons and build/smoke checks. Independent
+review found a P2 comparison-reference overwrite hazard, now fixed with collision
+checks; the additional live-tempo regression passes in both directions. The user
+accepted the sustained bass and explicitly requested committing it with the
+slider rollback. Final rollback validation passes 33 music tests (the obsolete
+controls test was removed), two menu/SDL tests and build/smoke; both the loop
+and full track remain byte-identical to the accepted sustained-bass renders.
+
+The user's latest request raises progression and repeated openings: their saved
+configuration initially selected the 6.4-second loop (later changed to Full Track), and the existing 204.8-second track
+restarts a fixed score. Random seeds affect noise, not the composition or start.
+The next proposed phase is an ongoing arrangement with shifts every 1–3 minutes
+and periodic playback checkpoints to resume across development relaunches. This
+is recorded planning; no progression or resume changes are included in the bass
+iteration. See the corresponding next-phase proposal in MUSIC_HANDOFF.md.
+
+Additional user direction: remove the wooden/taiko-like character from background
+percussion. All hard-techno sounds should suggest machinery, synths or a drum kit.
+The current metal bus uses the shared Atarigane voice; isolate and audition that
+part as the first candidate for replacement or redesign. This requirement is
+recorded for the next sound iteration; percussion is unchanged in the bass work.
 
 The user has explicitly made earlier music-generation guidance optional because
 the previous approach gave poor results. Treat this document's musical and

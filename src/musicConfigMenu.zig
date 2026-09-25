@@ -3,11 +3,29 @@ const menu = @import("menu.zig");
 const settings = @import("settings.zig");
 const state = @import("state.zig");
 const music = @import("music.zig");
-const procedural_choir = @import("procedural_choir.zig");
-const procedural_ambient = @import("procedural_ambient.zig");
-const procedural_african_drums = @import("procedural_african_drums.zig");
-const procedural_taiko = @import("procedural_taiko.zig");
-const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
+const procedural_hard_techno = @import("procedural_hard_techno.zig");
+
+pub var open_on_start: bool = false;
+var startup_settings_path: [4096]u8 = undefined;
+
+// Opt-in audition/testing entry points; the normal settings file stays intact.
+pub fn configureStartup(args: []const []const u8) !void {
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--music-menu")) open_on_start = true;
+        if (!std.mem.eql(u8, args[index], "--music-settings")) continue;
+        if (index + 1 >= args.len or args[index + 1].len == 0 or std.mem.startsWith(u8, args[index + 1], "--")) {
+            std.log.err("musicConfigMenu.configureStartup: --music-settings requires a file path", .{});
+            return error.MissingSettingsPath;
+        }
+        index += 1;
+        // main's argument arena ends before settings.init; retain the path.
+        settings.settings_path = std.fmt.bufPrint(&startup_settings_path, "{s}", .{args[index]}) catch |err| {
+            std.log.err("musicConfigMenu.configureStartup: settings path is too long: {}", .{err});
+            return err;
+        };
+    }
+}
 
 // ============================================================
 // Style selection
@@ -19,6 +37,7 @@ const style_targets = [_]music.Style{
     .african_drums,
     .taiko,
     .americana_guitar,
+    .hard_techno,
 };
 const STYLE_COUNT = style_targets.len;
 var style_value: u8 = 0;
@@ -33,6 +52,7 @@ const SavedMusicSettings = struct {
     african_cue: u8,
     taiko_cue: u8,
     americana_guitar_cue: u8,
+    techno: procedural_hard_techno.Config,
 };
 
 var initial_settings: SavedMusicSettings = undefined;
@@ -43,6 +63,7 @@ const style_names = [STYLE_COUNT][:0]const u8{
     "Style: African Drums",
     "Style: Taiko",
     "Style: Americana Guitar",
+    "Style: Hard Techno",
 };
 
 const AMBIENT_CUE_COUNT = 4;
@@ -91,6 +112,9 @@ const americana_guitar_cue_names = [AMERICANA_GUITAR_CUE_COUNT][:0]const u8{
     "Cue: High Lonesome",
 };
 
+const playback_names = [_][:0]const u8{ "Playback: Loop", "Playback: Full Track" };
+var playback_value: u8 = 0;
+
 // ============================================================
 // Shared configs (all styles)
 // ============================================================
@@ -107,8 +131,9 @@ var bpm_config    = menu.ConfigData{ .value = 1.0, .step = 0.01, .min = 0, .max 
 
 const IDX_STYLE: usize = 2;
 const IDX_CUE: usize = 3;
+const IDX_PLAYBACK: usize = 7;
 
-var main_items = [_]menu.Item{
+pub var main_items = [_]menu.Item{
     .{ .label = "Back", .kind = .{ .button = actionBack }, .font = .medium },
     .{ .label = "Reset Changes", .kind = .{ .button = actionResetChanges }, .font = .medium },
     .{ .label = "Style: Ambient", .kind = .{ .button = actionCycleStyle }, .font = .medium, .cycle_names = &style_names, .cycle_index = &style_value, .on_cycle = onCycleStyle },
@@ -116,6 +141,7 @@ var main_items = [_]menu.Item{
     .{ .label = "Volume", .kind = .{ .config = &volume_config }, .font = .medium },
     .{ .label = "Tempo Scale", .kind = .{ .config = &bpm_config }, .font = .medium },
     .{ .label = "Reverb", .kind = .{ .config = &reverb_config }, .font = .medium },
+    .{ .label = "Playback: Loop", .kind = .{ .button = actionCyclePlayback }, .font = .medium, .cycle_names = &playback_names, .cycle_index = &playback_value, .on_cycle = onCyclePlayback },
 };
 
 // ============================================================
@@ -166,13 +192,14 @@ fn loadFromParams() void {
     updateStyleLabel();
 
     volume_config.value = settings.music_volume;
-    fromShader(&bpm_config, settings.music_bpm);
+    fromShader(&bpm_config, if (settings.music_style == .hard_techno) settings.music_hard_techno.tempo_scale else settings.music_bpm);
     reverb_config.value = settings.music_reverb_mix;
     ambient_cue_value = settings.music_ambient_cue;
     choir_cue_value = settings.music_choir_cue;
     african_cue_value = settings.music_african_cue;
     taiko_cue_value = settings.music_taiko_cue;
     americana_guitar_cue_value = settings.music_americana_guitar_cue;
+    playback_value = @intFromEnum(settings.music_hard_techno.arrangement);
     updateCueRow();
 }
 
@@ -187,6 +214,7 @@ fn captureSettings() SavedMusicSettings {
         .african_cue = settings.music_african_cue,
         .taiko_cue = settings.music_taiko_cue,
         .americana_guitar_cue = settings.music_americana_guitar_cue,
+        .techno = settings.music_hard_techno,
     };
 }
 
@@ -200,15 +228,25 @@ fn restoreSettings(saved: SavedMusicSettings) void {
     settings.music_african_cue = saved.african_cue;
     settings.music_taiko_cue = saved.taiko_cue;
     settings.music_americana_guitar_cue = saved.americana_guitar_cue;
+    settings.music_hard_techno = saved.techno;
     settings.applyMusic();
 }
 
 fn updateStyleLabel() void {
     main_items[IDX_STYLE].label = style_names[style_value];
+    const techno = style_targets[style_value] == .hard_techno;
+    bpm_config.min = if (techno) 0.35 else 0.0;
+    bpm_config.max = if (techno) 1.65 else 2.0;
+    // Style previews (including Escape's restoration) must not overwrite the
+    // other styles' wider tempo range. Techno retains its own bounded tempo.
+    bpm_config.value = if (techno) settings.music_hard_techno.tempo_scale else settings.music_bpm;
+    main_items[IDX_PLAYBACK].hidden = !techno;
 }
 
 fn updateCueRow() void {
+    main_items[IDX_PLAYBACK].label = playback_names[playback_value];
     const item = &main_items[IDX_CUE];
+    item.hidden = style_targets[style_value] == .hard_techno;
     switch (style_targets[style_value]) {
         .ambient => {
             item.cycle_names = &ambient_cue_names;
@@ -235,6 +273,11 @@ fn updateCueRow() void {
             item.cycle_index = &americana_guitar_cue_value;
             item.label = americana_guitar_cue_names[americana_guitar_cue_value];
         },
+        .hard_techno => {
+            item.cycle_names = null;
+            item.cycle_index = null;
+            item.label = "Cue";
+        },
     }
 }
 
@@ -250,7 +293,7 @@ fn fromShader(cfg: *menu.ConfigData, val: f32) void {
 fn applyMenuToSettings(save_changes: bool) !void {
     settings.music_style = style_targets[style_value];
     settings.music_volume = volume_config.value;
-    settings.music_bpm = toShader(&bpm_config);
+    if (settings.music_style != .hard_techno) settings.music_bpm = toShader(&bpm_config);
     settings.music_reverb_mix = reverb_config.value;
 
     switch (settings.music_style) {
@@ -268,6 +311,10 @@ fn applyMenuToSettings(save_changes: bool) !void {
         },
         .americana_guitar => {
             settings.music_americana_guitar_cue = americana_guitar_cue_value;
+        },
+        .hard_techno => {
+            settings.music_hard_techno.tempo_scale = toShader(&bpm_config);
+            settings.music_hard_techno.arrangement = @enumFromInt(playback_value);
         },
     }
 
@@ -316,7 +363,7 @@ fn onCycleStyle() void {
 }
 
 fn actionCycleCue() anyerror!void {
-    const idx = activeCueValue();
+    const idx = activeCueValue() orelse return; // Hard Techno has no cue row.
     idx.* = (idx.* + 1) % activeCueCount();
     updateCueRow();
     try applyMenuToSettings(false);
@@ -331,13 +378,14 @@ fn onCycleCue() void {
     triggerCurrentCue();
 }
 
-fn activeCueValue() *u8 {
+fn activeCueValue() ?*u8 {
     switch (style_targets[style_value]) {
         .ambient => return &ambient_cue_value,
         .choir => return &choir_cue_value,
         .african_drums => return &african_cue_value,
         .taiko => return &taiko_cue_value,
         .americana_guitar => return &americana_guitar_cue_value,
+        .hard_techno => return null,
     }
 }
 
@@ -348,17 +396,25 @@ fn activeCueCount() u8 {
         .african_drums => AFRICAN_CUE_COUNT,
         .taiko => TAIKO_CUE_COUNT,
         .americana_guitar => AMERICANA_GUITAR_CUE_COUNT,
+        .hard_techno => 0,
     };
 }
 
 fn triggerCurrentCue() void {
-    switch (settings.music_style) {
-        .ambient => procedural_ambient.triggerCue(),
-        .choir => procedural_choir.triggerCue(),
-        .african_drums => procedural_african_drums.triggerCue(),
-        .taiko => procedural_taiko.triggerCue(),
-        .americana_guitar => procedural_americana_guitar.triggerCue(),
-    }
+    music.triggerCue();
+}
+
+fn actionCyclePlayback() anyerror!void {
+    playback_value = (playback_value + 1) % 2;
+    updateCueRow();
+    try applyMenuToSettings(false);
+}
+
+fn onCyclePlayback() void {
+    updateCueRow();
+    applyMenuToSettings(false) catch |err| {
+        std.log.warn("musicConfigMenu.onCyclePlayback: failed to apply playback: {}", .{err});
+    };
 }
 
 fn cleanupMusicConfigMenu() void {

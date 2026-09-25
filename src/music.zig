@@ -7,6 +7,7 @@ const procedural_choir = @import("procedural_choir.zig");
 const procedural_african_drums = @import("procedural_african_drums.zig");
 const procedural_taiko = @import("procedural_taiko.zig");
 const procedural_americana_guitar = @import("procedural_americana_guitar.zig");
+const procedural_hard_techno = @import("procedural_hard_techno.zig");
 const allocator = @import("allocator.zig").allocator;
 const AtomicU32 = std.atomic.Value(u32);
 
@@ -16,6 +17,7 @@ pub const Style = enum {
     african_drums,
     taiko,
     americana_guitar,
+    hard_techno,
 };
 
 pub const Source = enum {
@@ -103,10 +105,12 @@ pub fn init() !void {
     }
 
     stream = s;
-    std.log.info("music: initialized (style=ambient)", .{});
+    std.log.info("music: initialized (style={s})", .{@tagName(current_style)});
 }
 
 pub fn playStyle(style: Style) void {
+    if (!lockForUpdate()) return;
+    defer unlockAfterUpdate();
     current_style = style;
     current_source = .procedural;
     resetReactiveAnalysis();
@@ -115,9 +119,6 @@ pub fn playStyle(style: Style) void {
 }
 
 pub fn playFile(path: []const u8) !void {
-    freeFileData();
-    resetReactiveAnalysis();
-
     const path_z = try allocator.dupeZ(u8, path);
     defer allocator.free(path_z);
 
@@ -146,6 +147,13 @@ pub fn playFile(path: []const u8) !void {
         return error.LoadFailed;
     }
 
+    if (!lockForUpdate()) {
+        c.SDL_free(converted_buf);
+        return error.StreamLockFailed;
+    }
+    defer unlockAfterUpdate();
+    freeFileData();
+    resetReactiveAnalysis();
     file_buf = converted_buf;
     file_len = @intCast(converted_len);
     file_pos = 0;
@@ -154,11 +162,39 @@ pub fn playFile(path: []const u8) !void {
 }
 
 pub fn stop() void {
-    current_source = .procedural;
-    current_style = .ambient;
-    resetReactiveAnalysis();
-    resetCurrentStyle();
-    freeFileData();
+    playStyle(.ambient);
+}
+
+// SDL holds this recursive lock during musicCallback. All main-thread writes
+// to procedural state (including cue requests) must use this same boundary.
+// Before initialization there is no callback to exclude.
+pub fn lockForUpdate() bool {
+    if (stream == null) return true;
+    if (!c.SDL_LockAudioStream(stream.?)) {
+        std.log.warn("music.lockForUpdate: failed: {s}", .{c.SDL_GetError()});
+        return false;
+    }
+    return true;
+}
+
+pub fn unlockAfterUpdate() void {
+    if (stream == null) return;
+    if (!c.SDL_UnlockAudioStream(stream.?)) {
+        std.log.warn("music.unlockAfterUpdate: failed: {s}", .{c.SDL_GetError()});
+    }
+}
+
+pub fn triggerCue() void {
+    if (!lockForUpdate()) return;
+    defer unlockAfterUpdate();
+    switch (current_style) {
+        .ambient => procedural_ambient.triggerCue(),
+        .choir => procedural_choir.triggerCue(),
+        .african_drums => procedural_african_drums.triggerCue(),
+        .taiko => procedural_taiko.triggerCue(),
+        .americana_guitar => procedural_americana_guitar.triggerCue(),
+        .hard_techno => {}, // Groove changes use the running techno clock.
+    }
 }
 
 pub fn setVolume(vol: f32) void {
@@ -199,6 +235,7 @@ fn resetCurrentStyle() void {
         .african_drums => procedural_african_drums.reset(),
         .taiko => procedural_taiko.reset(),
         .americana_guitar => procedural_americana_guitar.reset(),
+        .hard_techno => procedural_hard_techno.reset(),
     }
 }
 
@@ -212,10 +249,7 @@ fn freeFileData() void {
 }
 
 fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_int, _: c_int) callconv(.c) void {
-    if (additional_amount <= 0) {
-        std.log.warn("musicCallback: non-positive request size {d}, skipping", .{additional_amount});
-        return;
-    }
+    if (additional_amount <= 0) return; // SDL may request zero additional bytes.
 
     if (s == null) {
         std.log.warn("musicCallback: stream was null, skipping request", .{});
@@ -246,6 +280,7 @@ fn musicCallback(_: ?*anyopaque, s: ?*c.SDL_AudioStream, additional_amount: c_in
                     .african_drums => procedural_african_drums.fillBuffer(&buf, chunk_frames),
                     .taiko => procedural_taiko.fillBuffer(&buf, chunk_frames),
                     .americana_guitar => procedural_americana_guitar.fillBuffer(&buf, chunk_frames),
+                    .hard_techno => procedural_hard_techno.fillBuffer(&buf, chunk_frames),
                 }
                 analyzeStereoBuffer(buf[0 .. chunk_frames * 2]);
 

@@ -151,6 +151,20 @@ pub fn delayLineProcess(comptime size: usize, line: *DelayLine(size), sample: f3
     return tapped;
 }
 
+// Continuous delay changes for live tempo controls. Integer taps retain the
+// exact existing output, while fractional positions interpolate adjacent taps.
+pub fn delayLineTapFractional(comptime size: usize, line: *const DelayLine(size), delay: f32) f32 {
+    if (!std.math.isFinite(delay) or delay < 0.0) {
+        std.log.warn("delayLineTapFractional: invalid delay={d}, returning silence", .{delay});
+        return 0.0;
+    }
+    const bounded = @min(delay, @as(f32, @floatFromInt(size - 1)));
+    const index: usize = @intFromFloat(bounded);
+    const fraction = bounded - @as(f32, @floatFromInt(index));
+    const first = delayLineTap(size, line, index);
+    return first + (delayLineTap(size, line, index + 1) - first) * fraction;
+}
+
 pub fn ResonatorBank(comptime n_modes: usize) type {
     comptime {
         if (n_modes == 0) @compileError("ResonatorBank mode count must be > 0");
@@ -457,6 +471,83 @@ pub fn panStereo(sample: f32, pan: f32) [2]f32 {
 
 pub fn samplesPerBeat(bpm: f32) f32 {
     return SAMPLE_RATE * 60.0 / bpm;
+}
+
+// Band-limited hard-sync saw: one master period contains ratio cycles of a
+// rising saw, then resets. Synthesize its Fourier series instead of sampling
+// the discontinuities. The DC term is omitted. Modulation is interpolated over
+// one millisecond; the 16 kHz ceiling leaves room for modulation sidebands.
+pub const SyncSaw = struct {
+    phase: f64 = 0.0,
+    frequency: f32 = 440.0,
+    harmonics: usize = 0,
+    sine: [48]f32 = .{0.0} ** 48,
+    cosine: [48]f32 = .{0.0} ** 48,
+    sine_step: [48]f32 = .{0.0} ** 48,
+    cosine_step: [48]f32 = .{0.0} ** 48,
+    interpolation_left: u8 = 0,
+};
+
+pub fn syncSawConfigure(osc: *SyncSaw, frequency: f32, ratio: f32) void {
+    if (!std.math.isFinite(frequency) or frequency < 40.0 or frequency > 4000.0 or
+        !std.math.isFinite(ratio) or ratio < 1.0 or ratio > 8.0)
+    {
+        std.log.warn("syncSawConfigure: invalid frequency/ratio ({d}, {d}), silencing oscillator", .{ frequency, ratio });
+        osc.* = .{};
+        return;
+    }
+    osc.frequency = frequency;
+    osc.harmonics = @min(osc.sine.len, @as(usize, @intFromFloat(16000.0 / frequency)));
+    const cycles: usize = @intFromFloat(ratio);
+    const fractional: f64 = ratio - @floor(ratio);
+    for (0..osc.sine.len) |index| {
+        if (index >= osc.harmonics) {
+            osc.sine[index] = 0.0;
+            osc.cosine[index] = 0.0;
+            osc.sine_step[index] = 0.0;
+            osc.cosine_step[index] = 0.0;
+            continue;
+        }
+        const harmonic: f64 = @floatFromInt(index + 1);
+        var real = fractional;
+        var imaginary: f64 = 0.0;
+        // Derivative impulses: -2 at each slave wrap, and -2*fract(ratio)
+        // at the master wrap. Integrating them gives the non-DC coefficients.
+        for (1..cycles + 1) |cycle| {
+            const angle = std.math.tau * harmonic * @as(f64, @floatFromInt(cycle)) / ratio;
+            real += @cos(angle);
+            imaginary += @sin(angle);
+        }
+        const sine: f32 = @floatCast(-2.0 * real / (std.math.pi * harmonic));
+        const cosine: f32 = @floatCast(2.0 * imaginary / (std.math.pi * harmonic));
+        osc.sine_step[index] = (sine - osc.sine[index]) / 48.0;
+        osc.cosine_step[index] = (cosine - osc.cosine[index]) / 48.0;
+    }
+    osc.interpolation_left = 48;
+}
+
+pub fn syncSawProcess(osc: *SyncSaw) f32 {
+    if (osc.harmonics == 0) return 0.0;
+    const angle: f32 = @floatCast(osc.phase * std.math.tau);
+    const sine = @sin(angle);
+    const cosine = @cos(angle);
+    var harmonic_sine = sine;
+    var harmonic_cosine = cosine;
+    var output: f32 = 0.0;
+    for (0..osc.harmonics) |index| {
+        if (osc.interpolation_left > 0) {
+            osc.sine[index] += osc.sine_step[index];
+            osc.cosine[index] += osc.cosine_step[index];
+        }
+        output += osc.sine[index] * harmonic_sine + osc.cosine[index] * harmonic_cosine;
+        const next_sine = harmonic_sine * cosine + harmonic_cosine * sine;
+        harmonic_cosine = harmonic_cosine * cosine - harmonic_sine * sine;
+        harmonic_sine = next_sine;
+    }
+    if (osc.interpolation_left > 0) osc.interpolation_left -= 1;
+    osc.phase += @as(f64, osc.frequency) / SAMPLE_RATE;
+    if (osc.phase >= 1.0) osc.phase -= 1.0;
+    return output;
 }
 
 pub fn Voice(comptime n_unison: u8, comptime n_harmonics: u8) type {

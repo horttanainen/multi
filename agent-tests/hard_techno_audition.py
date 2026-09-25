@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Render techno listening comparisons through the existing music probe.
 
-Run from any directory: python3 agent-tests/hard_techno_audition.py --phase 3
+Run from any directory: python3 agent-tests/hard_techno_audition.py --phase 4
 Phases 1/2 reproduce the kick/rumble and percussion comparisons. Phase 3 renders
 the full arrangement at three seeds, verifies stems and ending, and cuts previews.
+Phase 4 compares three lead tones, checks additive stems, and renders a full track.
+Add --lead-set rough to compare the original Razor with Machine and Buzz; output
+defaults to a separate phase4/rough directory, preserving earlier auditions.
+Use --lead-set industrial for Buzz, Iron and Corrosion in phase4/industrial.
+Phase 6 adds bass to Corrosion: before/after mixes, solo bass, full track and stems.
+Use --bass-reference PATH with phase 6 to compare an earlier mix against this version.
+The reference must be outside --output-dir and must not alias an existing output file.
+Phase 5 was the in-game menu work and has no comparison mode here.
 Requires the project's Zig toolchain and ffmpeg. Writes raw/stem WAVs, logs,
 constant-gain loudness-matched copies and a JSON receipt to --output-dir.
 The default destination is ignored scratch space. No game launch or downloads.
@@ -45,11 +53,11 @@ def run(command, log_path):
     return result.stdout + result.stderr
 
 
-def loudness(path):
+def loudness(path, log_path=None):
     output = run(
         ["ffmpeg", "-hide_banner", "-nostdin", "-i", str(path), "-af",
          "loudnorm=I=-18:TP=-2:LRA=11:print_format=json", "-f", "null", "-"],
-        path.with_suffix(".loudness.log"),
+        log_path or path.with_suffix(".loudness.log"),
     )
     start, end = output.rfind("{"), output.rfind("}")
     measurement = json.loads(output[start:end + 1])
@@ -60,7 +68,8 @@ def loudness(path):
     return {"integrated_lufs": integrated, "true_peak_dbtp": true_peak}
 
 
-def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, arrangement="loop"):
+def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, arrangement="loop",
+           lead="off", lead_level=0.75, bass_level=0.0):
     path = output_dir / f"{name}_{bus}_raw.wav"
     command = [
         "zig", "build", "procedural-music-probe", "-Doptimize=ReleaseFast", "--",
@@ -68,6 +77,8 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "--kick-drive", str(drive), "--kick-decay", str(decay),
         "--rumble", str(rumble), "--groove", groove,
         "--techno-bus", bus, "--out", str(path),
+        "--lead", lead, "--lead-level", str(lead_level),
+        "--bass-level", str(bass_level),
     ]
     if duration is not None:
         command.extend(["--duration", str(duration)])
@@ -83,7 +94,9 @@ def render(output_dir, name, drive, decay, rumble, groove, bus, duration, seed, 
         "name": name, "bus": bus, "drive": drive, "decay": decay,
         "rumble": rumble, "groove": groove, "raw": str(path), "command": command,
         "render_stats": stats[0], "raw_loudness": loudness(path),
-        "arrangement": arrangement, "sections": sections,
+        "arrangement": arrangement, "sections": sections, "lead": lead, "lead_level": lead_level,
+        "bass_level": bass_level,
+        "bass_notes": int(re.search(r"techno_bass: level=[\d.]+ notes=(\d+)", log).group(1)),
     }
 
 
@@ -136,17 +149,9 @@ def pcm16(data):
     return samples
 
 
-def verify_track(mix, stems):
-    sections = mix["sections"]
-    if [s["name"] for s in sections] != [
-            "intro", "drive", "contrast", "pressure", "breakdown", "returning", "outro", "finished"]:
-        raise RuntimeError("Incomplete or unexpected track section trace")
-    for section in sections:
-        if section["frame"] != section["bar"] * 76800:
-            raise RuntimeError(f"Section is off the 150 BPM bar grid: {section}")
-    if "kicks=480 " not in mix["render_stats"]:
-        raise RuntimeError("Track did not preserve the intended kick count/break")
+def verify_stems(mix, stems):
     max_error = 0
+    gains = [item.get("sum_gain", 1.0) for item in stems]
     with ExitStack() as stack:
         readers = [stack.enter_context(wave.open(item["raw"], "rb")) for item in [mix, *stems]]
         frames = readers[0].getnframes()
@@ -160,10 +165,26 @@ def verify_track(mix, stems):
             if any(len(block) != len(blocks[0]) for block in blocks):
                 raise RuntimeError("Track/stem WAV length mismatch")
             if stems:
-                max_error = max(max_error, max(abs(values[0] - sum(values[1:])) for values in zip(*blocks)))
+                max_error = max(max_error, max(abs(values[0] - sum(value * gain for value, gain in zip(values[1:], gains)))
+                                               for values in zip(*blocks)))
         if max_error > len(stems) + 1:
             raise RuntimeError(f"Track stems do not sum within PCM quantization: {max_error} LSB")
-        reader = readers[0]
+    return max_error
+
+
+def verify_track(mix, stems):
+    sections = mix["sections"]
+    if [s["name"] for s in sections] != [
+            "intro", "drive", "contrast", "pressure", "breakdown", "returning", "outro", "finished"]:
+        raise RuntimeError("Incomplete or unexpected track section trace")
+    for section in sections:
+        if section["frame"] != section["bar"] * 76800:
+            raise RuntimeError(f"Section is off the 150 BPM bar grid: {section}")
+    if "kicks=480 " not in mix["render_stats"]:
+        raise RuntimeError("Track did not preserve the intended kick count/break")
+    max_error = verify_stems(mix, stems)
+    with wave.open(mix["raw"], "rb") as reader:
+        frames = reader.getnframes()
         finished = sections[-1]["frame"]
         if frames < finished + SAMPLE_RATE:
             raise RuntimeError("Track lacks the one-second ending check")
@@ -222,13 +243,147 @@ def track_audition(output_dir, seed):
     return 0
 
 
+def lead_audition(output_dir, seed, duration, lead_set):
+    baseline = render(output_dir, "no_lead", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed)
+    tones, full_tone = {
+        "original": (("razor", "hollow", "wide"), "razor"),
+        "rough": (("razor", "machine", "buzz"), "buzz"),
+        "industrial": (("buzz", "iron", "corrosion"), "corrosion"),
+    }[lead_set]
+    mixes = [render(output_dir, tone, 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                    lead=tone) for tone in tones]
+    stems = [render(output_dir, tone, 2.3, 0.28, 0.52, "warehouse", "lead", duration, seed,
+                    lead=tone) for tone in tones]
+    rhythm = [render(output_dir, "lead_rhythm", 2.3, 0.28, 0.52, "warehouse", bus, duration, seed,
+                     lead="razor") for bus in ("low_end", "percussion")]
+    errors = [verify_stems(mix, [*rhythm, stem]) for mix, stem in zip(mixes, stems)]
+    target = min([-18.0] + [item["raw_loudness"]["integrated_lufs"] -
+                           item["raw_loudness"]["true_peak_dbtp"] - 2.0 for item in [baseline, *mixes]])
+    for item in [baseline, *mixes]:
+        match_loudness(item, target, output_dir)
+    clips = [{"name": item["name"], "path": item["matched"],
+              "start_frame": 0, "end_frame": 614400} for item in mixes]
+    pack, order = preview_pack(output_dir, clips, "lead_comparison")
+    full = render(output_dir, f"{full_tone}_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, seed,
+                  "track", lead=full_tone)
+    full_stem = render(output_dir, f"{full_tone}_track", 2.3, 0.28, 0.52, "warehouse", "lead", None, seed,
+                       "track", lead=full_tone)
+    full_baseline = render(output_dir, "no_lead_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, seed, "track")
+    full_rhythm = [render(output_dir, "lead_track_rhythm", 2.3, 0.28, 0.52, "warehouse", bus, None, seed,
+                         "track", lead="razor") for bus in ("low_end", "percussion")]
+    full_check = verify_track(full, [*full_rhythm, full_stem])
+    full_target = min(-18.0, full["raw_loudness"]["integrated_lufs"] -
+                      full["raw_loudness"]["true_peak_dbtp"] - 2.0)
+    match_loudness(full, full_target, output_dir)
+    transitions = [{"name": name, "path": full["matched"],
+                    "start_frame": start * 76800, "end_frame": end * 76800}
+                   for name, start, end in (("lead_entry", 14, 20), ("break_return", 82, 94))]
+    transition_pack, transition_order = preview_pack(output_dir, transitions, "lead_transitions")
+    receipt = {"phase": 4, "lead_set": lead_set, "bpm": 150, "seed": seed, "duration": duration, "target_lufs": target,
+               "mixes": mixes, "stems": stems, "baseline": baseline, "rhythm_stems": rhythm,
+               "stem_max_errors_lsb": errors,
+               "comparison": pack, "comparison_order": order, "full_track": full,
+               "full_stem": full_stem, "full_baseline": full_baseline, "full_rhythm_stems": full_rhythm,
+               "full_validation": full_check,
+               "transitions": transition_pack, "transition_order": transition_order,
+               "note": "Original four-bar motif shared by all tones. Stems retain raw mix gain. "
+                       "Technical checks do not establish musical quality."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print(f"Lead comparison: {pack}")
+    print(f"Full track: {full['matched']}")
+    print(f"Lead transitions: {transition_pack}")
+    return 0
+
+
+def bass_audition(output_dir, seed, duration, reference_path=None):
+    reference = None
+    if reference_path is not None:
+        # Validate before rendering: a prior mix in the output folder would be
+        # truncated by the probe before we could measure or compare it.
+        reference_path = reference_path.resolve()
+        if reference_path.is_relative_to(output_dir.resolve()) or any(
+                path.is_file() and reference_path.samefile(path) for path in output_dir.iterdir()):
+            raise ValueError("Bass reference must be outside --output-dir and must not alias an existing output file; choose a new output directory")
+        with wave.open(str(reference_path), "rb") as reader:
+            if (reader.getnchannels(), reader.getsampwidth(), reader.getframerate()) != (2, 2, SAMPLE_RATE) or reader.getnframes() < 614400:
+                raise ValueError("Bass reference must be stereo 48 kHz PCM16 with at least 12.8 seconds of audio")
+        reference = {"name": "previous_bass", "raw": str(reference_path),
+                     "raw_loudness": loudness(reference_path, output_dir / "reference.loudness.log")}
+    baseline = render(output_dir, "before_bass", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                      lead="corrosion")
+    mix = render(output_dir, "with_bass", 2.3, 0.28, 0.52, "warehouse", "mix", duration, seed,
+                 lead="corrosion", bass_level=0.65)
+    bass = render(output_dir, "bass_solo", 2.3, 0.28, 0.52, "warehouse", "bass", duration, seed,
+                  lead="corrosion", bass_level=0.65)
+    # Adding bass reserves linear master headroom. Apply that same gain to the
+    # old mix for the additive check; the bass-off source itself stays unchanged.
+    baseline["sum_gain"] = 1.0 / (1.0 + 0.65 * 0.25)
+    loop_error = verify_stems(mix, [baseline, bass])
+    comparison_baseline = baseline
+    comparison_items = [baseline, mix]
+    if reference is not None:
+        comparison_baseline = reference
+        comparison_items.append(comparison_baseline)
+    target = min([-18.0] + [item["raw_loudness"]["integrated_lufs"] -
+                           item["raw_loudness"]["true_peak_dbtp"] - 2.0 for item in comparison_items])
+    for item in comparison_items:
+        match_loudness(item, target, output_dir)
+    # The separate solo copy is raised for auditioning; the raw stem above
+    # retains the exact mix gain for summing and level comparisons.
+    solo_target = min(-18.0, bass["raw_loudness"]["integrated_lufs"] - bass["raw_loudness"]["true_peak_dbtp"] - 2.0)
+    match_loudness(bass, solo_target, output_dir)
+    pack, order = preview_pack(output_dir, [
+        {"name": item["name"], "path": item["matched"], "start_frame": 0, "end_frame": 614400}
+        for item in [comparison_baseline, mix]], "bass_comparison")
+    full = render(output_dir, "bass_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, seed,
+                  "track", lead="corrosion", bass_level=0.65)
+    full_baseline = render(output_dir, "before_bass_track", 2.3, 0.28, 0.52, "warehouse", "mix", None, seed,
+                           "track", lead="corrosion")
+    full_bass = render(output_dir, "bass_track", 2.3, 0.28, 0.52, "warehouse", "bass", None, seed,
+                       "track", lead="corrosion", bass_level=0.65)
+    full_baseline["sum_gain"] = baseline["sum_gain"]
+    full_check = verify_track(full, [full_baseline, full_bass])
+    if full_bass["bass_notes"] != 258:
+        raise RuntimeError("Bass arrangement changed its intended 258-note score")
+    with wave.open(full_bass["raw"], "rb") as reader:
+        for start, end in [(0, 8), (81, 88), (125, 128)]:
+            reader.setpos(start * 76800)
+            if any(pcm16(reader.readframes((end - start) * 76800))):
+                raise RuntimeError(f"Bass played in an arranged rest: bars {start}..{end}")
+    full_target = min(-18.0, full["raw_loudness"]["integrated_lufs"] - full["raw_loudness"]["true_peak_dbtp"] - 2.0)
+    match_loudness(full, full_target, output_dir)
+    transitions, transition_order = preview_pack(output_dir, [
+        {"name": name, "path": full["matched"], "start_frame": start * 76800, "end_frame": end * 76800}
+        for name, start, end in [("bass_entry", 6, 16), ("bass_under_lead_pause", 38, 44),
+                                ("break_and_return", 78, 94)]], "bass_transitions")
+    receipt = {"phase": 6, "bpm": 150, "seed": seed, "target_lufs": target,
+               "baseline": baseline, "mix": mix, "bass": bass, "comparison_baseline": comparison_baseline,
+               "loop_stem_max_error_lsb": loop_error, "comparison": pack, "comparison_order": order,
+               "full_track": full, "full_baseline": full_baseline, "full_bass": full_bass,
+               "full_validation": full_check, "transitions": transitions, "transition_order": transition_order,
+               "note": "Before/after mixes are loudness matched. Solo bass has its own audition gain; "
+                       "raw stems retain mix gain. Listening remains the sound-quality check."}
+    (output_dir / "audition.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    print(f"Bass comparison: {pack}")
+    print(f"Solo bass: {bass['matched']}")
+    print(f"Full track: {full['matched']}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", type=int, choices=(1, 2, 3), default=3)
+    parser.add_argument("--phase", type=int, choices=(1, 2, 3, 4, 6), default=4)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--duration", type=float, help="clip length for phases 1/2 (default 25.6 seconds)")
+    parser.add_argument("--duration", type=float, help="clip length for phases 1/2/4/6 (default 25.6 seconds)")
     parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--bass-reference", type=Path, help="previous mix WAV for the phase 6 listening comparison")
+    parser.add_argument("--lead-set", choices=("original", "rough", "industrial"), default="original",
+                        help="lead comparison for phase 4 (default original)")
     args = parser.parse_args()
+    if args.bass_reference is not None and args.phase != 6:
+        parser.error("--bass-reference requires --phase 6")
+    if args.lead_set != "original" and args.phase != 4:
+        parser.error("--lead-set requires --phase 4")
     if args.phase == 3 and args.duration is not None:
         parser.error("phase 3 renders the complete 128-bar arrangement; omit --duration")
     if args.duration is None:
@@ -237,11 +392,18 @@ def main():
         parser.error("duration must be between 12.8 and 120 seconds")
     if not 0 < args.seed < 2**32:
         parser.error("seed must be a nonzero u32")
-    destination = args.output_dir or ROOT / f"agent-temp-files/hard-techno/phase{args.phase}"
+    default_dir = ROOT / f"agent-temp-files/hard-techno/phase{args.phase}"
+    if args.phase == 4 and args.lead_set != "original":
+        default_dir = default_dir / args.lead_set
+    destination = args.output_dir or default_dir
     output_dir = destination.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.phase == 3:
         return track_audition(output_dir, args.seed)
+    if args.phase == 4:
+        return lead_audition(output_dir, args.seed, args.duration, args.lead_set)
+    if args.phase == 6:
+        return bass_audition(output_dir, args.seed, args.duration, args.bass_reference)
     candidates = FOUNDATIONS if args.phase == 1 else GROOVES
     mixes = [render(output_dir, *candidate, "mix", args.duration, args.seed)
              for candidate in candidates]
