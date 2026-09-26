@@ -16,6 +16,7 @@ const vec = @import("vector.zig");
 
 const time = @import("time.zig");
 const config = @import("config.zig");
+const perf = @import("perf.zig");
 
 const conv = @import("conversion.zig");
 const allocator = @import("allocator.zig").allocator;
@@ -168,7 +169,13 @@ pub fn mul(a: c.b2Vec2, b: f32) c.b2Vec2 {
 // ============================================================
 
 pub fn worldStep(dt: f32, subStepCount: c_int) void {
+    const start = perf.begin(.player_death);
     c.b2World_Step(getWorldId(), dt, subStepCount);
+    perf.recordPlayerDeathGameLoopStage(.box2d, start);
+    if (comptime config.perf.player_death) {
+        const profile = c.b2World_GetProfile(getWorldId());
+        perf.recordPlayerDeathGameLoopElapsed(.collision_pairs, @intFromFloat(profile.pairs * 1000));
+    }
 }
 
 pub fn getBodyCount() usize {

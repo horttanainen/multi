@@ -89,6 +89,15 @@ growth, including twelve Tower Keep deaths, but the last gibbing death reached
 45.431 ms and still failed the 33.333 ms frame-time gate. The remaining spike and
 obstructed respawn are documented for follow-up; acceptance does not mean that
 the performance gate passed.
+The user authorized a performance-polish follow-up. It targets the measured
+Box2D collision-pair search cost during dense blood bursts, preserving collision
+rules and particle amounts, and optimizes Box2D in Debug game builds while
+retaining native assertions. Independent review is complete; 137 tests and
+build/smoke passed. Twelve Tower Keep deaths passed the 33.333 ms gate with a
+29.880 ms maximum. See [performance-polish notes](ragdoll_performance_polish.md)
+for the earlier failed capture and final validation. The user accepted this
+follow-up and the patch-review reminder beside the Box2D pin, and explicitly
+authorized their commit.
 See [gibbing rule implementation](character_gibbing_rules.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
@@ -366,9 +375,9 @@ Split this work into independently reviewed commits:
 
 ### 4. Blender authoring after the setup works
 
-Deferred while the newly requested body-part gibbing and ragdoll work is planned.
-Implementation awaits the user's go-ahead. Begin with the running profile as one
-reviewable commit when returning to Blender authoring.
+Body-part gibbing, ragdolls and performance polish are accepted. Blender authoring
+is the next planned feature and awaits the user's go-ahead. Begin with the running
+profile as one reviewable commit.
 
 Build a prepared Blender scene with a planar skeleton, named target controls, IK preview, useful animation layout, and a limited set of custom properties for locomotion settings.
 

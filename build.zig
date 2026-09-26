@@ -1,8 +1,58 @@
 const std = @import("std");
 
+fn box2dBroadPhaseSource(b: *std.Build, dependency: *std.Build.Dependency) !std.Build.LazyPath {
+    // Patch only the pinned dependency's pair queries, leaving the cache source
+    // untouched. Dense particle bursts otherwise visit every rejected pair.
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        b.graph.io,
+        dependency.path("src/broad_phase.c").getPath(b),
+        b.allocator,
+        .limited(128 * 1024),
+    );
+    const binding = "queryContext.queryShapeIndex = (int)b2DynamicTree_GetUserData( baseTree, proxyId );";
+    const query = "fatAABB, B2_DEFAULT_MASK_BITS, b2PairQueryCallback, &queryContext";
+    if (std.mem.count(u8, source, binding) != 1 or std.mem.count(u8, source, query) != 3) {
+        std.log.err("box2dBroadPhaseSource: dependency changed; review collision-mask patch", .{});
+        return error.Box2dBroadPhaseSourceChanged;
+    }
+    // Positive groups force collision even when category masks exclude it.
+    const mask_binding =
+        \\        const b2Shape* queryShape =
+        \\            b2ShapeArray_Get( &world->shapes, queryContext.queryShapeIndex );
+        \\        uint64_t queryMask = queryShape->filter.groupIndex > 0
+        \\            ? B2_DEFAULT_MASK_BITS : queryShape->filter.maskBits;
+    ;
+    const with_mask = try std.mem.replaceOwned(
+        u8,
+        b.allocator,
+        source,
+        binding,
+        binding ++ "\n" ++ mask_binding,
+    );
+    const patched = try std.mem.replaceOwned(
+        u8,
+        b.allocator,
+        with_mask,
+        query,
+        "fatAABB, queryMask, b2PairQueryCallback, &queryContext",
+    );
+    return b.addWriteFiles().add("box2d/broad_phase.c", patched);
+}
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Keep game debugging intact without running the native collision solver
+    // unoptimized. Override this when stepping through Box2D itself.
+    const box2d_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "box2d-optimize",
+        "Box2D optimization mode (defaults to ReleaseSafe in Debug game builds)",
+    ) orelse if (optimize == .Debug) .ReleaseSafe else optimize;
+    const box2d_flags: []const []const u8 = if (optimize == .Debug)
+        &.{ "-std=gnu17", "-UNDEBUG" }
+    else
+        &.{"-std=gnu17"};
     const explosion_perf = b.option(bool, "explosion-perf", "Compile explosion performance instrumentation and benchmark scenarios") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "explosion_perf", explosion_perf);
@@ -33,22 +83,24 @@ pub fn build(b: *std.Build) !void {
     const box2d_source_dep = b.dependency("box2d_source", .{});
     const box2d_mod = b.createModule(.{
         .target = target,
-        .optimize = optimize,
+        .optimize = box2d_optimize,
         .link_libc = true,
     });
     box2d_mod.addIncludePath(box2d_source_dep.path("include"));
+    box2d_mod.addIncludePath(box2d_source_dep.path("src"));
+    box2d_mod.addCSourceFile(.{
+        .file = try box2dBroadPhaseSource(b, box2d_source_dep),
+        .flags = box2d_flags,
+    });
     box2d_mod.addCSourceFiles(.{
         .root = box2d_source_dep.path("src"),
-        .flags = &.{
-            "-std=gnu17",
-        },
+        .flags = box2d_flags,
         .files = &.{
             "aabb.c",
             "arena_allocator.c",
             "array.c",
             "bitset.c",
             "body.c",
-            "broad_phase.c",
             "constraint_graph.c",
             "contact.c",
             "contact_solver.c",

@@ -4,6 +4,8 @@ Status: accepted by the user, with explicit commit authorization. Independent
 review and corrections include the repeated-death performance work and reusable
 explosion storage. The remaining Tower Keep frame-time spike and obstructed
 respawn are documented below for follow-up.
+The subsequent [performance-polish phase](ragdoll_performance_polish.md) addresses
+the collision-search cost and native build performance; it is accepted by the user.
 
 ## Behavior
 

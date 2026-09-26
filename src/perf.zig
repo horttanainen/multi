@@ -10,6 +10,8 @@ pub const Scope = enum {
 };
 
 pub const PlayerDeathGameLoopMetrics = struct {
+    box2d_us: u64 = 0,
+    collision_pairs_us: u64 = 0,
     terrain_updates_us: u64 = 0,
     rope_us: u64 = 0,
     blood_contacts_us: u64 = 0,
@@ -46,6 +48,8 @@ pub const PlayerDeathFrameStage = enum {
 };
 
 pub const PlayerDeathGameLoopStage = enum {
+    box2d,
+    collision_pairs,
     terrain_updates,
     rope,
     blood_contacts,
@@ -154,6 +158,8 @@ pub inline fn log(comptime scope: Scope, comptime fmt: []const u8, args: anytype
 }
 
 fn addPlayerDeathGameLoopMetrics(target: *PlayerDeathGameLoopMetrics, metrics: PlayerDeathGameLoopMetrics) void {
+    target.box2d_us += metrics.box2d_us;
+    target.collision_pairs_us += metrics.collision_pairs_us;
     target.terrain_updates_us += metrics.terrain_updates_us;
     target.rope_us += metrics.rope_us;
     target.blood_contacts_us += metrics.blood_contacts_us;
@@ -222,9 +228,11 @@ fn reportPlayerDeathCapture() void {
         },
     );
     std.log.info(
-        "perf.player_death_game_loop event={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
+        "perf.player_death_game_loop event={d} box2d_us={d} collision_pairs_us={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
         .{
             capture.event_id,
+            capture.frame_totals.game_loop.box2d_us,
+            capture.frame_totals.game_loop.collision_pairs_us,
             capture.frame_totals.game_loop.terrain_updates_us,
             capture.frame_totals.game_loop.rope_us,
             capture.frame_totals.game_loop.blood_contacts_us,
@@ -252,7 +260,7 @@ fn reportPlayerDeathCapture() void {
         if (!worst.valid) continue;
         const frame = worst.metrics;
         std.log.info(
-            "perf.player_death_worst event={d} rank={d} frame={d} total_us={d} physics_us={d} input_us={d} logic_us={d} render_us={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
+            "perf.player_death_worst event={d} rank={d} frame={d} total_us={d} physics_us={d} input_us={d} logic_us={d} render_us={d} box2d_us={d} collision_pairs_us={d} terrain_us={d} rope_us={d} blood_contacts_us={d} blood_texture_us={d} giblet_contacts_us={d} projectile_contacts_us={d} cleanup_us={d} player_sensor_us={d} animation_camera_us={d}",
             .{
                 capture.event_id,
                 rank + 1,
@@ -262,6 +270,8 @@ fn reportPlayerDeathCapture() void {
                 frame.input_us,
                 frame.logic_us,
                 frame.render_us,
+                frame.game_loop.box2d_us,
+                frame.game_loop.collision_pairs_us,
                 frame.game_loop.terrain_updates_us,
                 frame.game_loop.rope_us,
                 frame.game_loop.blood_contacts_us,
@@ -322,6 +332,8 @@ pub inline fn recordPlayerDeathFrameStage(comptime stage: PlayerDeathFrameStage,
 pub inline fn recordPlayerDeathGameLoopElapsed(comptime stage: PlayerDeathGameLoopStage, elapsed_us: u64) void {
     if (comptime !configured(.player_death)) return;
     switch (stage) {
+        .box2d => currentPlayerDeathFrameMetrics.game_loop.box2d_us += elapsed_us,
+        .collision_pairs => currentPlayerDeathFrameMetrics.game_loop.collision_pairs_us += elapsed_us,
         .terrain_updates => currentPlayerDeathFrameMetrics.game_loop.terrain_updates_us += elapsed_us,
         .rope => currentPlayerDeathFrameMetrics.game_loop.rope_us += elapsed_us,
         .blood_contacts => currentPlayerDeathFrameMetrics.game_loop.blood_contacts_us += elapsed_us,

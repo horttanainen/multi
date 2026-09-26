@@ -17,6 +17,8 @@
             .hash = "SDL_ttf-3.2.3-1-PNW5xMMRAADJwwIkWjVS5gqMyk2oVbBm7qOh06Y7hFeu",
         },
         .box2d_source = .{
+            // When updating this pin, review box2dBroadPhaseSource in build.zig.
+            // Recheck whether upstream still needs the patch; see docs/ragdoll_performance_polish.md.
             .url = "git+https://github.com/erincatto/box2d#8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3",
             .hash = "N-V-__8AAD_GLQC0gE2D_PytnnbJ5Ow_tY-H253NllhDk_n1",
         },

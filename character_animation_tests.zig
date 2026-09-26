@@ -4384,6 +4384,153 @@ fn addDynamicL(height: f32, direction: f32) !box2d.c.b2BodyId {
     return body;
 }
 
+test "dense blood clouds skip self collisions but every droplet still contacts terrain" {
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    box2d.setGravity(0);
+    const droplet_count = 512;
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.enableContactEvents = true;
+    shape.filter.categoryBits = collision.CATEGORY_PARTICLE;
+    shape.filter.maskBits = collision.MASK_PARTICLE;
+    const circle: box2d.c.b2Circle = .{ .center = .{ .x = 0, .y = 0 }, .radius = 0.1 };
+    for (0..droplet_count) |_| {
+        const body = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+        _ = box2d.c.b2CreateCircleShape(body, &shape, &circle);
+    }
+    box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+    try std.testing.expectEqual(@as(c_int, 0), box2d.getContactEvents().beginCount);
+    const floor = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+    shape.filter.maskBits = collision.MASK_TERRAIN;
+    shape.invokeContactCreation = true;
+    const polygon = box2d.c.b2MakeBox(2, 0.1);
+    const floor_shape = box2d.c.b2CreatePolygonShape(floor, &shape, &polygon);
+    box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+    const contacts = box2d.getContactEvents();
+    try std.testing.expectEqual(@as(c_int, droplet_count), contacts.beginCount);
+    var seen = std.AutoHashMap(box2d.c.b2ShapeId, void).init(std.testing.allocator);
+    defer seen.deinit();
+    for (0..@intCast(contacts.beginCount)) |index| {
+        const contact = contacts.beginEvents[index];
+        const first_is_floor = box2d.c.B2_ID_EQUALS(floor_shape, contact.shapeIdA);
+        const second_is_floor = box2d.c.B2_ID_EQUALS(floor_shape, contact.shapeIdB);
+        try std.testing.expect(first_is_floor != second_is_floor);
+        const droplet = if (first_is_floor) contact.shapeIdB else contact.shapeIdA;
+        const entry = try seen.getOrPut(droplet);
+        try std.testing.expect(!entry.found_existing);
+    }
+}
+
+test "native broad phase preserves masks and group overrides across all body trees" {
+    const first_category: u64 = 1 << 60;
+    const second_category: u64 = 1 << 61;
+    const cases = [_]struct {
+        first_group: i32 = 0,
+        second_group: i32 = 0,
+        first_mask: u64 = second_category,
+        second_mask: u64 = first_category,
+        touching: bool = true,
+    }{
+        .{},
+        .{ .first_mask = 0, .touching = false },
+        .{ .second_mask = 0, .touching = false },
+        .{ .first_group = 3, .second_group = 3, .first_mask = 0, .second_mask = 0 },
+        .{ .first_group = -3, .second_group = -3, .touching = false },
+        .{ .first_group = 3, .second_group = 4, .first_mask = 0, .touching = false },
+        .{ .first_group = -3, .second_group = -4 },
+    };
+    for ([_]box2d.c.b2BodyType{ box2d.c.b2_staticBody, box2d.c.b2_kinematicBody, box2d.c.b2_dynamicBody }) |other_type| {
+        for ([_]bool{ false, true }) |reverse_order| {
+            for (cases) |case| {
+                box2d.initWorld();
+                defer box2d.destroyWorld();
+                box2d.setGravity(0);
+                for (0..2) |index| {
+                    const first = (index == 0) != reverse_order;
+                    var body_def = box2d.createDynamicBodyDef(vec.zero);
+                    body_def.type = if (first) box2d.c.b2_dynamicBody else other_type;
+                    const body = try box2d.createBody(body_def);
+                    var shape = box2d.c.b2DefaultShapeDef();
+                    shape.enableContactEvents = true;
+                    shape.filter = .{
+                        .categoryBits = if (first) first_category else second_category,
+                        .maskBits = if (first) case.first_mask else case.second_mask,
+                        .groupIndex = if (first) case.first_group else case.second_group,
+                    };
+                    const circle: box2d.c.b2Circle = .{ .center = .{ .x = 0, .y = 0 }, .radius = 0.5 };
+                    _ = box2d.c.b2CreateCircleShape(body, &shape, &circle);
+                }
+                box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+                try std.testing.expectEqual(@as(c_int, if (case.touching) 1 else 0), box2d.getContactEvents().beginCount);
+            }
+        }
+    }
+}
+
+test "native broad phase discovers collisions after pooled activation and filter changes" {
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    box2d.setGravity(0);
+    const first = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+    const second = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.enableContactEvents = true;
+    shape.filter.maskBits = 0;
+    const circle: box2d.c.b2Circle = .{ .center = .{ .x = 0, .y = 0 }, .radius = 0.5 };
+    const first_shape = box2d.c.b2CreateCircleShape(first, &shape, &circle);
+    const second_shape = box2d.c.b2CreateCircleShape(second, &shape, &circle);
+    box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+    try std.testing.expectEqual(@as(c_int, 0), box2d.getContactEvents().beginCount);
+    // The existing proxies must be reconsidered when positive groups override
+    // the empty masks, and again after pooled bodies are enabled.
+    for ([_]bool{ false, true }) |pooled| {
+        if (pooled) {
+            box2d.c.b2Body_Disable(first);
+            box2d.c.b2Body_Disable(second);
+        }
+        shape.filter.groupIndex = 5;
+        box2d.c.b2Shape_SetFilter(first_shape, shape.filter);
+        box2d.c.b2Shape_SetFilter(second_shape, shape.filter);
+        if (pooled) {
+            box2d.c.b2Body_Enable(first);
+            box2d.c.b2Body_Enable(second);
+        }
+        box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+        try std.testing.expectEqual(@as(c_int, 1), box2d.getContactEvents().beginCount);
+        shape.filter.groupIndex = -5;
+        box2d.c.b2Shape_SetFilter(first_shape, shape.filter);
+        box2d.c.b2Shape_SetFilter(second_shape, shape.filter);
+        box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+        try std.testing.expectEqual(@as(c_int, 0), box2d.getContactEvents().beginCount);
+    }
+    const mask_changes = [_]struct { first_mask: u64, second_category: u64, second_mask: u64, touching: bool }{
+        .{ .first_mask = 1 << 61, .second_category = 1 << 61, .second_mask = 0, .touching = false },
+        .{ .first_mask = 1 << 61, .second_category = 1 << 61, .second_mask = 1 << 60, .touching = true },
+        .{ .first_mask = 1 << 61, .second_category = 1 << 62, .second_mask = 1 << 60, .touching = false },
+        .{ .first_mask = 1 << 62, .second_category = 1 << 62, .second_mask = 1 << 60, .touching = true },
+    };
+    for (mask_changes) |change| {
+        box2d.c.b2Shape_SetFilter(first_shape, .{
+            .categoryBits = 1 << 60,
+            .maskBits = change.first_mask,
+            .groupIndex = 0,
+        });
+        box2d.c.b2Shape_SetFilter(second_shape, .{
+            .categoryBits = change.second_category,
+            .maskBits = change.second_mask,
+            .groupIndex = 0,
+        });
+        for ([_]box2d.c.b2BodyId{ first, second }) |body| {
+            box2d.c.b2Body_SetTransform(body, box2d.c.b2Vec2_zero, box2d.c.b2Rot_identity);
+            box2d.c.b2Body_SetLinearVelocity(body, box2d.c.b2Vec2_zero);
+        }
+        box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+        const expected: c_int = if (change.touching) 1 else 0;
+        try std.testing.expectEqual(expected, box2d.getContactEvents().beginCount);
+    }
+}
+
 test "grounding and foot probes use solid collision pairs including custom categories and group overrides" {
     const old_view = animation.view;
     defer animation.view = old_view;
