@@ -21,6 +21,7 @@ const weapon = @import("src/weapon.zig");
 const control = @import("src/control.zig");
 const entity = @import("src/entity.zig");
 const camera = @import("src/camera.zig");
+const camera_shake = @import("src/camera_shake.zig");
 const time = @import("src/time.zig");
 const audio = @import("src/audio.zig");
 const conv = @import("src/conversion.zig");
@@ -30,6 +31,8 @@ const damage = @import("src/damage.zig");
 const gravestone = @import("src/gravestone.zig");
 const score = @import("src/score.zig");
 const gibbing = @import("src/gibbing.zig");
+const ragdoll = @import("src/ragdoll.zig");
+const blast_pressure = @import("src/blast_pressure.zig");
 const destruction = @import("src/destruction.zig");
 const particle = @import("src/particle.zig");
 const particle_effect = @import("src/particle_effect.zig");
@@ -467,11 +470,29 @@ test "artwork reload prepares absent giblet pools after subsystem initialization
     const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
     const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 100, .b = 50 }, vec.zero);
     const body = try gibbing.activatePart(snapshot.parts[0], vec.zero, 0);
+    const corpse_root = (try ragdoll.create(snapshot, &pack)).?;
+    const corpse = ragdoll.corpses.get(corpse_root).?;
     const original_count = pool.memberships.count();
+    const saved_sprites = pack.parts[1].sprites;
+    pack.parts[1].sprites[0] = null;
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    const failure = gibbing.replaceArtwork(&pack);
+    std.testing.log_level = old_log_level;
+    pack.parts[1].sprites = saved_sprites;
+    try std.testing.expectError(error.MissingCharacterPartSprite, failure);
+    try std.testing.expect(ragdoll.corpses.contains(corpse_root));
+    for (corpse.joints[0..corpse.joint_count]) |joint| {
+        try std.testing.expect(box2d.c.b2Joint_IsValid(joint));
+    }
     try gibbing.replaceArtwork(&pack);
     character_art.install(try loadArt(set.rig));
     try std.testing.expect(!box2d.c.b2Body_IsValid(body));
     try std.testing.expect(!character_art.bodyParts.contains(body));
+    try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+    for (corpse.bodies[0..corpse.body_count]) |limb| {
+        try std.testing.expect(!box2d.c.b2Body_IsValid(limb));
+    }
     try std.testing.expectEqual(original_count, pool.memberships.count());
     try std.testing.expectEqual(original_count, character_art.bodyParts.count());
     const replacement_body = try gibbing.activatePart(snapshot.parts[0], vec.zero, 0);
@@ -503,6 +524,47 @@ test "discarding invalid queued pool bodies does not skip another queued release
     for (retained) |body| box2d.c.b2DestroyBody(body);
 }
 
+fn createArrowFixture(
+    position: vec.Vec2,
+    target_category: u64,
+    penetration: projectile.PenetrationMode,
+) !box2d.c.b2BodyId {
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.enableContactEvents = true;
+    var body_def = box2d.createDynamicBodyDef(vec.zero);
+    body_def.gravityScale = 0;
+    shape.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+    shape.filter.maskBits = target_category;
+    body_def.position = vec.toBox2d(position);
+    body_def.rotation = box2d.c.b2MakeRot(std.math.pi);
+    const arrow = try entity.createFromShape(
+        arrow_fixture_sprite,
+        box2d.c.b2MakeBox(0.04, 0.3),
+        shape,
+        body_def,
+        "projectile",
+        .rectangle,
+    );
+    entity.markSpriteUuidsShared(arrow.bodyId);
+    if (penetration == .penetrating) {
+        shape.isSensor = true;
+        shape.enableSensorEvents = true;
+        shape.filter.maskBits = collision.otherPlayersMask(0);
+        const polygon = box2d.c.b2MakeBox(0.04, 0.3);
+        _ = box2d.c.b2CreatePolygonShape(arrow.bodyId, &shape, &polygon);
+    }
+    try projectile.create(arrow.bodyId, .{
+        .owner_id = 0,
+        .direct_damage = 40,
+        .penetration = penetration,
+        .impact_behavior = .stick,
+        .flight_rotation = .velocity_aligned,
+        .stick_depth = 0.03,
+    });
+    box2d.c.b2Body_SetLinearVelocity(arrow.bodyId, .{ .x = 0, .y = 2 });
+    return arrow.bodyId;
+}
+
 fn createEmbeddedArrowFixture(
     target_category: u64,
     pooled: bool,
@@ -532,44 +594,16 @@ fn createEmbeddedArrowFixture(
         const id = try pool.create(&.{target.bodyId});
         _ = (try pool.acquire(id, .return_null)).?;
     }
-    shape.filter.categoryBits = collision.CATEGORY_PROJECTILE;
-    shape.filter.maskBits = target_category;
-    body_def.position = .{ .x = 0, .y = -0.5 };
-    body_def.rotation = box2d.c.b2MakeRot(std.math.pi);
-    const arrow = try entity.createFromShape(
-        arrow_fixture_sprite,
-        box2d.c.b2MakeBox(0.04, 0.3),
-        shape,
-        body_def,
-        "projectile",
-        .rectangle,
-    );
-    entity.markSpriteUuidsShared(arrow.bodyId);
-    if (penetration == .penetrating) {
-        shape.isSensor = true;
-        shape.enableSensorEvents = true;
-        shape.filter.maskBits = collision.otherPlayersMask(0);
-        const polygon = box2d.c.b2MakeBox(0.04, 0.3);
-        _ = box2d.c.b2CreatePolygonShape(arrow.bodyId, &shape, &polygon);
-    }
-    try projectile.create(arrow.bodyId, .{
-        .owner_id = 0,
-        .direct_damage = 40,
-        .penetration = penetration,
-        .impact_behavior = .stick,
-        .flight_rotation = .velocity_aligned,
-        .stick_depth = 0.03,
-    });
-    box2d.c.b2Body_SetLinearVelocity(arrow.bodyId, .{ .x = 0, .y = 2 });
+    const arrow_body = try createArrowFixture(.{ .x = 0, .y = -0.5 }, target_category, penetration);
     for (0..3) |_| {
         box2d.worldStep(1.0 / 60.0, 4);
         try projectile.checkContacts();
-        if (projectile.embeddedProjectiles.contains(arrow.bodyId)) break;
+        if (projectile.embeddedProjectiles.contains(arrow_body)) break;
     }
-    try std.testing.expect(projectile.embeddedProjectiles.contains(arrow.bodyId));
-    try std.testing.expect(!projectile.activeProjectiles.contains(arrow.bodyId));
+    try std.testing.expect(projectile.embeddedProjectiles.contains(arrow_body));
+    try std.testing.expect(!projectile.activeProjectiles.contains(arrow_body));
     try std.testing.expectEqual(@as(c_int, 1), box2d.c.b2Body_GetJointCount(target.bodyId));
-    return .{ .target = target.bodyId, .arrow = arrow.bodyId };
+    return .{ .target = target.bodyId, .arrow = arrow_body };
 }
 
 const arrow_fixture_sprite = 819274;
@@ -946,6 +980,8 @@ test "player damage uses ordinary death down to minus thirty nine and records it
     for ([_]f32{ 0, -5, -39 }) |remaining| {
         const body = try beginAimingPlayer();
         defer endAimingPlayer(body);
+        try prepareRagdollFixture(animation.assets.?.rig);
+        defer endRagdollFixture();
         defer gravestone.clearScheduledSpawns();
         try score.registerPlayer(7);
         defer score.cleanup();
@@ -967,12 +1003,607 @@ test "player damage uses ordinary death down to minus thirty nine and records it
         try std.testing.expect(!box2d.c.b2Body_IsEnabled(body));
         try std.testing.expect(!entity.getEntity(body).?.enabled);
         try std.testing.expectEqual(@as(i32, 1), score.scores.get(7).?.deaths);
+        try std.testing.expectEqual(@as(usize, 1), ragdoll.corpses.count());
+        const corpse_root = ragdoll.corpses.keys()[0];
+        try std.testing.expectEqual(@as(f32, 100), damage.components.get(corpse_root).?.model.health.current);
         const timer = player.players.get(7).?.respawnTimerId;
         try std.testing.expect(!(try player.damage(7, 500, null)).applied);
         try std.testing.expectEqual(timer, player.players.get(7).?.respawnTimerId);
         try std.testing.expectEqual(remaining, player.players.get(7).?.health);
         try std.testing.expectEqual(@as(i32, 1), score.scores.get(7).?.deaths);
+        try destruction.apply(corpse_root, .{ .source = .hitscan, .amount = 100, .position = vec.zero });
+        try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+        try std.testing.expectEqual(timer, player.players.get(7).?.respawnTimerId);
+        try std.testing.expectEqual(@as(i32, 1), score.scores.get(7).?.deaths);
     }
+}
+
+test "fatal projectile contact snapshots the current fixed-step facing" {
+    const old_view = animation.view;
+    const old_accumulator = time.accumulator;
+    const old_alpha = time.alpha;
+    defer animation.view = old_view;
+    defer time.accumulator = old_accumulator;
+    defer time.alpha = old_alpha;
+    try sdl.init(.{});
+    defer sdl.quit();
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    try prepareRagdollFixture(animation.assets.?.rig);
+    defer endRagdollFixture();
+    defer gravestone.clearScheduledSpawns();
+    defer camera_shake.cleanup();
+    try score.registerPlayer(7);
+    try score.registerPlayer(0);
+    defer score.cleanup();
+    defer particle.cleanup();
+    defer particle_effect.cleanup();
+    const old_presets = data.particleDataMap;
+    data.particleDataMap = .empty;
+    defer {
+        data.particleDataMap.deinit(allocator.allocator);
+        data.particleDataMap = old_presets;
+    }
+    var preset = std.mem.zeroes(data.ParticleData);
+    preset.particlesPerUnit = 1;
+    preset.maxParticles = 1;
+    preset.minScale = 0.1;
+    preset.maxScale = 0.1;
+    preset.density = 1;
+    preset.lifetimeMs = 100;
+    preset.stain = .{ .minRadius = 0.01, .maxRadius = 0.02 };
+    try data.particleDataMap.put(allocator.allocator, "blood", preset);
+    try particle_effect.init();
+    try blood.init();
+    // Suppress renderer-dependent droplets in this CPU-only contact fixture.
+    // Runtime projectile scenarios exercise the configured blood emission.
+    particle_effect.presets.getPtr(try blood.particleEffectId()).?.maxParticles = 0;
+    try registerArrowFixtureSprite();
+    defer _ = sprite.sprites.fetchSwapRemoveLocking(arrow_fixture_sprite);
+    defer projectile.cleanup();
+    const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+    const arrow = try createArrowFixture(position, collision.CATEGORY_PLAYER, .non_penetrating);
+    projectile.activeProjectiles.getPtr(arrow).?.impact_behavior = .destroy;
+    defer {
+        if (box2d.c.b2Body_IsValid(arrow)) {
+            _ = entity.remove(arrow);
+        }
+        sdl.removeTimer(player.players.get(7).?.respawnTimerId);
+    }
+    player.players.getPtr(7).?.health = 20;
+    try std.testing.expect(animation.states.get(7).?.facing_right);
+    player_input.submit(7, .{ .movementDirection = vec.west, .aimDirection = vec.west });
+    control.applyPlayerInput(7);
+    time.accumulator = config.physics.dt;
+    try std.testing.expectEqual(@as(usize, 1), try physics.step());
+    try std.testing.expect(player.players.get(7).?.isDead);
+    try std.testing.expectEqual(@as(usize, 1), ragdoll.corpses.count());
+    const snapshot = ragdoll.corpses.values()[0].snapshot;
+    for (snapshot.parts[0..snapshot.count]) |part| {
+        try std.testing.expect(!part.placed.facing_right);
+    }
+}
+
+fn prepareRagdollFixture(rig: animation.Rig) !void {
+    const pack = try loadArt(rig);
+    for (pack.parts, 0..) |*part, index| part.sprites = .{ 30000 + index * 2, 30001 + index * 2 };
+    character_art.install(pack);
+    gibbing.partPools = try gibbing.preparePools(&character_art.assets.?, 1);
+    // CPU-only fixture: keep destruction ownership/physics real; the runtime
+    // benchmark exercises particle emission with the initialized renderer.
+    for (damage.components.values()) |*component| component.onDestroyed = .none;
+}
+
+fn endRagdollFixture() void {
+    gibbing.cleanup();
+    for (character_art.assets.?.parts) |*part| part.sprites = .{ null, null };
+    character_art.cleanup();
+    damage.cleanup();
+    pool.cleanup();
+}
+
+fn createRagdollFixture(set: *const animation.Assets, position: vec.Vec2, facing: bool) !box2d.c.b2BodyId {
+    const pose = animation.evaluatePose(set, 0.4, .run);
+    const frame = animation.solveAimedPose(set, pose, position, facing, vec.east, 0, null);
+    const snapshot = gibbing.snapshotPose(
+        &character_art.assets.?,
+        set.rig,
+        frame,
+        false,
+        .{ .r = 70, .g = 140, .b = 210 },
+        .{ .x = 3, .y = -2 },
+    );
+    return (try ragdoll.create(snapshot, &character_art.assets.?)).?;
+}
+
+test "catch-up physics consumes first-step blood contacts and returns bodies before another emission" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer particle.cleanup();
+    const old_accumulator = time.accumulator;
+    const old_alpha = time.alpha;
+    defer time.accumulator = old_accumulator;
+    defer time.alpha = old_alpha;
+
+    const floor = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    var floor_shape = box2d.c.b2DefaultShapeDef();
+    floor_shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+    floor_shape.filter.maskBits = collision.CATEGORY_PARTICLE;
+    const polygon = box2d.c.b2MakeBox(2, 0.1);
+    _ = box2d.c.b2CreatePolygonShape(floor, &floor_shape, &polygon);
+
+    const body = try box2d.createBody(box2d.createDynamicBodyDef(.{ .x = 0, .y = -0.15 }));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.enableContactEvents = true;
+    shape.filter.categoryBits = collision.CATEGORY_PARTICLE;
+    shape.filter.maskBits = collision.CATEGORY_TERRAIN;
+    const circle = box2d.c.b2Circle{ .center = box2d.c.b2Vec2_zero, .radius = 0.1 };
+    const shape_id = box2d.c.b2CreateCircleShape(body, &shape, &circle);
+    try particle.particles.putLocking(body, .{
+        .bodyId = body,
+        .shapeId = shape_id,
+        .state = null,
+        .color = null,
+        .visual_scale = 0.1,
+        .expires_at = time.now() + 5,
+        .behaviors = .{ .stain = .{
+            .color = .{ .r = 100, .g = 0, .b = 0 },
+            .radius = 0.1,
+            .target_mask = collision.CATEGORY_TERRAIN,
+        } },
+        .seed = 123,
+    });
+    time.accumulator = 3 * @as(f64, config.physics.dt);
+    try std.testing.expectEqual(@as(usize, 3), try physics.step());
+    try std.testing.expectEqual(@as(usize, 0), particle.particles.map.count());
+    try std.testing.expectEqual(@as(usize, 1), particle.pendingStains.items.len);
+    try std.testing.expect(!box2d.c.b2Body_IsEnabled(body));
+    try std.testing.expectEqual(@as(usize, 1), particle.availableBodies.items.len);
+    try std.testing.expect(box2d.c.B2_ID_EQUALS(body, particle.availableBodies.items[0].bodyId));
+    // No render-loop cleanup or new allocation is required to replenish this reserve.
+    try particle.prewarmBodies(1);
+    try std.testing.expectEqual(@as(usize, 1), particle.availableBodies.items.len);
+    time.accumulator = config.physics.dt;
+    _ = try physics.step();
+    try std.testing.expectEqual(@as(usize, 1), particle.pendingStains.items.len);
+}
+
+test "connected ragdoll root and limbs produce no impact blood" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const root = try createRagdollFixture(&set, vec.zero, true);
+    const corpse = ragdoll.corpses.get(root).?;
+    const wall = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_UNBREAKABLE;
+    shape.filter.maskBits = collision.CATEGORY_GIBLET;
+    const polygon = box2d.c.b2MakeBox(4, 4);
+    _ = box2d.c.b2CreatePolygonShape(wall, &shape, &polygon);
+    box2d.worldStep(config.physics.dt, config.physics.subStepCount);
+    const contacts = box2d.getContactEvents();
+    var root_contact = false;
+    var limb_contact = false;
+    for (0..@intCast(contacts.beginCount)) |index| {
+        const event = contacts.beginEvents[index];
+        const first = box2d.c.b2Shape_GetBody(event.shapeIdA);
+        const second = box2d.c.b2Shape_GetBody(event.shapeIdB);
+        if (box2d.c.B2_ID_EQUALS(first, root) or box2d.c.B2_ID_EQUALS(second, root)) {
+            root_contact = true;
+        } else {
+            limb_contact = true;
+        }
+    }
+    try std.testing.expect(root_contact and limb_contact);
+    for (corpse.bodies[0..corpse.body_count]) |body| {
+        box2d.c.b2Body_SetLinearVelocity(body, .{ .x = 5, .y = 5 });
+    }
+    // Contact processing must not even reach the blood emitter; this CPU
+    // fixture intentionally has no renderer or particle effect initialized.
+    try gibbing.checkContacts();
+    try std.testing.expectEqual(@as(usize, 0), particle.particles.map.count());
+    try std.testing.expectEqual(@as(f32, 100), damage.components.get(root).?.model.health.current);
+}
+
+test "ragdolls preserve death pose and velocity and enforce mirrored anatomical hinges" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    _ = try addTerrainBox(.{ .x = 5, .y = 3 }, .{ .x = 20, .y = 0.5 });
+    for ([_]bool{ false, true }, 0..) |facing, index| {
+        const root = try createRagdollFixture(&set, .{ .x = @floatFromInt(index * 5), .y = 0 }, facing);
+        const corpse = ragdoll.corpses.get(root).?;
+        try std.testing.expectEqual(corpse.body_count - 1, corpse.joint_count);
+        for (corpse.bodies[0..corpse.body_count], corpse.snapshot.parts[0..corpse.body_count]) |body, part| {
+            try nearPoint(part.placed.position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0.00001);
+            try nearPoint(part.velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0.00001);
+            try std.testing.expectEqualDeep(part.skin_color, character_art.bodyParts.get(body).?.skin_color);
+            try std.testing.expect(pool.memberships.get(body).?.reserved);
+            try std.testing.expect(!character_art.bodyParts.get(body).?.severed);
+            try std.testing.expect(box2d.c.B2_ID_EQUALS(root, damage.healthOwner(body)));
+            const shape = entity.entities.getLocking(body).?.shapeIds[0];
+            const filter = box2d.c.b2Shape_GetFilter(shape);
+            try std.testing.expectEqual(corpse.collision_group, filter.groupIndex);
+            try std.testing.expect((filter.maskBits & collision.CATEGORY_PLAYER) != 0);
+            try std.testing.expect((filter.maskBits & collision.CATEGORY_RUBBLE) != 0);
+        }
+    }
+    for (0..180) |_| box2d.worldStep(1.0 / 60.0, 4);
+    for (ragdoll.corpses.values()) |corpse| {
+        for (corpse.bodies[0..corpse.body_count]) |body| {
+            try std.testing.expect(box2d.c.b2Body_GetPosition(body).y < 2.6);
+        }
+        for (corpse.joints[0..corpse.joint_count]) |joint| {
+            const a = box2d.c.b2Joint_GetBodyA(joint);
+            const b = box2d.c.b2Joint_GetBodyB(joint);
+            const anchor_a = box2d.c.b2Body_GetWorldPoint(a, box2d.c.b2Joint_GetLocalAnchorA(joint));
+            const anchor_b = box2d.c.b2Body_GetWorldPoint(b, box2d.c.b2Joint_GetLocalAnchorB(joint));
+            try nearPoint(vec.fromBox2d(anchor_a), vec.fromBox2d(anchor_b), 0.025);
+            const angle = box2d.c.b2RevoluteJoint_GetAngle(joint);
+            try std.testing.expect(angle >= box2d.c.b2RevoluteJoint_GetLowerLimit(joint) - 0.04);
+            try std.testing.expect(angle <= box2d.c.b2RevoluteJoint_GetUpperLimit(joint) + 0.04);
+        }
+    }
+}
+
+test "entity serialization resolves a ragdoll limb to the shared maximum health" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const root = try createRagdollFixture(&set, vec.zero, true);
+    const corpse = ragdoll.corpses.get(root).?;
+    var checked_limb = false;
+    for (corpse.bodies[0..corpse.body_count]) |body| {
+        if (box2d.c.B2_ID_EQUALS(root, body)) continue;
+        const ent = entity.entities.getLocking(body).?;
+        var visual: sprite.Sprite = undefined; // Serialization reads only these fields.
+        visual.scale = .{ .x = 1, .y = 1 };
+        visual.imgPath = "serialization fixture";
+        const sprite_id = ent.spriteUuids[0];
+        try sprite.sprites.putLocking(sprite_id, visual);
+        defer _ = sprite.sprites.fetchSwapRemoveLocking(sprite_id);
+        const serialized = entity.serialize(ent, vec.izero, 1).?;
+        try std.testing.expectEqual(@as(?f32, 100), serialized.health);
+        checked_limb = true;
+        break;
+    }
+    try std.testing.expect(checked_limb);
+}
+
+test "ragdoll shared health ignores its birth attack and ordinary destruction removes every limb" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const previous = damage.beginAttack(null);
+    defer damage.activeAttack = previous;
+    const root = try createRagdollFixture(&set, vec.zero, true);
+    const corpse = ragdoll.corpses.get(root).?;
+    try destruction.apply(corpse.bodies[0], .{ .source = .projectile, .amount = 200, .position = vec.zero });
+    try std.testing.expectEqual(@as(f32, 100), damage.components.get(root).?.model.health.current);
+    damage.activeAttack = previous;
+    for ([_]usize{ 0, 5 }) |index| {
+        try destruction.apply(corpse.bodies[index], .{ .source = .hitscan, .amount = 30, .position = vec.zero });
+    }
+    try std.testing.expectEqual(@as(f32, 40), damage.components.get(root).?.model.health.current);
+    try destruction.apply(corpse.bodies[10], .{ .source = .projectile, .amount = 79, .position = vec.zero });
+    try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+    pool.processQueuedReleases();
+    for (corpse.bodies[0..corpse.body_count]) |body| {
+        try std.testing.expect(!box2d.c.b2Body_IsEnabled(body));
+        try std.testing.expect(!entity.entities.getLocking(body).?.enabled);
+        try std.testing.expectEqual(@as(u64, 0), pool.memberships.get(body).?.activation);
+        try std.testing.expect(damage.components.get(body).?.model == .health);
+    }
+    for (corpse.joints[0..corpse.joint_count]) |joint| try std.testing.expect(!box2d.c.b2Joint_IsValid(joint));
+}
+
+test "ragdoll threshold equality releases weighted giblets in place without resetting motion" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const root = try createRagdollFixture(&set, vec.zero, false);
+    const corpse_ptr = ragdoll.corpses.getPtr(root).?;
+    for (corpse_ptr.snapshot.parts[0..corpse_ptr.body_count], 0..) |*part, i| {
+        part.survival_weight = if (i % 2 == 0) 1 else 0;
+    }
+    const corpse = corpse_ptr.*;
+    for (0..10) |_| box2d.worldStep(1.0 / 60.0, 4);
+    var before: [64]box2d.State = undefined;
+    var velocities: [64]box2d.c.b2Vec2 = undefined;
+    var spins: [64]f32 = undefined;
+    var activations: [64]u64 = undefined;
+    for (corpse.bodies[0..corpse.body_count], 0..) |body, i| {
+        before[i] = box2d.getState(body);
+        velocities[i] = box2d.c.b2Body_GetLinearVelocity(body);
+        spins[i] = box2d.c.b2Body_GetAngularVelocity(body);
+        activations[i] = pool.memberships.get(body).?.activation;
+    }
+    const previous = damage.beginAttack(null);
+    defer damage.activeAttack = previous;
+    try destruction.apply(root, .{ .source = .explosion, .amount = 140, .position = vec.zero });
+    var random = std.Random.DefaultPrng.init(93);
+    const selected = gibbing.selectSurvivors(corpse.snapshot, random.random());
+    for (corpse.bodies[0..corpse.body_count], 0..) |body, i| {
+        try std.testing.expectEqual(selected[i], box2d.c.b2Body_IsEnabled(body));
+        if (!selected[i]) continue;
+        try std.testing.expectEqualDeep(before[i], box2d.getState(body));
+        try std.testing.expectEqualDeep(velocities[i], box2d.c.b2Body_GetLinearVelocity(body));
+        try std.testing.expectEqual(spins[i], box2d.c.b2Body_GetAngularVelocity(body));
+        try std.testing.expectEqual(activations[i], pool.memberships.get(body).?.activation);
+        try std.testing.expect(!pool.memberships.get(body).?.reserved);
+        try std.testing.expect(character_art.bodyParts.get(body).?.severed);
+        // Remaining overlap samples from the same explosion cannot eat survivors.
+        try destruction.apply(body, .{ .source = .explosion, .amount = 140, .position = vec.zero });
+        try std.testing.expect(box2d.c.b2Body_IsEnabled(body));
+    }
+    try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+}
+
+test "corpse limit retires the oldest whole corpse and giblets cannot recycle connected limbs" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    const previous_rules = damage.rules;
+    defer damage.rules = previous_rules;
+    try damage.configure(.{ .maximumRagdolls = 2 });
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const first = try createRagdollFixture(&set, vec.zero, true);
+    const second = try createRagdollFixture(&set, .{ .x = 3, .y = 0 }, true);
+    const corpse = ragdoll.corpses.get(first).?;
+    const second_corpse = ragdoll.corpses.get(second).?;
+    const count = pool.memberships.count();
+    const part = corpse.snapshot.parts[0];
+    for (0..30) |_| {
+        const giblet = try gibbing.activatePart(part, vec.zero, 0);
+        for (corpse.bodies[0..corpse.body_count]) |body| {
+            try std.testing.expect(!box2d.c.B2_ID_EQUALS(body, giblet));
+        }
+    }
+    _ = try createRagdollFixture(&set, .{ .x = 6, .y = 0 }, true);
+    try std.testing.expectEqual(@as(usize, 2), ragdoll.corpses.count());
+    try std.testing.expect(ragdoll.corpses.contains(second));
+    for (corpse.joints[0..corpse.joint_count]) |joint| try std.testing.expect(!box2d.c.b2Joint_IsValid(joint));
+    for (second_corpse.joints[0..second_corpse.joint_count]) |joint| try std.testing.expect(box2d.c.b2Joint_IsValid(joint));
+    try std.testing.expectEqual(count, pool.memberships.count());
+    gibbing.clearBodies();
+    try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+    try std.testing.expectEqual(@as(usize, 0), damage.components.count());
+    try std.testing.expectEqual(@as(usize, 0), pool.memberships.count());
+}
+
+test "explosion scratch counts growth at the body set load threshold" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer projectile.cleanup();
+    _ = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    try projectile.prepareExplosionStorage();
+    const growths = projectile.explosionStorageGrowthCount;
+    const buckets = projectile.explosionBodySet.capacity();
+    // Give both other collections enough space to isolate the body's hash set.
+    try projectile.explosionBodies.ensureTotalCapacity(allocator.allocator, buckets);
+    try projectile.explosionDamage.ensureTotalCapacity(allocator.allocator, buckets);
+    const list_capacity = projectile.explosionBodies.capacity;
+    const damage_capacity = projectile.explosionDamage.capacity();
+    while (box2d.getBodyCount() < buckets) {
+        _ = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    }
+    try projectile.prepareExplosionStorage();
+    try std.testing.expect(projectile.explosionBodySet.capacity() > buckets);
+    try std.testing.expectEqual(list_capacity, projectile.explosionBodies.capacity);
+    try std.testing.expectEqual(damage_capacity, projectile.explosionDamage.capacity());
+    try std.testing.expectEqual(growths + 1, projectile.explosionStorageGrowthCount);
+    try projectile.prepareExplosionStorage();
+    try std.testing.expectEqual(growths + 1, projectile.explosionStorageGrowthCount);
+}
+
+test "explosion scratch grows beyond the old limit and reuses storage across large small and empty blasts" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer damage.cleanup();
+    defer projectile.cleanup();
+
+    const unused = try box2d.createBody(box2d.createStaticBodyDef(vec.zero));
+    box2d.c.b2Body_Disable(unused);
+    try projectile.prepareExplosionStorage();
+    const initial_growths = projectile.explosionStorageGrowthCount;
+    const bodies = try std.testing.allocator.alloc(box2d.c.b2BodyId, 5121);
+    defer std.testing.allocator.free(bodies);
+    const position: vec.Vec2 = .{ .x = 0.5, .y = 0 };
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.filter.categoryBits = collision.CATEGORY_DYNAMIC;
+    shape.filter.maskBits = collision.MASK_DYNAMIC;
+    const circle = box2d.c.b2Circle{ .center = box2d.c.b2Vec2_zero, .radius = 0.1 };
+    for (bodies) |*body| {
+        body.* = try box2d.createBody(box2d.createDynamicBodyDef(position));
+        // Two overlapping shapes must still receive one impulse and one damage event.
+        _ = box2d.c.b2CreateCircleShape(body.*, &shape, &circle);
+        _ = box2d.c.b2CreateCircleShape(body.*, &shape, &circle);
+        try damage.register(body.*, .{ .model = .{ .health = .{ .current = 100, .maximum = 100 } } });
+    }
+    var explosion = std.mem.zeroes(projectile.Explosion);
+    explosion.maximumDamage = 20;
+    explosion.maximumObjectImpulse = 0.2;
+    explosion.blastRadius = 2;
+    explosion.pressureRadius = 2;
+    var field = try blast_pressure.build(vec.zero, explosion.pressureRadius);
+    defer blast_pressure.deinit(&field);
+    const sample = blast_pressure.sample(field, position).?;
+    const expected_damage = explosion.maximumDamage * sample.strength * sample.strength;
+
+    // Deliberately outgrow the setup reserve. The first blast must include all
+    // 5,121 bodies rather than truncating at either of the previous fixed limits.
+    try projectile.explodeAt(vec.zero, explosion, null);
+    try std.testing.expectEqual(initial_growths + 1, projectile.explosionStorageGrowthCount);
+    const warmed_growths = projectile.explosionStorageGrowthCount;
+    const warmed_capacity = projectile.explosionBodies.capacity;
+    for (bodies) |body| {
+        try std.testing.expectApproxEqAbs(
+            100 - expected_damage,
+            damage.components.get(body).?.model.health.current,
+            0.0001,
+        );
+        const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+        const impulse = explosion.maximumObjectImpulse * sample.strength;
+        try nearPoint(vec.mul(sample.direction, impulse / box2d.c.b2Body_GetMass(body)), velocity, 0.0001);
+    }
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionBodies.items.len);
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionBodySet.count());
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionDamage.count());
+
+    try projectile.explodeAt(.{ .x = 100, .y = 0 }, explosion, null);
+    for (bodies[1..]) |body| box2d.c.b2Body_Disable(body);
+    try projectile.explodeAt(vec.zero, explosion, null);
+    for (bodies, 0..) |body, index| {
+        const hits: f32 = if (index == 0) 2 else 1;
+        try std.testing.expectApproxEqAbs(
+            100 - hits * expected_damage,
+            damage.components.get(body).?.model.health.current,
+            0.0001,
+        );
+    }
+    try std.testing.expectEqual(warmed_growths, projectile.explosionStorageGrowthCount);
+    try std.testing.expectEqual(warmed_capacity, projectile.explosionBodies.capacity);
+
+    // Level cleanup frees the retained memory; the next level can prepare it again.
+    projectile.cleanup();
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionBodies.capacity);
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionBodySet.capacity());
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionDamage.capacity());
+    try projectile.prepareExplosionStorage();
+    try std.testing.expect(projectile.explosionBodies.capacity >= box2d.getBodyCount());
+    try projectile.explodeAt(vec.zero, explosion, null);
+    try std.testing.expectApproxEqAbs(
+        100 - 3 * expected_damage,
+        damage.components.get(bodies[0]).?.model.health.current,
+        0.0001,
+    );
+}
+
+test "an explosion damages each corpse once using the strongest limb and impulses remain per limb" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer projectile.cleanup();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    var roots: [8]box2d.c.b2BodyId = undefined;
+    for (&roots, 0..) |*root, index| {
+        root.* = try createRagdollFixture(&set, .{ .x = @as(f32, @floatFromInt(index)) * 0.2, .y = 0 }, true);
+    }
+    // All 120 bodies are inside the blast, exceeding the former 100-body query.
+    const origin: vec.Vec2 = .{ .x = -1, .y = -0.5 };
+    var explosion = std.mem.zeroes(projectile.Explosion);
+    explosion.maximumDamage = 20;
+    explosion.maximumObjectImpulse = 0.2;
+    explosion.blastRadius = 5;
+    explosion.pressureRadius = 5;
+    var field = try blast_pressure.build(origin, explosion.pressureRadius);
+    defer blast_pressure.deinit(&field);
+    var expected: [8]f32 = undefined;
+    for (roots, &expected) |root, *health| {
+        const corpse = ragdoll.corpses.get(root).?;
+        var strongest: f32 = 0;
+        for (corpse.bodies[0..corpse.body_count]) |body| {
+            const point = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+            const sample = blast_pressure.sample(field, point).?;
+            strongest = @max(strongest, sample.strength);
+        }
+        health.* = 100 - explosion.maximumDamage * strongest * strongest;
+    }
+    try projectile.explodeAt(origin, explosion, null);
+    for (roots, expected) |root, health| {
+        try std.testing.expectApproxEqAbs(health, damage.components.get(root).?.model.health.current, 0.0001);
+        const corpse = ragdoll.corpses.get(root).?;
+        var moving_limbs: usize = 0;
+        for (corpse.bodies[0..corpse.body_count]) |body| {
+            const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body));
+            if (vec.magnitude(vec.subtract(velocity, .{ .x = 3, .y = -2 })) > 0.001) {
+                moving_limbs += 1;
+            }
+        }
+        try std.testing.expectEqual(corpse.body_count, moving_limbs);
+    }
+    const growths = projectile.explosionStorageGrowthCount;
+    // Destruction releases whole corpses while the remaining targets are still
+    // queued. The retained damage map must remain valid throughout that pass.
+    explosion.maximumDamage = 1000;
+    try projectile.explodeAt(origin, explosion, null);
+    try std.testing.expectEqual(@as(usize, 0), ragdoll.corpses.count());
+    try std.testing.expectEqual(@as(usize, 0), projectile.explosionDamage.count());
+    try std.testing.expectEqual(growths, projectile.explosionStorageGrowthCount);
+}
+
+test "arrows damage shared corpse health and fall harmlessly when that corpse is removed" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    try registerArrowFixtureSprite();
+    defer _ = sprite.sprites.fetchSwapRemoveLocking(arrow_fixture_sprite);
+    defer projectile.cleanup();
+    const root = try createRagdollFixture(&set, vec.zero, true);
+    const corpse = ragdoll.corpses.get(root).?;
+    var head: box2d.c.b2BodyId = undefined;
+    for (corpse.bodies[0..corpse.body_count], corpse.snapshot.parts[0..corpse.body_count]) |body, part| {
+        box2d.c.b2Body_SetLinearVelocity(body, box2d.c.b2Vec2_zero);
+        box2d.c.b2Body_SetGravityScale(body, 0);
+        if (character_art.assets.?.bindings[part.binding].anchor == .neck) head = body;
+    }
+    const head_shape = entity.entities.getLocking(head).?.shapeIds[0];
+    const bounds = box2d.c.b2Shape_GetAABB(head_shape);
+    const arrow = try createArrowFixture(.{
+        .x = (bounds.lowerBound.x + bounds.upperBound.x) * 0.5,
+        .y = bounds.lowerBound.y - 0.25,
+    }, collision.CATEGORY_GIBLET, .non_penetrating);
+    defer _ = entity.remove(arrow);
+    for (0..5) |_| {
+        box2d.worldStep(1.0 / 60.0, 4);
+        try projectile.checkContacts();
+        if (projectile.embeddedProjectiles.contains(arrow)) break;
+    }
+    try std.testing.expect(projectile.embeddedProjectiles.contains(arrow));
+    try std.testing.expectEqual(@as(f32, 60), damage.components.get(root).?.model.health.current);
+    try destruction.apply(root, .{ .source = .hitscan, .amount = 60, .position = vec.zero });
+    projectile.updateAttachments();
+    try std.testing.expect(!projectile.embeddedProjectiles.contains(arrow));
+    const released = projectile.activeProjectiles.get(arrow).?;
+    try std.testing.expect(released.spent);
+    try std.testing.expectEqual(@as(f32, 0), released.direct_damage);
+    pool.processQueuedReleases();
+    _ = try createRagdollFixture(&set, .{ .x = 5, .y = 0 }, false);
+    projectile.updateAttachments();
+    try std.testing.expect(projectile.activeProjectiles.get(arrow).?.spent);
 }
 
 fn loadArt(rig: animation.Rig) !character_art.Pack {
@@ -1022,6 +1653,10 @@ test "invalid art candidates preserve the installed pack and report named fields
         .{ "\"density\": 12", "\"density\": 0", "physics.density" },
         .{ "\"friction\": 0.5", "\"friction\": -1", "physics.friction" },
         .{ "\"survival_weight\": 0.8", "\"survival_weight\": 2", "survival_weight" },
+        .{ "\"parent\": \"torso\"", "\"parent\": \"missing\"", "unknown parent" },
+        .{ "\"parent\": \"torso\"", "\"parent\": \"head\"", "cyclic parent" },
+        .{ "\"reference_angle\": 0", "\"reference_angle\": 1e100", "reference_angle" },
+        .{ "-0.65", "-4.0", "invalid angle limits" },
         .{ "\"export/head_skin.svg\"", "\"../head.svg\"", "relative layer path" },
         .{ "\"export/head_gib_blood.svg\"", "\"../blood.svg\"", "gib_blood path" },
         .{ "\"export/head_gib_blood.svg\"", "\"export/head_skin.svg\"", "distinct file" },

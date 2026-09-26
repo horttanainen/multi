@@ -7,6 +7,7 @@ const box2d = @import("box2d.zig");
 const conv = @import("conversion.zig");
 const entity = @import("entity.zig");
 const destruction = @import("destruction.zig");
+const damage = @import("damage.zig");
 const projectile = @import("projectile.zig");
 const polygon = @import("polygon.zig");
 const runtime = @import("runtime.zig");
@@ -231,6 +232,8 @@ fn shootProjectile(w: Weapon, position: vec.IVec2, direction: vec.Vec2, shooterV
 }
 
 fn shootHitscan(w: Weapon, position: vec.IVec2, direction: vec.Vec2, playerId: usize) !void {
+    const previous_attack = damage.beginAttack(null);
+    defer damage.activeAttack = previous_attack;
     const origin = conv.pixel2M(position);
     // direction uses screen coords (y-up for aim), box2d uses y-down
     const dir = vec.Vec2{ .x = direction.x, .y = -direction.y };

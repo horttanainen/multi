@@ -7,6 +7,7 @@ if (($# > 0)); then
 fi
 output_dir="artifacts/explosion_perf"
 tower_keep_max_frame_us=25000
+ragdoll_max_frame_us=33333
 default_scenarios=(
     air-explosion
     air-explosion-no-visual
@@ -47,33 +48,42 @@ for scenario in "${scenarios[@]}"; do
         echo "Explosion performance scenario '$scenario' created giblet bodies on the hot path" >&2
         exit 1
     fi
-    if rg -q "trigger_particle_bodies_created=[1-9]" "$log_path"; then
-        echo "Explosion performance scenario '$scenario' created particle bodies on the trigger hot path" >&2
-        rg "trigger_particle_bodies_created=[1-9]" "$log_path" >&2
+    if rg -q "(trigger|capture)_particle_bodies_created=[1-9]" "$log_path"; then
+        echo "Explosion performance scenario '$scenario' created particle bodies during the capture" >&2
+        rg "(trigger|capture)_particle_bodies_created=[1-9]" "$log_path" >&2
         exit 1
     fi
-    if [[ "$scenario" != "tower-keep-player-kill" ]] && rg -q "texture_migrations=[1-9]" "$log_path"; then
+    if rg -q "perf\.benchmark_explosion_storage .*growths=[1-9]" "$log_path"; then
+        echo "Explosion performance scenario '$scenario' grew scratch storage during the capture" >&2
+        rg "perf\.benchmark_explosion_storage .*growths=[1-9]" "$log_path" >&2
+        exit 1
+    fi
+    if [[ "$scenario" != "tower-keep-player-kill" && "$scenario" != "tower-keep-ragdolls" ]] && rg -q "texture_migrations=[1-9]" "$log_path"; then
         echo "Explosion performance scenario '$scenario' migrated a texture on the hot path" >&2
         exit 1
     fi
-    if [[ "$scenario" == "tower-keep-player-kill" ]]; then
+    if [[ "$scenario" == "tower-keep-player-kill" || "$scenario" == "tower-keep-ragdolls" ]]; then
         maximum_frame_us="$(awk '
             /perf\.player_death_summary/ {
                 for (field = 1; field <= NF; field += 1) {
                     if ($field ~ /^max_frame_us=/) {
                         split($field, value, "=")
-                        print value[2]
-                        exit
+                        if (value[2] > maximum) maximum = value[2]
                     }
                 }
             }
+            END { if (maximum > 0) print maximum }
         ' "$log_path")"
         if [[ -z "$maximum_frame_us" ]]; then
             echo "Explosion performance scenario '$scenario' did not report a player-death maximum frame" >&2
             exit 1
         fi
-        if ((maximum_frame_us > tower_keep_max_frame_us)); then
-            echo "Explosion performance scenario '$scenario' exceeded ${tower_keep_max_frame_us}us: ${maximum_frame_us}us" >&2
+        frame_limit_us="$tower_keep_max_frame_us"
+        if [[ "$scenario" == "tower-keep-ragdolls" ]]; then
+            frame_limit_us="$ragdoll_max_frame_us"
+        fi
+        if ((maximum_frame_us > frame_limit_us)); then
+            echo "Explosion performance scenario '$scenario' exceeded ${frame_limit_us}us: ${maximum_frame_us}us" >&2
             exit 1
         fi
     fi

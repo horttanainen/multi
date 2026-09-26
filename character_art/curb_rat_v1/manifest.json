@@ -391,7 +391,15 @@
       ],
       "depth": "center",
       "length_mode": "decorative",
-      "survival_weight": 0.8
+      "survival_weight": 0.8,
+      "ragdoll": {
+        "parent": "torso",
+        "reference_angle": 0,
+        "limits": [
+          -0.65,
+          0.65
+        ]
+      }
     },
     {
       "id": "pelvis",
@@ -403,7 +411,15 @@
       ],
       "depth": "center",
       "length_mode": "decorative",
-      "survival_weight": 0.35
+      "survival_weight": 0.35,
+      "ragdoll": {
+        "parent": "torso",
+        "reference_angle": 0,
+        "limits": [
+          -0.18,
+          0.18
+        ]
+      }
     },
     {
       "id": "left_thigh",
@@ -415,7 +431,15 @@
       ],
       "depth": "left",
       "length_mode": "rig_bone",
-      "survival_weight": 0.5
+      "survival_weight": 0.5,
+      "ragdoll": {
+        "parent": "pelvis",
+        "reference_angle": 3.141592653589793,
+        "limits": [
+          -1.8,
+          1.3
+        ]
+      }
     },
     {
       "id": "left_shin",
@@ -427,7 +451,15 @@
       ],
       "depth": "left",
       "length_mode": "rig_bone",
-      "survival_weight": 0.6
+      "survival_weight": 0.6,
+      "ragdoll": {
+        "parent": "left_thigh",
+        "reference_angle": 0,
+        "limits": [
+          -0.05,
+          2.75
+        ]
+      }
     },
     {
       "id": "left_foot",
@@ -439,7 +471,15 @@
       ],
       "depth": "left",
       "length_mode": "decorative",
-      "survival_weight": 0.6
+      "survival_weight": 0.6,
+      "ragdoll": {
+        "parent": "left_shin",
+        "reference_angle": -1.5707963267948966,
+        "limits": [
+          -0.7,
+          0.8
+        ]
+      }
     },
     {
       "id": "left_upper_arm",
@@ -451,7 +491,15 @@
       ],
       "depth": "left",
       "length_mode": "rig_bone",
-      "survival_weight": 0.5
+      "survival_weight": 0.5,
+      "ragdoll": {
+        "parent": "torso",
+        "reference_angle": 3.141592653589793,
+        "limits": [
+          -2.7,
+          2.7
+        ]
+      }
     },
     {
       "id": "left_forearm",
@@ -463,7 +511,15 @@
       ],
       "depth": "left",
       "length_mode": "rig_bone",
-      "survival_weight": 0.65
+      "survival_weight": 0.65,
+      "ragdoll": {
+        "parent": "left_upper_arm",
+        "reference_angle": 0,
+        "limits": [
+          -2.75,
+          0.05
+        ]
+      }
     },
     {
       "id": "left_hand_open",
@@ -475,7 +531,15 @@
       ],
       "depth": "left",
       "length_mode": "decorative",
-      "survival_weight": 0.7
+      "survival_weight": 0.7,
+      "ragdoll": {
+        "parent": "left_forearm",
+        "reference_angle": 0,
+        "limits": [
+          -0.7,
+          0.7
+        ]
+      }
     },
     {
       "id": "right_thigh",
@@ -487,7 +551,15 @@
       ],
       "depth": "right",
       "length_mode": "rig_bone",
-      "survival_weight": 0.5
+      "survival_weight": 0.5,
+      "ragdoll": {
+        "parent": "pelvis",
+        "reference_angle": 3.141592653589793,
+        "limits": [
+          -1.8,
+          1.3
+        ]
+      }
     },
     {
       "id": "right_shin",
@@ -499,7 +571,15 @@
       ],
       "depth": "right",
       "length_mode": "rig_bone",
-      "survival_weight": 0.6
+      "survival_weight": 0.6,
+      "ragdoll": {
+        "parent": "right_thigh",
+        "reference_angle": 0,
+        "limits": [
+          -0.05,
+          2.75
+        ]
+      }
     },
     {
       "id": "right_foot",
@@ -511,7 +591,15 @@
       ],
       "depth": "right",
       "length_mode": "decorative",
-      "survival_weight": 0.6
+      "survival_weight": 0.6,
+      "ragdoll": {
+        "parent": "right_shin",
+        "reference_angle": -1.5707963267948966,
+        "limits": [
+          -0.7,
+          0.8
+        ]
+      }
     },
     {
       "id": "right_upper_arm",
@@ -523,7 +611,15 @@
       ],
       "depth": "right",
       "length_mode": "rig_bone",
-      "survival_weight": 0.5
+      "survival_weight": 0.5,
+      "ragdoll": {
+        "parent": "torso",
+        "reference_angle": 3.141592653589793,
+        "limits": [
+          -2.7,
+          2.7
+        ]
+      }
     },
     {
       "id": "right_forearm",
@@ -535,7 +631,15 @@
       ],
       "depth": "right",
       "length_mode": "rig_bone",
-      "survival_weight": 0.65
+      "survival_weight": 0.65,
+      "ragdoll": {
+        "parent": "right_upper_arm",
+        "reference_angle": 0,
+        "limits": [
+          -2.75,
+          0.05
+        ]
+      }
     },
     {
       "id": "right_hand_open",
@@ -547,7 +651,15 @@
       ],
       "depth": "right",
       "length_mode": "decorative",
-      "survival_weight": 0.7
+      "survival_weight": 0.7,
+      "ragdoll": {
+        "parent": "right_forearm",
+        "reference_angle": 0,
+        "limits": [
+          -0.7,
+          0.7
+        ]
+      }
     }
   ],
   "draw_order": [

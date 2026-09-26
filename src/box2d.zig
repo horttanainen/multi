@@ -171,6 +171,10 @@ pub fn worldStep(dt: f32, subStepCount: c_int) void {
     c.b2World_Step(getWorldId(), dt, subStepCount);
 }
 
+pub fn getBodyCount() usize {
+    return @intCast(c.b2World_GetCounters(getWorldId()).bodyCount);
+}
+
 pub fn worldDraw(debugDraw: *c.b2DebugDraw) void {
     c.b2World_Draw(getWorldId(), debugDraw);
 }
@@ -226,4 +230,8 @@ pub fn castShape(
 
 pub fn createWeldJoint(def: *const c.b2WeldJointDef) c.b2JointId {
     return c.b2CreateWeldJoint(getWorldId(), def);
+}
+
+pub fn createRevoluteJoint(def: *const c.b2RevoluteJointDef) c.b2JointId {
+    return c.b2CreateRevoluteJoint(getWorldId(), def);
 }

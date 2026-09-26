@@ -23,7 +23,12 @@ const BodyPool = struct {
 };
 
 var bodyPools = std.AutoArrayHashMapUnmanaged(Id, BodyPool).empty;
-pub const Membership = struct { poolId: Id, activation: u64 = 0 };
+pub const Membership = struct {
+    poolId: Id,
+    activation: u64 = 0,
+    // A connected body group owns recycling while its members are reserved.
+    reserved: bool = false,
+};
 // Zero marks an available body. Every acquisition gets a new identity, including
 // recycling an active body whose Box2D ID remains valid.
 pub var memberships = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, Membership).empty;
@@ -185,17 +190,22 @@ pub fn acquire(poolId: Id, exhaustionPolicy: ExhaustionPolicy) !?Acquisition {
     }
     if (exhaustionPolicy == .return_null) return null;
 
-    while (bodyPool.activeIndices.items.len > 0) {
-        const recycledIndex = bodyPool.activeIndices.items[0];
+    var activeIndex: usize = 0;
+    while (activeIndex < bodyPool.activeIndices.items.len) {
+        const recycledIndex = bodyPool.activeIndices.items[activeIndex];
         const bodyId = bodyPool.bodyIds.items[recycledIndex];
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             try discardInvalidBody(poolId, bodyId);
             continue;
         }
+        if (memberships.get(bodyId).?.reserved) {
+            activeIndex += 1;
+            continue;
+        }
 
         try activateMembership(bodyId);
         _ = bodiesToRelease.swapRemove(bodyId);
-        _ = bodyPool.activeIndices.orderedRemove(0);
+        _ = bodyPool.activeIndices.orderedRemove(activeIndex);
         bodyPool.activeIndices.appendAssumeCapacity(recycledIndex);
         return .{
             .bodyId = bodyId,
@@ -235,6 +245,7 @@ pub fn release(poolId: Id, bodyId: box2d.c.b2BodyId) !void {
     }
 
     membership.activation = 0;
+    membership.reserved = false;
     bodyPool.availableIndices.appendAssumeCapacity(bodyIndex.?);
 }
 

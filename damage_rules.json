@@ -1,3 +1,5 @@
 {
-  "gibHealthThreshold": -40
+  "gibHealthThreshold": -40,
+  "ragdollHealth": 100,
+  "maximumRagdolls": 8
 }

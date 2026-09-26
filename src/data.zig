@@ -241,6 +241,8 @@ pub const MovementData = struct {
 
 pub const DamageRulesData = struct {
     gibHealthThreshold: f32 = -40,
+    ragdollHealth: f32 = 100,
+    maximumRagdolls: u32 = 8,
 };
 
 // Serialized character assets. Decoding owns one temporary arena; the animation
@@ -398,6 +400,11 @@ pub const CharacterArtBinding = struct {
     depth: CharacterArtDepth,
     length_mode: enum { rig_bone, decorative },
     survival_weight: f32,
+    ragdoll: ?struct {
+        parent: []const u8,
+        reference_angle: f32 = 0,
+        limits: [2]f32,
+    } = null,
 };
 pub const CharacterArtManifest = struct {
     schema_version: u32,

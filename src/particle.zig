@@ -55,7 +55,7 @@ pub const Particle = struct {
     seed: u64,
 };
 
-const ParticleBody = struct {
+pub const ParticleBody = struct {
     bodyId: box2d.c.b2BodyId,
     shapeId: box2d.c.b2ShapeId,
 };
@@ -74,8 +74,7 @@ pub const PendingStain = struct {
 
 pub var particles = thread_safe.ThreadSafeAutoArrayHashMap(box2d.c.b2BodyId, Particle).init(allocator);
 pub var bodyCreationCount: u64 = 0;
-var availableBodies = std.ArrayListUnmanaged(ParticleBody).empty;
-var particlesToCleanup = thread_safe.ThreadSafeArrayList(ParticleBody).init(allocator);
+pub var availableBodies = std.ArrayListUnmanaged(ParticleBody).empty;
 pub var pendingStains = std.ArrayListUnmanaged(PendingStain).empty;
 pub var stainTextureUpdates = std.ArrayListUnmanaged(StainTextureUpdate).empty;
 const stainTextureRegionMaxEdge: i32 = 128;
@@ -131,10 +130,6 @@ pub fn prewarmBodies(count: usize) !void {
     particles.mutex.lockUncancelable(runtime.io());
     defer particles.mutex.unlock(runtime.io());
     try particles.map.ensureTotalCapacity(allocator, count);
-
-    particlesToCleanup.mutex.lockUncancelable(runtime.io());
-    defer particlesToCleanup.mutex.unlock(runtime.io());
-    try particlesToCleanup.list.ensureTotalCapacity(count);
 
     while (availableBodies.items.len < count) {
         availableBodies.appendAssumeCapacity(try createParticleBody());
@@ -424,8 +419,9 @@ fn processContact(bodyId: box2d.c.b2BodyId) !bool {
         std.log.warn("particle.processContact: particle disappeared before cleanup", .{});
         return true;
     };
-    box2d.c.b2Body_Disable(bodyId);
-    try particlesToCleanup.appendLocking(.{
+    // Contacts are consumed between physics steps, before any new emissions.
+    // Return the disabled body immediately so that the next burst can reuse it.
+    retainParticleBody(.{
         .bodyId = removed.value.bodyId,
         .shapeId = removed.value.shapeId,
     });
@@ -468,16 +464,6 @@ pub fn processOnePendingStain() !bool {
 }
 
 pub fn cleanupParticles() !void {
-    {
-        particlesToCleanup.mutex.lockUncancelable(runtime.io());
-        defer particlesToCleanup.mutex.unlock(runtime.io());
-
-        for (particlesToCleanup.list.items) |body| {
-            retainParticleBody(body);
-        }
-        particlesToCleanup.list.clearRetainingCapacity();
-    }
-
     var expiredBodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
     defer expiredBodyIds.deinit();
 
@@ -508,6 +494,8 @@ pub fn cleanupParticles() !void {
 pub fn cleanup() void {
     pendingStains.deinit(allocator);
     stainTextureUpdates.deinit(allocator);
+    pendingStains = .empty;
+    stainTextureUpdates = .empty;
 
     particles.mutex.lockUncancelable(runtime.io());
     for (particles.map.values()) |particle| {
@@ -515,13 +503,6 @@ pub fn cleanup() void {
     }
     particles.map.clearAndFree(allocator);
     particles.mutex.unlock(runtime.io());
-
-    particlesToCleanup.mutex.lockUncancelable(runtime.io());
-    defer particlesToCleanup.mutex.unlock(runtime.io());
-    for (particlesToCleanup.list.items) |body| {
-        destroyParticleBody(body);
-    }
-    particlesToCleanup.list.clearAndFree();
 
     for (availableBodies.items) |body| {
         destroyParticleBody(body);

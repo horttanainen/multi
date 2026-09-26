@@ -429,10 +429,14 @@ pub fn remove(bodyId: box2d.c.b2BodyId) bool {
 }
 
 fn maximumHealth(bodyId: box2d.c.b2BodyId) ?f32 {
-    const component = damage.components.get(bodyId) orelse return null;
+    const component = damage.components.get(damage.healthOwner(bodyId)) orelse return null;
     return switch (component.model) {
         .health => |health| health.maximum,
         .surface_cutout => null,
+        .shared_health => {
+            std.log.err("entity.maximumHealth: shared health must point directly to its owner", .{});
+            return null;
+        },
     };
 }
 

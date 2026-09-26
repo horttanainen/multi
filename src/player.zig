@@ -23,6 +23,7 @@ const movement = @import("movement.zig");
 const spawn_points = @import("spawn.zig");
 const thread_safe = @import("thread_safe_array_list.zig");
 const gibbing = @import("gibbing.zig");
+const ragdoll = @import("ragdoll.zig");
 const damage_component = @import("damage.zig");
 const gravestone = @import("gravestone.zig");
 const rope = @import("rope.zig");
@@ -941,6 +942,8 @@ pub fn drawAllLeftHandsFront() !void {
 }
 
 pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
+    const previous = damage_component.beginAttack(null);
+    defer damage_component.activeAttack = previous;
     const p = players.getPtr(playerId) orelse {
         std.log.err("damage: player {d} is missing", .{playerId});
         return PlayerError.PlayerUnspawned;
@@ -966,6 +969,10 @@ pub fn damage(playerId: usize, d: f32, attackerId: ?usize) !DamageResult {
             if (profileDeath) {
                 perf.recordPlayerDeathTriggerStage(.gib, gibStart);
             }
+        } else {
+            ragdoll.createForPlayer(playerId) catch |err| {
+                std.log.err("player.damage: could not create ragdoll for {d}: {}", .{ playerId, err });
+            };
         }
 
         const killStart = if (profileDeath) perf.begin(.player_death) else 0;

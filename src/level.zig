@@ -395,6 +395,7 @@ fn spawnTwoPlayers() !void {
     } else {
         player.setColor(playerId2, controller.controllers.get(playerId2).?.color);
     }
+    try projectile.prepareExplosionStorage();
 }
 
 // Load a level from any path without spawning players (for level editor view).
@@ -408,6 +409,7 @@ pub fn loadLevel(path: []const u8) !bool {
     try applyLevelSettings(lev);
     try gravestone.warmCaches();
     const hasSpawn = try loadLevelContents(lev);
+    try projectile.prepareExplosionStorage();
     return hasSpawn;
 }
 

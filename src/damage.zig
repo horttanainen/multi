@@ -41,10 +41,32 @@ pub const HealthResult = struct {
 };
 
 pub var rules: data.DamageRulesData = .{};
+pub var activeAttack: ?u64 = null;
+var nextAttack: u64 = 1;
+
+pub fn newAttackId() u64 {
+    const id = nextAttack;
+    nextAttack += 1;
+    return id;
+}
+
+// Nested direct-hit/explosion work belongs to the same attack. Each physical
+// projectile keeps its ID across contacts; separate pellets have separate IDs.
+pub fn beginAttack(id: ?u64) ?u64 {
+    const previous = activeAttack;
+    activeAttack = previous orelse id orelse newAttackId();
+    return previous;
+}
 
 pub fn configure(candidate: data.DamageRulesData) !void {
     if (!std.math.isFinite(candidate.gibHealthThreshold) or candidate.gibHealthThreshold >= 0) {
         std.log.warn("damage.configure: gibHealthThreshold must be finite and below zero, got {d}", .{candidate.gibHealthThreshold});
+        return error.InvalidDamageRules;
+    }
+    if (!std.math.isFinite(candidate.ragdollHealth) or candidate.ragdollHealth <= 0 or
+        candidate.maximumRagdolls == 0 or candidate.maximumRagdolls > 64)
+    {
+        std.log.warn("damage.configure: expected positive ragdollHealth and 1..64 maximumRagdolls", .{});
         return error.InvalidDamageRules;
     }
     rules = candidate;
@@ -73,6 +95,7 @@ pub const SurfaceCutout = struct {
 
 pub const Model = union(enum) {
     health: Health,
+    shared_health: box2d.c.b2BodyId,
     surface_cutout: SurfaceCutout,
 };
 
@@ -93,6 +116,7 @@ pub const DestructionEffect = union(enum) {
 pub const DestructionLifecycle = enum {
     remove,
     return_to_pool,
+    ragdoll,
 };
 
 pub const DestructionResponse = struct {
@@ -105,6 +129,7 @@ pub const Component = struct {
     onDestroyed: DestructionEffect = .none,
     destructionLifecycle: DestructionLifecycle = .remove,
     pendingDestruction: bool = false,
+    immuneAttack: u64 = 0,
 };
 
 pub const Outcome = union(enum) {
@@ -142,13 +167,17 @@ pub fn reset(bodyId: box2d.c.b2BodyId) !void {
     component.pendingDestruction = false;
     switch (component.model) {
         .health => |*health| health.current = health.maximum,
-        .surface_cutout => {},
+        .surface_cutout, .shared_health => {},
     }
 }
 
 pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
-    const component = components.getPtr(bodyId) orelse return .ignored;
+    const previous = beginAttack(null);
+    defer activeAttack = previous;
+    const target = healthOwner(bodyId);
+    const component = components.getPtr(target) orelse return .ignored;
     if (component.pendingDestruction) return .ignored;
+    if (component.immuneAttack == activeAttack.?) return .ignored;
 
     switch (component.model) {
         .health => |*health| {
@@ -168,7 +197,19 @@ pub fn apply(bodyId: box2d.c.b2BodyId, event: Event) Outcome {
             if (!std.math.isFinite(event.radius) or event.radius <= 0) return .ignored;
             return .{ .surface_cutout = surfaceCutout };
         },
+        .shared_health => {
+            std.log.err("damage.apply: shared health must point directly to its owner", .{});
+            return .ignored;
+        },
     }
+}
+
+pub fn healthOwner(bodyId: box2d.c.b2BodyId) box2d.c.b2BodyId {
+    const component = components.get(bodyId) orelse return bodyId;
+    return switch (component.model) {
+        .shared_health => |owner| owner,
+        else => bodyId,
+    };
 }
 
 pub fn markDestroyed(bodyId: box2d.c.b2BodyId) ?DestructionResponse {

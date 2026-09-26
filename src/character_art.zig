@@ -25,7 +25,9 @@ pub const Binding = struct {
     axis: [2]animation.Joint,
     depth: data.CharacterArtDepth,
     survival_weight: f32,
+    ragdoll: ?RagdollJoint = null,
 };
+pub const RagdollJoint = struct { parent: usize, reference_angle: f32, limits: [2]f32 };
 pub const DrawItem = union(enum) { part: usize, weapon: data.CharacterArtDepth, holster };
 pub const Pack = struct {
     arena: std.heap.ArenaAllocator,
@@ -166,6 +168,43 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
         for ([_][2]f32{ contacts.toe, contacts.heel }, [_]vec.Vec2{ end.rest_offset, vec.add(end.rest_offset, heel.rest_offset) }) |source, local| {
             const actual = vec.mul(vec.subtract(point(source), point(part.pivot)), part.meters_per_pixel);
             if (vec.magnitude(vec.subtract(actual, .{ .x = local.x, .y = -local.y })) > 0.0001) return invalid(detail, "bindings.{s}: foot contact differs from rig", .{definition.id});
+        }
+    }
+    var joint_total: usize = 0;
+    for (file.bindings, bindings) |definition, *binding| {
+        if (definition.ragdoll == null) continue;
+        const joint = definition.ragdoll.?;
+        const parent = ids.get(joint.parent) orelse {
+            return invalid(detail, "bindings.{s}.ragdoll: unknown parent", .{definition.id});
+        };
+        const lower = joint.limits[0];
+        const upper = joint.limits[1];
+        if (!std.math.isFinite(joint.reference_angle) or
+            !std.math.isFinite(lower) or !std.math.isFinite(upper) or
+            lower > upper or lower < -3.1 or upper > 3.1)
+        {
+            return invalid(detail, "bindings.{s}.ragdoll: invalid angle limits", .{definition.id});
+        }
+        binding.ragdoll = .{
+            .parent = parent,
+            .reference_angle = joint.reference_angle,
+            .limits = joint.limits,
+        };
+        joint_total += 1;
+    }
+    // Older packs may omit ragdolls; a supplied graph must be one connected tree.
+    if (joint_total != 0 and joint_total != bindings.len - 1) {
+        return invalid(detail, "bindings.ragdoll: expected exactly one root", .{});
+    }
+    for (bindings, 0..) |_, start| {
+        var cursor = start;
+        var visited: usize = 0;
+        while (bindings[cursor].ragdoll != null) {
+            if (visited == bindings.len) {
+                return invalid(detail, "bindings.ragdoll: cyclic parent chain", .{});
+            }
+            cursor = bindings[cursor].ragdoll.?.parent;
+            visited += 1;
         }
     }
     var order: [2][]DrawItem = undefined;

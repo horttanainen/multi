@@ -362,24 +362,14 @@ fn gameLoop() !void {
     projectile.applyPropulsion();
 
     const ropeStart = perf.begin(.player_death);
-    try rope.checkHookContacts();
     rope.applyTension();
     perf.recordPlayerDeathGameLoopStage(.rope, ropeStart);
 
-    const bloodContactsStart = perf.begin(.player_death);
-    try particle.checkContacts();
-    perf.recordPlayerDeathGameLoopStage(.blood_contacts, bloodContactsStart);
-
     try deferred_work.process();
-
-    const gibletContactsStart = perf.begin(.player_death);
-    try gibbing.checkContacts();
-    perf.recordPlayerDeathGameLoopStage(.giblet_contacts, gibletContactsStart);
 
     const projectileContactsStart = perf.begin(.player_death);
     try explosion_benchmark.update();
     try debug.update();
-    try projectile.checkContacts();
     pool.processQueuedReleases();
     perf.recordPlayerDeathGameLoopStage(.projectile_contacts, projectileContactsStart);
 

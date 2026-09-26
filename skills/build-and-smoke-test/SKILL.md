@@ -9,6 +9,9 @@ After making code changes, always format through the project script, build the p
 
 **IMPORTANT:** Always use `bash scripts/format.sh` for formatting and `bash scripts/smoke_test.sh` for the run step. Never invoke `zig fmt` directly, launch the game binary directly, or write custom run-and-kill logic. The project scripts define the correct file set and process management.
 
+Follow the [existing execution approvals rule](../agent-automation/SKILL.md#preserve-existing-execution-approvals).
+Invoke approved scripts directly and read their existing logs separately.
+
 ## Steps
 
 ### 1. Format
@@ -22,7 +25,7 @@ Run this as its own command. Do not combine direct `zig fmt` calls with the buil
 ### 2. Build
 
 ```bash
-zig build 2>&1
+zig build
 ```
 
 If the build fails, report the errors and stop — do not proceed to the run step.

@@ -48,6 +48,22 @@ protect complex DSP or timing behavior. Other agent tasks use checks appropriate
 to their purpose; they are not required to become feature tests or launch the
 game merely because they are automated.
 
+## Preserve existing execution approvals
+
+Before running a command, check the session's approved command prefixes. Invoke
+an already-approved project script directly, with ordinary arguments.
+
+Do not add shell wrappers, redirects, pipelines, chained commands, or inline
+environment assignments when they would prevent reuse of an existing approval.
+Use the script's existing logging and output options; read its logs separately.
+
+Repeated validation during an authorized phase does not require renewed user
+approval. Do not issue fresh escalation requests merely because you are rerunning
+checks or want a different log filename.
+
+If execution genuinely requires additional permission, identify the exact missing
+permission and explain why the existing approval does not cover it.
+
 ## Preserve task authority and data
 
 An agent-only or committed script is not blanket permission to run it. Stay

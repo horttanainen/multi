@@ -16,6 +16,8 @@ const camera_shake = @import("camera_shake.zig");
 const explosion_visual = @import("explosion_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
+const damage = @import("damage.zig");
+const ragdoll = @import("ragdoll.zig");
 const sprite = @import("sprite.zig");
 const pool = @import("pool.zig");
 
@@ -62,6 +64,7 @@ pub const Spec = struct {
 };
 
 const ActiveProjectile = struct {
+    attack_id: u64,
     owner_id: usize,
     direct_damage: f32,
     penetration: PenetrationMode,
@@ -89,11 +92,39 @@ const PropulsionData = struct {
 
 pub var propulsions = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, PropulsionData).empty;
 
-const OverlapContext = struct {
-    bodies: [100]box2d.c.b2BodyId,
-    count: usize,
-    truncated: bool = false,
-};
+// Retained between explosions; level cleanup releases their allocations.
+pub var explosionBodies = std.ArrayListUnmanaged(box2d.c.b2BodyId).empty;
+pub var explosionBodySet = std.AutoHashMapUnmanaged(box2d.c.b2BodyId, void).empty;
+pub var explosionDamage = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, damage.Event).empty;
+pub var explosionStorageGrowthCount: u64 = 0;
+var explosionInProgress = false;
+
+pub fn prepareExplosionStorage() !void {
+    if (explosionInProgress) {
+        std.log.err("projectile.prepareExplosionStorage: explosion scratch is already in use", .{});
+        return error.ExplosionInProgress;
+    }
+    // A query cannot return more unique bodies than exist in the world. Include
+    // disabled pool members so activating them does not require new storage.
+    const count = box2d.getBodyCount();
+    const body_capacity = explosionBodies.capacity;
+    const set_capacity = explosionBodySet.capacity();
+    const damage_capacity = explosionDamage.capacity();
+    try explosionBodies.ensureTotalCapacity(allocator, count);
+    try explosionBodySet.ensureTotalCapacity(allocator, @intCast(count));
+    try explosionDamage.ensureTotalCapacity(allocator, count);
+    // Hash-map capacity counts buckets, not usable entries. Its load threshold
+    // can require an allocation before count reaches the previous capacity.
+    const grew = explosionBodies.capacity != body_capacity or
+        explosionBodySet.capacity() != set_capacity or explosionDamage.capacity() != damage_capacity;
+    if (grew) explosionStorageGrowthCount += 1;
+}
+
+fn clearExplosionStorage() void {
+    explosionBodies.clearRetainingCapacity();
+    explosionBodySet.clearRetainingCapacity();
+    explosionDamage.clearRetainingCapacity();
+}
 
 const DirectHitDamage = struct {
     player_id: usize,
@@ -148,46 +179,27 @@ pub inline fn consumePerfFrameLog() bool {
     return true;
 }
 
-fn overlapCallback(shapeId: box2d.c.b2ShapeId, context: ?*anyopaque) callconv(.c) bool {
-    const ctx: *OverlapContext = @ptrCast(@alignCast(context.?));
-
-    // Get the body from the shape
+fn overlapCallback(shapeId: box2d.c.b2ShapeId, _: ?*anyopaque) callconv(.c) bool {
     const bodyId = box2d.c.b2Shape_GetBody(shapeId);
-
-    // Check if we already have this body (multiple shapes can belong to same body)
-    for (ctx.bodies[0..ctx.count]) |existingBody| {
-        if (box2d.c.b2Body_IsValid(existingBody) and
-            box2d.c.B2_ID_EQUALS(existingBody, bodyId))
-        {
-            return true; // Already added, skip
-        }
-    }
-
-    // Add body if we have space
-    if (ctx.count < ctx.bodies.len) {
-        ctx.bodies[ctx.count] = bodyId;
-        ctx.count += 1;
-    } else {
-        ctx.truncated = true;
-    }
-
-    return true; // Continue the query
+    const entry = explosionBodySet.getOrPutAssumeCapacity(bodyId);
+    if (entry.found_existing) return true;
+    explosionBodies.appendAssumeCapacity(bodyId);
+    return true;
 }
 
-fn sortOverlapBodies(context: *OverlapContext) void {
-    var index: usize = 1;
-    while (index < context.count) : (index += 1) {
-        const bodyId = context.bodies[index];
-        const bodyKey: usize = @bitCast(bodyId);
-        var insertionIndex = index;
-        while (insertionIndex > 0) {
-            const previousKey: usize = @bitCast(context.bodies[insertionIndex - 1]);
-            if (previousKey <= bodyKey) break;
-            context.bodies[insertionIndex] = context.bodies[insertionIndex - 1];
-            insertionIndex -= 1;
-        }
-        context.bodies[insertionIndex] = bodyId;
-    }
+fn bodyIdLessThan(_: void, a: box2d.c.b2BodyId, b: box2d.c.b2BodyId) bool {
+    return @as(u64, @bitCast(a)) < @as(u64, @bitCast(b));
+}
+
+fn collectExplosionBodies(position: vec.Vec2, radius: f32, mask: u64) void {
+    explosionBodies.clearRetainingCapacity();
+    explosionBodySet.clearRetainingCapacity();
+    const circle = box2d.c.b2Circle{ .center = box2d.c.b2Vec2_zero, .radius = radius };
+    const transform = box2d.c.b2Transform{ .p = vec.toBox2d(position), .q = box2d.c.b2Rot_identity };
+    var filter = box2d.c.b2DefaultQueryFilter();
+    filter.categoryBits = mask;
+    filter.maskBits = mask;
+    box2d.overlapCircle(&circle, transform, filter, overlapCallback, null);
 }
 
 fn damageEntitiesInExplosion(
@@ -197,32 +209,12 @@ fn damageEntitiesInExplosion(
     attackerId: ?usize,
     cutoutSeed: u64,
 ) !void {
-    var context = OverlapContext{
-        .bodies = undefined,
-        .count = 0,
-    };
+    collectExplosionBodies(impactPosition, explosion.blastRadius, collision.MASK_EXPLOSION_QUERY);
+    std.mem.sort(box2d.c.b2BodyId, explosionBodies.items, {}, bodyIdLessThan);
 
-    const circle = box2d.c.b2Circle{
-        .center = box2d.c.b2Vec2_zero,
-        .radius = explosion.blastRadius,
-    };
-
-    const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(impactPosition),
-        .q = box2d.c.b2Rot_identity,
-    };
-
-    var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = collision.MASK_EXPLOSION_QUERY;
-    filter.maskBits = collision.MASK_EXPLOSION_QUERY;
-
-    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
-    if (context.truncated) {
-        std.log.warn("damageEntitiesInExplosion: explosion damage query exceeded {d} bodies", .{context.bodies.len});
-    }
-    sortOverlapBodies(&context);
-
-    for (context.bodies[0..context.count]) |bodyId| {
+    // Sample every limb before applying any health damage. Destruction can
+    // release/recycle bodies, so grouping must use the original health owners.
+    for (explosionBodies.items) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             std.log.warn("damageEntitiesInExplosion: body became invalid during damage query", .{});
             continue;
@@ -240,7 +232,7 @@ fn damageEntitiesInExplosion(
         else
             vec.zero;
 
-        try destruction.apply(bodyId, .{
+        const event: damage.Event = .{
             .source = .explosion,
             .amount = amount,
             .position = impactPosition,
@@ -254,7 +246,19 @@ fn damageEntitiesInExplosion(
             .cutoutHotRimDurationMs = explosion.cutoutHotRimDurationMs,
             .cutoutSeed = cutoutSeed,
             .attackerId = attackerId,
-        });
+        };
+        const target = damage.healthOwner(bodyId);
+        const entry = explosionDamage.getOrPutAssumeCapacity(target);
+        if (entry.found_existing) {
+            if (event.amount > entry.value_ptr.amount) {
+                entry.value_ptr.* = event;
+            }
+            continue;
+        }
+        entry.value_ptr.* = event;
+    }
+    for (explosionDamage.keys(), explosionDamage.values()) |target, event| {
+        try destruction.apply(target, event);
     }
 }
 
@@ -345,25 +349,8 @@ fn applyPhysicalImpulse(bodyId: box2d.c.b2BodyId, impulse: vec.Vec2) void {
 
 fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explosion) void {
     if (explosion.maximumObjectImpulse <= 0) return;
-
-    var context = OverlapContext{
-        .bodies = undefined,
-        .count = 0,
-    };
-    const circle = box2d.c.b2Circle{
-        .center = box2d.c.b2Vec2_zero,
-        .radius = explosion.pressureRadius,
-    };
-    const transform = box2d.c.b2Transform{
-        .p = vec.toBox2d(field.origin),
-        .q = box2d.c.b2Rot_identity,
-    };
-    var filter = box2d.c.b2DefaultQueryFilter();
-    filter.categoryBits = collision.MASK_EXPLOSION_IMPULSE;
-    filter.maskBits = collision.MASK_EXPLOSION_IMPULSE;
-    box2d.overlapCircle(&circle, transform, filter, overlapCallback, &context);
-
-    for (context.bodies[0..context.count]) |bodyId| {
+    collectExplosionBodies(field.origin, explosion.pressureRadius, collision.MASK_EXPLOSION_IMPULSE);
+    for (explosionBodies.items) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             std.log.warn("applyExplosionPressureToBodies: body became invalid during pressure query", .{});
             continue;
@@ -375,8 +362,8 @@ fn applyExplosionPressureToBodies(field: blast_pressure.Field, explosion: Explos
     }
 }
 
-pub fn damagePlayerWithBlood(playerId: usize, damage: f32, attackerId: ?usize, emission: blood.Emission) !player.DamageResult {
-    const result = try player.damage(playerId, damage, attackerId);
+pub fn damagePlayerWithBlood(playerId: usize, amount: f32, attackerId: ?usize, emission: blood.Emission) !player.DamageResult {
+    const result = try player.damage(playerId, amount, attackerId);
     if (!result.applied) return result;
 
     if (result.fatal) {
@@ -471,16 +458,16 @@ fn applyExplosionPressureToPlayers(
 
         if (!explosion.damagePlayers) continue;
 
-        var damage = damageFromPressureStrength(explosion, response.strength);
+        var amount = damageFromPressureStrength(explosion, response.strength);
         if (isDirectHit) {
-            damage = @max(0, damage - directHitDamage.?.applied_damage);
+            amount = @max(0, amount - directHitDamage.?.applied_damage);
         }
-        if (damage <= 0) continue;
+        if (amount <= 0) continue;
 
         const playerVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-        _ = try damagePlayerWithBlood(p.id, damage, attackerId, .{
+        _ = try damagePlayerWithBlood(p.id, amount, attackerId, .{
             .position = playerPosM,
-            .amount = damage,
+            .amount = amount,
             .direction = response.direction,
             .spread_radians = std.math.pi * 0.9,
             .inherited_velocity = vec.add(playerVelocity, playerVelocityChange),
@@ -562,6 +549,17 @@ fn explodeAtWithDirectHit(
     attackerId: ?usize,
     directHitDamage: ?DirectHitDamage,
 ) !void {
+    // Reserve before effects or impulses. Queries and damage grouping then need
+    // no allocations. The in-use guard rejects nested explosions before they
+    // can overwrite an outer explosion's pending damage.
+    try prepareExplosionStorage();
+    explosionInProgress = true;
+    defer {
+        clearExplosionStorage();
+        explosionInProgress = false;
+    }
+    const previous_attack = damage.beginAttack(null);
+    defer damage.activeAttack = previous_attack;
     const perfId = beginExplosionPerfLog();
     const totalStart = perf.begin(.explosion);
     const cutoutSeed = cutoutSeedForExplosion(impactPosition, pressureSourcePosition, explosion);
@@ -619,6 +617,7 @@ pub fn explodeAtDirectPlayer(pos: vec.Vec2, explosion: Explosion, attackerId: ?u
 pub fn create(bodyId: box2d.c.b2BodyId, spec: Spec) !void {
     const rotation = box2d.c.b2Body_GetRotation(bodyId);
     try activeProjectiles.put(allocator, bodyId, .{
+        .attack_id = damage.newAttackId(),
         .owner_id = spec.owner_id,
         .direct_damage = spec.direct_damage,
         .penetration = spec.penetration,
@@ -760,13 +759,13 @@ pub fn playerIdForBody(bodyId: box2d.c.b2BodyId) ?usize {
 
 pub fn damagePlayerFromHitscan(
     playerId: usize,
-    damage: f32,
+    amount: f32,
     attackerId: usize,
     impactPoint: vec.Vec2,
     travelDirection: vec.Vec2,
     penetration: PenetrationMode,
 ) !void {
-    if (damage <= 0) return;
+    if (amount <= 0) return;
 
     const victim = player.players.get(playerId) orelse {
         std.log.err("damagePlayerFromHitscan: player {d} is missing", .{playerId});
@@ -786,9 +785,9 @@ pub fn damagePlayerFromHitscan(
     else
         null;
     const victimVelocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(victim.bodyId));
-    _ = try damagePlayerWithBlood(playerId, damage, attackerId, .{
+    _ = try damagePlayerWithBlood(playerId, amount, attackerId, .{
         .position = impactPoint,
-        .amount = damage,
+        .amount = amount,
         .direction = if (vec.magnitude(bloodDirection) < 0.001) null else bloodDirection,
         .spread_radians = spread,
         .inherited_velocity = victimVelocity,
@@ -982,6 +981,8 @@ fn handleProjectileContactForBody(
     maybeOutwardNormal: ?vec.Vec2,
 ) !void {
     const active = activeProjectiles.get(bodyId) orelse return;
+    const previous_attack = damage.beginAttack(active.attack_id);
+    defer damage.activeAttack = previous_attack;
     const otherFilter = box2d.c.b2Shape_GetFilter(otherShapeId);
     if ((otherFilter.categoryBits & collision.CATEGORY_HOOK) != 0) return;
 
@@ -990,6 +991,14 @@ fn handleProjectileContactForBody(
         const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
         if (active.impact_behavior == .stick) {
             try stickProjectile(bodyId, otherBodyId, impactPoint, active);
+            if (!active.spent and ragdoll.corpses.contains(damage.healthOwner(otherBodyId))) {
+                try destruction.apply(otherBodyId, .{
+                    .source = .projectile,
+                    .amount = active.direct_damage,
+                    .position = impactPoint,
+                    .attackerId = active.owner_id,
+                });
+            }
             return;
         }
 
@@ -1049,6 +1058,8 @@ fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShape
 
     const bodyId = box2d.c.b2Shape_GetBody(sensorShapeId);
     const active = activeProjectiles.get(bodyId) orelse return;
+    const previous_attack = damage.beginAttack(active.attack_id);
+    defer damage.activeAttack = previous_attack;
     if (active.spent or active.penetration != .penetrating) {
         return;
     }
@@ -1124,4 +1135,8 @@ pub fn cleanup() void {
     activeProjectiles.clearAndFree(allocator);
     propulsions.clearAndFree(allocator);
     embeddedProjectiles.clearAndFree(allocator);
+    explosionBodies.deinit(allocator);
+    explosionBodies = .empty;
+    explosionBodySet.clearAndFree(allocator);
+    explosionDamage.clearAndFree(allocator);
 }

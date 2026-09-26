@@ -4,6 +4,7 @@ const sprite = @import("sprite.zig");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const damage = @import("damage.zig");
+const ragdoll = @import("ragdoll.zig");
 const entity = @import("entity.zig");
 const collision = @import("collision.zig");
 const config = @import("config.zig");
@@ -33,7 +34,8 @@ const gibletBloodMinImpactSpeed: f32 = 1.4;
 const gibletBloodMinDamage: f32 = 4.0;
 const gibletBloodMaxDamage: f32 = 18.0;
 const gibletBloodDamagePerSpeed: f32 = 3.0;
-const consumedPartBloodAmount: f32 = 4;
+pub const consumedPartBloodAmount: f32 = 4;
+const destroyedPartBloodAmount: f32 = 18;
 
 pub const PartSnapshot = struct {
     binding: usize,
@@ -84,7 +86,7 @@ pub fn snapshotPose(
     return result;
 }
 
-// Shared by live-character and future corpse snapshots. Exactly one draw per
+// Shared by live-character and corpse snapshots. Exactly one draw per
 // anatomical part, including zero/one weights, makes seeded checks reproducible.
 pub fn selectSurvivors(snapshot: Snapshot, random: std.Random) [64]bool {
     var selected = [_]bool{false} ** 64;
@@ -195,7 +197,7 @@ fn createBody(
         .model = .{ .health = .{ .current = 1, .maximum = 1 } },
         .onDestroyed = .{ .particle_burst = .{
             .effectId = effect,
-            .amount = 18,
+            .amount = destroyedPartBloodAmount,
             .spreadRadians = std.math.pi * 0.55,
         } },
         .destructionLifecycle = .return_to_pool,
@@ -219,8 +221,12 @@ fn createPool(
             count += 1;
         }
     }
-    // At least two complete deaths can coexist without recycling within a death.
-    const bodies = try allocator.alloc(box2d.c.b2BodyId, @max(4, count * 2));
+    // Connected corpses reserve their members. Leave room for two complete gib
+    // deaths as well, without recycling within a death or stealing a corpse limb.
+    const bodies = try allocator.alloc(
+        box2d.c.b2BodyId,
+        @max(4, count * (2 + damage.rules.maximumRagdolls)),
+    );
     defer allocator.free(bodies);
     var created: usize = 0;
     errdefer destroyBodies(bodies[0..created]);
@@ -233,6 +239,7 @@ fn createPool(
 
 // Prepare a complete replacement before touching active pools or artwork.
 pub fn preparePools(pack: *const character_art.Pack, effect: particle_effect.Id) ![]PartPools {
+    try ragdoll.prepareCapacity();
     const result = try allocator.alloc(PartPools, pack.parts.len);
     errdefer allocator.free(result);
     var count: usize = 0;
@@ -266,10 +273,13 @@ fn prewarmBlood(pack: *const character_art.Pack, effect: particle_effect.Id) !vo
         std.log.warn("gibbing.prewarmBlood: blood preset is missing", .{});
         return error.BloodParticlePresetNotFound;
     };
-    // The ordinary fatal burst plus every consumed part, for two overlapping
-    // deaths. Use the emitter's exact rounding/cap and its existing body pool.
-    const consumed = pack.bindings.len * particle_effect.particleCount(preset, consumedPartBloodAmount);
-    try particle.prewarmBodies(2 * (preset.maxParticles + consumed));
+    // Cover two overlapping direct-hit/explosion deaths and their consumed
+    // parts. Connected corpses emit no impact blood. Use the emitter's exact
+    // rounding/cap so the reserve follows changes to the artwork and preset.
+    const count: f32 = @floatFromInt(pack.bindings.len);
+    const per_part = @max(consumedPartBloodAmount, destroyedPartBloodAmount / count);
+    const consumed = pack.bindings.len * particle_effect.particleCount(preset, per_part);
+    try particle.prewarmBodies(2 * (2 * preset.maxParticles + consumed));
 }
 
 pub fn replaceArtwork(pack: *const character_art.Pack) !void {
@@ -284,6 +294,7 @@ pub fn replaceArtwork(pack: *const character_art.Pack) !void {
 }
 
 pub fn clearBodies() void {
+    ragdoll.cleanup();
     destroyPools(partPools);
     partPools = &.{};
 }
@@ -321,7 +332,8 @@ pub fn activatePart(part: PartSnapshot, scatter_velocity: vec.Vec2, scatter_spin
         std.log.err("gibbing.activatePart: body part artwork is missing", .{});
         return error.MissingCharacterPart;
     };
-    try damage.reset(body);
+    resetPartDamage(body);
+    setCollisionGroup(body, 0);
     cooldown.* = 0;
     visual.* = .{
         .part = part.placed.part,
@@ -349,7 +361,46 @@ pub fn activatePart(part: PartSnapshot, scatter_velocity: vec.Vec2, scatter_spin
     return body;
 }
 
-// Corpses will supply this same snapshot from their current bodies in phase 6C.
+// Converting a connected limb to a giblet changes ownership and appearance only.
+// Its Box2D transform, velocities, and pool activation identity remain intact.
+pub fn resetPartDamage(bodyId: box2d.c.b2BodyId) void {
+    const component = damage.components.getPtr(bodyId) orelse {
+        std.log.err("gibbing.resetPartDamage: part has no damage component", .{});
+        return;
+    };
+    component.model = .{ .health = .{ .current = 1, .maximum = 1 } };
+    component.pendingDestruction = false;
+    component.destructionLifecycle = .return_to_pool;
+    component.immuneAttack = damage.activeAttack orelse 0;
+}
+
+pub fn setCollisionGroup(bodyId: box2d.c.b2BodyId, group: i32) void {
+    const ent = entity.entities.getLocking(bodyId) orelse {
+        std.log.err("gibbing.setCollisionGroup: part has no entity", .{});
+        return;
+    };
+    for (ent.shapeIds) |shape| {
+        var filter = box2d.c.b2Shape_GetFilter(shape);
+        filter.groupIndex = group;
+        box2d.c.b2Shape_SetFilter(shape, filter);
+    }
+}
+
+pub fn releasePart(bodyId: box2d.c.b2BodyId) void {
+    const ent = entity.entities.getPtrLocking(bodyId) orelse {
+        std.log.err("gibbing.releasePart: part has no entity", .{});
+        return;
+    };
+    box2d.c.b2Body_Disable(bodyId);
+    ent.enabled = false;
+    resetPartDamage(bodyId);
+    pool.releaseBody(bodyId) catch |err| {
+        std.log.err("gibbing.releasePart: cannot release part: {}", .{err});
+    };
+}
+
+// Live deaths activate surviving parts. Corpses use selectSurvivors with the
+// same binding weights and release their already-active bodies in place.
 pub fn gib(snapshot: Snapshot, random: std.Random) void {
     const selected = selectSurvivors(snapshot, random);
     for (snapshot.parts[0..snapshot.count], selected[0..snapshot.count]) |part, survives| {
@@ -369,18 +420,18 @@ pub fn gib(snapshot: Snapshot, random: std.Random) void {
     }
 }
 
-pub fn gibPlayer(player_id: usize) void {
+pub fn snapshotPlayer(player_id: usize) ?Snapshot {
     if (character_art.assets == null or character_animation.assets == null) {
-        std.log.warn("gibbing.gibPlayer: character assets are missing", .{});
-        return;
+        std.log.warn("gibbing.snapshotPlayer: character assets are missing", .{});
+        return null;
     }
     const p = player.players.get(player_id) orelse {
-        std.log.warn("gibbing.gibPlayer: player {d} is missing", .{player_id});
-        return;
+        std.log.warn("gibbing.snapshotPlayer: player {d} is missing", .{player_id});
+        return null;
     };
     const frame = character_animation.playerFrame(player_id, .physics, null) orelse {
-        std.log.warn("gibbing.gibPlayer: player {d} pose is missing", .{player_id});
-        return;
+        std.log.warn("gibbing.snapshotPlayer: player {d} pose is missing", .{player_id});
+        return null;
     };
     const pack = &character_art.assets.?;
     const rig = character_animation.assets.?.rig;
@@ -388,17 +439,22 @@ pub fn gibPlayer(player_id: usize) void {
     const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
     var snapshot = snapshotPose(pack, rig, frame, carrying, p.color, velocity);
     const state = character_animation.states.get(player_id) orelse {
-        std.log.warn("gibbing.gibPlayer: animation state is missing", .{});
-        return;
+        std.log.warn("gibbing.snapshotPlayer: animation state is missing", .{});
+        return null;
     };
     const before = character_animation.playerFrame(player_id, .previous_physics, null) orelse {
-        std.log.warn("gibbing.gibPlayer: previous pose is missing", .{});
-        return;
+        std.log.warn("gibbing.snapshotPlayer: previous pose is missing", .{});
+        return null;
     };
     if (state.initialized and state.facing_right == state.previous_facing_right) {
         const previous = snapshotPose(pack, rig, before, carrying, p.color, vec.zero);
         inheritPoseMotion(&snapshot, previous, frame.body, before.body, state.step_seconds);
     }
+    return snapshot;
+}
+
+pub fn gibPlayer(player_id: usize) void {
+    const snapshot = snapshotPlayer(player_id) orelse return;
     gib(snapshot, runtime.random());
 }
 
@@ -428,6 +484,8 @@ fn shapeCanReceiveGibletBlood(shapeId: box2d.c.b2ShapeId) bool {
 }
 
 fn spatterFromGiblet(gibletBodyId: box2d.c.b2BodyId, targetShapeId: box2d.c.b2ShapeId) !void {
+    // Connected corpses do not bleed from movement or environmental impacts.
+    if (ragdoll.corpses.contains(damage.healthOwner(gibletBodyId))) return;
     if (!box2d.c.b2Body_IsValid(gibletBodyId)) {
         return;
     }

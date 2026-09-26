@@ -67,7 +67,28 @@ selection of surviving anatomical parts for players and ragdolls. Phase 6A was
 completed in `aa2c27b`: configurable -40 HP threshold and shared signed health
 outcomes. Weighted body-part giblets (6B) are complete and accepted by the user,
 with independent review, corrections and validation complete; see
-[body-part giblet notes](character_body_part_giblets.md). Ragdolls (6C) remain pending.
+[body-part giblet notes](character_body_part_giblets.md). Ragdolls (6C) are accepted
+by the user, including the performance and explosion-storage iterations below;
+independent review and corrections are complete, and the user has explicitly
+authorized the commit. See [ragdoll notes](character_ragdolls.md).
+User testing exposed repeated-missile slowdowns. The authorized correction
+removes movement/impact blood from intact corpses, consumes transient contacts
+after every fixed step, returns droplets immediately to the existing pool, and
+adds a Tower Keep repeated-kill benchmark. Independent review found a death-pose
+ordering issue, now fixed and covered by a regression. All 132 tests and the
+build/smoke checks pass. Twelve repeated kills allocate no new particle or corpse
+bodies, but a remaining 38.915 ms burst-time frame exceeds the new 33.333 ms gate.
+The prolonged baseline slowdown did not recur; performance validation remains
+partially failing.
+The user also authorized replacing fixed explosion query/damage arrays with
+reusable scratch collections. That refactor is implemented with setup reservation,
+world-size-based growth, body/health-owner maps and dedicated regression coverage;
+independent review found and corrected a missed hash-map growth counter case.
+All 134 tests and build/smoke checks pass. Runtime captures report zero scratch
+growth, including twelve Tower Keep deaths, but the last gibbing death reached
+45.431 ms and still failed the 33.333 ms frame-time gate. The remaining spike and
+obstructed respawn are documented for follow-up; acceptance does not mean that
+the performance gate passed.
 See [gibbing rule implementation](character_gibbing_rules.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
@@ -480,6 +501,13 @@ adding connected corpse physics.
 
 #### 6C. Ragdolls with shared health and destruction
 
+Completed and accepted by the user, including independent review and corrections.
+Validation passed 134 tests and build/smoke checks. Repeated Tower Keep deaths
+allocate no new explosion scratch storage or particle/corpse bodies, but a
+45.431 ms frame still exceeds the benchmark's 33.333 ms gate. See the
+[ragdoll notes](character_ragdolls.md) for the remaining performance and respawn
+limitations.
+
 On a non-gibbing death, create the same physical body parts connected by Box2D
 hinge joints with anatomical angle limits, initialized from the death pose and
 motion. The normal player remains disabled for the existing respawn lifecycle.
@@ -489,7 +517,7 @@ parallel damage pipeline or copying the character renderer.
 
 Give the corpse a shared 100 HP pool and route hitscan, projectile and explosion
 damage from its parts to that pool. Group explosion health damage per corpse
-(proposed: use the strongest valid limb sample), while physical impulses may
+using the strongest valid limb sample, while physical impulses may
 still act on individual parts. Use the agreed rule from 6A to select the outcome.
 On gibbing, run the same weighted survivor selection as live-player gibbing.
 Release the joints and transfer only selected parts to giblet ownership without
@@ -499,8 +527,9 @@ effect over the body and remove all parts and joints as one operation. No active
 invisible colliders or orphan damage entries may remain.
 
 Handle level teardown, player respawn, artwork reload and pool recycling through
-the existing lifecycle boundaries. Settle any corpse-count/retention limit and
-gravestone/weapon presentation before implementing those choices. Walking and
+the existing lifecycle boundaries. The agreed default is eight corpses, configured
+in `damage_rules.json`; recycle the oldest whole corpse when full. Retain existing
+gravestone and weapon presentation. Walking and
 foot anchoring must continue to treat solid corpse parts as physical supports.
 
 Validate death-to-ragdoll continuity, joint limits, shared-health damage,

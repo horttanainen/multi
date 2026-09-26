@@ -3,6 +3,7 @@ const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const damage = @import("damage.zig");
+const ragdoll = @import("ragdoll.zig");
 const entity = @import("entity.zig");
 const hot_rim_visual = @import("hot_rim_visual.zig");
 const perf = @import("perf.zig");
@@ -151,7 +152,15 @@ fn deactivatePooledBody(bodyId: box2d.c.b2BodyId) void {
     pool.queueRelease(bodyId);
 }
 
-fn destroy(bodyId: box2d.c.b2BodyId, event: damage.Event, response: damage.DestructionResponse) void {
+pub fn destroy(
+    bodyId: box2d.c.b2BodyId,
+    event: damage.Event,
+    response: damage.DestructionResponse,
+) void {
+    if (response.lifecycle == .ragdoll) {
+        ragdoll.destroy(bodyId, event);
+        return;
+    }
     if (!box2d.c.b2Body_IsValid(bodyId)) {
         std.log.warn("destruction.destroy: body became invalid before destruction", .{});
         return;
@@ -227,6 +236,8 @@ fn cutSurface(bodyId: box2d.c.b2BodyId, event: damage.Event, surfaceCutout: dama
 }
 
 pub fn apply(bodyId: box2d.c.b2BodyId, event: damage.Event) !void {
+    const previous = damage.beginAttack(null);
+    defer damage.activeAttack = previous;
     switch (damage.apply(bodyId, event)) {
         .ignored, .damaged => {},
         .surface_cutout => |surfaceCutout| try cutSurface(bodyId, event, surfaceCutout),

@@ -5,6 +5,8 @@ const config = @import("config.zig");
 const conv = @import("conversion.zig");
 const data = @import("data.zig");
 const damage = @import("damage.zig");
+const destruction = @import("destruction.zig");
+const ragdoll = @import("ragdoll.zig");
 const gibbing = @import("gibbing.zig");
 const particle = @import("particle.zig");
 const perf = @import("perf.zig");
@@ -20,10 +22,16 @@ pub const Scenario = enum {
     air_explosion,
     air_explosion_no_visual,
     air_death,
+    air_ragdoll,
+    ragdoll_gib,
+    ragdoll_remove,
+    ragdoll_projectile,
+    ragdoll_hitscan,
     ground_explosion,
     ground_explosion_no_visual,
     ground_death,
     tower_keep_player_kill,
+    tower_keep_ragdolls,
 };
 
 pub const Options = struct {
@@ -38,6 +46,7 @@ const CounterSnapshot = struct {
     giblet_recycles: u64,
     texture_migrations: u64,
     texture_migration_bytes: u64,
+    explosion_storage_growths: u64,
 };
 
 const maximumGroundEvents: u32 = 3;
@@ -58,15 +67,23 @@ var waitingForCapture = false;
 var eventCounters: CounterSnapshot = undefined;
 var triggerCounters: CounterSnapshot = undefined;
 var eventTriggerUs: u64 = 0;
+var eventShotCount: u32 = 0;
+const maximumShotsPerDeath: u32 = 8;
 
 fn scenarioFromName(name: []const u8) !Scenario {
     if (std.mem.eql(u8, name, "air-explosion")) return .air_explosion;
     if (std.mem.eql(u8, name, "air-explosion-no-visual")) return .air_explosion_no_visual;
     if (std.mem.eql(u8, name, "air-death")) return .air_death;
+    if (std.mem.eql(u8, name, "air-ragdoll")) return .air_ragdoll;
+    if (std.mem.eql(u8, name, "ragdoll-gib")) return .ragdoll_gib;
+    if (std.mem.eql(u8, name, "ragdoll-remove")) return .ragdoll_remove;
+    if (std.mem.eql(u8, name, "ragdoll-projectile")) return .ragdoll_projectile;
+    if (std.mem.eql(u8, name, "ragdoll-hitscan")) return .ragdoll_hitscan;
     if (std.mem.eql(u8, name, "ground-explosion")) return .ground_explosion;
     if (std.mem.eql(u8, name, "ground-explosion-no-visual")) return .ground_explosion_no_visual;
     if (std.mem.eql(u8, name, "ground-death")) return .ground_death;
     if (std.mem.eql(u8, name, "tower-keep-player-kill")) return .tower_keep_player_kill;
+    if (std.mem.eql(u8, name, "tower-keep-ragdolls")) return .tower_keep_ragdolls;
 
     std.log.err("explosion_benchmark.scenarioFromName: unknown scenario '{s}'", .{name});
     return error.InvalidExplosionBenchmarkScenario;
@@ -77,10 +94,16 @@ fn scenarioName(scenario: Scenario) []const u8 {
         .air_explosion => "air-explosion",
         .air_explosion_no_visual => "air-explosion-no-visual",
         .air_death => "air-death",
+        .air_ragdoll => "air-ragdoll",
+        .ragdoll_gib => "ragdoll-gib",
+        .ragdoll_remove => "ragdoll-remove",
+        .ragdoll_projectile => "ragdoll-projectile",
+        .ragdoll_hitscan => "ragdoll-hitscan",
         .ground_explosion => "ground-explosion",
         .ground_explosion_no_visual => "ground-explosion-no-visual",
         .ground_death => "ground-death",
         .tower_keep_player_kill => "tower-keep-player-kill",
+        .tower_keep_ragdolls => "tower-keep-ragdolls",
     };
 }
 
@@ -144,7 +167,17 @@ fn scenarioUsesGround(scenario: Scenario) bool {
 }
 
 fn scenarioDamagesPlayer(scenario: Scenario) bool {
-    return scenario == .air_death or scenario == .ground_death or scenario == .tower_keep_player_kill;
+    return scenario == .air_death or scenario == .ground_death or
+        scenario == .tower_keep_player_kill or scenarioUsesRagdoll(scenario);
+}
+
+fn scenarioUsesRagdoll(scenario: Scenario) bool {
+    return scenario == .air_ragdoll or scenario == .ragdoll_gib or
+        scenario == .ragdoll_remove or scenarioUsesDirectRagdollHit(scenario);
+}
+
+fn scenarioUsesDirectRagdollHit(scenario: Scenario) bool {
+    return scenario == .ragdoll_projectile or scenario == .ragdoll_hitscan;
 }
 
 fn scenarioUsesVisual(scenario: Scenario) bool {
@@ -153,7 +186,9 @@ fn scenarioUsesVisual(scenario: Scenario) bool {
 
 pub fn levelPath() ?[]const u8 {
     if (!options.enabled) return null;
-    if (options.scenario == .tower_keep_player_kill) return towerKeepLevelPath;
+    if (options.scenario == .tower_keep_player_kill or options.scenario == .tower_keep_ragdolls) {
+        return towerKeepLevelPath;
+    }
     return explosionBenchmarkLevelPath;
 }
 
@@ -164,6 +199,7 @@ fn counterSnapshot() CounterSnapshot {
         .giblet_recycles = gibbing.poolRecycleCount,
         .texture_migrations = tex.fullMigrationCount,
         .texture_migration_bytes = tex.fullMigrationBytes,
+        .explosion_storage_growths = projectile.explosionStorageGrowthCount,
     };
 }
 
@@ -224,55 +260,112 @@ fn prepareVictim(victimId: usize, attackerId: usize, maximumDamage: f32) !void {
     }
 }
 
-fn triggerTowerKeepPlayerKill(attackerId: usize, victimId: usize, explosion: projectile.Explosion) !void {
+fn triggerWeaponKill(attackerId: usize, victimId: usize, explosion: projectile.Explosion) !void {
     const attacker = player.players.getPtr(attackerId) orelse {
-        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: attacker player {d} is missing", .{attackerId});
+        std.log.err("explosion_benchmark.triggerWeaponKill: attacker player {d} is missing", .{attackerId});
         return error.ExplosionBenchmarkPlayerMissing;
     };
     if (attacker.weapons.len == 0) {
-        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: attacker player {d} has no weapon", .{attackerId});
+        std.log.err("explosion_benchmark.triggerWeaponKill: attacker player {d} has no weapon", .{attackerId});
         return error.ExplosionBenchmarkWeaponMissing;
     }
 
     const attackerSpawn = try spawn.positionForPlayer(attackerId);
     const victimSpawn = try spawn.positionForPlayer(victimId);
-    const victimBodyPosition = conv.pixel2M(victimSpawn);
+    const direct_ragdoll = scenarioUsesDirectRagdollHit(options.scenario);
+    const repeated = options.scenario == .tower_keep_ragdolls;
+    const victimBodyPosition = if (repeated)
+        vec.fromBox2d(box2d.c.b2Body_GetPosition(player.players.get(victimId).?.bodyId))
+    else if (direct_ragdoll)
+        vec.subtract(eventTarget(), player.centerOffset)
+    else
+        conv.pixel2M(victimSpawn);
     try positionPlayer(attackerId, conv.pixel2M(attackerSpawn));
-    try positionPlayer(victimId, victimBodyPosition);
+    if (!repeated) {
+        try positionPlayer(victimId, victimBodyPosition);
+    }
     player.aim(attacker, vec.east);
-    try prepareVictim(victimId, attackerId, explosion.maximumDamage);
-
-    const selectedWeapon = attacker.weapons[attacker.selectedWeaponIndex];
-    if (selectedWeapon.projectile == null) {
-        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: player {d} selected a non-projectile weapon", .{attackerId});
+    var selectedWeapon = attacker.weapons[attacker.selectedWeaponIndex];
+    if (options.scenario == .ragdoll_hitscan) {
+        for (attacker.weapons) |candidate| {
+            if (candidate.hitscanExplosion == null) continue;
+            selectedWeapon = candidate;
+            break;
+        }
+        if (selectedWeapon.hitscanExplosion == null) {
+            std.log.err("explosion_benchmark.triggerWeaponKill: explosive hitscan weapon is missing", .{});
+            return error.ExplosionBenchmarkWeaponMissing;
+        }
+        // End the ray just behind the victim so its explosion overlaps the corpse.
+        selectedWeapon.range = 0.7;
+    } else if (selectedWeapon.projectile == null) {
+        std.log.err("explosion_benchmark.triggerWeaponKill: selected weapon has no projectile", .{});
         return error.ExplosionBenchmarkProjectileWeaponMissing;
+    }
+    if (direct_ragdoll) {
+        if (selectedWeapon.directDamage <= 0) {
+            std.log.err("explosion_benchmark.triggerWeaponKill: weapon has no direct damage", .{});
+            return error.ExplosionBenchmarkWeaponMissing;
+        }
+        player.players.getPtr(victimId).?.health = selectedWeapon.directDamage;
+    } else if (!repeated) {
+        try prepareVictim(victimId, attackerId, explosion.maximumDamage);
     }
     const target = vec.add(victimBodyPosition, player.centerOffset);
     const launchPosition = vec.Vec2{
-        .x = conv.pixel2M(attackerSpawn).x,
+        .x = if (direct_ragdoll or repeated) target.x - 0.5 else conv.pixel2M(attackerSpawn).x,
         .y = target.y,
     };
     const launchPixelPosition = conv.m2Pixel(vec.toBox2d(launchPosition));
 
-    eventCounters = counterSnapshot();
+    if (eventShotCount == 0) {
+        eventCounters = counterSnapshot();
+        eventTriggerUs = 0;
+    }
     const projectileCountBefore = projectile.activeProjectiles.count();
     const triggerStart = perf.begin(.explosion);
     try weapon.shoot(selectedWeapon, launchPixelPosition, vec.east, vec.zero, attackerId);
-    eventTriggerUs = perf.elapsedUs(triggerStart);
+    eventTriggerUs += perf.elapsedUs(triggerStart);
+    eventShotCount += 1;
     const projectileCountAfter = projectile.activeProjectiles.count();
-    if (projectileCountAfter <= projectileCountBefore) {
-        std.log.err("explosion_benchmark.triggerTowerKeepPlayerKill: player {d} did not fire a projectile", .{attackerId});
+    if (options.scenario != .ragdoll_hitscan and projectileCountAfter <= projectileCountBefore) {
+        std.log.err("explosion_benchmark.triggerWeaponKill: player {d} did not fire a projectile", .{attackerId});
         return error.ExplosionBenchmarkProjectileMissing;
     }
 
-    triggerCounters = counterSnapshot();
-    waitingForImpact = true;
+    if (eventShotCount == 1) {
+        triggerCounters = counterSnapshot();
+    }
+    if (options.scenario == .ragdoll_hitscan) {
+        _ = try validateFreshRagdoll();
+        waitingForCapture = true;
+    } else {
+        waitingForImpact = true;
+    }
     framesWaitingForImpact = 0;
+
+    if (eventShotCount > 1) {
+        std.log.info("perf.benchmark_retry event={d} shot={d}", .{ eventIndex + 1, eventShotCount });
+        return;
+    }
 
     std.log.info(
         "perf.benchmark_event_begin scenario={s} event={d} cold={} target_x={d:.3} target_y={d:.3} trigger_us={d}",
         .{ scenarioName(options.scenario), eventIndex + 1, eventIndex == 0, target.x, target.y, eventTriggerUs },
     );
+}
+
+fn validateFreshRagdoll() !box2d.c.b2BodyId {
+    if (ragdoll.corpses.count() == 0) {
+        std.log.err("explosion_benchmark.validateFreshRagdoll: ordinary death produced no corpse", .{});
+        return error.MissingBenchmarkRagdoll;
+    }
+    const root = ragdoll.corpses.keys()[ragdoll.corpses.count() - 1];
+    if (damage.components.get(root).?.model.health.current != damage.rules.ragdollHealth) {
+        std.log.err("explosion_benchmark.validateFreshRagdoll: fatal attack damaged the fresh corpse", .{});
+        return error.BenchmarkRagdollBirthDamage;
+    }
+    return root;
 }
 
 fn triggerEvent() !void {
@@ -285,8 +378,10 @@ fn triggerEvent() !void {
     if (victim.isDead) return;
 
     var explosion = try data.createExplosionFrom("missile_explosion");
-    if (options.scenario == .tower_keep_player_kill) {
-        try triggerTowerKeepPlayerKill(attackerId, victimId, explosion);
+    if (options.scenario == .tower_keep_player_kill or options.scenario == .tower_keep_ragdolls or
+        scenarioUsesDirectRagdollHit(options.scenario))
+    {
+        try triggerWeaponKill(attackerId, victimId, explosion);
         return;
     }
     if (!scenarioDamagesPlayer(options.scenario)) explosion.damagePlayers = false;
@@ -297,7 +392,9 @@ fn triggerEvent() !void {
     try positionPlayer(victimId, victimBodyPosition);
     try positionPlayer(attackerId, vec.add(victimBodyPosition, .{ .x = -6, .y = 0 }));
 
-    if (scenarioDamagesPlayer(options.scenario)) {
+    if (scenarioUsesRagdoll(options.scenario)) {
+        explosion.maximumDamage = victim.health;
+    } else if (scenarioDamagesPlayer(options.scenario)) {
         try prepareVictim(victimId, attackerId, explosion.maximumDamage);
     }
 
@@ -307,6 +404,17 @@ fn triggerEvent() !void {
         try projectile.explodeAtDirectPlayer(target, explosion, attackerId, victimId);
     } else {
         try projectile.explodeAt(target, explosion, attackerId);
+    }
+    if (scenarioUsesRagdoll(options.scenario)) {
+        const root = try validateFreshRagdoll();
+        const health = damage.components.get(root).?.model.health.current;
+        if (options.scenario != .air_ragdoll) {
+            const amount = health - if (options.scenario == .ragdoll_gib)
+                damage.rules.gibHealthThreshold
+            else
+                @as(f32, 0);
+            try destruction.apply(root, .{ .source = .explosion, .amount = amount, .position = target });
+        }
     }
     eventTriggerUs = perf.elapsedUs(triggerStart);
     triggerCounters = counterSnapshot();
@@ -320,6 +428,14 @@ fn triggerEvent() !void {
 
 fn reportCompletedEvent() void {
     const counters = counterSnapshot();
+    std.log.info(
+        "perf.benchmark_explosion_storage event={d} trigger_growths={d} capture_growths={d}",
+        .{
+            eventIndex + 1,
+            triggerCounters.explosion_storage_growths - eventCounters.explosion_storage_growths,
+            counters.explosion_storage_growths - eventCounters.explosion_storage_growths,
+        },
+    );
     std.log.info(
         "perf.benchmark_event_end scenario={s} event={d} cold={} trigger_us={d} trigger_particle_bodies_created={d} trigger_giblet_bodies_created={d} trigger_giblet_pool_recycles={d} capture_particle_bodies_created={d} capture_giblet_bodies_created={d} capture_giblet_pool_recycles={d} texture_migrations={d} texture_migration_bytes={d}",
         .{
@@ -349,16 +465,26 @@ pub fn update() !void {
             return error.ExplosionBenchmarkPlayerMissing;
         };
         if (victim.isDead) {
+            if (scenarioUsesDirectRagdollHit(options.scenario)) {
+                _ = try validateFreshRagdoll();
+            }
             waitingForImpact = false;
             waitingForCapture = true;
             return;
         }
         if (projectile.activeProjectiles.count() == 0) {
-            std.log.err("explosion_benchmark.update: Tower Keep projectile ended without killing player {d}", .{victimId});
+            // A corpse or gravestone can intercept the missile. Keep normal
+            // damage/health and retry, retaining counters across all attempts.
+            if (options.scenario == .tower_keep_ragdolls and eventShotCount < maximumShotsPerDeath) {
+                waitingForImpact = false;
+                framesUntilTrigger = betweenEventFrameCount;
+                return;
+            }
+            std.log.err("explosion_benchmark.update: projectile ended without killing player {d}", .{victimId});
             return error.ExplosionBenchmarkProjectileMissed;
         }
         if (framesWaitingForImpact >= maximumImpactWaitFrames) {
-            std.log.err("explosion_benchmark.update: Tower Keep projectile did not hit within {d} frames", .{maximumImpactWaitFrames});
+            std.log.err("explosion_benchmark.update: projectile did not hit within {d} frames", .{maximumImpactWaitFrames});
             return error.ExplosionBenchmarkProjectileTimedOut;
         }
         framesWaitingForImpact += 1;
@@ -371,12 +497,13 @@ pub fn update() !void {
         reportCompletedEvent();
         waitingForCapture = false;
         eventIndex += 1;
+        eventShotCount = 0;
         if (eventIndex >= options.event_count) {
             std.log.info("perf.benchmark_complete scenario={s} events={d}", .{ scenarioName(options.scenario), eventIndex });
             state.quitGame = true;
             return;
         }
-        framesUntilTrigger = betweenEventFrameCount;
+        framesUntilTrigger = if (options.scenario == .tower_keep_ragdolls) 0 else betweenEventFrameCount;
         return;
     }
 
