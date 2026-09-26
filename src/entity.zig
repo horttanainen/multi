@@ -25,6 +25,7 @@ const collision = @import("collision.zig");
 const damage = @import("damage.zig");
 const pool = @import("pool.zig");
 const character_animation = @import("character_animation.zig");
+const character_art = @import("character_art.zig");
 
 pub const terrainColliderChunkSizeP: i32 = 64;
 
@@ -127,6 +128,7 @@ pub fn draw(entity: *Entity) !void {
 fn drawWithOptions(entity: *Entity, flip: bool) !void {
     const currentState = box2d.getState(entity.bodyId);
     const state = box2d.getInterpolatedState(entity.state, currentState);
+    if (try character_art.drawBodyPart(entity.bodyId, vec.fromBox2d(state.pos), state.rotAngle)) return;
 
     for (entity.spriteUuids) |spriteUuid| {
         const entitySprite = sprite.getSprite(spriteUuid) orelse continue;
@@ -357,16 +359,13 @@ pub fn cleanupLater(entity: Entity) void {
 }
 
 pub fn addSprite(bodyId: box2d.c.b2BodyId, spriteUuid: u64) !void {
-    const maybeEnt = entities.getPtrLocking(bodyId);
-    if (maybeEnt) |ent| {
-        var uuids: std.ArrayListUnmanaged(u64) = .empty;
-        for (ent.spriteUuids) |uuid| {
-            try uuids.append(allocator, uuid);
-        }
-        try uuids.append(allocator, spriteUuid);
-        allocator.free(ent.spriteUuids);
-        ent.spriteUuids = try uuids.toOwnedSlice(allocator);
-    }
+    const ent = entities.getPtrLocking(bodyId) orelse {
+        std.log.warn("entity.addSprite: body has no entity", .{});
+        return error.EntityNotFound;
+    };
+    const count = ent.spriteUuids.len;
+    ent.spriteUuids = try allocator.realloc(ent.spriteUuids, count + 1);
+    ent.spriteUuids[count] = spriteUuid;
 }
 
 pub fn markSpriteUuidsShared(bodyId: box2d.c.b2BodyId) void {
@@ -402,6 +401,7 @@ pub fn cleanupEntities() void {
 }
 
 pub fn cleanupOne(entity: Entity) void {
+    _ = character_art.bodyParts.swapRemove(entity.bodyId);
     _ = damage.unregister(entity.bodyId);
     _ = pool.discardBody(entity.bodyId);
     box2d.c.b2DestroyBody(entity.bodyId);

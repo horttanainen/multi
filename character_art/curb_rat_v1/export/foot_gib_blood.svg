@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="60" viewBox="0 0 90 60">
+  <title>Generated: source/foot.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 8 L32 8 L34 15 L30 14 L28 18 L24 15 L21 18 L17 15 Z" fill="#6b6b6b" />
+    <path d="M20 9 L30 9 L31 12 L27 12 L25 15 L22 12 L19 13 Z" fill="#d3d3d3" />
+    <path d="M23 10 L28 10 L26 12 Z" fill="#fdfdfd" />
+    <path d="M38 22 L43 20 L46 23 L51 22 L54 25 L50 27 L47 30 L43 28 L39 29 L37 26 L34 25 Z" fill="#bcbcbc" />
+    <path d="M39 24 L44 23 L49 25 L45 27 L40 26 Z" fill="#eeeeee" />
+  </g>
+</svg>

@@ -6,11 +6,26 @@ const player = @import("player.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
 const camera = @import("camera.zig");
+const blood = @import("blood.zig");
+const box2d = @import("box2d.zig");
+const allocator = @import("allocator.zig").allocator;
 
 const joint_count = std.meta.fields(animation.Joint).len;
 const invalid = data.invalidCharacterAsset;
-pub const Part = struct { definition: data.CharacterArtPart, paths: [2][]const u8, sprites: [2]?u64 = .{ null, null } };
-pub const Binding = struct { part: usize, anchor: animation.Joint, axis: [2]animation.Joint, depth: data.CharacterArtDepth };
+pub const Part = struct {
+    definition: data.CharacterArtPart,
+    paths: [2][]const u8,
+    sprites: [2]?u64 = .{ null, null },
+    gib_blood_path: ?[]const u8 = null,
+    gib_blood_sprite: ?u64 = null,
+};
+pub const Binding = struct {
+    part: usize,
+    anchor: animation.Joint,
+    axis: [2]animation.Joint,
+    depth: data.CharacterArtDepth,
+    survival_weight: f32,
+};
 pub const DrawItem = union(enum) { part: usize, weapon: data.CharacterArtDepth, holster };
 pub const Pack = struct {
     arena: std.heap.ArenaAllocator,
@@ -23,7 +38,14 @@ pub const Pack = struct {
     far_skin_multiplier: f32,
 };
 pub const PlacedPart = struct { part: usize, position: vec.Vec2, angle: f32, facing_right: bool, far: bool };
+pub const DetachedPart = struct {
+    part: usize,
+    facing_right: bool,
+    skin_color: sprite.Color,
+    severed: bool = false,
+};
 pub var assets: ?Pack = null;
+pub var bodyParts = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, DetachedPart).empty;
 
 fn relativePath(path: []const u8) bool {
     if (path.len == 0 or path.len > 256 or path[0] == '/' or std.mem.indexOfScalar(u8, path, '\\') != null or std.mem.indexOfScalar(u8, path, 0) != null) return false;
@@ -53,6 +75,34 @@ fn validatePart(name: []const u8, part: data.CharacterArtPart, detail: *data.Cha
     for (part.layers) |layer| {
         if (!relativePath(layer.file)) return invalid(detail, "parts.{s}: invalid relative layer path", .{name});
     }
+    for (part.physics.center) |value| {
+        if (!std.math.isFinite(value) or value < 0 or value > 10000) {
+            return invalid(detail, "parts.{s}.physics.center: invalid source coordinate", .{name});
+        }
+    }
+    for (part.physics.half_extents) |value| {
+        if (!std.math.isFinite(value) or value <= 0 or value > 10000) {
+            return invalid(detail, "parts.{s}.physics.half_extents: expected positive source extent", .{name});
+        }
+    }
+    const density = part.physics.density;
+    if (!std.math.isFinite(density) or density <= 0 or density > 1000) {
+        return invalid(detail, "parts.{s}.physics.density: expected 0..1000", .{name});
+    }
+    const friction = part.physics.friction;
+    if (!std.math.isFinite(friction) or friction < 0 or friction > 1) {
+        return invalid(detail, "parts.{s}.physics.friction: expected 0..1", .{name});
+    }
+    if (part.gib_blood == null) return; // Optional decoration, with no effect on physics.
+    const path = part.gib_blood.?;
+    if (!relativePath(path)) {
+        return invalid(detail, "parts.{s}: invalid relative gib_blood path", .{name});
+    }
+    for (part.layers) |layer| {
+        if (std.mem.eql(u8, path, layer.file)) {
+            return invalid(detail, "parts.{s}: gib_blood must use a distinct file", .{name});
+        }
+    }
 }
 
 // Consumes parsed data on both success and failure; preparation needs no GPU.
@@ -78,6 +128,8 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
             try std.fs.path.join(memory, &.{ folder, definition.layers[0].file }),
             try std.fs.path.join(memory, &.{ folder, definition.layers[1].file }),
         } };
+        if (definition.gib_blood == null) continue; // Older packs have no severed-end artwork.
+        part.gib_blood_path = try std.fs.path.join(memory, &.{ folder, definition.gib_blood.? });
     }
     const bindings = try memory.alloc(Binding, file.bindings.len);
     var ids: std.StringHashMapUnmanaged(usize) = .empty;
@@ -86,7 +138,17 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
         try ids.put(memory, definition.id, index);
         const part_index = file.parts.map.getIndex(definition.part) orelse return invalid(detail, "bindings.{s}: unknown part", .{definition.id});
         if (definition.axis[0] == definition.axis[1]) return invalid(detail, "bindings.{s}: degenerate joint axis", .{definition.id});
-        binding.* = .{ .part = part_index, .anchor = definition.anchor, .axis = definition.axis, .depth = definition.depth };
+        const weight = definition.survival_weight;
+        if (!std.math.isFinite(weight) or weight < 0 or weight > 1) {
+            return invalid(detail, "bindings.{s}.survival_weight: expected 0..1", .{definition.id});
+        }
+        binding.* = .{
+            .part = part_index,
+            .anchor = definition.anchor,
+            .axis = definition.axis,
+            .depth = definition.depth,
+            .survival_weight = weight,
+        };
         const part = parts[part_index].definition;
         const end = rig.joints[@intFromEnum(definition.axis[1])];
         // Only a direct bone anchored at its root specifies a matching length.
@@ -148,14 +210,34 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
 // JSON edits. They also survive level atlas resets without retaining old slots.
 pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
     for (pack.parts) |*part| {
-        for (&part.sprites, part.paths) |*id, path| {
-            id.* = sprite.createFromImgWithAtlasProfile(path, .{ .x = part.definition.meters_per_pixel, .y = part.definition.meters_per_pixel }, vec.zero, .standalone, .world_meters, .preserve_detail, .{}) catch |err| {
-                return invalid(detail, "image {s}: {s}", .{ path, @errorName(err) });
+        const paths = [_]?[]const u8{ part.paths[0], part.paths[1], part.gib_blood_path };
+        const ids = [_]*?u64{ &part.sprites[0], &part.sprites[1], &part.gib_blood_sprite };
+        const scale: vec.Vec2 = .{
+            .x = part.definition.meters_per_pixel,
+            .y = part.definition.meters_per_pixel,
+        };
+        for (ids, paths) |id, path| {
+            if (path == null) continue; // The blood overlay is optional.
+            id.* = sprite.createFromImgWithAtlasProfile(
+                path.?,
+                scale,
+                vec.zero,
+                .standalone,
+                .world_meters,
+                .preserve_detail,
+                .{},
+            ) catch |err| {
+                return invalid(detail, "image {s}: {s}", .{ path.?, @errorName(err) });
             };
         }
         const skin = sprite.getSprite(part.sprites[0].?).?; // Just created; this pack owns the IDs.
-        const fixed = sprite.getSprite(part.sprites[1].?).?;
-        if (skin.surface.w != fixed.surface.w or skin.surface.h != fixed.surface.h) return invalid(detail, "{s}: layer canvases differ", .{part.paths[0]});
+        for ([_]?u64{ part.sprites[1], part.gib_blood_sprite }) |id| {
+            if (id == null) continue;
+            const layer = sprite.getSprite(id.?).?;
+            if (skin.surface.w != layer.surface.w or skin.surface.h != layer.surface.h) {
+                return invalid(detail, "{s}: layer canvases differ", .{part.paths[0]});
+            }
+        }
         for ([_][2]f32{ part.definition.pivot, part.definition.axis_end }) |p| {
             if (p[0] > @as(f32, @floatFromInt(skin.surface.w)) or p[1] > @as(f32, @floatFromInt(skin.surface.h))) return invalid(detail, "{s}: pivot/axis outside image canvas", .{part.paths[0]});
         }
@@ -164,7 +246,7 @@ pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
 
 pub fn destroy(pack: *Pack) void {
     for (pack.parts) |part| {
-        for (part.sprites) |id| {
+        for ([_]?u64{ part.sprites[0], part.sprites[1], part.gib_blood_sprite }) |id| {
             if (id == null) continue; // Preparation and failed loads can own no texture.
             sprite.destroy(id.?);
         }
@@ -173,11 +255,15 @@ pub fn destroy(pack: *Pack) void {
 }
 
 pub fn install(replacement: Pack) void {
-    cleanup();
+    // Replacement bodies are already registered; only retire the old assets.
+    var previous = assets;
     assets = replacement;
+    if (previous == null) return;
+    destroy(&previous.?);
 }
 
 pub fn cleanup() void {
+    bodyParts.clearAndFree(allocator);
     if (assets == null) return;
     destroy(&assets.?);
     assets = null;
@@ -238,19 +324,55 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
             },
             .part => |index| {
                 const placed = placePart(pack, index, points, frame, carrying);
-                const part = pack.parts[placed.part];
-                const anchor = camera.relativePosition(conv.m2Pixel(.{ .x = placed.position.x, .y = placed.position.y }));
-                const pivot: vec.IVec2 = .{ .x = @intFromFloat(@round(part.definition.pivot[0] * part.definition.meters_per_pixel * conv.met2pix)), .y = @intFromFloat(@round(part.definition.pivot[1] * part.definition.meters_per_pixel * conv.met2pix)) };
-                for (part.sprites, 0..) |id, layer| {
-                    const visual = sprite.getSprite(id.?) orelse {
-                        std.log.warn("character_art.draw: part sprite {d} is missing", .{id.?});
-                        return;
-                    };
-                    const placement = sprite.placeAtAnchor(visual, pivot, anchor, placed.angle, !placed.facing_right);
-                    const tint: ?sprite.Color = if (layer == 0) skinColor(.{ .r = p.color.r, .g = p.color.g, .b = p.color.b }, if (placed.far) pack.far_skin_multiplier else 1) else null;
-                    try sprite.drawPlacedTinted(visual, placement, tint);
-                }
+                const tint = skinColor(p.color, if (placed.far) pack.far_skin_multiplier else 1);
+                try drawPart(.{
+                    .part = placed.part,
+                    .facing_right = placed.facing_right,
+                    .skin_color = tint,
+                }, placed.position, placed.angle);
             },
         }
+    }
+}
+
+// Entity drawing supplies its existing interpolated transform and draw order.
+pub fn drawBodyPart(bodyId: box2d.c.b2BodyId, position: vec.Vec2, angle: f32) !bool {
+    const visual = bodyParts.get(bodyId) orelse return false;
+    try drawPart(visual, position, angle);
+    return true;
+}
+
+// Living and detached parts share placement; only severed pieces draw blood.
+pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void {
+    if (assets == null or part_visual.part >= assets.?.parts.len) {
+        std.log.warn("character_art.drawPart: detached artwork is unavailable", .{});
+        return;
+    }
+    const part = assets.?.parts[part_visual.part];
+    const anchor = camera.relativePosition(conv.m2Pixel(vec.toBox2d(position)));
+    const scale = part.definition.meters_per_pixel;
+    const pivot: vec.IVec2 = .{
+        .x = @intFromFloat(@round(part.definition.pivot[0] * scale * conv.met2pix)),
+        .y = @intFromFloat(@round(part.definition.pivot[1] * scale * conv.met2pix)),
+    };
+    for ([_]?u64{ part.sprites[0], part.sprites[1], part.gib_blood_sprite }, 0..) |id, layer| {
+        if (layer == 2 and (!part_visual.severed or part.gib_blood_path == null)) {
+            continue;
+        }
+        if (id == null) {
+            std.log.warn("character_art.drawPart: layer {d} has no sprite", .{layer});
+            return;
+        }
+        const visual = sprite.getSprite(id.?) orelse {
+            std.log.warn("character_art.drawPart: sprite {d} is missing", .{id.?});
+            return;
+        };
+        const placement = sprite.placeAtAnchor(visual, pivot, anchor, angle, !part_visual.facing_right);
+        const tint: ?sprite.Color = switch (layer) {
+            0 => part_visual.skin_color,
+            2 => try blood.currentColor(),
+            else => null,
+        };
+        try sprite.drawPlacedTinted(visual, placement, tint);
     }
 }

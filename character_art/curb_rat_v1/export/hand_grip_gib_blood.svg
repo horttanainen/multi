@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="65" viewBox="0 0 80 65">
+  <title>Generated: source/hand_grip.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25 23 L30 22 L33 25 L31 28 L35 32 L31 34 L32 38 L25 35 Z" fill="#6b6b6b" />
+    <path d="M26 25 L29 24 L30 27 L28 30 L31 33 L29 35 L26 33 Z" fill="#d3d3d3" />
+    <path d="M27 27 L29 28 L28 32 L27 31 Z" fill="#fdfdfd" />
+    <path d="M43 25 L46 23 L49 26 L52 26 L52 30 L48 32 L47 36 L44 33 L41 34 L40 30 Z" fill="#bcbcbc" />
+    <path d="M44 27 L48 27 L50 29 L46 32 L43 30 Z" fill="#eeeeee" />
+  </g>
+</svg>

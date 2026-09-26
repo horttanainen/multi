@@ -63,10 +63,11 @@ build/smoke check passed. The user has authorized the artwork commit. See the
 The user has requested another phase for giblets made from the actual body parts,
 non-gibbing deaths becoming ragdolls, and revised shared gibbing rules. This is
 planned in section 6 below. The agreed threshold is -40 HP, with the same weighted
-selection of surviving anatomical parts for players and ragdolls. Phase 6A is
-accepted by the user and its commit is authorized: configurable -40 HP threshold
-and shared signed health outcomes. Independent review, corrections and validation
-are complete. Weighted body-part giblets (6B) and ragdolls (6C) remain pending.
+selection of surviving anatomical parts for players and ragdolls. Phase 6A was
+completed in `aa2c27b`: configurable -40 HP threshold and shared signed health
+outcomes. Weighted body-part giblets (6B) are complete and accepted by the user,
+with independent review, corrections and validation complete; see
+[body-part giblet notes](character_body_part_giblets.md). Ragdolls (6C) remain pending.
 See [gibbing rule implementation](character_gibbing_rules.md).
 The accepted phase's scope and test instructions are in
 [character_animation_phase3a.md](character_animation_phase3a.md).
@@ -421,7 +422,7 @@ to the blood/particle effect.
 
 #### 6A. Centralize the -40 HP gibbing rule
 
-Accepted by the user; commit authorized. The
+Completed in `aa2c27b`. The
 `damage_rules.json` profile selects -40 HP, `damage.zig` owns signed subtraction
 and outcome classification, and `player.damage` uses that decision. Physical
 objects retain their signed remaining health and registered destruction effect.
@@ -438,6 +439,20 @@ hits, and agreed attack-grouping cases using the existing test entry points.
 The user reviews the resulting weapon/death behavior before a separate commit.
 
 #### 6B. Giblets from the assembled character
+
+Completed and accepted by the user. The full-phase independent
+review and corrections are complete. The blood polish adds optional grayscale
+SVG overlays with severed ends and 1–2 surface stains, tinted by the existing
+particle blood-color setting. Embedded arrows now detach as harmless falling
+projectiles when their target is destroyed or recycled and can stick again.
+Physical part appearances now live in `character_art.bodyParts`, keyed by body
+ID; entities retain rendering dispatch and remove the component on destruction.
+Validation includes 122 tests, build/smoke and two airborne death events after
+this ownership refactor; earlier checks covered ground and Tower Keep death
+benchmarks. See
+[body-part giblet notes](character_body_part_giblets.md) for findings and testing.
+The final readability pass also passed all 122 tests and build/smoke; the user
+requested no additional independent review for that mechanical iteration.
 
 Replace the legacy player-death templates with the anatomical parts from the
 active character-art manifest. Capture the final physics pose before disabling

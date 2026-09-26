@@ -11,6 +11,7 @@ const sensor = @import("sensor.zig");
 const player_input = @import("player_input.zig");
 const control = @import("control.zig");
 const character_animation = @import("character_animation.zig");
+const projectile = @import("projectile.zig");
 
 pub fn step() !usize {
     // Step box2d.c physics world
@@ -26,6 +27,8 @@ pub fn step() !usize {
             control.applyFixedStepPlayerInputs();
             movement.clampAllSpeeds();
             movement.applyAll(config.physics.dt);
+            // Shooting can destroy or recycle a target during this fixed step.
+            projectile.updateAttachments();
             box2d.worldStep(config.physics.dt, config.physics.subStepCount);
             try movement.resolveGroundMovement();
             try movement.processSensorEvents();

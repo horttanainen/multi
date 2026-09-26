@@ -12,6 +12,7 @@ const allocator = @import("allocator.zig").allocator;
 const box2d = @import("box2d.zig");
 const animation = @import("animation.zig");
 const character_animation = @import("character_animation.zig");
+const character_art = @import("character_art.zig");
 const time = @import("time.zig");
 
 const weapon = @import("weapon.zig");
@@ -608,6 +609,9 @@ pub fn sprayPaint(p: *Player) !void {
 
     for (context.bodies[0..context.count]) |bodyId| {
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
+        // Detached anatomy borrows the live character's immutable layers.
+        // The centered surface-paint path cannot edit those shared textures.
+        if (character_art.bodyParts.contains(bodyId)) continue;
 
         const maybeEnt = entity.entities.getPtrLocking(bodyId);
         if (maybeEnt) |e| {
@@ -669,7 +673,7 @@ pub fn setColor(playerId: usize, color: sprite.Color) void {
             std.debug.print("Warning: Failed to color left hand no-hook sprite for player {}: {}\n", .{ playerId, err });
         };
 
-        gibbing.prepareGibletsForPlayer(playerId, color) catch |err| {
+        gibbing.prepareForLevel() catch |err| {
             std.debug.print("Warning: Failed to prepare giblets for player {}: {}\n", .{ playerId, err });
         };
     }
@@ -1013,8 +1017,7 @@ fn disablePlayerEntity(playerId: usize, bodyId: box2d.c.b2BodyId) void {
 }
 
 fn gib(p: *Player) !void {
-    const playerPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(p.bodyId));
-    gibbing.gib(playerPosM, p.id);
+    gibbing.gibPlayer(p.id);
 }
 
 pub fn processRespawns() !void {

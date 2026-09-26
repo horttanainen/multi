@@ -37,8 +37,9 @@ def load_assets():
     for name, part in manifest['parts'].items():
         source = ET.parse(PACK / part['source']).getroot()
         layers = {child.get('id'): child for child in source.findall(f'{{{SVG}}}g')}
-        if set(layers) != {'skin', 'fixed'}:
-            raise ValueError(f'{name}: expected skin and fixed source groups')
+        expected = {'skin', 'fixed', 'gib_blood'} if part.get('gib_blood') else {'skin', 'fixed'}
+        if set(layers) != expected:
+            raise ValueError(f'{name}: expected source groups {sorted(expected)}')
         if [layer['role'] for layer in part['layers']] != ['skin', 'fixed']:
             raise ValueError(f'{name}: layers must draw skin before fixed details')
         points = part['pivot'] + part['axis_end']
@@ -47,13 +48,16 @@ def load_assets():
             raise ValueError(f'{name}: non-finite geometry or invalid scale')
         if math.dist(part['pivot'], part['axis_end']) < 1:
             raise ValueError(f'{name}: source axis is degenerate')
-        for element in layers['skin'].iter():
-            for prop in ('fill', 'stroke'):
-                color = element.get(prop, 'none')
-                if color == 'none':
-                    continue
-                if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
-                    raise ValueError(f'{name}: skin layer contains non-neutral {color}')
+        for role in ('skin', 'gib_blood'):
+            if role not in layers:
+                continue
+            for element in layers[role].iter():
+                for prop in ('fill', 'stroke'):
+                    color = element.get(prop, 'none')
+                    if color == 'none':
+                        continue
+                    if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
+                        raise ValueError(f'{name}: {role} layer contains non-neutral {color}')
         sources[name] = source
     bindings = {binding['id']: binding for binding in manifest['bindings']}
     if len(bindings) != len(manifest['bindings']):
@@ -99,7 +103,8 @@ def export_layers(manifest, sources, check):
     count = 0
     for name, part in manifest['parts'].items():
         source = sources[name]
-        for layer in part['layers']:
+        layers = part['layers'] + ([{'role': 'gib_blood', 'file': part['gib_blood']}] if part.get('gib_blood') else [])
+        for layer in layers:
             output = ET.Element(f'{{{SVG}}}svg', source.attrib)
             title = ET.SubElement(output, f'{{{SVG}}}title')
             title.text = f"Generated: {part['source']} / {layer['role']}; edit the source"
@@ -117,19 +122,25 @@ def export_layers(manifest, sources, check):
     print(f"{'Checked' if check else 'Exported'} {count} SVG layers; rig lengths, contacts, colors and draw order valid")
 
 
-def tinted_part(source, color, depth):
+def tinted_part(source, color, depth, severed=False, blood_color=None):
     output = ET.Element(f'{{{SVG}}}g')
-    channels = [int(color[i:i+2], 16) for i in (1, 3, 5)]
     for child in source.findall(f'{{{SVG}}}g'):
+        if child.get('id') == 'gib_blood' and not severed:
+            continue
         layer = copy.deepcopy(child)
         layer.attrib.pop('id')
-        if child.get('id') == 'skin':
+        if child.get('id') in ('skin', 'gib_blood'):
+            tint = color if child.get('id') == 'skin' else blood_color
+            if tint is None:
+                raise ValueError('Severed artwork needs a blood color')
+            channels = [int(tint[i:i+2], 16) for i in (1, 3, 5)]
+            multiplier = depth if child.get('id') == 'skin' else 1
             for element in layer.iter():
                 for prop in ('fill', 'stroke'):
                     paint = element.get(prop, 'none')
                     if paint == 'none':
                         continue
-                    value = int(paint[1:3], 16) / 255 * depth
+                    value = int(paint[1:3], 16) / 255 * multiplier
                     element.set(prop, '#' + ''.join(f'{round(c * value):02x}' for c in channels))
         output.append(layer)
     return ET.tostring(output, encoding='unicode')
@@ -233,7 +244,7 @@ def page(title, subtitle, body):
 <text x="32" y="49" fill="#f3eedb" font-size="32" font-weight="bold">{html.escape(title)}</text>
 <text x="32" y="81" fill="#a6b9bc" font-size="16">{html.escape(subtitle)}</text>
 {body}
-<text x="32" y="1252" fill="#a6b9bc" font-size="14">ART FIT PREVIEW / Existing solved joints. No game renderer integration or collision changes.</text>
+<text x="32" y="1252" fill="#a6b9bc" font-size="14">ART FIT PREVIEW / Source SVG layers assembled offline. Verify final appearance in game.</text>
 </g></svg>'''
 
 
@@ -248,6 +259,26 @@ def panel(drawing, joints, x, y, width, height, label, scale=150, ground=None, c
 <g transform="translate({origin_x} {origin_y}) scale({scale})">{drawing}</g>'''
 
 
+def giblet_preview(sources, output, blood_color, filename='giblets.svg'):
+    cells = []
+    for index, (name, source) in enumerate(sources.items()):
+        x, y = 24 + index % 5 * 249, 110 + index // 5 * 554
+        width, height = float(source.get('width')), float(source.get('height'))
+        scale = min(195 / width, 127 / height)
+        cells.append(f'<rect x="{x}" y="{y}" width="235" height="536" rx="10" fill="#eae8d9"/><text x="{x+14}" y="{y+27}" fill="#374c56" font-size="18" font-weight="bold">{name.replace("_", " ")}</text>')
+        for row, (severed, mirrored, color, label) in enumerate((
+            (False, False, '#ffffff', 'INTACT'),
+            (True, False, '#61d9df', 'GIB / CYAN'),
+            (True, True, '#e889b4', 'GIB / MIRRORED PINK'),
+        )):
+            sign = -1 if mirrored else 1
+            art = tinted_part(source, color, 1, severed=severed, blood_color=blood_color)
+            origin_x = x + 117.5 - sign * width * scale / 2
+            origin_y = y + 67 + row * 162 + (127 - height * scale) / 2
+            cells.append(f'<text x="{x+14}" y="{y+55+row*162}" fill="#526671" font-size="12">{label}</text><g transform="translate({origin_x} {origin_y}) scale({sign*scale} {scale})">{art}</g>')
+    (output / filename).write_text(page('CURB RAT / BLOOD AND SURFACE STAINS', f'Blood tint {blood_color}. Clean parts above; cyan and mirrored pink giblets below. Enlarged, not game scale.', ''.join(cells)))
+
+
 def previews(manifest, rig, sources, output):
     artifacts = ROOT / 'artifacts/character_animation'
     run = json.loads((artifacts / 'run_polish_poses.json').read_text())
@@ -255,6 +286,11 @@ def previews(manifest, rig, sources, output):
     aims = json.loads((artifacts / 'aim_samples.json').read_text())
     walls = json.loads((artifacts / 'one_hand_slide_samples.json').read_text())
     output.mkdir(parents=True, exist_ok=True)
+    blood_preset = next(p for p in json.loads((ROOT / 'particles.json').read_text()) if p['key'] == 'blood')
+    blood_color = '#' + ''.join(f'{blood_preset["color"][channel]:02x}' for channel in ('r', 'g', 'b'))
+    giblet_preview(sources, output, blood_color)
+    giblet_preview(sources, output, '#61cf45', 'giblets_green.svg')
+    giblet_preview(sources, output, '#668cff', 'giblets_blue.svg')
     cells = []
     for index in range(12):
         sample = run[round(index * len(run) / 12)]
@@ -317,7 +353,8 @@ def previews(manifest, rig, sources, output):
 <h1>Curb Rat — articulated art review</h1><p>Offline preview of existing solved run poses, {seconds:g}s per cycle. Review the in-game artwork for final rendering.</p>
 <button id="play">Pause</button><label>Frame <input id="frame" type="range" min="0" max="{len(frames)-1}" value="0"></label><label>Speed <select id="speed"><option value="1">1×</option><option value=".25">¼×</option></select></label><label>Size <select id="size"><option value="100%">Close up</option><option value="192px">80 px/m</option></select></label>
 <div><svg id="run" xmlns="{SVG}" viewBox="-1.2 -1.9 2.4 2.4"><path d="M-1.2 .3 H1.2" stroke="#b9b5a1" stroke-width=".012"/>{''.join(frames)}</svg></div>
-<p><a href="parts.svg">Parts and joint overlay</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a></p>
+<p><a href="parts.svg">Parts and joint overlay</a> · <a href="giblets.svg">Bloody severed ends</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a></p>
+<p>Blood tint examples: <a href="giblets_green.svg">Green</a> · <a href="giblets_blue.svg">Blue</a>. These previews do not change particles.json.</p>
 <img src="poses.svg" alt="Six solved action poses with segmented artwork">
 <script>
 const frames=[...document.querySelectorAll('.frame')], slider=document.querySelector('#frame'), button=document.querySelector('#play'), speed=document.querySelector('#speed');
@@ -329,7 +366,7 @@ slider.oninput=()=>{{playing=false;button.textContent='Play';phase=Number(slider
 function tick(now){{if(playing){{phase=(phase+(now-last)/1000*Number(speed.value)/{seconds})%1;show(Math.floor(phase*frames.length));}}last=now;requestAnimationFrame(tick);}}requestAnimationFrame(tick);
 </script></html>'''
     (output / 'preview.html').write_text(document)
-    print(f'Wrote parts.svg, run.svg, poses.svg and preview.html to {output}')
+    print(f'Wrote parts.svg, giblets*.svg, run.svg, poses.svg and preview.html to {output}')
 
 
 def main():

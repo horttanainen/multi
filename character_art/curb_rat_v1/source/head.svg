@@ -23,4 +23,15 @@
     <path d="M212 132 Q227 138 242 128 L239 140 L229 148 L218 144 Z" fill="#293332" stroke="#161d26" stroke-width="2.2" />
     <path d="M222 137 L228 137 L227 145 L223 143 Z M232 136 L238 132 L237 139 L232 142 Z" fill="#e2dfb7" stroke="none" />
   </g>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round" transform="translate(-115 -22)">
+    <path d="M176 158 L181 155 L189 160 L193 157 L199 161 L208 161 L205 167 L194 175 L186 170 Z" fill="#5d5d5d"/>
+    <path d="M181 159 L186 160 L191 164 L197 162 L204 164 L195 172 L190 169 L188 165 Z" fill="#b0b0b0"/>
+    <path d="M187 163 L191 165 L195 164 L199 165 L194 169 Z" fill="#f2f2f2"/>
+    <path d="M181 151 L184 153 L185 158 L181 156 Z" fill="#b0b0b0"/>
+    <!-- Surface stains on crown and cheek, clear of the glasses. -->
+    <path d="M175 48 L180 45 L184 48 L189 47 L189 53 L193 57 L187 60 L183 57 L178 60 L174 55 L170 54 Z" fill="#ababab"/>
+    <path d="M178 50 L184 49 L187 54 L183 56 L177 54 Z" fill="#eeeeee"/>
+    <path d="M196 117 L200 115 L203 119 L208 119 L209 124 L205 127 L203 134 L200 132 L200 126 L196 124 L192 124 Z" fill="#bcbcbc"/>
+    <path d="M199 120 L204 120 L205 124 L201 127 L198 124 Z" fill="#eeeeee"/>
+  </g>
 </svg>

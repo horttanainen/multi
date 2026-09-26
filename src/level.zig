@@ -32,6 +32,7 @@ const projectile = @import("projectile.zig");
 const damage = @import("damage.zig");
 const destruction = @import("destruction.zig");
 const rubble = @import("rubble.zig");
+const gibbing = @import("gibbing.zig");
 const Sprite = entity.Sprite;
 const Entity = entity.Entity;
 
@@ -437,6 +438,7 @@ pub fn cleanup() void {
     rubble.cleanup();
     destruction.cleanup();
     weapon.cleanupTrails();
+    gibbing.clearBodies();
     entity.cleanup();
     background.cleanup();
     animation.cleanup();

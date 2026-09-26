@@ -17,6 +17,7 @@ const explosion_visual = @import("explosion_visual.zig");
 const perf = @import("perf.zig");
 const destruction = @import("destruction.zig");
 const sprite = @import("sprite.zig");
+const pool = @import("pool.zig");
 
 pub const Explosion = struct {
     sound: ?audio.Audio = null,
@@ -70,9 +71,17 @@ const ActiveProjectile = struct {
     flight_angle: f32,
     stick_depth: f32,
     hit_player_bits: u64 = 0,
+    spent: bool = false,
 };
 
 pub var activeProjectiles = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, ActiveProjectile).empty;
+pub const EmbeddedProjectile = struct {
+    target: box2d.c.b2BodyId,
+    joint: box2d.c.b2JointId,
+    pool_activation: ?u64,
+    projectile: ActiveProjectile,
+};
+pub var embeddedProjectiles = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, EmbeddedProjectile).empty;
 const PropulsionData = struct {
     magnitude: f32,
     lateralDamping: f32,
@@ -678,6 +687,69 @@ pub fn updateFlightRotation() void {
     }
 }
 
+// A pooled target keeps its Box2D ID when it becomes a different object. Its
+// activation identity prevents an old weld from following that replacement.
+pub fn updateAttachments() void {
+    var index: usize = 0;
+    while (index < embeddedProjectiles.count()) {
+        const body = embeddedProjectiles.keys()[index];
+        const attachment = embeddedProjectiles.values()[index];
+        const membership = pool.memberships.get(attachment.target);
+        const activation: ?u64 = if (membership == null) null else membership.?.activation;
+        const target_alive = box2d.c.b2Body_IsValid(attachment.target) and
+            box2d.c.b2Body_IsEnabled(attachment.target) and
+            activation == attachment.pool_activation and activation != @as(?u64, 0);
+        if (box2d.c.b2Body_IsValid(body) and target_alive and box2d.c.b2Joint_IsValid(attachment.joint)) {
+            index += 1;
+            continue;
+        }
+        _ = embeddedProjectiles.swapRemove(body);
+        if (box2d.c.b2Joint_IsValid(attachment.joint)) {
+            box2d.c.b2DestroyJoint(attachment.joint);
+        }
+        if (!box2d.c.b2Body_IsValid(body)) continue; // Entity/level cleanup already removed it.
+        releaseProjectile(body, attachment.projectile) catch |err| {
+            std.log.err("projectile.updateAttachments: could not release projectile: {}", .{err});
+            if (entity.remove(body)) continue;
+            std.log.warn("projectile.updateAttachments: embedded projectile has no entity", .{});
+            box2d.c.b2DestroyBody(body);
+        };
+    }
+}
+
+fn releaseProjectile(bodyId: box2d.c.b2BodyId, embedded: ActiveProjectile) !void {
+    try activeProjectiles.ensureUnusedCapacity(allocator, 1);
+    try setProjectileCollisions(bodyId, collision.MASK_PROJECTILE & ~collision.CATEGORY_HOOK);
+    var active = embedded;
+    active.spent = true;
+    active.direct_damage = 0;
+    active.explosion = null;
+    active.penetration = .non_penetrating;
+    const rotation = box2d.c.b2Body_GetRotation(bodyId);
+    active.flight_angle = std.math.atan2(rotation.s, rotation.c);
+    activeProjectiles.putAssumeCapacity(bodyId, active);
+    // Keep the arrow's own position and momentum, even if its target was
+    // already teleported to a new pool activation.
+    box2d.c.b2Body_SetAwake(bodyId, true);
+}
+
+fn setProjectileCollisions(bodyId: box2d.c.b2BodyId, mask: u64) !void {
+    const count = box2d.c.b2Body_GetShapeCount(bodyId);
+    if (count <= 0) {
+        std.log.err("setProjectileCollisions: projectile has no shapes", .{});
+        return error.ProjectileShapesMissing;
+    }
+    // Penetrating shots also own sensor shapes outside entity.shapeIds.
+    const shapes = try allocator.alloc(box2d.c.b2ShapeId, @intCast(count));
+    defer allocator.free(shapes);
+    const length: usize = @intCast(box2d.c.b2Body_GetShapes(bodyId, shapes.ptr, count));
+    for (shapes[0..length]) |shape| {
+        var filter = box2d.c.b2Shape_GetFilter(shape);
+        filter.maskBits = if (box2d.c.b2Shape_IsSensor(shape)) 0 else mask;
+        box2d.c.b2Shape_SetFilter(shape, filter);
+    }
+}
+
 pub fn playerIdForBody(bodyId: box2d.c.b2BodyId) ?usize {
     for (player.players.values()) |p| {
         if (!box2d.c.b2Body_IsValid(p.bodyId)) continue;
@@ -770,7 +842,12 @@ fn finishProjectile(
     try triggerProjectileExplosion(active.explosion, impactPoint, pressureSourcePosition, active.owner_id, directHitDamage);
 }
 
-fn stickProjectile(bodyId: box2d.c.b2BodyId, targetBodyId: box2d.c.b2BodyId, impactPoint: vec.Vec2, active: ActiveProjectile) void {
+fn stickProjectile(
+    bodyId: box2d.c.b2BodyId,
+    targetBodyId: box2d.c.b2BodyId,
+    impactPoint: vec.Vec2,
+    active: ActiveProjectile,
+) !void {
     if (!box2d.c.b2Body_IsValid(bodyId)) {
         std.log.warn("stickProjectile: projectile body became invalid before attachment", .{});
         return;
@@ -793,18 +870,11 @@ fn stickProjectile(bodyId: box2d.c.b2BodyId, targetBodyId: box2d.c.b2BodyId, imp
         return;
     };
 
+    // Reserve tracking before removing the projectile from active processing.
+    try embeddedProjectiles.ensureUnusedCapacity(allocator, 1);
+    try setProjectileCollisions(bodyId, 0);
     if (activeProjectiles.fetchSwapRemove(bodyId) == null) return;
     _ = propulsions.swapRemove(bodyId);
-
-    for (projectileEntity.shapeIds) |shapeId| {
-        if (!box2d.c.b2Shape_IsValid(shapeId)) {
-            std.log.warn("stickProjectile: projectile shape became invalid before attachment", .{});
-            continue;
-        }
-        var filter = box2d.c.b2Shape_GetFilter(shapeId);
-        filter.maskBits = 0;
-        box2d.c.b2Shape_SetFilter(shapeId, filter);
-    }
 
     const projectileRotation = if (active.flight_rotation == .velocity_aligned)
         box2d.c.b2MakeRot(active.flight_angle)
@@ -830,7 +900,14 @@ fn stickProjectile(bodyId: box2d.c.b2BodyId, targetBodyId: box2d.c.b2BodyId, imp
     weldDef.localAnchorA = vec.toBox2d(localTip);
     weldDef.localAnchorB = box2d.c.b2Body_GetLocalPoint(targetBodyId, vec.toBox2d(buriedTip));
     weldDef.referenceAngle = box2d.c.b2RelativeAngle(targetRotation, projectileRotation);
-    _ = box2d.createWeldJoint(&weldDef);
+    const joint = box2d.createWeldJoint(&weldDef);
+    const membership = pool.memberships.get(targetBodyId);
+    embeddedProjectiles.putAssumeCapacity(bodyId, .{
+        .target = targetBodyId,
+        .joint = joint,
+        .pool_activation = if (membership == null) null else membership.?.activation,
+        .projectile = active,
+    });
 }
 
 fn projectileImpactPoint(bodyId: box2d.c.b2BodyId, maybePoint: ?vec.Vec2) vec.Vec2 {
@@ -912,7 +989,7 @@ fn handleProjectileContactForBody(
     if ((otherFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) {
         const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
         if (active.impact_behavior == .stick) {
-            stickProjectile(bodyId, otherBodyId, impactPoint, active);
+            try stickProjectile(bodyId, otherBodyId, impactPoint, active);
             return;
         }
 
@@ -934,7 +1011,9 @@ fn handleProjectileContactForBody(
         return;
     }
 
-    if (active.penetration == .penetrating) return;
+    if (active.spent or active.penetration == .penetrating) {
+        return;
+    }
 
     const otherBodyId = box2d.c.b2Shape_GetBody(otherShapeId);
     const playerId = playerIdForBody(otherBodyId) orelse {
@@ -970,7 +1049,9 @@ fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShape
 
     const bodyId = box2d.c.b2Shape_GetBody(sensorShapeId);
     const active = activeProjectiles.get(bodyId) orelse return;
-    if (active.penetration != .penetrating) return;
+    if (active.spent or active.penetration != .penetrating) {
+        return;
+    }
 
     const visitorFilter = box2d.c.b2Shape_GetFilter(visitorShapeId);
     if ((visitorFilter.categoryBits & collision.CATEGORY_PLAYER) == 0) return;
@@ -1006,6 +1087,7 @@ fn handlePenetratingSensorContact(sensorShapeId: box2d.c.b2ShapeId, visitorShape
 }
 
 pub fn checkContacts() !void {
+    defer updateAttachments();
     errdefer destruction.flushSurfaceEdits() catch |err| {
         std.log.err("checkContacts: failed to flush surface edits: {}", .{err});
     };
@@ -1041,4 +1123,5 @@ pub fn checkContacts() !void {
 pub fn cleanup() void {
     activeProjectiles.clearAndFree(allocator);
     propulsions.clearAndFree(allocator);
+    embeddedProjectiles.clearAndFree(allocator);
 }

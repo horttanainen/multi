@@ -13,4 +13,20 @@
   <g id="fixed" stroke-linecap="round" stroke-linejoin="round" transform="translate(-142 -146)">
     <path d="M176 154 L199 156 L198 174 Q215 178 222 193 Q226 204 220 216 L214 230 L208 248 L209 276 L214 289 L191 301 L165 289 L159 274 L166 246 Q158 236 155 219 L155 201 Q156 183 171 177 Z" fill="none" stroke="#161d26" stroke-width="3.2" />
   </g>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round" transform="translate(-142 -146)">
+    <path d="M176 154 L183 155 L188 153 L199 156 L198 166 L194 164 L192 173 L188 167 L181 169 L178 163 L174 166 Z" fill="#6c6c6c"/>
+    <path d="M179 157 L184 158 L188 156 L196 158 L194 163 L189 161 L184 165 L182 161 L177 162 Z" fill="#c5c5c5"/>
+    <path d="M182 158 L186 159 L189 157 L193 159" fill="none" stroke="#fefefe" stroke-width="1.8"/>
+    <path d="M159 190 L165 186 L171 189 L174 198 L170 207 L164 211 L161 204 L156 203 Z" fill="#6b6b6b"/>
+    <path d="M161 192 L166 190 L170 194 L169 203 L165 207 L162 201 Z" fill="#c4c4c4"/>
+    <path d="M164 193 L167 194 L166 201 L164 202 Z" fill="#f9f9f9"/>
+    <path d="M168 284 L175 288 L180 284 L185 291 L191 286 L197 290 L203 284 L211 286 L214 289 L191 301 L165 289 Z" fill="#6c6c6c"/>
+    <path d="M172 289 L179 290 L184 293 L190 291 L197 294 L205 289 L209 290 L191 298 Z" fill="#c5c5c5"/>
+    <path d="M181 292 L190 295 L199 293" fill="none" stroke="#fefefe" stroke-width="1.8"/>
+    <!-- Surface stains on chest and abdomen. -->
+    <path d="M193 198 L198 197 L201 201 L207 199 L210 204 L206 208 L207 212 L201 215 L196 211 L192 213 L188 208 L191 204 Z" fill="#aaaaaa"/>
+    <path d="M194 202 L200 204 L205 202 L206 207 L201 211 L195 208 Z" fill="#ededed"/>
+    <path d="M179 251 L183 253 L187 249 L191 253 L193 258 L189 261 L190 265 L185 267 L181 263 L177 264 L175 259 Z" fill="#bbbbbb"/>
+    <path d="M180 256 L185 255 L189 258 L185 262 L180 260 Z" fill="#eeeeee"/>
+  </g>
 </svg>

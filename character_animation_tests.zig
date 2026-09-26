@@ -29,6 +29,14 @@ const character_art = @import("src/character_art.zig");
 const damage = @import("src/damage.zig");
 const gravestone = @import("src/gravestone.zig");
 const score = @import("src/score.zig");
+const gibbing = @import("src/gibbing.zig");
+const destruction = @import("src/destruction.zig");
+const particle = @import("src/particle.zig");
+const particle_effect = @import("src/particle_effect.zig");
+const blood = @import("src/blood.zig");
+const projectile = @import("src/projectile.zig");
+const physics = @import("src/physics.zig");
+const config = @import("src/config.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -40,6 +48,803 @@ const original_motion_json = @embedFile("tests/fixtures/character_run_reference_
 const dense_motion_json = @embedFile("character_motions/run_reference_dense.json");
 const reference_json = @embedFile("tests/fixtures/character_run_poses.json");
 const art_json = @embedFile("character_art/curb_rat_v1/manifest.json");
+
+test "death snapshots preserve every anatomical part pose layer tint and carried hand" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    for ([_]bool{ false, true }) |facing| {
+        for ([_]sprite.Color{ .{ .r = 250, .g = 50, .b = 30 }, .{ .r = 30, .g = 120, .b = 240 } }) |color| {
+            for (0..12) |phase| {
+                const pose = animation.evaluatePose(&set, @as(f64, @floatFromInt(phase)) / 12, .run);
+                const frame = animation.solveAimedPose(
+                    &set,
+                    pose,
+                    .{ .x = 4, .y = 8 },
+                    facing,
+                    .{ .x = -0.7, .y = -0.7 },
+                    0.5,
+                    null,
+                );
+                const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, true, color, .{ .x = 5, .y = -3 });
+                try std.testing.expectEqual(pack.bindings.len, snapshot.count);
+                var seen = [_]bool{false} ** 64;
+                var grips: usize = 0;
+                const joints = character_art.worldJoints(set.rig, frame);
+                for (snapshot.parts[0..snapshot.count]) |part| {
+                    try std.testing.expect(!seen[part.binding]);
+                    seen[part.binding] = true;
+                    const expected = character_art.placePart(&pack, part.binding, joints, frame, true);
+                    try std.testing.expectEqualDeep(expected, part.placed);
+                    const multiplier = if (expected.far) pack.far_skin_multiplier else 1;
+                    try std.testing.expectEqualDeep(
+                        character_art.skinColor(color, multiplier),
+                        part.skin_color,
+                    );
+                    try nearPoint(.{ .x = 5, .y = -3 }, part.velocity, 0.00001);
+                    if (part.placed.part == pack.grip_part) {
+                        grips += 1;
+                    }
+                }
+                try std.testing.expectEqual(@as(usize, 1), grips);
+            }
+        }
+    }
+}
+
+test "weighted survival is reproducible per anatomical part and may consume every part" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const pose = animation.evaluatePose(&set, 0, .neutral);
+    const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
+    var snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero);
+    var first = std.Random.DefaultPrng.init(901);
+    var second = std.Random.DefaultPrng.init(901);
+    var counts = [_]usize{0} ** 64;
+    for (0..2000) |_| {
+        const selected = gibbing.selectSurvivors(snapshot, first.random());
+        try std.testing.expectEqualDeep(selected, gibbing.selectSurvivors(snapshot, second.random()));
+        for (selected[0..snapshot.count], counts[0..snapshot.count]) |yes, *count| count.* += @intFromBool(yes);
+    }
+    for (snapshot.parts[0..snapshot.count], counts[0..snapshot.count]) |part, count| {
+        try std.testing.expectApproxEqAbs(part.survival_weight, @as(f32, @floatFromInt(count)) / 2000, 0.05);
+    }
+    for ([_]f32{ 0, 1 }) |weight| {
+        for (snapshot.parts[0..snapshot.count]) |*part| part.survival_weight = weight;
+        const selected = gibbing.selectSurvivors(snapshot, first.random());
+        for (selected[0..snapshot.count]) |yes| try std.testing.expectEqual(weight == 1, yes);
+    }
+}
+
+test "detached motion adds limb swing without doubling root velocity or spinning through angle wrap" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const pose = animation.evaluatePose(&set, 0, .neutral);
+    const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
+    var before = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero);
+    before.parts[0].placed.angle = std.math.pi - 0.01;
+    var after = before;
+    for (after.parts[0..after.count]) |*part| {
+        part.placed.position = vec.add(part.placed.position, .{ .x = 0.5, .y = 0 });
+        part.velocity = .{ .x = 8, .y = -2 }; // Includes a newly applied blast.
+    }
+    after.parts[0].placed.position.y += 0.03;
+    after.parts[0].placed.angle = -std.math.pi + 0.01;
+    gibbing.inheritPoseMotion(&after, before, .{ .x = 0.5, .y = 0 }, vec.zero, 0.01);
+    try nearPoint(.{ .x = 8, .y = 1 }, after.parts[0].velocity, 0.0001);
+    try nearPoint(.{ .x = 8, .y = -2 }, after.parts[1].velocity, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), after.parts[0].angular_velocity, 0.0001);
+}
+
+test "anatomical pools preserve colliders and activation identity through damage recycling and replacement" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer pool.cleanup();
+    defer damage.cleanup();
+    defer gibbing.cleanup();
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    // CPU fixture: borrowing IDs exercises ownership without texture uploads.
+    for (pack.parts, 0..) |*part, index| part.sprites = .{ 10000 + index * 2, 10001 + index * 2 };
+    defer for (pack.parts) |*part| {
+        part.sprites = .{ null, null };
+    };
+    gibbing.partPools = try gibbing.preparePools(&pack, 1);
+    const prepared_count = pool.memberships.count();
+    try std.testing.expect(prepared_count >= pack.bindings.len * 2);
+    try std.testing.expectEqual(prepared_count, character_art.bodyParts.count());
+    for (entity.entities.map.values()) |ent| {
+        try std.testing.expect(!ent.enabled and !ent.ownsSpriteUuids);
+        try std.testing.expectEqual(@as(usize, 2), ent.spriteUuids.len);
+        try std.testing.expect(!character_art.bodyParts.get(ent.bodyId).?.severed);
+    }
+    var selected_body: ?box2d.c.b2BodyId = null;
+    for ([_]bool{ false, true }) |facing| {
+        const pose = animation.evaluatePose(&set, 0.4, .run);
+        const frame = animation.solveAimedPose(
+            &set,
+            pose,
+            .{ .x = 3, .y = 4 },
+            facing,
+            vec.east,
+            0,
+            null,
+        );
+        const snapshot = gibbing.snapshotPose(
+            &pack,
+            set.rig,
+            frame,
+            true,
+            .{ .r = 90, .g = 150, .b = 210 },
+            .{ .x = 7, .y = -2 },
+        );
+        for (snapshot.parts[0..snapshot.count]) |part| {
+            const body = try gibbing.activatePart(part, .{ .x = 1, .y = -1 }, 2);
+            selected_body = body;
+            const ent = entity.entities.getLocking(body).?;
+            try std.testing.expect(ent.enabled and box2d.c.b2Body_IsEnabled(body));
+            try nearPoint(part.placed.position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0.00001);
+            try nearPoint(.{ .x = 8, .y = -3 }, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0.00001);
+            try std.testing.expectApproxEqAbs(@as(f32, 2), box2d.c.b2Body_GetAngularVelocity(body), 0.00001);
+            const visual = character_art.bodyParts.get(body).?;
+            try std.testing.expectEqualDeep(part.skin_color, visual.skin_color);
+            try std.testing.expectEqual(part.placed.part, visual.part);
+            try std.testing.expectEqual(facing, visual.facing_right);
+            try std.testing.expect(visual.severed);
+            const part_physics = pack.parts[part.placed.part].definition.physics;
+            const shape = box2d.c.b2Shape_GetPolygon(ent.shapeIds[0]);
+            const center = vec.fromBox2d(box2d.c.b2Body_GetWorldPoint(body, shape.centroid));
+            const expected_center = placedArtPoint(
+                pack.parts[part.placed.part].definition,
+                part.placed,
+                part_physics.center,
+            );
+            try nearPoint(expected_center, center, 2 / conv.met2pix);
+            try std.testing.expect(ent.colliderShapeDef.enableSensorEvents);
+            try std.testing.expect((ent.categoryBits & collision.MASK_SENSOR_FOOT) != 0);
+            // Particle emission is exercised by the game benchmark; use the
+            // existing no-effect response to test destruction's pool lifecycle.
+            damage.components.getPtr(body).?.onDestroyed = .none;
+            try destruction.apply(body, .{ .source = .hitscan, .amount = 2, .position = part.placed.position });
+            try std.testing.expect(!entity.entities.getLocking(body).?.enabled);
+            try std.testing.expect(!box2d.c.b2Body_IsEnabled(body));
+            const activation = pool.memberships.get(body).?.activation;
+            pool.processQueuedReleases();
+            try std.testing.expectEqual(@as(u64, 0), pool.memberships.get(body).?.activation);
+            var next_part = part;
+            next_part.skin_color = .{ .r = 10, .g = 210, .b = 80 };
+            const reused = try gibbing.activatePart(next_part, vec.zero, 0);
+            try std.testing.expect(box2d.c.B2_ID_EQUALS(body, reused));
+            try std.testing.expectEqualDeep(next_part.skin_color, character_art.bodyParts.get(reused).?.skin_color);
+            try std.testing.expect(character_art.bodyParts.get(reused).?.severed);
+            try std.testing.expect(pool.memberships.get(body).?.activation != activation);
+            try std.testing.expectEqual(@as(f32, 1), damage.components.get(body).?.model.health.current);
+        }
+    }
+    try std.testing.expectEqual(prepared_count, pool.memberships.count());
+    try std.testing.expectEqual(prepared_count, character_art.bodyParts.count());
+    const original_pools = gibbing.partPools.ptr;
+    const original_visual = character_art.bodyParts.get(selected_body.?).?;
+    const saved = pack.parts[1].sprites;
+    pack.parts[1].sprites[0] = null;
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    // The incomplete replacement is rejected; the old pool remains usable.
+    const failure = gibbing.preparePools(&pack, 1);
+    std.testing.log_level = old_log_level;
+    pack.parts[1].sprites = saved;
+    try std.testing.expectError(error.MissingCharacterPartSprite, failure);
+    try std.testing.expect(original_pools == gibbing.partPools.ptr);
+    try std.testing.expectEqual(prepared_count, pool.memberships.count());
+    try std.testing.expectEqual(prepared_count, character_art.bodyParts.count());
+    try std.testing.expectEqualDeep(original_visual, character_art.bodyParts.get(selected_body.?).?);
+    // A reload/level teardown can run with releases still queued.
+    pool.queueRelease(selected_body.?);
+    gibbing.clearBodies();
+    pool.processQueuedReleases();
+    try std.testing.expectEqual(@as(usize, 0), pool.memberships.count());
+    try std.testing.expectEqual(@as(usize, 0), damage.components.count());
+    try std.testing.expectEqual(@as(usize, 0), entity.entities.map.count());
+    try std.testing.expectEqual(@as(usize, 0), character_art.bodyParts.count());
+    gibbing.partPools = try gibbing.preparePools(&pack, 1);
+    try std.testing.expectEqual(prepared_count, pool.memberships.count());
+    try std.testing.expectEqual(prepared_count, character_art.bodyParts.count());
+}
+
+test "entity removal and bulk cleanup unregister body artwork without touching other bodies" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer character_art.cleanup();
+    defer entity.cleanup();
+    var bodies: [3]box2d.c.b2BodyId = undefined;
+    for (&bodies) |*body| {
+        const ent = try entity.createFromShape(
+            1,
+            box2d.c.b2MakeBox(0.1, 0.1),
+            box2d.c.b2DefaultShapeDef(),
+            box2d.createDynamicBodyDef(vec.zero),
+            "dynamic",
+            .rectangle,
+        );
+        body.* = ent.bodyId;
+        entity.markSpriteUuidsShared(body.*); // CPU fixture; no texture is owned.
+    }
+    const visual: character_art.DetachedPart = .{
+        .part = 0,
+        .facing_right = true,
+        .skin_color = .{ .r = 20, .g = 80, .b = 160 },
+        .severed = true,
+    };
+    for (bodies[0..2]) |body| try character_art.bodyParts.put(allocator.allocator, body, visual);
+    // Ordinary sprites still fall through to the existing entity draw path.
+    try std.testing.expect(!try character_art.drawBodyPart(bodies[2], vec.zero, 0));
+    try std.testing.expect(entity.remove(bodies[0]));
+    try std.testing.expect(!character_art.bodyParts.contains(bodies[0]));
+    try std.testing.expectEqualDeep(visual, character_art.bodyParts.get(bodies[1]).?);
+    try std.testing.expectEqual(@as(usize, 1), character_art.bodyParts.count());
+    try std.testing.expect(!entity.remove(bodies[0]));
+    entity.cleanup();
+    try std.testing.expectEqual(@as(usize, 0), character_art.bodyParts.count());
+    for (bodies) |body| try std.testing.expect(!box2d.c.b2Body_IsValid(body));
+}
+
+test "giblet spray cannot mutate the character pack shared surface" {
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    defer gibbing.cleanup();
+    var pack = try loadArt(animation.assets.?.rig);
+    defer character_art.destroy(&pack);
+    const fixture_id = 918273;
+    const surface = try sdl.image.load("character_art/curb_rat_v1/export/head_skin.svg");
+    defer sdl.destroySurface(surface);
+    const pixels: []const u8 = @as([*]const u8, @ptrCast(surface.pixels.?))[0..@intCast(surface.pitch * surface.h)];
+    const before = try std.testing.allocator.dupe(u8, pixels);
+    defer std.testing.allocator.free(before);
+    var visual: sprite.Sprite = undefined; // No GPU fields are accessed by the guarded spray path.
+    visual.surface = surface;
+    visual.sizeP = .{ .x = surface.w, .y = surface.h };
+    visual.scale = .{ .x = 1, .y = 1 };
+    try sprite.sprites.putLocking(fixture_id, visual);
+    defer _ = sprite.sprites.fetchSwapRemoveLocking(fixture_id);
+    for (pack.parts) |*part| part.sprites = .{ fixture_id, fixture_id };
+    defer for (pack.parts) |*part| {
+        part.sprites = .{ null, null };
+    };
+    gibbing.partPools = try gibbing.preparePools(&pack, 1);
+    const part: gibbing.PartSnapshot = .{
+        .binding = 0,
+        .placed = .{
+            .part = 0,
+            .position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body)),
+            .angle = 0,
+            .facing_right = false,
+            .far = false,
+        },
+        .skin_color = .{ .r = 80, .g = 200, .b = 20 },
+        .velocity = vec.zero,
+        .angular_velocity = 0,
+        .survival_weight = 1,
+    };
+    const detached = try gibbing.activatePart(part, vec.zero, 0);
+    const p = player.players.getPtr(7).?;
+    p.sprayPaintSpriteUuid = fixture_id;
+    p.isAiming = false;
+    try player.sprayPaint(p);
+    // The shared surface and borrowed ownership are unchanged; no GPU upload
+    // should be attempted by this CPU-only spray invocation.
+    try std.testing.expectEqualSlices(u8, before, pixels);
+    try std.testing.expect(!entity.entities.getLocking(detached).?.ownsSpriteUuids);
+    try std.testing.expect(delay.delayedActions.contains("p7_spray"));
+    const delayed = delay.delayedActions.fetchRemove("p7_spray").?;
+    allocator.allocator.free(delayed.key);
+}
+
+test "previous physics frame preserves aimed arm motion when the root remains still" {
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    var pack = try loadArt(animation.assets.?.rig);
+    defer character_art.destroy(&pack);
+    const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(body));
+    var input: animation.LocomotionInput = .{
+        .body = position,
+        .supported = false,
+        .ground_y = null,
+        .facing_right = true,
+        .vertical_speed_mps = 0,
+        .separation_speed_mps = 0,
+        .aiming = true,
+        .aim_direction = vec.east,
+    };
+    for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+    const before = animation.playerFrame(7, .physics, null).?;
+    input.aim_direction = vec.normalize(.{ .x = 1, .y = 1 });
+    animation.updatePlayer(7, input, 1.0 / 60.0);
+    const after = animation.playerFrame(7, .physics, null).?;
+    const sampled_before = animation.playerFrame(7, .previous_physics, null).?;
+    for ([_]animation.Joint{ .right_elbow, .right_hand }) |joint| {
+        const index = @intFromEnum(joint);
+        try nearPoint(before.pose.joints[index], sampled_before.pose.joints[index], 0.00001);
+    }
+    const tint: sprite.Color = .{ .r = 100, .g = 120, .b = 140 };
+    const original = gibbing.snapshotPose(&pack, animation.assets.?.rig, before, true, tint, vec.zero);
+    const previous = gibbing.snapshotPose(&pack, animation.assets.?.rig, sampled_before, true, tint, vec.zero);
+    var current = gibbing.snapshotPose(&pack, animation.assets.?.rig, after, true, tint, vec.zero);
+    gibbing.inheritPoseMotion(&current, previous, after.body, sampled_before.body, 1.0 / 60.0);
+    var swinging_parts: usize = 0;
+    for (current.parts[0..current.count], original.parts[0..original.count]) |part, old| {
+        if (vec.magnitude(part.velocity) <= 0.1) continue;
+        swinging_parts += 1;
+        try nearPoint(vec.mul(vec.subtract(part.placed.position, old.placed.position), 60), part.velocity, 0.0001);
+    }
+    try std.testing.expect(swinging_parts >= 2);
+}
+
+test "stain color inherits emitted tint while explicit overrides remain compatible" {
+    const green: sprite.Color = .{ .r = 30, .g = 220, .b = 50 };
+    const blue: sprite.Color = .{ .r = 50, .g = 90, .b = 240 };
+    const red: sprite.Color = .{ .r = 138, .g = 3, .b = 3 };
+    const cases = [_]struct { json: []const u8, emitted: sprite.Color, expected: sprite.Color }{
+        .{ .json = "{\"minRadius\":0.05,\"maxRadius\":0.35}", .emitted = green, .expected = green },
+        .{ .json = "{\"minRadius\":0.05,\"maxRadius\":0.35,\"color\":null}", .emitted = blue, .expected = blue },
+        .{
+            .json = "{\"minRadius\":0.05,\"maxRadius\":0.35,\"color\":{\"r\":138,\"g\":3,\"b\":3}}",
+            .emitted = blue,
+            .expected = red,
+        },
+    };
+    var preset = std.mem.zeroes(data.ParticleData);
+    preset.color = red;
+    for (cases) |case| {
+        const parsed = try std.json.parseFromSlice(data.ParticleStainData, std.testing.allocator, case.json, .{});
+        defer parsed.deinit();
+        preset.stain = parsed.value;
+        const behavior = particle_effect.stainBehavior(preset, 0.1, case.emitted).?;
+        try std.testing.expectEqualDeep(case.expected, behavior.color);
+        try std.testing.expectEqual(@as(f32, 0.1), behavior.radius);
+    }
+    preset.stain = null;
+    try std.testing.expect(particle_effect.stainBehavior(preset, 0.1, green) == null);
+}
+
+test "artwork reload prepares absent giblet pools after subsystem initialization" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer particle.cleanup();
+    defer particle_effect.cleanup();
+    defer pool.cleanup();
+    defer damage.cleanup();
+    defer character_art.cleanup();
+    defer gibbing.cleanup();
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    for (pack.parts, 0..) |*part, index| part.sprites = .{ 20000 + index * 2, 20001 + index * 2 };
+    defer for (pack.parts) |*part| {
+        part.sprites = .{ null, null };
+    };
+    try gibbing.replaceArtwork(&pack); // Initial art load happens before blood.
+    try std.testing.expectEqual(@as(usize, 0), gibbing.partPools.len);
+    var preset = std.mem.zeroes(data.ParticleData);
+    preset.particlesPerUnit = 1;
+    preset.maxParticles = 1;
+    preset.minScale = 0.1;
+    preset.maxScale = 0.2;
+    preset.density = 1;
+    preset.lifetimeMs = 100;
+    preset.color = .{ .r = 30, .g = 220, .b = 50 };
+    preset.stain = .{ .color = .{ .r = 120, .g = 0, .b = 0 }, .minRadius = 0.01, .maxRadius = 0.02 };
+    const old_presets = data.particleDataMap;
+    data.particleDataMap = .empty;
+    defer {
+        data.particleDataMap.deinit(allocator.allocator);
+        data.particleDataMap = old_presets;
+    }
+    try data.particleDataMap.put(allocator.allocator, "blood", preset);
+    try particle_effect.init();
+    try blood.init();
+    try std.testing.expectEqualDeep(preset.color, try blood.currentColor());
+    try gibbing.init();
+    // Models the first successful reload after invalid startup artwork; no
+    // player color assignment or level load is needed to recover.
+    try gibbing.replaceArtwork(&pack);
+    try std.testing.expectEqual(pack.parts.len, gibbing.partPools.len);
+    // Match the real reload ordering: prepared bodies precede asset install.
+    // The installed CPU pack has no textures; pool construction borrows IDs.
+    character_art.install(try loadArt(set.rig));
+    try std.testing.expectEqual(pool.memberships.count(), character_art.bodyParts.count());
+    const pose = animation.evaluatePose(&set, 0, .neutral);
+    const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
+    const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 100, .b = 50 }, vec.zero);
+    const body = try gibbing.activatePart(snapshot.parts[0], vec.zero, 0);
+    const original_count = pool.memberships.count();
+    try gibbing.replaceArtwork(&pack);
+    character_art.install(try loadArt(set.rig));
+    try std.testing.expect(!box2d.c.b2Body_IsValid(body));
+    try std.testing.expect(!character_art.bodyParts.contains(body));
+    try std.testing.expectEqual(original_count, pool.memberships.count());
+    try std.testing.expectEqual(original_count, character_art.bodyParts.count());
+    const replacement_body = try gibbing.activatePart(snapshot.parts[0], vec.zero, 0);
+    try std.testing.expect(character_art.bodyParts.get(replacement_body).?.severed);
+}
+
+test "discarding invalid queued pool bodies does not skip another queued release" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    defer pool.cleanup();
+    var bodies: [3]box2d.c.b2BodyId = undefined;
+    for (&bodies) |*body| body.* = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+    const id = try pool.create(&bodies);
+    for (bodies) |body| {
+        _ = try pool.acquire(id, .return_null);
+        pool.queueRelease(body);
+    }
+    box2d.c.b2DestroyBody(bodies[1]);
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = old_log_level;
+    pool.processQueuedReleases();
+    try std.testing.expect(!pool.memberships.contains(bodies[1]));
+    try std.testing.expectEqual(@as(u64, 0), pool.memberships.get(bodies[0]).?.activation);
+    try std.testing.expectEqual(@as(u64, 0), pool.memberships.get(bodies[2]).?.activation);
+    const retained = try pool.takeBodyIds(id);
+    defer allocator.allocator.free(retained);
+    for (retained) |body| box2d.c.b2DestroyBody(body);
+}
+
+fn createEmbeddedArrowFixture(
+    target_category: u64,
+    pooled: bool,
+    penetration: projectile.PenetrationMode,
+) !struct { target: box2d.c.b2BodyId, arrow: box2d.c.b2BodyId } {
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.enableContactEvents = true;
+    shape.filter.categoryBits = target_category;
+    shape.filter.maskBits = collision.CATEGORY_PROJECTILE;
+    var body_def = box2d.createDynamicBodyDef(vec.zero);
+    body_def.gravityScale = 0;
+    const target = try entity.createFromShape(
+        arrow_fixture_sprite,
+        box2d.c.b2MakeBox(0.3, 0.3),
+        shape,
+        body_def,
+        "dynamic",
+        .rectangle,
+    );
+    entity.markSpriteUuidsShared(target.bodyId);
+    try damage.register(target.bodyId, .{
+        .model = .{ .health = .{ .current = 1, .maximum = 1 } },
+        .onDestroyed = .none,
+        .destructionLifecycle = if (pooled) .return_to_pool else .remove,
+    });
+    if (pooled) {
+        const id = try pool.create(&.{target.bodyId});
+        _ = (try pool.acquire(id, .return_null)).?;
+    }
+    shape.filter.categoryBits = collision.CATEGORY_PROJECTILE;
+    shape.filter.maskBits = target_category;
+    body_def.position = .{ .x = 0, .y = -0.5 };
+    body_def.rotation = box2d.c.b2MakeRot(std.math.pi);
+    const arrow = try entity.createFromShape(
+        arrow_fixture_sprite,
+        box2d.c.b2MakeBox(0.04, 0.3),
+        shape,
+        body_def,
+        "projectile",
+        .rectangle,
+    );
+    entity.markSpriteUuidsShared(arrow.bodyId);
+    if (penetration == .penetrating) {
+        shape.isSensor = true;
+        shape.enableSensorEvents = true;
+        shape.filter.maskBits = collision.otherPlayersMask(0);
+        const polygon = box2d.c.b2MakeBox(0.04, 0.3);
+        _ = box2d.c.b2CreatePolygonShape(arrow.bodyId, &shape, &polygon);
+    }
+    try projectile.create(arrow.bodyId, .{
+        .owner_id = 0,
+        .direct_damage = 40,
+        .penetration = penetration,
+        .impact_behavior = .stick,
+        .flight_rotation = .velocity_aligned,
+        .stick_depth = 0.03,
+    });
+    box2d.c.b2Body_SetLinearVelocity(arrow.bodyId, .{ .x = 0, .y = 2 });
+    for (0..3) |_| {
+        box2d.worldStep(1.0 / 60.0, 4);
+        try projectile.checkContacts();
+        if (projectile.embeddedProjectiles.contains(arrow.bodyId)) break;
+    }
+    try std.testing.expect(projectile.embeddedProjectiles.contains(arrow.bodyId));
+    try std.testing.expect(!projectile.activeProjectiles.contains(arrow.bodyId));
+    try std.testing.expectEqual(@as(c_int, 1), box2d.c.b2Body_GetJointCount(target.bodyId));
+    return .{ .target = target.bodyId, .arrow = arrow.bodyId };
+}
+
+const arrow_fixture_sprite = 819274;
+
+fn beginArrowFixture() !void {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    try registerArrowFixtureSprite();
+}
+
+fn registerArrowFixtureSprite() !void {
+    var visual: sprite.Sprite = undefined; // Embedding reads only sprite length.
+    visual.sizeM = .{ .x = 0.08, .y = 0.6 };
+    try sprite.sprites.putLocking(arrow_fixture_sprite, visual);
+}
+
+fn endArrowFixture() void {
+    projectile.cleanup();
+    while (pool.memberships.count() > 0) {
+        const id = pool.memberships.values()[0].poolId;
+        const bodies = pool.takeBodyIds(id) catch |err| {
+            std.log.err("endArrowFixture: could not remove fixture pool: {}", .{err});
+            @panic("Arrow fixture pool cleanup failed");
+        };
+        allocator.allocator.free(bodies);
+    }
+    entity.cleanup();
+    pool.cleanup();
+    damage.cleanup();
+    destruction.cleanup();
+    _ = sprite.sprites.fetchSwapRemoveLocking(arrow_fixture_sprite);
+    box2d.destroyWorld();
+}
+
+test "destroying a pooled giblet releases its embedded arrow before body reuse" {
+    try beginArrowFixture();
+    defer endArrowFixture();
+    const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_GIBLET, true, .non_penetrating);
+    const attachment = projectile.embeddedProjectiles.get(fixture.arrow).?;
+    const id = pool.memberships.get(fixture.target).?.poolId;
+    try destruction.apply(fixture.target, .{ .source = .hitscan, .amount = 2, .position = vec.zero });
+    try std.testing.expect(!box2d.c.b2Body_IsEnabled(fixture.target));
+    try std.testing.expect(box2d.c.b2Joint_IsValid(attachment.joint)); // Disabling alone preserves the weld.
+    // Contact processing performs cleanup even before the queued pool release.
+    try projectile.checkContacts();
+    try std.testing.expect(box2d.c.b2Body_IsValid(fixture.arrow));
+    try std.testing.expect(projectile.activeProjectiles.get(fixture.arrow).?.spent);
+    try std.testing.expect(!box2d.c.b2Joint_IsValid(attachment.joint));
+    try std.testing.expectEqual(@as(usize, 0), projectile.embeddedProjectiles.count());
+    pool.processQueuedReleases();
+    const reused = (try pool.acquire(id, .return_null)).?;
+    try std.testing.expect(box2d.c.B2_ID_EQUALS(fixture.target, reused.bodyId));
+    box2d.c.b2Body_Enable(reused.bodyId);
+    try damage.reset(reused.bodyId);
+    box2d.c.b2Body_SetTransform(reused.bodyId, .{ .x = 9, .y = 2 }, box2d.c.b2Rot_identity);
+    projectile.updateAttachments();
+    box2d.worldStep(1.0 / 60.0, 4);
+    try std.testing.expectEqual(@as(c_int, 0), box2d.c.b2Body_GetJointCount(reused.bodyId));
+    try std.testing.expect(entity.entities.map.contains(fixture.arrow));
+}
+
+test "embedded arrows reject recycled activations and immediate release reacquisition" {
+    const old_accumulator = time.accumulator;
+    const old_alpha = time.alpha;
+    defer time.accumulator = old_accumulator;
+    defer time.alpha = old_alpha;
+    for ([_]bool{ false, true }) |release_first| {
+        try beginArrowFixture();
+        defer endArrowFixture();
+        const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_RUBBLE, true, .non_penetrating);
+        const attachment = projectile.embeddedProjectiles.get(fixture.arrow).?;
+        const id = pool.memberships.get(fixture.target).?.poolId;
+        projectile.updateAttachments();
+        try std.testing.expect(box2d.c.b2Joint_IsValid(attachment.joint));
+        if (release_first) {
+            try pool.release(id, fixture.target);
+        }
+        const reused = (try pool.acquire(id, .recycle_oldest)).?;
+        try std.testing.expect(box2d.c.B2_ID_EQUALS(reused.bodyId, fixture.target));
+        try std.testing.expect(box2d.c.b2Body_IsEnabled(fixture.target));
+        try std.testing.expect(pool.memberships.get(fixture.target).?.activation != attachment.pool_activation.?);
+        // No disabled-frame observation is needed; pre-physics cleanup checks
+        // the existing pool identity before the old weld can move the new body.
+        const replacement_position = vec.Vec2{ .x = 8, .y = 2 };
+        box2d.c.b2Body_SetTransform(fixture.target, vec.toBox2d(replacement_position), box2d.c.b2Rot_identity);
+        box2d.c.b2Body_SetLinearVelocity(fixture.target, box2d.c.b2Vec2_zero);
+        box2d.c.b2Body_SetAngularVelocity(fixture.target, 0);
+        time.accumulator = config.physics.dt;
+        try std.testing.expectEqual(@as(usize, 1), try physics.step());
+        try std.testing.expect(box2d.c.b2Body_IsValid(fixture.arrow));
+        try std.testing.expect(projectile.activeProjectiles.get(fixture.arrow).?.spent);
+        try std.testing.expect(!box2d.c.b2Joint_IsValid(attachment.joint));
+        try std.testing.expectEqual(@as(c_int, 0), box2d.c.b2Body_GetJointCount(fixture.target));
+        try nearPoint(replacement_position, vec.fromBox2d(box2d.c.b2Body_GetPosition(fixture.target)), 0.00001);
+    }
+}
+
+test "fixed step releases arrows after firing destroys their target" {
+    const old_view = animation.view;
+    const old_accumulator = time.accumulator;
+    const old_alpha = time.alpha;
+    defer animation.view = old_view;
+    defer time.accumulator = old_accumulator;
+    defer time.alpha = old_alpha;
+    const shooter = try beginAimingPlayer();
+    defer endAimingPlayer(shooter);
+    defer {
+        delay.cleanup();
+        delay.delayedActions = .init(allocator.allocator);
+    }
+    defer weapon.activeTrails.clearAndFree(allocator.allocator);
+    try std.testing.expect(sdl.c.SDL_SetHint(sdl.c.SDL_HINT_AUDIO_DRIVER, "dummy"));
+    defer _ = sdl.c.SDL_ResetHint(sdl.c.SDL_HINT_AUDIO_DRIVER);
+    try std.testing.expect(sdl.c.SDL_InitSubSystem(sdl.c.SDL_INIT_AUDIO));
+    defer sdl.c.SDL_QuitSubSystem(sdl.c.SDL_INIT_AUDIO);
+    try audio.init();
+    defer audio.cleanup();
+    try registerArrowFixtureSprite();
+    defer _ = sprite.sprites.fetchSwapRemoveLocking(arrow_fixture_sprite);
+    const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_GIBLET, true, .non_penetrating);
+    const attachment = projectile.embeddedProjectiles.get(fixture.arrow).?;
+    const id = pool.memberships.get(fixture.target).?.poolId;
+    defer {
+        projectile.cleanup();
+        const bodies = pool.takeBodyIds(id) catch unreachable; // The fixture owns this live pool.
+        allocator.allocator.free(bodies);
+        _ = entity.remove(fixture.target);
+        if (box2d.c.b2Body_IsValid(fixture.arrow)) {
+            _ = entity.remove(fixture.arrow);
+        }
+        pool.cleanup();
+        destruction.cleanup();
+    }
+    submitAim(vec.east, true);
+    submitAim(vec.east, false);
+    const muzzle = conv.pixel2M(player.weaponMuzzle(player.weaponFrame(7, .physics, vec.east).?).?);
+    const target_position = vec.fromBox2d(box2d.c.b2Body_GetPosition(fixture.target));
+    const shift = vec.subtract(vec.add(muzzle, .{ .x = 1, .y = 0 }), target_position);
+    for ([_]box2d.c.b2BodyId{ fixture.target, fixture.arrow }) |body| {
+        const position = vec.add(vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), shift);
+        box2d.c.b2Body_SetTransform(body, vec.toBox2d(position), box2d.c.b2Body_GetRotation(body));
+        box2d.c.b2Body_SetLinearVelocity(body, box2d.c.b2Vec2_zero);
+    }
+    player.players.getPtr(7).?.weapons[0].directDamage = 2;
+    try std.testing.expect(box2d.c.b2Body_IsEnabled(fixture.target));
+    // Exercise the real fixed-step firing boundary without manual cleanup.
+    time.accumulator = config.physics.dt;
+    try std.testing.expectEqual(@as(usize, 1), try physics.step());
+    try std.testing.expect(!box2d.c.b2Body_IsEnabled(fixture.target));
+    try std.testing.expect(box2d.c.b2Body_IsValid(fixture.arrow));
+    try std.testing.expect(projectile.activeProjectiles.get(fixture.arrow).?.spent);
+    try std.testing.expect(!box2d.c.b2Joint_IsValid(attachment.joint));
+}
+
+test "embedded arrows retain their own pose and momentum when ordinary targets are removed" {
+    try beginArrowFixture();
+    defer endArrowFixture();
+    const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_DYNAMIC, false, .non_penetrating);
+    const attachment = projectile.embeddedProjectiles.get(fixture.arrow).?;
+    try std.testing.expect(attachment.pool_activation == null);
+    box2d.c.b2Body_SetLinearVelocity(fixture.target, .{ .x = 1, .y = 0 });
+    for (0..3) |_| {
+        projectile.updateAttachments();
+        box2d.worldStep(1.0 / 60.0, 4);
+    }
+    try std.testing.expect(box2d.c.b2Body_IsValid(fixture.arrow));
+    try std.testing.expect(box2d.c.b2Joint_IsValid(attachment.joint));
+    const position = vec.fromBox2d(box2d.c.b2Body_GetPosition(fixture.arrow));
+    const rotation = box2d.c.b2Body_GetRotation(fixture.arrow);
+    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(fixture.arrow));
+    const angular_velocity = box2d.c.b2Body_GetAngularVelocity(fixture.arrow);
+    try std.testing.expect(velocity.x > 0);
+    try std.testing.expect(entity.remove(fixture.target));
+    projectile.updateAttachments();
+    try std.testing.expect(box2d.c.b2Body_IsValid(fixture.arrow));
+    try nearPoint(position, vec.fromBox2d(box2d.c.b2Body_GetPosition(fixture.arrow)), 0.00001);
+    try std.testing.expectEqualDeep(rotation, box2d.c.b2Body_GetRotation(fixture.arrow));
+    try nearPoint(velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(fixture.arrow)), 0.00001);
+    try std.testing.expectEqual(angular_velocity, box2d.c.b2Body_GetAngularVelocity(fixture.arrow));
+    try std.testing.expectEqual(@as(usize, 0), projectile.embeddedProjectiles.count());
+}
+
+test "released arrows fall harmlessly through players and can stick and release again" {
+    for ([_]projectile.PenetrationMode{ .non_penetrating, .penetrating }) |penetration| {
+        try beginArrowFixture();
+        defer endArrowFixture();
+        const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_GIBLET, true, penetration);
+        var shape = box2d.c.b2DefaultShapeDef();
+        shape.enableContactEvents = true;
+        shape.enableSensorEvents = true;
+        shape.filter.maskBits = collision.CATEGORY_PROJECTILE;
+        const player_box = box2d.c.b2MakeBox(0.5, 0.3);
+        for (0..2) |id| {
+            const position: vec.Vec2 = .{ .x = 0, .y = 1 + @as(f32, @floatFromInt(id)) };
+            const body = try box2d.createBody(box2d.createStaticBodyDef(position));
+            shape.filter.categoryBits = collision.CATEGORY_PLAYER | collision.playerCategory(id);
+            _ = box2d.c.b2CreatePolygonShape(body, &shape, &player_box);
+            var p = std.mem.zeroes(player.Player);
+            p.id = id;
+            p.bodyId = body;
+            p.health = 100;
+            try player.players.put(allocator.allocator, id, p);
+        }
+        defer for (0..2) |id| {
+            _ = player.players.swapRemove(id);
+        };
+        var floors: [2]box2d.c.b2BodyId = undefined;
+        const floor_box = box2d.c.b2MakeBox(5, 0.25);
+        shape.filter.categoryBits = collision.CATEGORY_TERRAIN;
+        for (&floors, 0..) |*body, index| {
+            const position: vec.Vec2 = .{ .x = 0, .y = 4 + @as(f32, @floatFromInt(index)) * 2 };
+            body.* = try box2d.createBody(box2d.createStaticBodyDef(position));
+            _ = box2d.c.b2CreatePolygonShape(body.*, &shape, &floor_box);
+        }
+        box2d.c.b2Body_SetGravityScale(fixture.arrow, 2);
+        box2d.c.b2Body_SetLinearVelocity(fixture.arrow, box2d.c.b2Vec2_zero);
+        box2d.c.b2Body_SetAwake(fixture.arrow, false);
+        try destruction.apply(fixture.target, .{ .source = .hitscan, .amount = 2, .position = vec.zero });
+        projectile.updateAttachments();
+        try std.testing.expect(box2d.c.b2Body_IsAwake(fixture.arrow));
+        const released = projectile.activeProjectiles.get(fixture.arrow).?;
+        try std.testing.expect(released.spent);
+        try std.testing.expectEqual(@as(f32, 0), released.direct_damage);
+        try std.testing.expect(released.explosion == null);
+        try std.testing.expect(!projectile.propulsions.contains(fixture.arrow));
+        var shapes: [2]box2d.c.b2ShapeId = undefined;
+        const count: usize = @intCast(box2d.c.b2Body_GetShapes(fixture.arrow, &shapes, shapes.len));
+        try std.testing.expectEqual(@as(usize, if (penetration == .penetrating) 2 else 1), count);
+        for (shapes[0..count]) |arrow_shape| {
+            const filter = box2d.c.b2Shape_GetFilter(arrow_shape);
+            if (box2d.c.b2Shape_IsSensor(arrow_shape)) {
+                try std.testing.expectEqual(@as(u64, 0), filter.maskBits);
+                continue;
+            }
+            try std.testing.expectEqual(collision.MASK_PROJECTILE & ~collision.CATEGORY_HOOK, filter.maskBits);
+        }
+        for (floors, 0..) |floor, index| {
+            for (0..120) |_| {
+                projectile.updateFlightRotation();
+                box2d.worldStep(1.0 / 60.0, 4);
+                try projectile.checkContacts();
+                if (projectile.embeddedProjectiles.contains(fixture.arrow)) break;
+            }
+            const embedded = projectile.embeddedProjectiles.get(fixture.arrow).?;
+            try std.testing.expect(box2d.c.B2_ID_EQUALS(floor, embedded.target));
+            try std.testing.expect(box2d.c.b2Joint_IsValid(embedded.joint));
+            try std.testing.expect(embedded.projectile.spent);
+            try std.testing.expectEqual(
+                projectile.FlightRotation.velocity_aligned,
+                embedded.projectile.flight_rotation,
+            );
+            try std.testing.expectEqual(@as(f32, 0.03), embedded.projectile.stick_depth);
+            try std.testing.expect(!projectile.activeProjectiles.contains(fixture.arrow));
+            const rotation = box2d.c.b2Body_GetRotation(fixture.arrow);
+            try std.testing.expectApproxEqAbs(@as(f32, -1), rotation.c, 0.001); // Tip points down.
+            for (0..2) |id| try std.testing.expectEqual(@as(f32, 100), player.players.get(id).?.health);
+            if (index == floors.len - 1) break;
+            box2d.c.b2DestroyBody(floor);
+            projectile.updateAttachments();
+            try std.testing.expect(projectile.activeProjectiles.get(fixture.arrow).?.spent);
+        }
+    }
+}
+
+test "attachment cleanup tolerates an arrow entity removed before its target" {
+    try beginArrowFixture();
+    defer endArrowFixture();
+    const fixture = try createEmbeddedArrowFixture(collision.CATEGORY_DYNAMIC, false, .non_penetrating);
+    try std.testing.expect(entity.remove(fixture.arrow));
+    projectile.updateAttachments();
+    projectile.updateAttachments();
+    try std.testing.expectEqual(@as(usize, 0), projectile.embeddedProjectiles.count());
+    try std.testing.expectEqual(@as(usize, 0), projectile.activeProjectiles.count());
+    try std.testing.expectEqual(@as(c_int, 0), box2d.c.b2Body_GetJointCount(fixture.target));
+}
 
 test "shared health rules retain overkill and distinguish death from gibbing at minus forty" {
     const previous = damage.rules;
@@ -214,7 +1019,13 @@ test "invalid art candidates preserve the installed pack and report named fields
         .{ "\"meters_per_pixel\": 0.003225", "\"meters_per_pixel\": 1e999", "finite" },
         .{ "\"meters_per_pixel\": 0.003225", "\"misspelled_scale\": 0.003225", "meters_per_pixel" },
         .{ "\"far_skin_multiplier\": 0.65", "\"far_skin_multiplier\": 2", "far_skin_multiplier" },
+        .{ "\"density\": 12", "\"density\": 0", "physics.density" },
+        .{ "\"friction\": 0.5", "\"friction\": -1", "physics.friction" },
+        .{ "\"survival_weight\": 0.8", "\"survival_weight\": 2", "survival_weight" },
         .{ "\"export/head_skin.svg\"", "\"../head.svg\"", "relative layer path" },
+        .{ "\"export/head_gib_blood.svg\"", "\"../blood.svg\"", "gib_blood path" },
+        .{ "\"export/head_gib_blood.svg\"", "\"export/head_skin.svg\"", "distinct file" },
+        .{ "\"gib_blood\": \"export/head_gib_blood.svg\"", "\"gib_blood\": 2", "gib_blood" },
         .{ "\"part\": \"forearm\"", "\"part\": \"missing\"", "unknown part" },
         .{ "\"role\": \"skin\"", "\"role\": \"fixed\"", "skin then fixed" },
         .{ "\"holstered_weapon\"", "\"missing_binding\"", "unknown binding" },
@@ -238,14 +1049,14 @@ test "invalid art candidates preserve the installed pack and report named fields
     }
 }
 
-test "art SVGs decode in SDL with matching canvases neutral skin and visible fixed details" {
+test "art SVGs decode in SDL with matching canvases and neutral skin and blood masks" {
     var set = try load();
     defer set.arena.deinit();
     var pack = try loadArt(set.rig);
     defer character_art.destroy(&pack);
     for (pack.parts) |part| {
         var canvas: [2]c_int = undefined;
-        for (part.paths, 0..) |path, layer| {
+        for ([_][]const u8{ part.paths[0], part.paths[1], part.gib_blood_path.? }, 0..) |path, layer| {
             const terminated = try std.testing.allocator.dupeZ(u8, path);
             defer std.testing.allocator.free(terminated);
             const surface = try sdl.image.load(terminated);
@@ -265,14 +1076,38 @@ test "art SVGs decode in SDL with matching canvases neutral skin and visible fix
                         continue;
                     }
                     visible += 1;
-                    if (layer != 0) continue;
+                    if (layer == 1) continue;
                     try std.testing.expectEqual(color.r, color.g);
                     try std.testing.expectEqual(color.g, color.b);
                 }
             }
             try std.testing.expect(transparent > 0);
-            if (layer == 1) try std.testing.expect(visible > 0);
+            if (layer != 0) {
+                try std.testing.expect(visible > 0);
+            }
         }
+    }
+}
+
+test "character art accepts omitted or null blood overlays" {
+    var set = try load();
+    defer set.arena.deinit();
+    for ([_][]const u8{ "", ",\n      \"gib_blood\": null" }) |replacement| {
+        const bytes = try std.mem.replaceOwned(
+            u8,
+            std.testing.allocator,
+            art_json,
+            ",\n      \"gib_blood\": \"export/head_gib_blood.svg\"",
+            replacement,
+        );
+        defer std.testing.allocator.free(bytes);
+        var detail: data.CharacterAssetDiagnostic = .{};
+        const files = try data.parseCharacterArtData(std.testing.allocator, bytes, &detail);
+        var pack = try character_art.prepare(files, set.rig, &detail);
+        defer character_art.destroy(&pack);
+        try std.testing.expect(pack.parts[0].gib_blood_path == null);
+        try std.testing.expect(pack.parts[0].gib_blood_sprite == null);
+        try std.testing.expect(pack.parts[1].gib_blood_path != null);
     }
 }
 

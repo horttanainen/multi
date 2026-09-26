@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="80" viewBox="0 0 90 80">
+  <title>Generated: source/pelvis.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 12 L24 15 L32 17 L40 18 L48 17 L57 15 L65 12 L68 19 L62 21 L57 19 L52 24 L46 22 L41 27 L35 23 L30 25 L24 21 L19 23 L14 20 Z" fill="#5f5f5f" />
+    <path d="M19 15 L28 18 L39 21 L49 19 L63 15 L62 19 L55 20 L48 22 L41 23 L33 21 L27 22 Z" fill="#bbbbbb" />
+    <path d="M24 18 L37 22 M47 21 L60 17" fill="none" stroke="#f9f9f9" stroke-width="1.8" />
+    <path d="M13 40 L19 42 L22 39 L28 43 L33 42 L40 46 L34 49 L27 51 L12 47 Z M45 45 L51 41 L56 43 L61 40 L67 43 L73 40 L71 47 L59 50 L51 49 Z" fill="#6c6c6c" />
+    <path d="M15 44 L21 45 L26 43 L34 47 L26 49 L15 46 Z M49 46 L55 44 L61 46 L69 44 L67 47 L57 48 Z" fill="#cdcdcd" />
+    <path d="M24 29 L28 31 L32 29 L34 34 L31 36 L30 40 L25 38 L21 39 L21 35 L18 33 Z" fill="#cccccc" />
+    <path d="M24 32 L29 32 L30 35 L26 37 L23 35 Z" fill="#ffffff" />
+    <path d="M49 31 L53 29 L56 32 L60 31 L63 35 L58 37 L54 40 L51 37 L47 36 Z" fill="#bdbdbd" />
+    <path d="M51 32 L57 33 L58 35 L54 37 L51 35 Z" fill="#f5f5f5" />
+  </g>
+</svg>

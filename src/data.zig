@@ -19,18 +19,6 @@ pub const SpriteData = struct {
     markers: sprite.MarkerExtraction,
 };
 
-pub const GibletGroup = enum {
-    head,
-    leg,
-    meat,
-};
-
-pub const GibletData = struct {
-    group: GibletGroup,
-    path: []const u8,
-    heightMeters: f32,
-};
-
 pub const AnimationData = struct {
     path: []const u8,
     fps: i32,
@@ -111,7 +99,7 @@ pub const WeaponData = struct {
 pub const ParticleStainData = struct {
     minRadius: f32,
     maxRadius: f32,
-    color: sprite.Color,
+    color: ?sprite.Color = null, // Inherit the emitted particle color unless overridden.
 };
 
 pub const ParticleDirection = enum {
@@ -384,12 +372,21 @@ pub const CharacterAssetDiagnostic = struct {
 
 pub const CharacterArtDepth = enum { center, left, right };
 pub const CharacterArtLayer = struct { role: enum { skin, fixed }, file: []const u8 };
+pub const CharacterPartPhysics = struct {
+    // Source pixels, transformed by the same pivot, scale and facing as the art.
+    center: [2]f32,
+    half_extents: [2]f32,
+    density: f32,
+    friction: f32,
+};
 pub const CharacterArtPart = struct {
     pivot: [2]f32,
     axis_end: [2]f32,
     meters_per_pixel: f32,
     source: []const u8,
     layers: [2]CharacterArtLayer,
+    gib_blood: ?[]const u8 = null,
+    physics: CharacterPartPhysics,
     contacts: ?struct { heel: [2]f32, toe: [2]f32 } = null,
 };
 pub const CharacterArtParts = std.json.ArrayHashMap(CharacterArtPart);
@@ -400,6 +397,7 @@ pub const CharacterArtBinding = struct {
     axis: [2]character_animation.Joint,
     depth: CharacterArtDepth,
     length_mode: enum { rig_bone, decorative },
+    survival_weight: f32,
 };
 pub const CharacterArtManifest = struct {
     schema_version: u32,
@@ -606,7 +604,6 @@ fn loadValueData(comptime T: type, path: []const u8) !T {
 }
 
 pub var spriteDataMap: std.StringHashMapUnmanaged(SpriteData) = .{};
-pub var gibletData: []GibletData = &.{};
 var animationDataMap: std.StringHashMapUnmanaged(AnimationData) = .{};
 var soundDataMap: std.StringHashMapUnmanaged(SoundData) = .{};
 var explosionDataMap: std.StringHashMapUnmanaged(ExplosionData) = .{};
@@ -617,7 +614,6 @@ pub var explosionVisualDataMap: std.StringHashMapUnmanaged(explosion_visual.Pres
 
 pub fn init() !void {
     try initSprites();
-    try initGiblets();
     try initParticles();
     try initAnimations();
     try initSounds();
@@ -625,46 +621,6 @@ pub fn init() !void {
     try initExplosions();
     try initProjectiles();
     try initWeapons();
-}
-
-fn initGiblets() !void {
-    var jsonBuf: [16384]u8 = undefined;
-    const jsonData = fs.readFile("giblets.json", &jsonBuf) catch |err| {
-        std.log.err("data.initGiblets: failed to read giblets.json: {}", .{err});
-        return err;
-    };
-
-    const Entry = struct {
-        group: GibletGroup,
-        path: []const u8,
-        heightMeters: f32,
-    };
-
-    const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
-        std.log.err("data.initGiblets: failed to parse giblets.json: {}", .{err});
-        return err;
-    };
-    defer parsed.deinit();
-
-    var entries = std.array_list.Managed(GibletData).init(allocator);
-    defer entries.deinit();
-    errdefer {
-        for (entries.items) |entry| allocator.free(entry.path);
-    }
-
-    for (parsed.value) |entry| {
-        const path = try allocator.dupe(u8, entry.path);
-        entries.append(.{
-            .group = entry.group,
-            .path = path,
-            .heightMeters = entry.heightMeters,
-        }) catch |err| {
-            allocator.free(path);
-            return err;
-        };
-    }
-
-    gibletData = try entries.toOwnedSlice();
 }
 
 fn initExplosionVisuals() !void {
@@ -1485,17 +1441,6 @@ pub fn getSpriteData(key: []const u8) ?SpriteData {
     return spriteDataMap.get(key);
 }
 
-pub fn createGibletSprite(giblet: GibletData) !u64 {
-    return sprite.createFromImgWorldHeightWithBacking(
-        giblet.path,
-        giblet.heightMeters,
-        vec.zero,
-        .immutable,
-        config.defaultRuntimeAtlasProfile,
-        .{},
-    );
-}
-
 pub fn getParticleData(key: []const u8) ?ParticleData {
     return particleDataMap.get(key);
 }
@@ -1507,10 +1452,6 @@ pub fn cleanup() void {
         allocator.free(entry.value_ptr.path);
     }
     spriteDataMap.deinit(allocator);
-
-    for (gibletData) |giblet| allocator.free(giblet.path);
-    allocator.free(gibletData);
-    gibletData = &.{};
 
     var particleIter = particleDataMap.iterator();
     while (particleIter.next()) |entry| {

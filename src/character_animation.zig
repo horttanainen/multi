@@ -17,6 +17,7 @@ const renderer = @import("renderer.zig");
 const sprite = @import("sprite.zig");
 const collision = @import("collision.zig");
 const character_art = @import("character_art.zig");
+const gibbing = @import("gibbing.zig");
 
 pub const Joint = enum(u8) {
     pelvis,
@@ -176,6 +177,7 @@ pub const LocomotionInput = struct {
     wall_jump_direction: i8 = 0,
 };
 pub const PlayerState = struct {
+    step_seconds: f32 = 0,
     previous_phase: f64 = 0,
     phase: f64 = 0,
     facing_right: bool = false,
@@ -209,6 +211,7 @@ pub const PlayerState = struct {
     aim_weight: f32 = 0,
     previous_aim_weight: f32 = 0,
     aim_direction: vec.Vec2 = vec.east,
+    previous_aim_direction: vec.Vec2 = vec.east,
     shot_hold_seconds: f32 = 0,
     weapon_angle: ?f32 = null,
     previous_weapon_angle: ?f32 = null,
@@ -222,7 +225,7 @@ pub const PlayerState = struct {
     previous_limb_release_seconds: f32 = 1,
     limb_release_facing_right: bool = false,
 };
-pub const Sampling = enum { render, physics };
+pub const Sampling = enum { render, physics, previous_physics };
 pub const FramePose = struct {
     pose: Pose,
     body: vec.Vec2,
@@ -697,6 +700,7 @@ fn loadAssets() !void {
     var art = try character_art.prepare(try data.loadCharacterArtData(allocator, &diagnostic), replacement.rig, &diagnostic);
     errdefer character_art.destroy(&art);
     try character_art.loadSprites(&art, &diagnostic);
+    try gibbing.replaceArtwork(&art);
     installAssets(replacement);
     character_art.install(art);
 }
@@ -1481,6 +1485,7 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
         state.* = .{ .facing_right = input.facing_right, .previous_facing_right = input.facing_right, .body = input.body, .initialized = true, .controls = set.rig.neutral, .previous_controls = set.rig.neutral, .shot_hold_seconds = initial_hold, .aim_direction = initial_direction, .aim_weight = if (initial_hold > 0) 1 else 0, .weapon_angle = initial_angle };
         state.foot_heading = if (input.facing_right) 0 else 1;
     }
+    state.step_seconds = step;
     state.previous_phase = state.phase;
     state.previous_controls = state.controls;
     state.previous_facing_right = state.facing_right;
@@ -1498,6 +1503,7 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
     state.speed_mps = (input.body.x - state.body.x) / step - input.support_velocity_x;
     state.body = input.body;
     state.previous_aim_weight = state.aim_weight;
+    state.previous_aim_direction = state.aim_direction;
     if (input.aiming) state.aim_direction = input.aim_direction;
     const raising = input.aiming or state.shot_hold_seconds > 0;
     state.shot_hold_seconds = @max(0, state.shot_hold_seconds - step);
@@ -1840,7 +1846,14 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
         return null;
     };
     var body = box2d.getState(p.bodyId);
-    const alpha: f64 = if (sampling == .render) time.alpha else 1;
+    const alpha: f64 = switch (sampling) {
+        .render => time.alpha,
+        .physics => 1,
+        .previous_physics => 0,
+    };
+    if (sampling == .previous_physics) {
+        body.pos = vec.toBox2d(state.previous_body);
+    }
     if (sampling == .render) {
         const ent = entity.getEntity(p.bodyId) orelse {
             std.log.warn("character_animation.playerFrame: entity missing for player {d}", .{player_id});
@@ -1849,7 +1862,10 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
         body = box2d.getInterpolatedState(ent.state, body);
     }
     const pose = basePlayerPose(set, state, alpha);
-    const direction = forced_aim orelse state.aim_direction;
+    const direction = forced_aim orelse if (sampling == .previous_physics)
+        state.previous_aim_direction
+    else
+        state.aim_direction;
     const weight = if (!player.usesProceduralWeapon(p)) 0 else if (forced_aim != null) 1 else std.math.lerp(state.previous_aim_weight, state.aim_weight, @as(f32, @floatCast(alpha)));
     const angle = if (forced_aim != null or state.weapon_angle == null) null else std.math.lerp(state.previous_weapon_angle orelse state.weapon_angle.?, state.weapon_angle.?, @as(f32, @floatCast(alpha)));
     var frame = solveAimedPose(set, pose, vec.fromBox2d(body.pos), state.facing_right, direction, weight, angle);
@@ -1874,6 +1890,7 @@ pub fn holdShotPose(player_id: usize, direction: vec.Vec2) void {
         return;
     };
     state.aim_direction = direction;
+    state.previous_aim_direction = direction;
     state.aim_weight = 1;
     state.previous_aim_weight = 1;
     state.shot_hold_seconds = assets.?.aiming.shot_hold_seconds;

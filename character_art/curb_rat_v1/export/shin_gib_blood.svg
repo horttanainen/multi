@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="140" viewBox="0 0 80 140">
+  <title>Generated: source/shin.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M30 17 Q40 9 50 18 L49 27 L46 25 L43 29 L39 26 L35 29 L31 25 Z" fill="#6b6b6b" />
+    <path d="M33 18 L39 15 L47 19 L46 23 L42 22 L38 25 L34 22 Z" fill="#cccccc" />
+    <path d="M36 19 L40 17 L44 20 L40 22 Z" fill="#fdfdfd" />
+    <path d="M33 104 L37 108 L40 104 L43 108 L47 105 L46 112 Q41 124 34 113 Z" fill="#6b6b6b" />
+    <path d="M35 111 L39 111 L41 109 L45 112 L41 118 L37 115 Z" fill="#cccccc" />
+    <path d="M39 113 L42 112 L41 115 Z" fill="#fdfdfd" />
+    <path d="M37 41 L40 39 L43 42 L48 42 L49 47 L45 49 L43 54 L39 52 L36 54 L33 49 L36 46 Z" fill="#aaaaaa" />
+    <path d="M38 44 L42 43 L45 46 L42 50 L38 48 Z" fill="#eeeeee" />
+    <path d="M37 82 L41 80 L44 84 L43 89 L40 91 L40 96 L37 93 L36 89 L34 86 Z" fill="#bcbcbc" />
+    <path d="M38 84 L41 84 L41 88 L38 89 Z" fill="#eeeeee" />
+  </g>
+</svg>

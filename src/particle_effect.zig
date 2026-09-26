@@ -172,11 +172,15 @@ fn randomSpawnPosition(position: vec.Vec2) vec.Vec2 {
     };
 }
 
-fn stainBehavior(preset: data.ParticleData, stainRadius: f32) ?particle.StainBehavior {
+pub fn stainBehavior(
+    preset: data.ParticleData,
+    stainRadius: f32,
+    particleColor: sprite.Color,
+) ?particle.StainBehavior {
     if (preset.stain == null) return null;
     const stain = preset.stain.?;
     return .{
-        .color = stain.color,
+        .color = stain.color orelse particleColor,
         .radius = stainRadius,
         .target_mask = collision.MASK_PARTICLE_STAIN_TARGET,
         .destroy_on_contact = true,
@@ -189,6 +193,13 @@ fn randomStainRadius(preset: data.ParticleData) f32 {
     return randomRange(stain.minRadius, stain.maxRadius);
 }
 
+pub fn particleCount(preset: data.ParticleData, amount: f32) u32 {
+    if (amount <= 0) return 0;
+    const maximum: f32 = @floatFromInt(preset.maxParticles);
+    const count = @max(1, @ceil(amount * preset.particlesPerUnit));
+    return @intFromFloat(@min(maximum, count));
+}
+
 pub fn emit(effectId: Id, emission: Emission) !void {
     if (emission.amount <= 0) return;
 
@@ -196,11 +207,11 @@ pub fn emit(effectId: Id, emission: Emission) !void {
         std.log.err("particle_effect.emit: preset {d} is missing", .{effectId});
         return error.ParticlePresetNotFound;
     };
-    const scaledParticleCount = @ceil(emission.amount * preset.particlesPerUnit);
-    const particleCount: u32 = @min(preset.maxParticles, @max(1, @as(u32, @intFromFloat(scaledParticleCount))));
+    const count = particleCount(preset, emission.amount);
+    const particleColor = emission.color orelse preset.color;
     const carriedFraction = std.math.clamp(emission.carried_fraction, 0.0, 1.0);
 
-    for (0..particleCount) |_| {
+    for (0..count) |_| {
         const useCarriedVelocity = emission.carried_velocity != null and
             runtime.random().float(f32) < carriedFraction and
             vec.magnitude(emission.carried_velocity.?) >= 0.001;
@@ -229,7 +240,7 @@ pub fn emit(effectId: Id, emission: Emission) !void {
             .velocity = velocity,
             .visual_scale = visualScale,
             .lifetime_ms = preset.lifetimeMs,
-            .color = emission.color orelse preset.color,
+            .color = particleColor,
             .linear_damping = preset.linearDamping,
             .gravity_scale = preset.gravityScale,
             .density = preset.density,
@@ -239,7 +250,7 @@ pub fn emit(effectId: Id, emission: Emission) !void {
             .category_bits = collision.CATEGORY_PARTICLE,
             .mask_bits = collision.MASK_PARTICLE,
             .is_bullet = false,
-            .behaviors = .{ .stain = stainBehavior(preset, stainRadius) },
+            .behaviors = .{ .stain = stainBehavior(preset, stainRadius, particleColor) },
             .seed = runtime.random().int(u64),
         });
     }

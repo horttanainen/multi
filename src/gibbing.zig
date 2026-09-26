@@ -8,402 +8,398 @@ const entity = @import("entity.zig");
 const collision = @import("collision.zig");
 const config = @import("config.zig");
 const data = @import("data.zig");
+const character_art = @import("character_art.zig");
+const character_animation = @import("character_animation.zig");
+const player = @import("player.zig");
 const vec = @import("vector.zig");
 const pool = @import("pool.zig");
 const particle_effect = @import("particle_effect.zig");
+const particle = @import("particle.zig");
 const runtime = @import("runtime.zig");
 const blood = @import("blood.zig");
 const time = @import("time.zig");
 
-const GibletSet = struct {
-    heads: []u64,
-    legs: []u64,
-    meat: []u64,
-    headPoolId: pool.Id,
-    legPoolId: pool.Id,
-    meatPoolId: pool.Id,
-};
+// A slot keeps both layers on one physical object. Pools are shared across
+// players; tint and pose belong to each activation, never to the shared textures.
+pub const PartPools = struct { facing: [2]pool.Id };
+pub var partPools: []PartPools = &.{};
+var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
+var bloodParticleEffectId: ?particle_effect.Id = null;
+pub var pooledBodyCreationCount: u64 = 0;
+pub var poolRecycleCount: u64 = 0;
 
 const gibletBloodCooldownSeconds: f64 = 0.16;
 const gibletBloodMinImpactSpeed: f32 = 1.4;
 const gibletBloodMinDamage: f32 = 4.0;
 const gibletBloodMaxDamage: f32 = 18.0;
 const gibletBloodDamagePerSpeed: f32 = 3.0;
-const maxHeadGibletsPerDeath: u32 = 1;
-const maxLegGibletsPerDeath: u32 = 2;
-const maxMeatGibletsPerDeath: u32 = 3;
-const gibletColliderHalfExtentScale: f32 = 0.35;
-const gibletColliderMinimumHalfExtent: f32 = 0.08;
-const gibletHealth: f32 = 1.0;
-const gibletDestructionParticleAmount: f32 = 18.0;
-const gibletDestructionParticleSpreadRadians: f32 = std.math.pi * 0.55;
+const consumedPartBloodAmount: f32 = 4;
 
-// uncolored template giblets
-var templateHeadGiblets: []u64 = &[_]u64{};
-var templateLegGiblets: []u64 = &[_]u64{};
-var templateMeatGiblets: []u64 = &[_]u64{};
+pub const PartSnapshot = struct {
+    binding: usize,
+    placed: character_art.PlacedPart,
+    skin_color: sprite.Color,
+    velocity: vec.Vec2,
+    angular_velocity: f32,
+    survival_weight: f32,
+};
+pub const Snapshot = struct { parts: [64]PartSnapshot = undefined, count: usize = 0 };
 
-var playerGiblets: std.AutoHashMap(usize, GibletSet) = undefined;
-var gibletBloodCooldowns = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, f64).empty;
-var bloodParticleEffectId: ?particle_effect.Id = null;
-pub var pooledBodyCreationCount: u64 = 0;
-pub var poolRecycleCount: u64 = 0;
+// Physics and artwork use the same mirrored pivot-relative coordinates.
+pub fn collider(definition: data.CharacterArtPart, facing_right: bool) box2d.c.b2Polygon {
+    const physics = definition.physics;
+    const scale = definition.meters_per_pixel;
+    const sign: f32 = if (facing_right) 1 else -1;
+    return box2d.c.b2MakeOffsetBox(physics.half_extents[0] * scale, physics.half_extents[1] * scale, .{
+        .x = (physics.center[0] - definition.pivot[0]) * scale * sign,
+        .y = (physics.center[1] - definition.pivot[1]) * scale,
+    }, box2d.c.b2Rot_identity);
+}
 
-fn loadTemplateGiblets(group: data.GibletGroup) ![]u64 {
-    var templates = std.array_list.Managed(u64).init(allocator);
-    defer templates.deinit();
-    errdefer cleanupSpriteUuids(templates.items);
-
-    for (data.gibletData) |giblet| {
-        if (giblet.group != group) continue;
-
-        const spriteUuid = try data.createGibletSprite(giblet);
-        templates.append(spriteUuid) catch |err| {
-            sprite.cleanupLater(spriteUuid);
-            return err;
+pub fn snapshotPose(
+    pack: *const character_art.Pack,
+    rig: character_animation.Rig,
+    frame: character_animation.FramePose,
+    carrying: bool,
+    color: sprite.Color,
+    velocity: vec.Vec2,
+) Snapshot {
+    var result: Snapshot = .{};
+    const points = character_art.worldJoints(rig, frame);
+    // Preserve the manifest's back-to-front order on first activation.
+    for (pack.order[@intFromBool(frame.facing_right)]) |item| {
+        if (item != .part) continue;
+        const index = item.part;
+        const placed = character_art.placePart(pack, index, points, frame, carrying);
+        result.parts[result.count] = .{
+            .binding = index,
+            .placed = placed,
+            .skin_color = character_art.skinColor(color, if (placed.far) pack.far_skin_multiplier else 1),
+            .velocity = velocity,
+            .angular_velocity = 0,
+            .survival_weight = pack.bindings[index].survival_weight,
         };
+        result.count += 1;
     }
+    return result;
+}
 
-    if (templates.items.len == 0) {
-        std.log.err("loadTemplateGiblets: no giblets configured for group '{s}'", .{@tagName(group)});
-        return error.NoGibletsConfigured;
+// Shared by live-character and future corpse snapshots. Exactly one draw per
+// anatomical part, including zero/one weights, makes seeded checks reproducible.
+pub fn selectSurvivors(snapshot: Snapshot, random: std.Random) [64]bool {
+    var selected = [_]bool{false} ** 64;
+    for (snapshot.parts[0..snapshot.count], selected[0..snapshot.count]) |part, *survives| {
+        survives.* = random.float(f32) < part.survival_weight;
     }
+    return selected;
+}
 
-    return templates.toOwnedSlice();
+// Add motion relative to the player's root, leaving the current physics velocity
+// (including the fatal blast's impulse) intact. Facing/art changes are discrete.
+pub fn inheritPoseMotion(
+    snapshot: *Snapshot,
+    previous: Snapshot,
+    body: vec.Vec2,
+    previous_body: vec.Vec2,
+    seconds: f32,
+) void {
+    if (seconds <= 0 or snapshot.count != previous.count) {
+        return;
+    }
+    for (snapshot.parts[0..snapshot.count], previous.parts[0..previous.count]) |*part, before| {
+        if (part.binding != before.binding or
+            part.placed.part != before.placed.part or
+            part.placed.facing_right != before.placed.facing_right)
+        {
+            continue;
+        }
+        const local = vec.subtract(part.placed.position, body);
+        const previous_local = vec.subtract(before.placed.position, previous_body);
+        part.velocity = vec.add(part.velocity, vec.mul(vec.subtract(local, previous_local), 1 / seconds));
+        const delta = part.placed.angle - before.placed.angle;
+        part.angular_velocity = std.math.atan2(@sin(delta), @cos(delta)) / seconds;
+    }
 }
 
 pub fn init() !void {
-    const heads = try loadTemplateGiblets(.head);
-    errdefer {
-        cleanupSpriteUuids(heads);
-        allocator.free(heads);
-    }
-    const legs = try loadTemplateGiblets(.leg);
-    errdefer {
-        cleanupSpriteUuids(legs);
-        allocator.free(legs);
-    }
-    const meat = try loadTemplateGiblets(.meat);
-    errdefer {
-        cleanupSpriteUuids(meat);
-        allocator.free(meat);
-    }
-
-    templateHeadGiblets = heads;
-    templateLegGiblets = legs;
-    templateMeatGiblets = meat;
-
-    playerGiblets = std.AutoHashMap(usize, GibletSet).init(allocator);
     bloodParticleEffectId = try blood.particleEffectId();
-
-    std.debug.print("Loaded giblet templates - heads: {}, legs: {}, meat: {}\n", .{ templateHeadGiblets.len, templateLegGiblets.len, templateMeatGiblets.len });
 }
 
-fn cleanupSpriteUuids(spriteUuids: []const u64) void {
-    for (spriteUuids) |spriteUuid| {
-        sprite.cleanupLater(spriteUuid);
-    }
-}
-
-fn createColoredSprites(templateGiblets: []const u64, playerColor: sprite.Color) ![]u64 {
-    var coloredSprites = std.array_list.Managed(u64).init(allocator);
-    errdefer {
-        cleanupSpriteUuids(coloredSprites.items);
-        coloredSprites.deinit();
-    }
-
-    for (templateGiblets) |templateGiblet| {
-        const colored = try createColoredSprite(templateGiblet, playerColor);
-        try coloredSprites.append(colored);
-    }
-
-    return coloredSprites.toOwnedSlice();
-}
-
-fn gibletCollider(spriteUuid: u64) !box2d.c.b2Polygon {
-    const gibletSprite = sprite.getSprite(spriteUuid) orelse {
-        std.log.err("gibletCollider: sprite {d} is missing", .{spriteUuid});
-        return error.SpriteNotFound;
-    };
-    const halfWidth = @max(gibletColliderMinimumHalfExtent, gibletSprite.sizeM.x * gibletColliderHalfExtentScale);
-    const halfHeight = @max(gibletColliderMinimumHalfExtent, gibletSprite.sizeM.y * gibletColliderHalfExtentScale);
-    return box2d.c.b2MakeBox(halfWidth, halfHeight);
-}
-
-fn gibletShapeDef() box2d.c.b2ShapeDef {
-    var shapeDef = box2d.c.b2DefaultShapeDef();
-    shapeDef.material.friction = 0.5;
-    shapeDef.density = 1.0;
-    shapeDef.filter.categoryBits = collision.CATEGORY_GIBLET;
-    shapeDef.filter.maskBits = collision.MASK_GIBLET;
-    shapeDef.enableHitEvents = true;
-    shapeDef.enableContactEvents = true;
-    return shapeDef;
-}
-
-fn gibletBatchSize(spriteTemplates: []const u64, maximumPerDeath: u32) usize {
-    return @max(spriteTemplates.len, @as(usize, @intCast(maximumPerDeath)));
-}
-
-fn destroyGibletBodies(bodyIds: []const box2d.c.b2BodyId) void {
+fn destroyBodies(bodyIds: []const box2d.c.b2BodyId) void {
     for (bodyIds) |bodyId| {
         _ = gibletBloodCooldowns.swapRemove(bodyId);
         if (!box2d.c.b2Body_IsValid(bodyId)) continue;
         if (entity.remove(bodyId)) continue;
-        std.log.warn("destroyGibletBodies: pooled body has no entity", .{});
+        std.log.warn("gibbing.destroyBodies: pooled body has no entity", .{});
     }
 }
 
-fn destroyGibletPool(poolId: pool.Id) void {
-    const bodyIds = pool.takeBodyIds(poolId) catch |err| {
-        std.log.err("destroyGibletPool: could not take bodies from pool {d}: {}", .{ poolId, err });
+fn destroyPool(id: pool.Id) void {
+    const bodies = pool.takeBodyIds(id) catch |err| {
+        std.log.err("gibbing.destroyPool: cannot take pool {d}: {}", .{ id, err });
         return;
     };
-    defer allocator.free(bodyIds);
-    destroyGibletBodies(bodyIds);
+    defer allocator.free(bodies);
+    destroyBodies(bodies);
 }
 
-fn createPooledGibletBody(templateSpriteUuid: u64) !box2d.c.b2BodyId {
-    const destructionParticleEffectId = bloodParticleEffectId orelse {
-        std.log.err("createPooledGibletBody: blood particle effect is not initialized", .{});
-        return error.BloodParticleEffectNotInitialized;
-    };
-    const collider = try gibletCollider(templateSpriteUuid);
-    const bodyDef = box2d.createDynamicBodyDef(vec.zero);
-    const gibletEntity = try entity.createFromShape(templateSpriteUuid, collider, gibletShapeDef(), bodyDef, "dynamic", .image);
-    errdefer _ = entity.remove(gibletEntity.bodyId);
-    entity.markSpriteUuidsShared(gibletEntity.bodyId);
+pub fn destroyPools(pools: []PartPools) void {
+    for (pools) |part| {
+        for (part.facing) |id| destroyPool(id);
+    }
+    allocator.free(pools);
+}
 
-    try damage.register(gibletEntity.bodyId, .{
-        .model = .{ .health = .{
-            .current = gibletHealth,
-            .maximum = gibletHealth,
-        } },
+fn createBody(
+    part: character_art.Part,
+    part_index: usize,
+    facing: bool,
+    effect: particle_effect.Id,
+) !box2d.c.b2BodyId {
+    if (part.sprites[0] == null or part.sprites[1] == null) {
+        std.log.warn("gibbing.createBody: part {d} has missing artwork layers", .{part_index});
+        return error.MissingCharacterPartSprite;
+    }
+    var shape = box2d.c.b2DefaultShapeDef();
+    shape.material.friction = part.definition.physics.friction;
+    shape.density = part.definition.physics.density;
+    shape.filter.categoryBits = collision.CATEGORY_GIBLET;
+    shape.filter.maskBits = collision.MASK_GIBLET;
+    shape.enableHitEvents = true;
+    shape.enableContactEvents = true;
+    var body_def = box2d.createDynamicBodyDef(vec.zero);
+    body_def.isEnabled = false;
+    body_def.angularDamping = 0.4;
+    const created = try entity.createFromShape(
+        part.sprites[0].?,
+        collider(part.definition, facing),
+        shape,
+        body_def,
+        "dynamic",
+        .rectangle,
+    );
+    entity.markSpriteUuidsShared(created.bodyId);
+    errdefer _ = entity.remove(created.bodyId);
+    try entity.addSprite(created.bodyId, part.sprites[1].?);
+    const ent = entity.entities.getPtrLocking(created.bodyId) orelse {
+        std.log.err("gibbing.createBody: newly created entity is missing", .{});
+        return error.EntityNotFound;
+    };
+    ent.enabled = false;
+    try character_art.bodyParts.put(allocator, created.bodyId, .{
+        .part = part_index,
+        .facing_right = facing,
+        .skin_color = .{ .r = 255, .g = 255, .b = 255 },
+    });
+    try damage.register(created.bodyId, .{
+        .model = .{ .health = .{ .current = 1, .maximum = 1 } },
         .onDestroyed = .{ .particle_burst = .{
-            .effectId = destructionParticleEffectId,
-            .amount = gibletDestructionParticleAmount,
-            .spreadRadians = gibletDestructionParticleSpreadRadians,
+            .effectId = effect,
+            .amount = 18,
+            .spreadRadians = std.math.pi * 0.55,
         } },
         .destructionLifecycle = .return_to_pool,
     });
-
-    const pooledEntity = entity.entities.getPtrLocking(gibletEntity.bodyId) orelse {
-        std.log.err("createPooledGibletBody: new pooled entity is missing", .{});
-        return error.EntityNotFound;
-    };
-    pooledEntity.enabled = false;
-    box2d.c.b2Body_Disable(gibletEntity.bodyId);
-
-    try gibletBloodCooldowns.put(allocator, gibletEntity.bodyId, 0.0);
-    errdefer _ = gibletBloodCooldowns.swapRemove(gibletEntity.bodyId);
-
-    if (comptime config.perf.explosion) pooledBodyCreationCount += 1;
-    return gibletEntity.bodyId;
-}
-
-fn createGibletBodies(spriteTemplates: []const u64, batchSize: usize) ![]box2d.c.b2BodyId {
-    if (spriteTemplates.len == 0) {
-        std.log.err("createGibletBodies: cannot create bodies without sprite templates", .{});
-        return error.NoGibletSprites;
-    }
-    if (batchSize == 0) {
-        std.log.err("createGibletBodies: cannot create an empty batch", .{});
-        return error.EmptyGibletBatch;
-    }
-
-    var bodyIds = std.array_list.Managed(box2d.c.b2BodyId).init(allocator);
-    defer bodyIds.deinit();
-    errdefer destroyGibletBodies(bodyIds.items);
-
-    for (0..batchSize) |index| {
-        const bodyId = try createPooledGibletBody(spriteTemplates[index % spriteTemplates.len]);
-        bodyIds.append(bodyId) catch |err| {
-            destroyGibletBodies(&.{bodyId});
-            return err;
-        };
-    }
-
-    return bodyIds.toOwnedSlice();
-}
-
-fn createGibletPool(spriteTemplates: []const u64, batchSize: usize) !pool.Id {
-    const bodyIds = try createGibletBodies(spriteTemplates, batchSize);
-    defer allocator.free(bodyIds);
-    errdefer destroyGibletBodies(bodyIds);
-    return pool.create(bodyIds);
-}
-
-fn cleanupGibletSet(gibletSet: GibletSet) void {
-    destroyGibletPool(gibletSet.headPoolId);
-    destroyGibletPool(gibletSet.legPoolId);
-    destroyGibletPool(gibletSet.meatPoolId);
-
-    cleanupSpriteUuids(gibletSet.heads);
-    allocator.free(gibletSet.heads);
-    cleanupSpriteUuids(gibletSet.legs);
-    allocator.free(gibletSet.legs);
-    cleanupSpriteUuids(gibletSet.meat);
-    allocator.free(gibletSet.meat);
-}
-
-pub fn prepareGibletsForPlayer(playerId: usize, playerColor: sprite.Color) !void {
-    const coloredHeads = try createColoredSprites(templateHeadGiblets, playerColor);
-    errdefer {
-        cleanupSpriteUuids(coloredHeads);
-        allocator.free(coloredHeads);
-    }
-
-    const coloredLegs = try createColoredSprites(templateLegGiblets, playerColor);
-    errdefer {
-        cleanupSpriteUuids(coloredLegs);
-        allocator.free(coloredLegs);
-    }
-
-    const coloredMeat = try createColoredSprites(templateMeatGiblets, playerColor);
-    errdefer {
-        cleanupSpriteUuids(coloredMeat);
-        allocator.free(coloredMeat);
-    }
-
-    if (coloredHeads.len == 0 or coloredLegs.len == 0 or coloredMeat.len == 0) {
-        std.log.err("prepareGibletsForPlayer: one or more giblet categories are empty for player {d}", .{playerId});
-        return error.NoGibletSprites;
-    }
-
-    const headBatchSize = gibletBatchSize(coloredHeads, maxHeadGibletsPerDeath);
-    const legBatchSize = gibletBatchSize(coloredLegs, maxLegGibletsPerDeath);
-    const meatBatchSize = gibletBatchSize(coloredMeat, maxMeatGibletsPerDeath);
-    const headPoolId = try createGibletPool(coloredHeads, headBatchSize);
-    errdefer destroyGibletPool(headPoolId);
-    const legPoolId = try createGibletPool(coloredLegs, legBatchSize);
-    errdefer destroyGibletPool(legPoolId);
-    const meatPoolId = try createGibletPool(coloredMeat, meatBatchSize);
-    errdefer destroyGibletPool(meatPoolId);
-
-    const gibletSet = GibletSet{
-        .heads = coloredHeads,
-        .legs = coloredLegs,
-        .meat = coloredMeat,
-        .headPoolId = headPoolId,
-        .legPoolId = legPoolId,
-        .meatPoolId = meatPoolId,
-    };
-
-    const oldGibletSet = playerGiblets.get(playerId);
-    try playerGiblets.put(playerId, gibletSet);
-    if (oldGibletSet != null) {
-        cleanupGibletSet(oldGibletSet.?);
-    }
-
-    std.debug.print("Prepared giblet pools for player {}: {} heads, {} legs, {} meat, {} bodies\n", .{ playerId, gibletSet.heads.len, gibletSet.legs.len, gibletSet.meat.len, headBatchSize + legBatchSize + meatBatchSize });
-}
-
-fn acquireGiblet(poolId: pool.Id) !pool.Acquisition {
-    const acquisition = try pool.acquire(poolId, .recycle_oldest);
-    if (acquisition == null) {
-        std.log.err("acquireGiblet: pool {d} has no body to acquire or recycle", .{poolId});
-        return error.EmptyGibletPool;
-    }
-    return acquisition.?;
-}
-
-fn activateGiblet(poolId: pool.Id, posM: vec.Vec2) !void {
-    const acquisition = try acquireGiblet(poolId);
+    try gibletBloodCooldowns.put(allocator, created.bodyId, 0);
     if (comptime config.perf.explosion) {
-        if (acquisition.recycled) poolRecycleCount += 1;
+        pooledBodyCreationCount += 1;
     }
-    const bodyId = acquisition.bodyId;
-    if (!box2d.c.b2Body_IsValid(bodyId)) {
-        std.log.err("activateGiblet: pooled body is invalid", .{});
-        _ = pool.discardBody(bodyId);
-        return error.InvalidGibletBody;
-    }
-    box2d.c.b2Body_Disable(bodyId);
-    errdefer {
-        const failedEntity = entity.entities.getPtrLocking(bodyId);
-        if (failedEntity != null) {
-            failedEntity.?.enabled = false;
-        }
-        pool.release(poolId, bodyId) catch |err| {
-            std.log.err("activateGiblet: could not return failed acquisition to pool {d}: {}", .{ poolId, err });
-        };
-    }
+    return created.bodyId;
+}
 
-    const pooledEntity = entity.entities.getPtrLocking(bodyId) orelse {
-        std.log.err("activateGiblet: pooled body has no entity", .{});
+fn createPool(
+    pack: *const character_art.Pack,
+    index: usize,
+    facing: bool,
+    effect: particle_effect.Id,
+) !pool.Id {
+    var count: usize = 0;
+    for (pack.bindings) |binding| {
+        if (binding.part == index or (index == pack.grip_part and binding.anchor == pack.weapon_joint)) {
+            count += 1;
+        }
+    }
+    // At least two complete deaths can coexist without recycling within a death.
+    const bodies = try allocator.alloc(box2d.c.b2BodyId, @max(4, count * 2));
+    defer allocator.free(bodies);
+    var created: usize = 0;
+    errdefer destroyBodies(bodies[0..created]);
+    for (bodies) |*body| {
+        body.* = try createBody(pack.parts[index], index, facing, effect);
+        created += 1;
+    }
+    return pool.create(bodies);
+}
+
+// Prepare a complete replacement before touching active pools or artwork.
+pub fn preparePools(pack: *const character_art.Pack, effect: particle_effect.Id) ![]PartPools {
+    const result = try allocator.alloc(PartPools, pack.parts.len);
+    errdefer allocator.free(result);
+    var count: usize = 0;
+    errdefer {
+        for (result[0..count]) |part| {
+            for (part.facing) |id| destroyPool(id);
+        }
+    }
+    for (result, 0..) |*part, index| {
+        const left = try createPool(pack, index, false, effect);
+        errdefer destroyPool(left);
+        const right = try createPool(pack, index, true, effect);
+        part.* = .{ .facing = .{ left, right } };
+        count += 1;
+    }
+    return result;
+}
+
+pub fn prepareForLevel() !void {
+    if (partPools.len != 0) return;
+    if (character_art.assets == null or bloodParticleEffectId == null) {
+        std.log.err("gibbing.prepareForLevel: artwork or blood is not initialized", .{});
+        return error.GibbingNotInitialized;
+    }
+    try prewarmBlood(&character_art.assets.?, bloodParticleEffectId.?);
+    partPools = try preparePools(&character_art.assets.?, bloodParticleEffectId.?);
+}
+
+fn prewarmBlood(pack: *const character_art.Pack, effect: particle_effect.Id) !void {
+    const preset = particle_effect.presets.get(effect) orelse {
+        std.log.warn("gibbing.prewarmBlood: blood preset is missing", .{});
+        return error.BloodParticlePresetNotFound;
+    };
+    // The ordinary fatal burst plus every consumed part, for two overlapping
+    // deaths. Use the emitter's exact rounding/cap and its existing body pool.
+    const consumed = pack.bindings.len * particle_effect.particleCount(preset, consumedPartBloodAmount);
+    try particle.prewarmBodies(2 * (preset.maxParticles + consumed));
+}
+
+pub fn replaceArtwork(pack: *const character_art.Pack) !void {
+    // Initial loading precedes blood/world preparation. An empty pool after that
+    // can also mean recovery from a failed initial artwork load.
+    if (bloodParticleEffectId == null) return;
+    const effect = bloodParticleEffectId.?;
+    try prewarmBlood(pack, effect);
+    const replacement = try preparePools(pack, effect);
+    clearBodies();
+    partPools = replacement;
+}
+
+pub fn clearBodies() void {
+    destroyPools(partPools);
+    partPools = &.{};
+}
+
+pub fn activatePart(part: PartSnapshot, scatter_velocity: vec.Vec2, scatter_spin: f32) !box2d.c.b2BodyId {
+    if (part.placed.part >= partPools.len) {
+        std.log.err("gibbing.activatePart: no pool for part {d}", .{part.placed.part});
+        return error.MissingGibletPool;
+    }
+    const id = partPools[part.placed.part].facing[@intFromBool(part.placed.facing_right)];
+    const acquired = (try pool.acquire(id, .recycle_oldest)) orelse {
+        std.log.err("gibbing.activatePart: pool {d} is empty", .{id});
+        return error.EmptyGibletPool;
+    };
+    const body = acquired.bodyId;
+    if (comptime config.perf.explosion) {
+        if (acquired.recycled) {
+            poolRecycleCount += 1;
+        }
+    }
+    box2d.c.b2Body_Disable(body);
+    errdefer pool.release(id, body) catch |err| {
+        std.log.err("gibbing.activatePart: cannot return failed activation: {}", .{err});
+    };
+    const ent = entity.entities.getPtrLocking(body) orelse {
+        std.log.err("gibbing.activatePart: entity is missing", .{});
         return error.EntityNotFound;
     };
-    const nextBloodSpatterAt = gibletBloodCooldowns.getPtr(bodyId) orelse {
-        std.log.err("activateGiblet: pooled body has no blood cooldown", .{});
+    ent.enabled = false;
+    const cooldown = gibletBloodCooldowns.getPtr(body) orelse {
+        std.log.err("gibbing.activatePart: blood cooldown is missing", .{});
         return error.MissingGibletCooldown;
     };
-
-    try damage.reset(bodyId);
-    pooledEntity.state = null;
-    pooledEntity.enabled = true;
-    nextBloodSpatterAt.* = 0.0;
-
-    const variedPosM: vec.Vec2 = .{
-        .x = posM.x + runtime.random().float(f32) * 2 - 1,
-        .y = posM.y - runtime.random().float(f32) * 2,
+    const visual = character_art.bodyParts.getPtr(body) orelse {
+        std.log.err("gibbing.activatePart: body part artwork is missing", .{});
+        return error.MissingCharacterPart;
     };
-    const rotationAngle = runtime.random().float(f32) * std.math.pi * 2.0;
-    box2d.c.b2Body_SetTransform(bodyId, vec.toBox2d(variedPosM), box2d.c.b2MakeRot(rotationAngle));
-    box2d.c.b2Body_SetLinearVelocity(bodyId, box2d.c.b2Vec2_zero);
-    box2d.c.b2Body_SetAngularVelocity(bodyId, 0);
-    box2d.c.b2Body_Enable(bodyId);
-
-    // Apply random impulse to scatter giblets
-    const angle = runtime.random().float(f32) * std.math.pi * 2.0;
-    const force = 5.0 + runtime.random().float(f32) * 10.0;
-    const impulse = box2d.c.b2Vec2{
-        .x = std.math.cos(angle) * force,
-        .y = std.math.sin(angle) * force,
+    try damage.reset(body);
+    cooldown.* = 0;
+    visual.* = .{
+        .part = part.placed.part,
+        .facing_right = part.placed.facing_right,
+        .skin_color = part.skin_color,
+        .severed = true,
     };
-    box2d.c.b2Body_ApplyLinearImpulseToCenter(bodyId, impulse, true);
+    box2d.c.b2Body_SetTransform(
+        body,
+        vec.toBox2d(part.placed.position),
+        box2d.c.b2MakeRot(part.placed.angle),
+    );
+    ent.state = box2d.getState(body);
+    box2d.c.b2Body_Enable(body);
+    const center = vec.fromBox2d(box2d.c.b2Body_GetWorldCenterOfMass(body));
+    const offset = vec.subtract(center, part.placed.position);
+    const rotation_velocity: vec.Vec2 = .{
+        .x = -offset.y * part.angular_velocity,
+        .y = offset.x * part.angular_velocity,
+    };
+    const velocity = vec.add(vec.add(part.velocity, rotation_velocity), scatter_velocity);
+    box2d.c.b2Body_SetLinearVelocity(body, vec.toBox2d(velocity));
+    box2d.c.b2Body_SetAngularVelocity(body, part.angular_velocity + scatter_spin);
+    ent.enabled = true;
+    return body;
 }
 
-fn activateRandomGiblets(poolId: pool.Id, spriteUuids: []const u64, count: u32, posM: vec.Vec2) void {
-    if (count == 0) return;
-    if (spriteUuids.len == 0) {
-        std.log.err("activateRandomGiblets: requested {d} giblets without sprites", .{count});
-        return;
-    }
-
-    for (0..count) |_| {
-        activateGiblet(poolId, posM) catch |err| {
-            std.log.err("activateRandomGiblets: failed to activate pooled giblet with {}", .{err});
+// Corpses will supply this same snapshot from their current bodies in phase 6C.
+pub fn gib(snapshot: Snapshot, random: std.Random) void {
+    const selected = selectSurvivors(snapshot, random);
+    for (snapshot.parts[0..snapshot.count], selected[0..snapshot.count]) |part, survives| {
+        if (!survives) {
+            blood.createParticles(part.placed.position, consumedPartBloodAmount, part.velocity) catch |err| {
+                std.log.err("gibbing.gib: could not emit consumed part: {}", .{err});
+            };
+            continue;
+        }
+        const angle = random.float(f32) * 2 * std.math.pi;
+        const speed = 2 + random.float(f32) * 3;
+        const velocity: vec.Vec2 = .{ .x = @cos(angle) * speed, .y = @sin(angle) * speed };
+        const spin = (random.float(f32) * 2 - 1) * 6;
+        _ = activatePart(part, velocity, spin) catch |err| {
+            std.log.err("gibbing.gib: could not activate binding {d}: {}", .{ part.binding, err });
         };
     }
 }
 
-pub fn gib(posM: vec.Vec2, playerId: usize) void {
-    if (playerGiblets.getPtr(playerId) == null) {
-        std.log.err("gib: no prepared giblets found for player {d}", .{playerId});
+pub fn gibPlayer(player_id: usize) void {
+    if (character_art.assets == null or character_animation.assets == null) {
+        std.log.warn("gibbing.gibPlayer: character assets are missing", .{});
         return;
     }
-    const gibletSet = playerGiblets.getPtr(playerId).?;
-
-    const headCount = runtime.random().intRangeAtMost(u32, 0, maxHeadGibletsPerDeath);
-    activateRandomGiblets(gibletSet.headPoolId, gibletSet.heads, headCount, posM);
-
-    const legCount = runtime.random().intRangeAtMost(u32, 0, maxLegGibletsPerDeath);
-    activateRandomGiblets(gibletSet.legPoolId, gibletSet.legs, legCount, posM);
-
-    const meatCount = runtime.random().intRangeAtMost(u32, 1, maxMeatGibletsPerDeath);
-    activateRandomGiblets(gibletSet.meatPoolId, gibletSet.meat, meatCount, posM);
-}
-
-fn createColoredSprite(gibletSpriteUuid: u64, playerColor: sprite.Color) !u64 {
-    const coloredSpriteUuid = try sprite.createMutableCopy(gibletSpriteUuid);
-    errdefer sprite.cleanupLater(coloredSpriteUuid);
-
-    const bloodColor = try blood.currentColor();
-
-    try sprite.colorMatchingPixels(coloredSpriteUuid, bloodColor, sprite.isCyan);
-    try sprite.colorMatchingPixels(coloredSpriteUuid, playerColor, sprite.isWhite);
-
-    return coloredSpriteUuid;
+    const p = player.players.get(player_id) orelse {
+        std.log.warn("gibbing.gibPlayer: player {d} is missing", .{player_id});
+        return;
+    };
+    const frame = character_animation.playerFrame(player_id, .physics, null) orelse {
+        std.log.warn("gibbing.gibPlayer: player {d} pose is missing", .{player_id});
+        return;
+    };
+    const pack = &character_art.assets.?;
+    const rig = character_animation.assets.?.rig;
+    const carrying = player.usesProceduralWeapon(p);
+    const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
+    var snapshot = snapshotPose(pack, rig, frame, carrying, p.color, velocity);
+    const state = character_animation.states.get(player_id) orelse {
+        std.log.warn("gibbing.gibPlayer: animation state is missing", .{});
+        return;
+    };
+    const before = character_animation.playerFrame(player_id, .previous_physics, null) orelse {
+        std.log.warn("gibbing.gibPlayer: previous pose is missing", .{});
+        return;
+    };
+    if (state.initialized and state.facing_right == state.previous_facing_right) {
+        const previous = snapshotPose(pack, rig, before, carrying, p.color, vec.zero);
+        inheritPoseMotion(&snapshot, previous, frame.body, before.body, state.step_seconds);
+    }
+    gib(snapshot, runtime.random());
 }
 
 fn cleanupInvalidTrackedGiblets() void {
@@ -494,29 +490,7 @@ pub fn checkContacts() !void {
 }
 
 pub fn cleanup() void {
-    // Clean up template giblets
-    for (templateHeadGiblets) |spriteUuid| {
-        sprite.cleanupLater(spriteUuid);
-    }
-    allocator.free(templateHeadGiblets);
-
-    for (templateLegGiblets) |spriteUuid| {
-        sprite.cleanupLater(spriteUuid);
-    }
-    allocator.free(templateLegGiblets);
-
-    for (templateMeatGiblets) |spriteUuid| {
-        sprite.cleanupLater(spriteUuid);
-    }
-    allocator.free(templateMeatGiblets);
-
-    // Clean up all player-specific colored giblets
-    var iter = playerGiblets.valueIterator();
-    while (iter.next()) |gibletSet| {
-        cleanupGibletSet(gibletSet.*);
-    }
-
-    playerGiblets.deinit();
+    clearBodies();
     gibletBloodCooldowns.clearAndFree(allocator);
     bloodParticleEffectId = null;
 }

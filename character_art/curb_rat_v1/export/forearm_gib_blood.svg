@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="90" viewBox="0 0 80 90">
+  <title>Generated: source/forearm.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 12 Q40 6 48 14 L50 22 L46 20 L43 24 L38 20 L34 23 L30 19 Z" fill="#6b6b6b" />
+    <path d="M33 14 L39 10 L46 15 L45 19 L41 17 L37 20 Z" fill="#c6c6c6" />
+    <path d="M36 14 L40 12 L43 15 L39 17 Z" fill="#fdfdfd" />
+    <path d="M33 66 L37 66 L40 63 L43 66 L47 64 L47 68 L34 72 Z" fill="#6b6b6b" />
+    <path d="M35 68 L39 68 L42 66 L45 67 L43 70 L36 71 Z" fill="#d3d3d3" />
+    <path d="M38 69 L42 68" fill="none" stroke="#fdfdfd" stroke-width="1.5" />
+    <path d="M38 29 L42 28 L44 31 L48 33 L47 37 L43 39 L40 37 L36 38 L34 34 Z" fill="#aaaaaa" />
+    <path d="M38 32 L42 31 L45 34 L42 36 L38 35 Z" fill="#eeeeee" />
+    <path d="M35 46 L38 44 L41 47 L45 47 L44 51 L40 53 L39 56 L36 53 L33 51 Z" fill="#bcbcbc" />
+    <path d="M36 47 L40 48 L41 50 L37 52 Z" fill="#eeeeee" />
+  </g>
+</svg>

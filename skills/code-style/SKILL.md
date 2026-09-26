@@ -7,6 +7,36 @@ description: Apply this skill whenever writing new code or refactoring existing 
 
 This project uses a **component architecture**: the game is made up of components like `entity`, `sprite`, `player`, `camera`, `weapon`, etc. Each component is a Zig file that owns a collection of structs and the functions that operate on them.
 
+## Readable conditionals
+
+Use blocks for conditional statements by default. Short, simple guard clauses
+may remain on one line:
+
+```zig
+if (assets == null) return;
+if (!entity.enabled) continue;
+```
+
+Use a block when the condition combines multiple checks, or the guarded statement
+contains a substantial expression or function call:
+
+```zig
+const weight = definition.survival_weight;
+if (!std.math.isFinite(weight) or weight < 0 or weight > 1) {
+    return invalid(detail, "bindings.{s}.survival_weight: expected 0..1", .{definition.id});
+}
+```
+
+Aim for roughly 100 columns. Before splitting an expression across many lines,
+consider a meaningful local variable that reduces repetition. Avoid cryptic
+abbreviations or aliases introduced solely to meet a line-length target.
+
+When a condition or call remains long, split it at logical boundaries. Do not
+rely on editor wrapping for readability.
+
+Compact expression-style conditionals, such as
+`const sign = if (facing_right) 1 else -1;`, remain allowed.
+
 ## IDs over pointers
 
 Prefer passing IDs as function arguments rather than pointers to structs. Inside the component file, look up the struct from the map using the ID.
@@ -101,6 +131,13 @@ Do not introduce `self` parameters or method-like signatures in this codebase.
 ## One component, one file
 
 Each logical component lives in its own file. The file is the namespace. Don't split a single component across multiple files, and don't merge two unrelated components into one file.
+
+## Tests belong in dedicated files
+
+Never write inline `test` blocks in production modules. Keep tests and test-only
+fixtures in dedicated test files, using the existing test suites and build
+entry points (for example, `character_animation_tests.zig`). Test the production
+implementation rather than copying its logic into the test file.
 
 ## Imports at the top of the file
 

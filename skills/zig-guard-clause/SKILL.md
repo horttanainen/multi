@@ -7,6 +7,13 @@ description: Apply this skill whenever generating new Zig code in this project. 
 
 When writing Zig code in this project, always handle special cases (null, missing, error) upfront as guard clauses. The happy path should be at the top indentation level, not nested inside an `if` block.
 
+## Guard formatting
+
+Follow the [code-style skill's readable-conditional rules](../code-style/SKILL.md#readable-conditionals).
+Keep simple guards compact; use braced blocks for compound conditions and
+substantial return expressions. Early exits should keep the happy path flat
+without compressing complex checks into a single line.
+
 ## The pattern
 
 **Optionals — never nest the happy path:**

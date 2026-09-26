@@ -16,12 +16,7 @@
         },
         "stain": {
             "minRadius": 0.05,
-            "maxRadius": 0.35,
-            "color": {
-                "r": 138,
-                "g": 3,
-                "b": 3
-            }
+            "maxRadius": 0.35
         },
         "linearDamping": 0.25,
         "gravityScale": 1.2,

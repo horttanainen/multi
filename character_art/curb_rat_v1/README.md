@@ -12,12 +12,31 @@ torso retain the approved drawing; limbs are redrawn around movable joints.
 Hidden rounded extensions cover bends instead of cutting the concept into flat
 rectangles. The shorts cuffs move with the thighs under a separate waistband.
 
-Each source has two named groups, `skin` and `fixed`. Draw skin first, then fixed
+Each source has three named groups: `skin`, `fixed` and `gib_blood`. Draw skin first, then fixed
 details, at the **same placement**. Skin is neutral grey and receives a multiply
 by player RGB. The fixed layer preserves glasses, shorts, wristbands, teeth,
 claws and dark outlines. Only skin receives the additional far-side multiplier
 (0.65). This avoids changing accessory colors or swapping the weapon hand when
 turning.
+
+`gib_blood` contains neutral grayscale patches at severed joint ends, plus two
+surface stains on larger parts and one on each hand/foot. It draws last, only on
+giblets, using the same canvas, pivot, scale and mirror as the other layers.
+The renderer applies `blood.currentColor()`, without player tint or far-side
+darkening. Living parts remain clean. Blood is
+preloaded as an immutable shared layer; spawning pieces never paints the shared
+skin texture or uploads a new texture. The manifest's `gib_blood` path is optional
+(omitted or null means no overlay), allowing older packs and intact future
+ragdolls to retain the base artwork.
+
+Set the `color` of the `blood` preset in repository-root `particles.json` to choose
+the blood RGB (0–255 per channel). The default is `{ "r": 138, "g": 3, "b": 3 }`.
+Restart the game to apply particle preset changes. This one color drives droplets,
+surface stains and giblet overlays. Particle stains inherit their emitted
+particle color when `stain.color` is omitted/null; an explicit override remains
+supported for presets that need a different stain color. § then R reloads artwork,
+not particle presets. Surface stains are authored marks shared by each part
+variant, rather than random per-death texture edits.
 
 ## Authoring contract
 
@@ -28,7 +47,7 @@ Future Blender animation export continues targeting the existing motion contract
 these art bindings only consume the final solved joints.
 
 - `parts`: editable source, generated layers, pivot, second axis point and fixed
-  meters per source pixel. Both layers have identical canvases. Coordinates are
+  meters per source pixel. All layers have identical canvases. Coordinates are
   SVG pixels: right/down. Head and pelvis are decorative parts; their axis sets
   orientation, not bone length. Other limb lengths match the rig at rest.
 - `bindings`: named rig anchor and two joints defining the **world right/down**
@@ -69,7 +88,7 @@ python3 scripts/export_character_art.py --preview agent-temp-files/curb-rat-segm
 python3 scripts/export_character_art.py --check
 ```
 
-The exporter writes twenty generated `export/*_{skin,fixed}.svg` files. Edit
+The exporter writes thirty generated `export/*_{skin,fixed,gib_blood}.svg` files. Edit
 `source/` and the manifest, then rerun the exporter; never hand-edit exports.
 `--check` compares generated content without writing it and checks rig bindings,
 limb lengths, foot offsets, neutral tint layers and complete draw order.
@@ -82,6 +101,10 @@ interpolation. Those frames have no carried gun. Action samples include the
 existing blaster and its exported grip transform. Links open:
 
 - `parts.svg`: separate pieces, pivots and an assembled rig overlay.
+- `giblets.svg`: enlarged intact/bloody comparisons, including mirrored pink and
+  cyan pieces and the configured blood color. Each part is enlarged to fit its
+  card, rather than game scale. `giblets_green.svg` and `giblets_blue.svg` demonstrate
+  alternate tints without changing game configuration.
 - `run.svg`: twelve reference-run frames at a fixed scale and ground reference.
 - `poses.svg`: kneeling, aiming, kneeling aim and wall slides on both sides,
   including white/cyan/pink tint examples.
@@ -105,7 +128,7 @@ as-yet-unloaded art assets.
 ## Runtime integration
 
 The game now loads this pack through `data.zig` and renders it through the existing
-sprite placement and tint helpers. Skin/fixed layers share placement. Standalone
+sprite placement and tint helpers. Skin/fixed/blood layers share placement. Standalone
 textures keep the art alive across level atlas resets and allow SVG reloads.
 The § menu provides artwork, skeleton overlay, legacy sprites and stick views.
 See the [integration notes](../../docs/character_animation_artwork.md) for the

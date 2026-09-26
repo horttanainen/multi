@@ -261,10 +261,11 @@ pub fn queueRelease(bodyId: box2d.c.b2BodyId) void {
 }
 
 pub fn processQueuedReleases() void {
-    if (bodiesToRelease.count() == 0) return;
-    defer bodiesToRelease.clearRetainingCapacity();
-
-    for (bodiesToRelease.keys()) |bodyId| {
+    // Remove each item before processing: discarding an invalid body also
+    // cancels its queued release and may move other entries in this map.
+    while (bodiesToRelease.count() > 0) {
+        const bodyId = bodiesToRelease.keys()[bodiesToRelease.count() - 1];
+        _ = bodiesToRelease.swapRemove(bodyId);
         if (!box2d.c.b2Body_IsValid(bodyId)) {
             std.log.warn("pool.processQueuedReleases: queued body became invalid", .{});
             _ = discardBody(bodyId);
@@ -279,6 +280,7 @@ pub fn processQueuedReleases() void {
 // Removes a body before its owner destroys it. Returns false for non-pooled bodies.
 pub fn discardBody(bodyId: box2d.c.b2BodyId) bool {
     const removedMembership = memberships.fetchSwapRemove(bodyId) orelse return false;
+    _ = bodiesToRelease.swapRemove(bodyId);
     const poolId = removedMembership.value.poolId;
     const bodyPool = bodyPools.getPtr(poolId) orelse {
         std.log.err("pool.discardBody: pool {d} is missing for registered body", .{poolId});
@@ -323,6 +325,7 @@ pub fn takeBodyIds(poolId: Id) ![]box2d.c.b2BodyId {
 
     var bodyPool = removed.value;
     for (bodyPool.bodyIds.items) |bodyId| {
+        _ = bodiesToRelease.swapRemove(bodyId);
         const removedMembership = memberships.fetchSwapRemove(bodyId);
         if (removedMembership != null) continue;
         std.log.err("pool.takeBodyIds: body in pool {d} has no reverse membership", .{poolId});

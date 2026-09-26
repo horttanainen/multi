@@ -9,4 +9,12 @@
   <g id="fixed" stroke-linecap="round" stroke-linejoin="round">
     <path d="M46 13 L48 24 L59 36 Q62 41 57 42 L49 35 L55 47 Q56 52 52 53 L42 40 L46 57 Q44 62 40 57 L32 39 L32 28 L32 14" fill="none" stroke="#161d26" stroke-width="2.6" />
   </g>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 12 L46 12 L47 19 L43 18 L41 23 L37 19 L32 22 Z" fill="#6b6b6b"/>
+    <path d="M34 13 L44 13 L44 17 L40 16 L37 19 L34 17 Z" fill="#d3d3d3"/>
+    <path d="M36 14 L42 14 L40 16 Z" fill="#fdfdfd"/>
+    <!-- One surface stain on the palm. -->
+    <path d="M37 29 L40 27 L43 30 L47 31 L46 35 L43 36 L43 40 L39 38 L36 39 L34 35 Z" fill="#bcbcbc"/>
+    <path d="M38 31 L42 31 L44 34 L40 36 L37 34 Z" fill="#eeeeee"/>
+  </g>
 </svg>

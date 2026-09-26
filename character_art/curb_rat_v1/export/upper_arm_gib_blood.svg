@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="106" viewBox="0 0 80 106">
+  <title>Generated: source/upper_arm.svg / gib_blood; edit the source</title>
+  <g id="gib_blood" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 15 Q38 5 50 16 L52 23 L47 22 L44 27 L39 23 L35 27 L30 22 L24 25 Z" fill="#6b6b6b" />
+    <path d="M28 17 L36 12 L42 13 L49 18 L45 22 L40 19 L36 23 L32 19 Z" fill="#c6c6c6" />
+    <path d="M33 16 L38 14 L43 17 L38 19 Z" fill="#fdfdfd" />
+    <path d="M30 78 L34 79 L38 75 L41 79 L45 77 L49 79 L49 83 Q39 95 30 83 Z" fill="#6b6b6b" />
+    <path d="M32 82 L36 83 L39 80 L43 83 L47 82 L45 87 L39 90 L34 87 Z" fill="#c6c6c6" />
+    <path d="M36 84 L39 83 L43 85 L39 87 Z" fill="#fdfdfd" />
+    <path d="M37 35 L41 32 L44 35 L49 35 L50 39 L46 42 L45 47 L41 45 L38 47 L35 43 L32 41 Z" fill="#aaaaaa" />
+    <path d="M38 37 L42 36 L46 38 L43 42 L39 41 Z" fill="#eeeeee" />
+    <path d="M34 57 L38 55 L41 58 L44 59 L42 64 L38 66 L37 70 L34 66 L32 64 Z" fill="#bcbcbc" />
+    <path d="M35 59 L39 59 L40 62 L36 64 Z" fill="#eeeeee" />
+  </g>
+</svg>
