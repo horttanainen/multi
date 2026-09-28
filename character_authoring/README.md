@@ -97,3 +97,10 @@ The original scene and JSON are retained locally in
 pass is in `agent-temp-files/run-timing-apply/before/`. Open the updated scene
 again if Blender still shows the previous version. The game JSON has also been
 updated for testing this pass.
+
+Idle now uses a taller stance with slightly bent knees and a small forward lean.
+It remains in the rig's `neutral_controls`; the run's authored curves are
+unchanged. The saved workspace includes the updated neutral rig reference.
+
+The neck attachment sits 4 cm forward of the chest in torso-local space, bringing
+the head forward with it throughout the animation. The preview uses the same rig.

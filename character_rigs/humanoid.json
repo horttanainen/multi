@@ -29,7 +29,7 @@
       "id": "neck",
       "parent": "chest",
       "rest_offset": {
-        "x": 0,
+        "x": 0.04,
         "y": 0.08
       }
     },
@@ -229,11 +229,11 @@
     },
     {
       "binding": "pelvis_y",
-      "value": 0
+      "value": 0.12
     },
     {
       "binding": "torso_angle",
-      "value": 0
+      "value": 0.14
     },
     {
       "binding": "left_foot_x",
@@ -249,11 +249,11 @@
     },
     {
       "binding": "left_hand_x",
-      "value": 0.10800000000000001
+      "value": 0.09438445
     },
     {
       "binding": "left_hand_y",
-      "value": -0.09
+      "value": 0.0158099
     },
     {
       "binding": "right_foot_x",
@@ -269,11 +269,11 @@
     },
     {
       "binding": "right_hand_x",
-      "value": 0.092
+      "value": 0.07854099
     },
     {
       "binding": "right_hand_y",
-      "value": -0.09
+      "value": 0.01804259
     }
   ]
 }

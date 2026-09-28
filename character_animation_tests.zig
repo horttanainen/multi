@@ -1237,7 +1237,8 @@ test "ragdolls preserve death pose and velocity and enforce mirrored anatomical 
             try std.testing.expect((filter.maskBits & collision.CATEGORY_RUBBLE) != 0);
         }
     }
-    for (0..180) |_| box2d.worldStep(1.0 / 60.0, 4);
+    // Allow the ragdolls to settle before measuring the soft joint limits.
+    for (0..360) |_| box2d.worldStep(1.0 / 60.0, 4);
     for (ragdoll.corpses.values()) |corpse| {
         for (corpse.bodies[0..corpse.body_count]) |body| {
             try std.testing.expect(box2d.c.b2Body_GetPosition(body).y < 2.6);
@@ -2344,6 +2345,10 @@ test "original character run reproduces the twelve accepted poses after explicit
     var detail: animation.Diagnostic = .{};
     var set = try animation.prepareAssets(try data.parseCharacterAnimationData(std.testing.allocator, rig_json, original_motion_json, locomotion_json, actions_json, aiming_json, walls_json, &detail), &detail);
     defer set.arena.deinit();
+    // These archived poses predate the forward neck attachment; reproduce their rig.
+    const neck = @intFromEnum(animation.Joint.neck);
+    set.rig.joints[neck].rest_offset = .{ .x = 0, .y = 0.08 };
+    set.rig.lengths[neck] = 0.08;
     const reference = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, reference_json, .{});
     defer reference.deinit();
     const frames = reference.value.object.get("frames").?.array.items;
@@ -2886,6 +2891,16 @@ test "locomotion settles a stopped swing, turns using actual displacement, and r
     try std.testing.expect(stopped.run_weight < 0.00001);
     const rest = animation.solvePose(animation.assets.?.rig, animation.assets.?.rig.neutral);
     const settled = animation.interpolatedPose(&animation.assets.?, stopped, 1);
+    const rig = animation.assets.?.rig;
+    const hip = settled.joints[@intFromEnum(animation.Joint.pelvis)];
+    const chest = settled.joints[@intFromEnum(animation.Joint.chest)];
+    try std.testing.expect(chest.x > hip.x + 0.03);
+    for (rig.limbs[0..2]) |limb| {
+        const leg_length = rig.lengths[@intFromEnum(limb.middle)] +
+            rig.lengths[@intFromEnum(limb.end)];
+        const ankle = settled.joints[@intFromEnum(limb.end)];
+        try std.testing.expect(vec.magnitude(vec.subtract(ankle, hip)) > leg_length * 0.96);
+    }
     // Idle retains the final settled footholds instead of sliding them the last
     // few millimeters to the exact neutral targets after planting.
     for (rest.joints, settled.joints) |a, b| try nearPoint(a, b, 0.015);
@@ -3513,7 +3528,16 @@ test "hard landings squat and settle on both feet in either facing, including an
         // In the canonical frame lower pelvis_y increases world Y, putting the
         // hips closer to the actual floor rather than only leaning the torso.
         const rig = animation.assets.?.rig;
-        const neutral_hip_height = 0.3 - animation.toWorld(rig, .{ .x = 0, .y = 0 }, .{ .x = x, .y = 0 }, sample.facing_right).y;
+        const neutral_hip: vec.Vec2 = .{
+            .x = rig.neutral[@intFromEnum(animation.Control.pelvis_x)],
+            .y = rig.neutral[@intFromEnum(animation.Control.pelvis_y)],
+        };
+        const neutral_hip_height = 0.3 - animation.toWorld(
+            rig,
+            neutral_hip,
+            .{ .x = x, .y = 0 },
+            sample.facing_right,
+        ).y;
         const compressed_hip_height = 0.3 - animation.toWorld(rig, .{ .x = 0, .y = lowest_pelvis }, .{ .x = x, .y = 0 }, sample.facing_right).y;
         try std.testing.expect(compressed_hip_height < neutral_hip_height - 0.28);
         try std.testing.expect(contact_frames > 5);
@@ -3522,6 +3546,11 @@ test "hard landings squat and settle on both feet in either facing, including an
         for (sample.feet) |foot| try std.testing.expect(foot.locked);
         const pose = animation.interpolatedPose(&animation.assets.?, sample, 1);
         const neutral = animation.solvePose(animation.assets.?.rig, animation.assets.?.rig.neutral);
+        // The additive landing layer must return to zero offset against the
+        // current idle reference before the action ends, including after tuning.
+        for (animation.assets.?.actions.landing.tracks, rig.neutral) |track, value| {
+            try std.testing.expectApproxEqAbs(value, animation.evaluateTrack(track, 1), 0.00001);
+        }
         // Keep the acquired landing stance; only the upper body returns to the
         // neutral coordinates. Both foot anchors must remain stable afterward.
         for ([_]animation.Joint{ .pelvis, .chest, .neck, .head, .left_hand, .right_hand }) |joint| try nearPoint(pose.joints[@intFromEnum(joint)], neutral.joints[@intFromEnum(joint)], 0.001);
@@ -3674,7 +3703,8 @@ test "kneeling plants the rear knee and front foot with a low head on both facin
                 for (settled.joints, boundary.joints) |a, b| try nearPoint(a, b, 0.00003);
             }
         }
-        try std.testing.expectApproxEqAbs(@as(f32, 0), sample.controls[@intFromEnum(animation.Control.pelvis_y)], 0.0001);
+        const pelvis_y = @intFromEnum(animation.Control.pelvis_y);
+        try std.testing.expectApproxEqAbs(set.rig.neutral[pelvis_y], sample.controls[pelvis_y], 0.0001);
     }
     const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
     defer std.testing.allocator.free(bytes);
@@ -6229,11 +6259,26 @@ fn checkWallPoseBoundary(before: animation.PlayerState, after: animation.PlayerS
     const start = animation.interpolatedPose(set, after, 0);
     try checkBones(set.rig, end);
     try checkBones(set.rig, start);
-    // Facing reflects the rig's small anatomical shoulder offsets (8 mm each).
-    // Allow that shoulder shift on a turn, but catch a switched elbow/knee branch.
-    const tolerance: f32 = if (before.facing_right == after.facing_right) 0.00003 else 0.02;
+    // Facing reflects anatomical offsets. Account for the forward neck exactly;
+    // allow the small shoulder shift, but catch a switched elbow/knee branch.
+    const turning = before.facing_right != after.facing_right;
+    const tolerance: f32 = if (turning) 0.02 else 0.00003;
     for (end.joints, start.joints, 0..) |a, b, index| {
-        nearPoint(animation.toWorld(set.rig, a, before.body, before.facing_right), animation.toWorld(set.rig, b, after.previous_body, after.facing_right), tolerance) catch |err| {
+        var expected = a;
+        const joint: animation.Joint = @enumFromInt(index);
+        if (turning and (joint == .neck or joint == .head)) {
+            const torso = vec.normalize(vec.subtract(
+                end.joints[@intFromEnum(animation.Joint.chest)],
+                end.joints[@intFromEnum(animation.Joint.pelvis)],
+            ));
+            const forward = set.rig.joints[@intFromEnum(animation.Joint.neck)].rest_offset.x;
+            expected = vec.subtract(expected, vec.mul(.{ .x = torso.y, .y = -torso.x }, 2 * forward));
+        }
+        nearPoint(
+            animation.toWorld(set.rig, expected, before.body, before.facing_right),
+            animation.toWorld(set.rig, b, after.previous_body, after.facing_right),
+            tolerance,
+        ) catch |err| {
             std.debug.print("wall boundary {s}->{s}, joint {s}, age={d}\n", .{ @tagName(before.wall.action), @tagName(after.wall.action), @tagName(@as(animation.Joint, @enumFromInt(index))), after.wall.seconds });
             return err;
         };

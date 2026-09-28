@@ -977,7 +977,9 @@ fn reachableFoot(rig: Rig, controls: [controlCount]f32, index: usize, ankle: vec
     const limits = reachLimits(rig.lengths[@intFromEnum(limb.middle)], rig.lengths[@intFromEnum(limb.end)], limb.min_bend_radians, limb.max_bend_radians);
     const pelvis = vec.Vec2{ .x = controls[@intFromEnum(Control.pelvis_x)], .y = controls[@intFromEnum(Control.pelvis_y)] };
     const distance = vec.magnitude(vec.subtract(ankle, pelvis));
-    return distance >= limits[0] and distance <= limits[1] - 0.002;
+    // Pelvis fitting and ankle transforms round in f32. Allow one micrometer
+    // at that boundary so a fitted foot stays planted within the 2 mm IK margin.
+    return distance >= limits[0] and distance <= limits[1] - 0.002 + 0.000001;
 }
 
 fn unevenGround(surfaces: [4]?GroundSurface, tolerance: f32) bool {
