@@ -2444,7 +2444,7 @@ test "character continuous run and neutral preserve every bone and loop without 
     }
 }
 
-test "polished run lands beneath the hips, extends at toe-off, and folds the heel beside the advancing knee" {
+test "run compresses at passing then pushes up with prompt release and a higher foot recovery" {
     var set = try load();
     defer set.arena.deinit();
     const pelvis = @intFromEnum(animation.Joint.pelvis);
@@ -2454,21 +2454,55 @@ test "polished run lands beneath the hips, extends at toe-off, and folds the hee
     const toe = @intFromEnum(animation.Joint.left_toe);
     const touchdown = animation.evaluatePose(&set, 0, .run);
     try std.testing.expect(@abs(touchdown.joints[ankle].x - touchdown.joints[pelvis].x) < 0.1);
-    const toe_off = animation.evaluatePose(&set, 0.3599, .run);
+    const toe_off = animation.evaluatePose(&set, 0.2999, .run);
     const leg_length = set.rig.lengths[knee] + set.rig.lengths[ankle];
-    try std.testing.expect(vec.magnitude(vec.subtract(toe_off.joints[ankle], toe_off.joints[pelvis])) > leg_length * 0.9);
+    const push_length = vec.magnitude(vec.subtract(toe_off.joints[ankle], toe_off.joints[pelvis]));
+    try std.testing.expect(push_length > leg_length * 0.95);
     try std.testing.expect(toe_off.joints[heel].y > toe_off.joints[toe].y + 0.15);
+    const down = animation.evaluatePose(&set, 3.0 / 36.0, .run);
+    const up = animation.evaluatePose(&set, 14.0 / 36.0, .run);
+    try std.testing.expect(down.joints[pelvis].y < touchdown.joints[pelvis].y - 0.03);
+    try std.testing.expect(up.joints[pelvis].y > down.joints[pelvis].y + 0.08);
+    try std.testing.expect(down.contact_intent[0]);
+    try std.testing.expect(!up.contact_intent[0] and !up.contact_intent[1]);
+    const released = animation.evaluatePose(&set, 0.325, .run);
+    try std.testing.expect(released.joints[ankle].y > toe_off.joints[ankle].y + 0.04);
     // During contact, the authored toe travels backwards exactly as far as the
     // root travels forwards. Planting should only correct terrain/transitions.
-    for (0..36) |index| {
+    var previous_pelvis_y = down.joints[pelvis].y;
+    for (0..30) |index| {
         const phase = @as(f32, @floatFromInt(index)) / 100;
         const pose = animation.evaluatePose(&set, phase, .run);
-        try std.testing.expectApproxEqAbs(touchdown.joints[toe].x, pose.joints[toe].x + phase * set.motion.cycle_seconds * set.motion.reference_speed_mps, 0.0002);
+        const travel = phase * set.motion.cycle_seconds * set.motion.reference_speed_mps;
+        try std.testing.expectApproxEqAbs(touchdown.joints[toe].x, pose.joints[toe].x + travel, 0.0002);
+        // Allow landing compression around passing, without a deep knee fold
+        // or a second pelvis dip as the supporting leg extends into push-off.
+        const hip_to_ankle = vec.magnitude(vec.subtract(pose.joints[ankle], pose.joints[pelvis]));
+        try std.testing.expect(hip_to_ankle > leg_length * 0.87);
+        if (phase >= 3.0 / 36.0) {
+            try std.testing.expect(pose.joints[pelvis].y >= previous_pelvis_y - 0.0002);
+            previous_pelvis_y = pose.joints[pelvis].y;
+        }
     }
-    const recovery = animation.evaluatePose(&set, 0.66, .run);
-    try std.testing.expect(vec.magnitude(vec.subtract(recovery.joints[heel], recovery.joints[pelvis])) < 0.22);
+    // By frame 22 the ankle has passed the pelvis, without tucking up into it.
+    const recovery = animation.evaluatePose(&set, 21.0 / 36.0, .run);
+    const heel_clearance = vec.magnitude(vec.subtract(recovery.joints[heel], recovery.joints[pelvis]));
+    try std.testing.expect(heel_clearance > 0.25);
+    try std.testing.expect(heel_clearance < 0.6);
+    try std.testing.expect(recovery.joints[ankle].x > recovery.joints[pelvis].x + 0.03);
     try std.testing.expect(recovery.joints[knee].x > recovery.joints[pelvis].x + 0.25);
     try std.testing.expect(recovery.joints[ankle].x < recovery.joints[knee].x - 0.25);
+    var peak_ankle_height: f32 = 0;
+    for (30..100) |index| {
+        const phase = @as(f32, @floatFromInt(index)) / 100;
+        const pose = animation.evaluatePose(&set, phase, .run);
+        try std.testing.expect(pose.joints[ankle].y < pose.joints[pelvis].y - 0.25);
+        peak_ankle_height = @max(peak_ankle_height, pose.joints[ankle].y + 0.84);
+        const opposite = animation.evaluatePose(&set, @as(f64, phase) + 0.5, .run);
+        try nearPoint(pose.joints[ankle], opposite.joints[@intFromEnum(animation.Joint.right_ankle)], 0.0002);
+    }
+    try std.testing.expect(peak_ankle_height > 0.58);
+    try std.testing.expect(peak_ankle_height < 0.65);
     const unfolding = animation.evaluatePose(&set, 0.84, .run);
     try std.testing.expect(unfolding.joints[ankle].x > recovery.joints[ankle].x + 0.3);
     try std.testing.expect(unfolding.joints[ankle].y < recovery.joints[ankle].y - 0.3);
@@ -2492,10 +2526,12 @@ test "polished run lands beneath the hips, extends at toe-off, and folds the hee
 test "character contacts are half-open and facing conversion preserves the root and attachments" {
     var set = try load();
     defer set.arena.deinit();
-    try std.testing.expect(animation.contactIntent(set.motion, .left_leg, 0));
-    try std.testing.expect(!animation.contactIntent(set.motion, .left_leg, 0.36));
-    try std.testing.expect(animation.contactIntent(set.motion, .right_leg, 0.5));
-    try std.testing.expect(!animation.contactIntent(set.motion, .right_leg, 0.86));
+    for (set.motion.contacts) |contact| {
+        try std.testing.expect(animation.contactIntent(set.motion, contact.limb, contact.start));
+        const before_end = animation.contactIntent(set.motion, contact.limb, contact.end - 0.0001);
+        try std.testing.expect(before_end);
+        try std.testing.expect(!animation.contactIntent(set.motion, contact.limb, contact.end));
+    }
     try std.testing.expect(!animation.contactIntent(set.motion, .left_leg, 0.45));
     try std.testing.expect(!animation.contactIntent(set.motion, .right_leg, 0.45));
     try std.testing.expectEqual(@as(f32, 0), animation.clipPhase(set.motion, 1));
@@ -2563,7 +2599,6 @@ test "character invalid assets report field paths and failed replacement preserv
         try std.testing.expectEqual(@as(f64, 0.3), animation.states.get(19).?.phase);
     }
     const motion_cases = [_][3][]const u8{
-        .{ "\"end\": 0.36", "\"end\": 1.1", "contacts" },
         .{ "\"phase\": 0.0,", "\"phase\": 1e999,", "tracks[0].keys[0].phase: number must be finite" },
     };
     for (motion_cases) |case| {
@@ -2572,6 +2607,29 @@ test "character invalid assets report field paths and failed replacement preserv
         try std.testing.expectError(error.InvalidCharacterAsset, replaceFromJson(rig_json, malformed_motion, &detail));
         try std.testing.expectEqualStrings(data.characterMotionPath, detail.file);
         try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], case[2]) != null);
+        try std.testing.expect(old_id == animation.assets.?.rig.id.ptr);
+        try std.testing.expectEqual(@as(f64, 0.7), animation.states.get(7).?.phase);
+        try std.testing.expectEqual(@as(f64, 0.3), animation.states.get(19).?.phase);
+    }
+    // Contact timing is artist-editable; mutate the field instead of relying
+    // on a particular serialized number to exercise out-of-range rejection.
+    {
+        var motion = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, motion_json, .{});
+        defer motion.deinit();
+        const contacts = motion.value.object.get("contacts").?.array.items;
+        try contacts[0].object.put(motion.arena.allocator(), "end", .{ .float = 1.1 });
+        const malformed_motion = try std.json.Stringify.valueAlloc(
+            std.testing.allocator,
+            motion.value,
+            .{},
+        );
+        defer std.testing.allocator.free(malformed_motion);
+        try std.testing.expectError(
+            error.InvalidCharacterAsset,
+            replaceFromJson(rig_json, malformed_motion, &detail),
+        );
+        try std.testing.expectEqualStrings(data.characterMotionPath, detail.file);
+        try std.testing.expect(std.mem.indexOf(u8, detail.message[0..detail.length], "contacts") != null);
         try std.testing.expect(old_id == animation.assets.?.rig.id.ptr);
         try std.testing.expectEqual(@as(f64, 0.7), animation.states.get(7).?.phase);
         try std.testing.expectEqual(@as(f64, 0.3), animation.states.get(19).?.phase);

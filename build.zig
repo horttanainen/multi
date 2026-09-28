@@ -186,6 +186,26 @@ pub fn build(b: *std.Build) !void {
     const test_music_menu = b.step("test-music-menu", "Check live music controls, persistence and SDL audio playback");
     test_music_menu.dependOn(&b.addRunArtifact(music_menu_tests).step);
 
+    const character_export = b.addExecutable(.{
+        .name = "character_export_check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("character_export_check.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    character_export.root_module.addOptions("build_options", build_options);
+    character_export.root_module.linkLibrary(sdl);
+    character_export.root_module.linkLibrary(sdl_image);
+    character_export.root_module.linkLibrary(sdl_ttf);
+    character_export.root_module.linkLibrary(box2d_lib);
+    character_export.root_module.linkLibrary(triangle_dep.artifact("triangle"));
+    const export_check = b.addRunArtifact(character_export);
+    export_check.addArgs(b.args orelse &.{});
+    b.step("check-character-export", "Validate Blender exports against runtime curves and IK")
+        .dependOn(&export_check.step);
+
     b.installArtifact(exe);
 
     const run = b.step("run", "Run the game");

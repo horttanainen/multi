@@ -375,9 +375,23 @@ Split this work into independently reviewed commits:
 
 ### 4. Blender authoring after the setup works
 
-Body-part gibbing, ragdolls and performance polish are accepted. Blender authoring
-is the next planned feature and awaits the user's go-ahead. Begin with the running
-profile as one reviewable commit.
+Body-part gibbing, ragdolls and performance polish are accepted. The first Blender
+running-profile authoring phase and timing polish are accepted by the user.
+The prepared scene and workflow are documented in
+[`character_authoring/README.md`](../character_authoring/README.md).
+
+This first phase uses Blender 4.5 LTS, native target controls and planar two-bone
+IK. Sparse Constant/Linear/Bezier curves export without baking. The existing
+`data.zig` loader and `character_animation.zig` evaluator validate staged exports
+against 121 Blender control/pose samples before an explicit `export --apply`.
+The original rig is exported for validation; editing rig proportions, other
+actions, and terrain simulation inside Blender remain outside this phase.
+
+The approved running-timing preview is now applied to the scene and exported
+motion: down/passing at frames 4 and 22, earlier toe-off, higher
+heel recovery and a 9 cm pelvis rise/fall. The 0.6-second cycle and existing
+runtime speed response are preserved. Native tests, Blender/runtime comparisons,
+build and smoke checks passed; the timing review found no actionable issues.
 
 Build a prepared Blender scene with a planar skeleton, named target controls, IK preview, useful animation layout, and a limited set of custom properties for locomotion settings.
 

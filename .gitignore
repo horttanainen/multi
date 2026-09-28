@@ -14,3 +14,5 @@ drafts/
 # Generated music/reference outputs
 artifacts/
 references/
+character_authoring/*.blend1
+character_authoring/*.blend2
