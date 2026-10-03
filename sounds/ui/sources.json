@@ -1,0 +1,96 @@
+{
+  "sample_rate": 48000,
+  "channels": 1,
+  "bits": 16,
+  "processing": "80 Hz high-pass, 11 kHz low-pass; DC removal; RMS matching with -8 dBFS peak ceiling; 1 ms attack and 12 ms tail fades",
+  "files": [
+    {
+      "file": "sounds/ui/navigate_1.wav",
+      "source": "audio/key_presses/Regular_key.m4a",
+      "source_sha256": "9954e409125c70a82b810857f2179d879e268b6f81820e96044db52a7b0e74c9",
+      "source_start_seconds": 1.352,
+      "source_end_seconds": 1.43,
+      "playback_rate": 0.98,
+      "gain": 2.26673,
+      "duration_ms": 75,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/navigate_2.wav",
+      "source": "audio/key_presses/Regular_key.m4a",
+      "source_sha256": "9954e409125c70a82b810857f2179d879e268b6f81820e96044db52a7b0e74c9",
+      "source_start_seconds": 1.352,
+      "source_end_seconds": 1.43,
+      "playback_rate": 1.0,
+      "gain": 2.251747,
+      "duration_ms": 73,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/navigate_3.wav",
+      "source": "audio/key_presses/Regular_key.m4a",
+      "source_sha256": "9954e409125c70a82b810857f2179d879e268b6f81820e96044db52a7b0e74c9",
+      "source_start_seconds": 1.352,
+      "source_end_seconds": 1.43,
+      "playback_rate": 1.02,
+      "gain": 2.255489,
+      "duration_ms": 72,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/confirm.wav",
+      "source": "audio/key_presses/Enter.m4a",
+      "source_sha256": "6607172fecc4adbed322dab08bae6044c9317a14ab9ad7082e32119403031872",
+      "source_start_seconds": 1.25,
+      "source_end_seconds": 1.375,
+      "playback_rate": 1.0,
+      "gain": 1.157539,
+      "duration_ms": 116,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/submenu.wav",
+      "source": "audio/key_presses/Space.m4a",
+      "source_sha256": "eca053af549b546df026c3a3d41658e67db6edea4e2715755fad4756066c5bd0",
+      "source_start_seconds": 0.565,
+      "source_end_seconds": 0.685,
+      "playback_rate": 1.0,
+      "gain": 2.285147,
+      "duration_ms": 118,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/back.wav",
+      "source": "audio/key_presses/Cmd_key.m4a",
+      "source_sha256": "efabeccc2d9d88a265230f29515306928b83dd874c9b3491b8742d369526044b",
+      "source_start_seconds": 1.11,
+      "source_end_seconds": 1.23,
+      "playback_rate": 1.0,
+      "gain": 3.151887,
+      "duration_ms": 120,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/open.wav",
+      "source": "audio/key_presses/Toggle on.m4a",
+      "source_sha256": "c2c902d2fe69a9b3fa7022118a936dda67b388804329be778bcad68bd3a8802d",
+      "source_start_seconds": 1.11,
+      "source_end_seconds": 1.28,
+      "playback_rate": 1.0,
+      "gain": 1.221556,
+      "duration_ms": 169,
+      "peak_dbfs": -8.0
+    },
+    {
+      "file": "sounds/ui/close.wav",
+      "source": "audio/key_presses/Toggle off.m4a",
+      "source_sha256": "5a57bb2d0726d6f52da510e6fa8b04b4a4a3c269f238bb95447d4874f44b3981",
+      "source_start_seconds": 1.5,
+      "source_end_seconds": 1.67,
+      "playback_rate": 1.0,
+      "gain": 0.802522,
+      "duration_ms": 166,
+      "peak_dbfs": -8.0
+    }
+  ]
+}

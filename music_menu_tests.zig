@@ -8,6 +8,11 @@ const settings = @import("src/settings.zig");
 const procedural_hard_techno = @import("src/procedural_hard_techno.zig");
 const runtime = @import("src/runtime.zig");
 const fs = @import("src/fs.zig");
+const menu_audio_tests = @import("menu_audio_tests.zig");
+
+comptime {
+    _ = menu_audio_tests;
+}
 
 fn itemNamed(label: []const u8) !*menu.Item {
     for (&musicConfigMenu.main_items) |*item| {
@@ -211,4 +216,35 @@ test "SDL callback tolerates live playback edits and master mute silences the ac
     try std.testing.expect(measured_samples.load(.acquire) > 0);
     try std.testing.expectEqual(@as(u32, 0), measured_peak.load(.acquire));
     try std.testing.expect(!invalid_output.load(.acquire));
+}
+
+test "cached keyboard cue reaches the SDL output and muted playback queues nothing" {
+    runtime.init(std.testing.io);
+    try std.testing.expect(sdl.c.SDL_SetHint(sdl.c.SDL_HINT_AUDIO_DRIVER, "dummy"));
+    try std.testing.expect(sdl.c.SDL_Init(sdl.c.SDL_INIT_AUDIO));
+    defer sdl.c.SDL_Quit();
+    try audio.init();
+    defer audio.cleanup();
+    try audio.preload("keyboard", .{ .file = "sounds/ui/confirm.wav", .durationMs = 1 });
+    measured_peak.store(0, .monotonic);
+    measured_samples.store(0, .monotonic);
+    invalid_output.store(false, .monotonic);
+    try std.testing.expect(sdl.c.SDL_SetAudioPostmixCallback(audio.device_id, inspectMix, null));
+    defer _ = sdl.c.SDL_SetAudioPostmixCallback(audio.device_id, null, null);
+    try std.testing.expect(audio.playCached("keyboard", 0.5));
+    for (0..100) |_| {
+        if (measured_peak.load(.acquire) > @as(u32, @bitCast(@as(f32, 0.01)))) break;
+        sdl.c.SDL_Delay(10);
+    }
+    try std.testing.expect(measured_peak.load(.acquire) > @as(u32, @bitCast(@as(f32, 0.01))));
+    try std.testing.expect(!invalid_output.load(.acquire));
+    sdl.c.SDL_Delay(250);
+    try std.testing.expect(sdl.c.SDL_SetAudioPostmixCallback(audio.device_id, null, null));
+    measured_peak.store(0, .monotonic);
+    measured_samples.store(0, .monotonic);
+    try std.testing.expect(sdl.c.SDL_SetAudioPostmixCallback(audio.device_id, inspectMix, null));
+    try std.testing.expect(!audio.playCached("keyboard", 0));
+    sdl.c.SDL_Delay(100);
+    try std.testing.expect(measured_samples.load(.acquire) > 0);
+    try std.testing.expectEqual(@as(u32, 0), measured_peak.load(.acquire));
 }

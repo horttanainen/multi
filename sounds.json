@@ -1,4 +1,12 @@
 [
     {"key": "cannon_fire", "path": "sounds/cannon_fire.wav", "durationMs": 10000, "volume": 0.5},
-    {"key": "cannon_hit", "path": "sounds/cannon_hit.wav", "durationMs": 10000, "volume": 0.5}
+    {"key": "cannon_hit", "path": "sounds/cannon_hit.wav", "durationMs": 10000, "volume": 0.5},
+    {"key": "ui_navigate_1", "path": "sounds/ui/navigate_1.wav", "durationMs": 75, "volume": 0.45, "preload": true},
+    {"key": "ui_navigate_2", "path": "sounds/ui/navigate_2.wav", "durationMs": 73, "volume": 0.45, "preload": true},
+    {"key": "ui_navigate_3", "path": "sounds/ui/navigate_3.wav", "durationMs": 72, "volume": 0.45, "preload": true},
+    {"key": "ui_confirm", "path": "sounds/ui/confirm.wav", "durationMs": 116, "volume": 0.75, "preload": true},
+    {"key": "ui_submenu", "path": "sounds/ui/submenu.wav", "durationMs": 118, "volume": 0.8, "preload": true},
+    {"key": "ui_back", "path": "sounds/ui/back.wav", "durationMs": 120, "volume": 0.7, "preload": true},
+    {"key": "ui_open", "path": "sounds/ui/open.wav", "durationMs": 169, "volume": 0.85, "preload": true},
+    {"key": "ui_close", "path": "sounds/ui/close.wav", "durationMs": 166, "volume": 0.8, "preload": true}
 ]

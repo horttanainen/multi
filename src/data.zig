@@ -979,6 +979,7 @@ fn initSounds() !void {
         path: []const u8,
         durationMs: u32 = 10000,
         volume: f32 = 1.0,
+        preload: bool = false,
     };
 
     const parsed = std.json.parseFromSlice([]const Entry, allocator, jsonData, .{ .allocate = .alloc_always }) catch |err| {
@@ -1005,6 +1006,16 @@ fn initSounds() !void {
         };
 
         std.debug.print("Parsed sound data '{s}'\n", .{key});
+        if (!entry.preload or audio.device_id == 0) {
+            continue;
+        }
+        audio.preload(key, .{
+            .file = path,
+            .durationMs = entry.durationMs,
+            .volume = entry.volume,
+        }) catch |err| {
+            std.log.warn("data.initSounds: could not preload '{s}': {}", .{ key, err });
+        };
     }
 }
 

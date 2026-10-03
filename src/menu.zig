@@ -8,6 +8,7 @@ const delay = @import("delay.zig");
 const gamepad = @import("gamepad.zig");
 const sprite = @import("sprite.zig");
 const cursor = @import("cursor.zig");
+const audio = @import("audio.zig");
 
 // ============================================================
 // Types
@@ -95,6 +96,73 @@ var nav_stack_len: usize = 0;
 
 const LERP_SPEED: f32 = 0.2;
 
+// Overall UI gain; individual cue levels live in sounds.json.
+pub var sound_volume: f32 = 0.7;
+const SoundCue = enum { navigate, confirm, submenu, back, open, close };
+var sound_action_depth: usize = 0;
+var sound_action_started_open = false;
+var pending_sound: ?SoundCue = null;
+var navigate_variant: usize = 0;
+const navigate_sounds = [_][]const u8{ "ui_navigate_1", "ui_navigate_2", "ui_navigate_3" };
+
+fn beginSoundAction() void {
+    if (sound_action_depth == 0) {
+        pending_sound = null;
+        sound_action_started_open = is_open;
+    }
+    sound_action_depth += 1;
+}
+
+fn soundPriority(cue: SoundCue) u8 {
+    return switch (cue) {
+        .navigate => 0,
+        .confirm => 1,
+        .submenu, .back, .open, .close => 2,
+    };
+}
+
+fn queueSound(cue: SoundCue) void {
+    // A transition replaces its click; the last transition wins when an action
+    // closes one menu and opens another. The whole action emits only one cue.
+    if (pending_sound != null and soundPriority(cue) < soundPriority(pending_sound.?)) {
+        return;
+    }
+    pending_sound = cue;
+}
+
+fn nextNavigateSound() ?[]const u8 {
+    for (0..navigate_sounds.len) |_| {
+        const id = navigate_sounds[navigate_variant];
+        navigate_variant = (navigate_variant + 1) % navigate_sounds.len;
+        // A failed preload was logged by the asset loader; muted variants are
+        // intentional. Continue through the remaining healthy recordings.
+        const clip = audio.cached_sounds.get(id) orelse continue;
+        if (clip.volume <= 0) continue;
+        return id;
+    }
+    return null;
+}
+
+fn endSoundAction() void {
+    sound_action_depth -= 1;
+    if (sound_action_depth != 0) return;
+    const cue = pending_sound orelse return;
+    pending_sound = null;
+    // Menus are also used before audio startup and by tests without a device.
+    if (audio.device_id == 0 or sound_volume <= 0) {
+        return;
+    }
+    const id = switch (cue) {
+        .navigate => nextNavigateSound() orelse return,
+        .confirm => "ui_confirm",
+        .submenu => "ui_submenu",
+        .back => "ui_back",
+        .open => "ui_open",
+        .close => "ui_close",
+    };
+    _ = audio.playCached(id, sound_volume);
+}
+
 pub fn open(items: []Item, options: OpenOptions) void {
     openImpl(items, null, options, .replace);
 }
@@ -123,6 +191,8 @@ pub fn pushWithCleanup(items: []Item, cleanup: *const fn () void, options: OpenO
 const OpenMode = enum { replace, push };
 
 fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions, mode: OpenMode) void {
+    beginSoundAction();
+    defer endSoundAction();
     switch (mode) {
         .replace => resetNavigation(),
         .push => pushCurrentState(),
@@ -137,10 +207,13 @@ fn openImpl(items: []Item, cleanup: ?*const fn () void, options: OpenOptions, mo
     editing_index = null;
     current_options = options;
     close_fn = cleanup;
+    queueSound(if (sound_action_started_open) .submenu else .open);
 }
 
 pub fn close() void {
     if (!is_open and nav_stack_len == 0) return;
+    beginSoundAction();
+    defer endSoundAction();
 
     is_open = false;
     consumed_this_frame = true;
@@ -152,11 +225,14 @@ pub fn close() void {
     const current_cleanup = close_fn;
     close_fn = null;
     current_options = .{};
+    queueSound(.close);
     if (current_cleanup) |fn_ptr| fn_ptr();
     clearNavStack();
 }
 
 pub fn back() anyerror!void {
+    beginSoundAction();
+    defer endSoundAction();
     try goBack();
 }
 
@@ -218,6 +294,8 @@ pub fn beginFrame() void {
 // Browse navigation still uses the existing repeat and controller handling.
 pub fn handleKey(scancode: sdl.c.SDL_Scancode, repeat: bool) !void {
     if (!is_open or repeat or editing_index != null) return;
+    beginSoundAction();
+    defer endSoundAction();
     if (scancode == sdl.c.SDL_SCANCODE_ESCAPE) {
         consumed_this_frame = true;
         try goBack();
@@ -249,8 +327,10 @@ pub fn blocksGameplayInput(keys: []const bool) bool {
 
 pub fn handleInput(keys: []const bool) !void {
     if (!is_open or consumed_this_frame) return;
+    beginSoundAction();
+    defer endSoundAction();
     if (editing_index != null) {
-        try handleEditInput();
+        try handleEditInput(keys);
     } else {
         try handleBrowseInput(keys);
     }
@@ -331,14 +411,18 @@ fn adjustScrollForFocus() void {
 
 fn navUp() void {
     const prev = previousVisibleIndex(focused_index) orelse return;
+    if (prev == focused_index) return;
     focused_index = prev;
     adjustScrollForFocus();
+    queueSound(.navigate);
 }
 
 fn navDown() void {
     const next = nextVisibleIndex(focused_index) orelse return;
+    if (next == focused_index) return;
     focused_index = next;
     adjustScrollForFocus();
+    queueSound(.navigate);
 }
 
 fn browseKey(keys: []const bool, scancode: sdl.c.SDL_Scancode) bool {
@@ -423,6 +507,7 @@ fn handleBrowseInput(keys: []const bool) !void {
 fn goBack() !void {
     if (nav_stack_len > 0) {
         popState();
+        queueSound(.back);
         return;
     }
 
@@ -431,6 +516,7 @@ fn goBack() !void {
         return;
     }
     try current_options.back_fn.?();
+    if (is_open) queueSound(.back);
 }
 
 fn pushCurrentState() void {
@@ -504,20 +590,19 @@ fn resetNavigation() void {
     clearNavStack();
 }
 
-fn handleEditInput() !void {
+fn handleEditInput(keys: []const bool) !void {
     const ei = editing_index orelse return;
 
     switch (active_items[ei].kind) {
-        .config => |cfg| handleEditConfig(cfg),
-        .button => |action| try handleEditButton(action),
+        .config => |cfg| handleEditConfig(cfg, keys),
+        .button => |action| try handleEditButton(action, keys),
         else => {
             editing_index = null;
         },
     }
 }
 
-fn handleEditConfig(cfg: *ConfigData) void {
-    const keys = sdl.getKeyboardState();
+fn handleEditConfig(cfg: *ConfigData, keys: []const bool) void {
     if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
         editing_value = @min(cfg.max, editing_value + cfg.step);
         setConfigValue(cfg, editing_value);
@@ -530,11 +615,13 @@ fn handleEditConfig(cfg: *ConfigData) void {
     }
     if (keys[@intFromEnum(sdl.Scancode.return_)] and !delay.check("menuConfirm")) {
         editing_index = null;
+        queueSound(.confirm);
         delay.action("menuConfirm", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
         setConfigValue(cfg, pre_edit_value);
         editing_index = null;
+        queueSound(.back);
         delay.action("menuToggle", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
@@ -559,6 +646,7 @@ fn handleEditConfig(cfg: *ConfigData) void {
         }
         if (sdl.getGamepadButton(sdlGp, .a) and !delay.check("menuConfirm")) {
             editing_index = null;
+            queueSound(.confirm);
             delay.action("menuConfirm", 200);
         }
         if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
@@ -570,21 +658,23 @@ fn handleEditConfig(cfg: *ConfigData) void {
         if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
             setConfigValue(cfg, pre_edit_value);
             editing_index = null;
+            queueSound(.back);
             delay.action("menuToggle", 200);
         }
     }
 }
 
 fn setConfigValue(cfg: *ConfigData, value: f32) void {
+    const changed = cfg.value != value;
     cfg.value = value;
+    if (changed) queueSound(.navigate);
     const on_change = cfg.on_change orelse return;
     on_change(value);
 }
 
-fn handleEditButton(action: *const fn () anyerror!void) !void {
+fn handleEditButton(action: *const fn () anyerror!void, keys: []const bool) !void {
     const ei = editing_index orelse return;
     const item = &active_items[ei];
-    const keys = sdl.getKeyboardState();
 
     if (item.cycle_names != null and item.cycle_index != null) {
         if ((keys[@intFromEnum(sdl.Scancode.up)] or keys[@intFromEnum(sdl.Scancode.w)]) and !delay.check("menuNav")) {
@@ -603,11 +693,13 @@ fn handleEditButton(action: *const fn () anyerror!void) !void {
         } else {
             try action();
         }
+        queueSound(.confirm);
         delay.action("menuConfirm", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.escape)] and !delay.check("menuToggle")) {
         revertCycleEdit(item);
         editing_index = null;
+        queueSound(.back);
         delay.action("menuToggle", 200);
     }
     if (keys[@intFromEnum(sdl.Scancode.t)] and !delay.check("menuToggle")) {
@@ -638,6 +730,7 @@ fn handleEditButton(action: *const fn () anyerror!void) !void {
             } else {
                 try action();
             }
+            queueSound(.confirm);
             delay.action("menuConfirm", 200);
         }
         if (sdl.getGamepadButton(sdlGp, .y) and !delay.check("menuToggle")) {
@@ -649,6 +742,7 @@ fn handleEditButton(action: *const fn () anyerror!void) !void {
         if (sdl.getGamepadButton(sdlGp, .b) and !delay.check("menuToggle")) {
             revertCycleEdit(item);
             editing_index = null;
+            queueSound(.back);
             delay.action("menuToggle", 200);
         }
     }
@@ -706,12 +800,18 @@ fn cycleItem(item: *Item, direction: i2) void {
     const names = item.cycle_names orelse return;
     const idx = item.cycle_index orelse return;
     const count: u8 = @intCast(names.len);
+    if (count == 0 or idx.* >= count) {
+        std.log.warn("menu.cycleItem: invalid cycle index {d} for {d} choices", .{ idx.*, count });
+        return;
+    }
+    const previous = idx.*;
     if (direction > 0) {
         idx.* = (idx.* + 1) % count;
     } else {
         idx.* = if (idx.* == 0) count - 1 else idx.* - 1;
     }
     item.label = names[idx.*];
+    if (idx.* != previous) queueSound(.navigate);
     if (item.on_cycle) |cb| cb();
 }
 
@@ -746,6 +846,7 @@ fn activate(idx: usize) !void {
             close();
         },
     }
+    queueSound(.confirm);
 }
 
 // ============================================================
