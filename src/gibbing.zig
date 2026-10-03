@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const std = @import("std");
 
 const sprite = @import("sprite.zig");
@@ -45,6 +46,7 @@ pub const PartSnapshot = struct {
     angular_velocity: f32,
     survival_weight: f32,
     hair: ?data.CharacterHairAppearance = null,
+    hair_source: ?box2d.c.b2BodyId = null,
 };
 pub const Snapshot = struct { parts: [64]PartSnapshot = undefined, count: usize = 0 };
 
@@ -236,6 +238,9 @@ fn createPool(
     for (bodies) |*body| {
         body.* = try createBody(pack.parts[index], index, facing, effect);
         created += 1;
+        const hair = pack.hair orelse continue;
+        if (index != pack.bindings[hair.head_binding].part) continue;
+        try character_hair.prepare(body.*, null, hair.definition);
     }
     return pool.create(bodies);
 }
@@ -350,6 +355,7 @@ pub fn activatePart(part: PartSnapshot, scatter_velocity: vec.Vec2, scatter_spin
         vec.toBox2d(part.placed.position),
         box2d.c.b2MakeRot(part.placed.angle),
     );
+    character_hair.inherit(part.hair_source, body, part.placed, scatter_velocity);
     ent.state = box2d.getState(body);
     box2d.c.b2Body_Enable(body);
     const center = vec.fromBox2d(box2d.c.b2Body_GetWorldCenterOfMass(body));
@@ -443,6 +449,10 @@ pub fn snapshotPlayer(player_id: usize) ?Snapshot {
     const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
     const hair = character_art.hairForPlayer(pack, player_id);
     var snapshot = snapshotPose(pack, rig, frame, carrying, p.color, velocity, hair);
+    for (snapshot.parts[0..snapshot.count]) |*part| {
+        if (part.hair == null) continue;
+        part.hair_source = p.bodyId;
+    }
     const state = character_animation.states.get(player_id) orelse {
         std.log.warn("gibbing.snapshotPlayer: animation state is missing", .{});
         return null;

@@ -79,15 +79,20 @@ clipping and readability in motion still need user review.
 
 ### Hair
 
-The optional `hair` section adds a grayscale scalp layer and twelve instances of
-one shared lock SVG, each with a named root in head SVG pixels. Overall length and RGB hair color can
-vary per player; each lock has its own width, relative length, rest angle and
-front/back layer. Defaults currently demonstrate two colors and lengths.
+The optional `hair` section adds a grayscale scalp layer and fifteen instances of
+one shared lock SVG, each with a named root in head SVG pixels. Overall length
+and RGB hair color can vary per player; each lock has its own width, relative length, rest angle and
+front/back layer. Three crown roots let locks lift above the head during falls.
+Near-side roots hang over the ear and part of the cheek, with the eye visible.
+Defaults currently demonstrate two colors and lengths.
 The two files `source/hair_scalp.svg` and `source/hair_lock.svg` each contain one
-neutral `hair` group. Width, length and angle vary per anchor in code; all locks
-share one loaded texture and its authored curve.
-Roots follow the final head placement, including detached heads. Hair is rigid
-in this phase; movement will follow after visual review. See
+neutral `hair` group. Width, length and angle vary per anchor; fixed-step chains
+bend the shared texture.
+The optional `hair.motion` object configures gravity, damping, bend limits,
+movement transmission and head/torso obstacles. Front locks may overlap the body
+in projection; rear locks use the obstacles. All locks share one loaded texture and its authored curve.
+Roots follow the final head placement, including detached heads. Motion is
+preallocated with players/head pools and settles to sleep when the head stops moving. See
 [configuration and review steps](../../docs/character_animation_hair.md).
 
 ## Export and review

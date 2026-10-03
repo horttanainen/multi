@@ -2370,6 +2370,23 @@ pub fn renderSelectionMaskCopyEx(
     g.batch_count += 1;
 }
 
+const TextureBounds = struct { left: f32, top: f32, right: f32, bottom: f32 };
+
+fn textureBounds(tex: *Texture, src_rect: ?*const sdl.Rect) TextureBounds {
+    const in_atlas = texture.isAtlasTexture(tex);
+    const width: f32 = if (in_atlas) @floatFromInt(atlas.ATLAS_SIZE) else @floatFromInt(tex.width);
+    const height: f32 = if (in_atlas) @floatFromInt(atlas.ATLAS_SIZE) else @floatFromInt(tex.height);
+    const x: i32 = if (in_atlas) @intCast(tex.atlas_x) else 0;
+    const y: i32 = if (in_atlas) @intCast(tex.atlas_y) else 0;
+    const source = src_rect orelse &sdl.Rect{ .x = 0, .y = 0, .w = tex.width, .h = tex.height };
+    return .{
+        .left = @as(f32, @floatFromInt(x + source.x)) / width,
+        .top = @as(f32, @floatFromInt(y + source.y)) / height,
+        .right = @as(f32, @floatFromInt(x + source.x + source.w)) / width,
+        .bottom = @as(f32, @floatFromInt(y + source.y + source.h)) / height,
+    };
+}
+
 fn appendSpriteVertices(
     g: *GpuState,
     tex: *Texture,
@@ -2380,41 +2397,11 @@ fn appendSpriteVertices(
     flip: sdl.FlipMode,
     color: PackedColor,
 ) !SpriteVertexRange {
-    // Source UV coords - atlas vs standalone
-    var uv_left: f32 = undefined;
-    var uv_top: f32 = undefined;
-    var uv_right: f32 = undefined;
-    var uv_bottom: f32 = undefined;
-    if (texture.isAtlasTexture(tex)) {
-        const atlas_size: f32 = @floatFromInt(atlas.ATLAS_SIZE);
-        const ax: f32 = @floatFromInt(tex.atlas_x);
-        const ay: f32 = @floatFromInt(tex.atlas_y);
-        if (src_rect) |sr| {
-            uv_left = (ax + @as(f32, @floatFromInt(sr.x))) / atlas_size;
-            uv_top = (ay + @as(f32, @floatFromInt(sr.y))) / atlas_size;
-            uv_right = (ax + @as(f32, @floatFromInt(sr.x + sr.w))) / atlas_size;
-            uv_bottom = (ay + @as(f32, @floatFromInt(sr.y + sr.h))) / atlas_size;
-        } else {
-            uv_left = ax / atlas_size;
-            uv_top = ay / atlas_size;
-            uv_right = (ax + @as(f32, @floatFromInt(tex.width))) / atlas_size;
-            uv_bottom = (ay + @as(f32, @floatFromInt(tex.height))) / atlas_size;
-        }
-    } else {
-        // Standalone texture: UVs relative to texture size (0..1)
-        uv_left = 0;
-        uv_top = 0;
-        uv_right = 1;
-        uv_bottom = 1;
-        if (src_rect) |sr| {
-            const tw: f32 = @floatFromInt(tex.width);
-            const th: f32 = @floatFromInt(tex.height);
-            uv_left = @as(f32, @floatFromInt(sr.x)) / tw;
-            uv_top = @as(f32, @floatFromInt(sr.y)) / th;
-            uv_right = @as(f32, @floatFromInt(sr.x + sr.w)) / tw;
-            uv_bottom = @as(f32, @floatFromInt(sr.y + sr.h)) / th;
-        }
-    }
+    const bounds = textureBounds(tex, src_rect);
+    var uv_left = bounds.left;
+    var uv_top = bounds.top;
+    var uv_right = bounds.right;
+    var uv_bottom = bounds.bottom;
 
     // Destination rect
     var dx: f32 = 0;
@@ -2476,6 +2463,42 @@ fn appendSpriteVertices(
         };
     }
 
+    return appendQuadVertices(g, rotated, uvs, color);
+}
+
+// UVs are normalized within this texture, including when it lives in an atlas.
+// Deformed sprites share the normal sprite pipeline, buffers and texture batches.
+pub fn renderTexturedQuad(
+    tex: *Texture,
+    corners: [4][2]f32,
+    normalized_uvs: [4][2]f32,
+    color: sdl.Color,
+) !void {
+    const g = getGpu();
+    const pipeline: PipelineType = if (tex.blend_mode == .add) .sprite_additive else .sprite_alpha;
+    ensureSpritePipeline(g, pipeline, texture.gpuTexture(tex));
+    const bounds = textureBounds(tex, null);
+    var uvs: [4][2]f32 = undefined;
+    for (normalized_uvs, &uvs) |source, *uv| {
+        uv.* = .{
+            std.math.lerp(bounds.left, bounds.right, source[0]),
+            std.math.lerp(bounds.top, bounds.bottom, source[1]),
+        };
+    }
+    _ = try appendQuadVertices(g, corners, uvs, .{
+        .r = color.r,
+        .g = color.g,
+        .b = color.b,
+        .a = color.a,
+    });
+}
+
+fn appendQuadVertices(
+    g: *GpuState,
+    corners: [4][2]f32,
+    uvs: [4][2]f32,
+    color: PackedColor,
+) !SpriteVertexRange {
     try growSpriteVertexCapacity(g, g.sprite_vertex_count + 6);
 
     // Emit two triangles (0,1,2) (0,2,3)
@@ -2483,8 +2506,8 @@ fn appendSpriteVertices(
     const tri_indices = [6]usize{ 0, 1, 2, 0, 2, 3 };
     for (tri_indices, 0..) |vi, ti| {
         g.sprite_vertices[idx + ti] = .{
-            .x = rotated[vi][0],
-            .y = rotated[vi][1],
+            .x = corners[vi][0],
+            .y = corners[vi][1],
             .u = uvs[vi][0],
             .v = uvs[vi][1],
             .color = color,

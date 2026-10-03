@@ -785,56 +785,89 @@
       {
         "id": "side_upper",
         "position": [
-          44,
-          42
+          43,
+          48
         ],
-        "angle_radians": 0.47018346,
-        "width_m": 0.037,
-        "length_scale": 0.5516777,
+        "angle_radians": 0.08,
+        "width_m": 0.04,
+        "length_scale": 0.65,
         "layer": "front"
       },
       {
         "id": "side_lower",
         "position": [
-          33,
-          65
+          27,
+          77
         ],
-        "angle_radians": 0.24702365,
+        "angle_radians": 0.08,
         "width_m": 0.033,
-        "length_scale": 0.47810693,
+        "length_scale": 0.55,
         "layer": "front"
       },
       {
         "id": "temple_back",
         "position": [
-          52,
-          37
+          54,
+          61
         ],
-        "angle_radians": 0.11379201,
-        "width_m": 0.034,
-        "length_scale": 0.56804876,
+        "angle_radians": 0.08,
+        "width_m": 0.038,
+        "length_scale": 0.65,
         "layer": "front"
       },
       {
         "id": "temple_long",
         "position": [
-          64,
-          34
+          74,
+          30
         ],
-        "angle_radians": 0.05945366,
-        "width_m": 0.038,
-        "length_scale": 0.67844872,
+        "angle_radians": 0.08,
+        "width_m": 0.043,
+        "length_scale": 0.72,
         "layer": "front"
       },
       {
         "id": "temple_front",
         "position": [
-          76,
+          84,
           31
         ],
-        "angle_radians": -0.05180546,
-        "width_m": 0.032,
-        "length_scale": 0.54494986,
+        "angle_radians": 0.08,
+        "width_m": 0.038,
+        "length_scale": 0.6,
+        "layer": "front"
+      },
+      {
+        "id": "crown_back",
+        "position": [
+          43,
+          17
+        ],
+        "angle_radians": 1.8,
+        "width_m": 0.035,
+        "length_scale": 0.72,
+        "layer": "back"
+      },
+      {
+        "id": "crown_middle",
+        "position": [
+          64,
+          10
+        ],
+        "angle_radians": 0.2,
+        "width_m": 0.038,
+        "length_scale": 0.77,
+        "layer": "front"
+      },
+      {
+        "id": "crown_front",
+        "position": [
+          88,
+          16
+        ],
+        "angle_radians": -0.15,
+        "width_m": 0.034,
+        "length_scale": 0.76,
         "layer": "front"
       }
     ],
@@ -872,6 +905,24 @@
         12,
         168.29735589
       ]
+    },
+    "motion": {
+      "points_per_lock": 6,
+      "iterations": 6,
+      "gravity_mps2": 9,
+      "damping_per_second": 2.5,
+      "stiffness_per_second": 1.5,
+      "root_bend_radians": 3.0,
+      "bend_radians": 0.85,
+      "head_radius_m": 0.13,
+      "torso_radius_m": 0.13,
+      "teleport_distance_m": 1.5,
+      "sleep_speed_mps": 0.04,
+      "sleep_seconds": 0.6,
+      "settle_seconds": 1.8,
+      "rest_distance_m": 0.003,
+      "bend_damping_per_second": 12,
+      "motion_transfer": 0.2
     }
   }
 }

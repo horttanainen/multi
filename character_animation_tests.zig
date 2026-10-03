@@ -1,3 +1,4 @@
+const character_hair = @import("src/character_hair.zig");
 const std = @import("std");
 const animation = @import("src/character_animation.zig");
 const vec = @import("src/vector.zig");
@@ -1663,7 +1664,7 @@ test "hair settings support per-player lengths and colors and legacy packs witho
     try std.testing.expectEqualDeep(first, character_art.hairForPlayer(&pack, 999).?);
     try std.testing.expect(first.length_m != second.length_m);
     try std.testing.expect(!std.meta.eql(first.color, second.color));
-    try std.testing.expectEqual(@as(usize, 12), pack.hair.?.definition.anchors.len);
+    try std.testing.expectEqual(@as(usize, 15), pack.hair.?.definition.anchors.len);
     try std.testing.expectEqualStrings("character_art/curb_rat_v1/export/hair_lock.svg", pack.hair.?.lock.path);
 
     for ([_]bool{ false, true }) |explicit_null| {
@@ -1885,6 +1886,9 @@ test "invalid art candidates preserve the installed pack and report named fields
         .{ "\"export/hair_scalp.svg\"", "\"../hair.svg\"", "hair image" },
         .{ "\"export/hair_lock.svg\"", "\"../lock.svg\"", "hair image" },
         .{ "168.29735589", "0", "hair.lock.source_size" },
+        .{ "\"points_per_lock\": 6", "\"points_per_lock\": 2", "hair.motion" },
+        .{ "\"iterations\": 6", "\"iterations\": 0", "hair.motion" },
+        .{ "\"damping_per_second\": 2.5", "\"damping_per_second\": -1", "hair.motion.damping" },
         .{ "\"id\": \"temple_front\"", "\"id\": \"temple_long\"", "hair.anchors" },
         .{ "\"layer\": \"back\"", "\"layer\": \"sideways\"", "layer" },
     };
@@ -6538,5 +6542,356 @@ test "partial wall brace entry and release preserve adjacent render endpoints" {
             animation.updatePlayer(7, input, 1.0 / 60.0);
             try checkWallPoseBoundary(before, animation.states.get(7).?);
         }
+    }
+}
+
+fn hairTestFrame(set: *const animation.Assets, pack: *const character_art.Pack) character_hair.Frame {
+    const pose: animation.FramePose = .{
+        .pose = animation.evaluatePose(set, 0, .neutral),
+        .body = vec.zero,
+        .facing_right = true,
+        .weapon = .{ .position = vec.zero, .angle = 0 },
+        .weapon_facing_right = true,
+    };
+    const joints = character_art.worldJoints(set.rig, pose);
+    return .{
+        .head = character_art.placePart(pack, pack.hair.?.head_binding, joints, pose, false),
+        .appearance = character_art.hairForPlayer(pack, 0).?,
+        .torso = .{
+            .a = joints[@intFromEnum(animation.Joint.neck)],
+            .b = joints[@intFromEnum(animation.Joint.pelvis)],
+            .radius = pack.hair.?.definition.motion.torso_radius_m,
+        },
+    };
+}
+
+fn checkHairChain(pack: *const character_art.Pack, hair_state: character_hair.State) !void {
+    const count = hair_state.points_per_lock;
+    for (pack.hair.?.definition.anchors, 0..) |anchor, index| {
+        const nodes = hair_state.nodes.items[index * count ..][0..count];
+        const root = character_art.hairAnchor(pack, hair_state.frame.head, anchor);
+        try nearPoint(root, nodes[0].position, 0.00001);
+        const segment = hair_state.frame.appearance.length_m * anchor.length_scale /
+            @as(f32, @floatFromInt(count - 1));
+        for (nodes[1..], nodes[0 .. count - 1]) |node, previous| {
+            try std.testing.expect(std.math.isFinite(node.position.x));
+            try std.testing.expect(std.math.isFinite(node.position.y));
+            try std.testing.expectApproxEqAbs(segment, vec.magnitude(vec.subtract(node.position, previous.position)), 0.00001);
+            if (anchor.layer == .front) continue; // Near-side locks overlap the body in projection.
+            const capsule = hair_state.frame.torso orelse continue;
+            const center = character_hair.closestCapsulePoint(node.position, capsule);
+            const clearance = vec.magnitude(vec.subtract(node.position, center));
+            try std.testing.expect(clearance >= capsule.radius + anchor.width_m * 0.5 - 0.00001);
+        }
+    }
+}
+
+test "moving locks stay anchored, settle, mirror and reset without growing their reserve" {
+    runtime.init(std.testing.io);
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    var hair_state: character_hair.State = .{ .player_id = null };
+    defer hair_state.nodes.deinit(allocator.allocator);
+    const definition = pack.hair.?.definition;
+    try hair_state.nodes.ensureTotalCapacity(allocator.allocator, definition.anchors.len * definition.motion.points_per_lock);
+    const original = hair_state.nodes.items.ptr;
+    var frame = hairTestFrame(&set, &pack);
+    for (0..600) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try checkHairChain(&pack, hair_state);
+    try std.testing.expect(hair_state.sleeping);
+    const count = hair_state.points_per_lock;
+    const old_root = hair_state.nodes.items[0].position;
+    const old_tip = hair_state.nodes.items[count - 1].position;
+    frame.head.position.x += 0.1;
+    frame.torso.?.a.x += 0.1;
+    frame.torso.?.b.x += 0.1;
+    character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try std.testing.expect(!hair_state.sleeping);
+    try std.testing.expect(@abs(hair_state.nodes.items[count - 1].position.x - old_tip.x) <
+        @abs(hair_state.nodes.items[0].position.x - old_root.x));
+    // Running and turning exercise the real constraints with the body's obstacle.
+    for (0..240) |index| {
+        const phase: f32 = @as(f32, @floatFromInt(index)) / 30;
+        frame.head.position.x += 0.06 * @cos(phase);
+        frame.torso.?.a.x += 0.06 * @cos(phase);
+        frame.torso.?.b.x += 0.06 * @cos(phase);
+        frame.head.facing_right = index < 120;
+        character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        try checkHairChain(&pack, hair_state);
+    }
+    // A sustained run must leave visible trailing hair, then settle back into
+    // a hanging shape after a stop instead of freezing in the running shape.
+    frame.head.facing_right = true;
+    for (0..60) |_| {
+        frame.head.position.x += 0.08;
+        frame.torso.?.a.x += 0.08;
+        frame.torso.?.b.x += 0.08;
+        character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    }
+    var trailing_locks: usize = 0;
+    for (definition.anchors, 0..) |anchor, index| {
+        if (anchor.layer != .front) continue;
+        const nodes = hair_state.nodes.items[index * count ..][0..count];
+        if (nodes[count - 1].position.x < nodes[0].position.x - 0.15) trailing_locks += 1;
+    }
+    try std.testing.expect(trailing_locks >= 5);
+    for (0..240) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try std.testing.expect(hair_state.sleeping);
+    try checkHairChain(&pack, hair_state);
+    for (definition.anchors, 0..) |anchor, index| {
+        if (anchor.layer != .front) continue;
+        const nodes = hair_state.nodes.items[index * count ..][0..count];
+        try std.testing.expect(nodes[count - 1].position.y - nodes[0].position.y >
+            0.85 * frame.appearance.length_m * anchor.length_scale);
+    }
+    frame.head.position.x += 100;
+    character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try nearPoint(hair_state.nodes.items[0].position, hair_state.nodes.items[0].previous, 0);
+    frame.appearance.length_m = 0;
+    character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try std.testing.expect(!hair_state.initialized);
+    frame.appearance.length_m = 0.58;
+    character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+    try std.testing.expect(hair_state.initialized);
+    try std.testing.expect(original == hair_state.nodes.items.ptr);
+}
+
+test "hair ribbon follows interpolated nodes and extrapolates transparent padding" {
+    const nodes = [_]character_hair.Node{
+        .{ .previous = .{ .x = 0, .y = 0 }, .position = .{ .x = 2, .y = 0 } },
+        .{ .previous = .{ .x = 0, .y = 1 }, .position = .{ .x = 2, .y = 1 } },
+        .{ .previous = .{ .x = 1, .y = 2 }, .position = .{ .x = 3, .y = 2 } },
+    };
+    const root = character_hair.ribbonRow(&nodes, 0, 0.5, .{ .x = 0.3, .y = 0.2 }, .{ -0.1, 0.1 });
+    try nearPoint(.{ .x = 1.2, .y = 0.2 }, root[0], 0.00001);
+    try nearPoint(.{ .x = 1.4, .y = 0.2 }, root[1], 0.00001);
+    const tip = character_hair.ribbonRow(&nodes, 1, 0.5, vec.zero, .{ -0.1, 0.1 });
+    try nearPoint(.{ .x = 2, .y = 2 }, vec.mul(vec.add(tip[0], tip[1]), 0.5), 0.00001);
+    const padding = character_hair.ribbonRow(&nodes, -0.5, 0.5, vec.zero, .{ 0, 0 });
+    try nearPoint(.{ .x = 1, .y = -1 }, padding[0], 0.00001);
+}
+
+test "pooled heads inherit moving hair and released heads reset before reuse" {
+    runtime.init(std.testing.io);
+    box2d.initWorld();
+    defer box2d.destroyWorld();
+    var set = try load();
+    defer set.arena.deinit();
+    try prepareRagdollFixture(set.rig);
+    defer endRagdollFixture();
+    const pack = &character_art.assets.?;
+    const source = try box2d.createBody(box2d.createDynamicBodyDef(vec.zero));
+    defer box2d.c.b2DestroyBody(source);
+    try character_hair.prepare(source, null, pack.hair.?.definition);
+    defer character_hair.remove(source);
+    var frame = hairTestFrame(&set, pack);
+    frame.appearance = character_art.hairForPlayer(pack, 1).?;
+    character_hair.step(character_hair.states.getPtr(source).?, pack, frame, 1.0 / 60.0);
+    character_hair.states.getPtr(source).?.nodes.items[1].velocity = .{ .x = 1, .y = 2 };
+    const root = try createRagdollFixture(&set, vec.zero, true);
+    const corpse = ragdoll.corpses.get(root).?;
+    var checked = false;
+    for (corpse.bodies[0..corpse.body_count], corpse.snapshot.parts[0..corpse.body_count]) |body, part| {
+        if (part.hair == null) continue;
+        const original = character_hair.states.get(body).?.nodes.items.ptr;
+        character_hair.inherit(source, body, part.placed, .{ .x = 3, .y = 4 });
+        const inherited = character_hair.states.get(body).?;
+        try std.testing.expect(inherited.initialized);
+        try nearPoint(.{ .x = 4, .y = 6 }, inherited.nodes.items[1].velocity, 0.00001);
+        try std.testing.expect(original == inherited.nodes.items.ptr);
+        character_hair.fixedUpdate(1.0 / 60.0);
+        try std.testing.expect(character_hair.states.get(body).?.initialized);
+        character_art.bodyParts.getPtr(body).?.severed = true;
+        character_hair.fixedUpdate(1.0 / 60.0);
+        try std.testing.expect(original == character_hair.states.get(body).?.nodes.items.ptr);
+        entity.getEntity(body).?.enabled = false;
+        character_hair.fixedUpdate(1.0 / 60.0);
+        try std.testing.expect(!character_hair.states.get(body).?.initialized);
+        checked = true;
+    }
+    try std.testing.expect(checked);
+}
+
+test "short locks and high point counts retain configured lengths near embedded roots" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    var hair_state: character_hair.State = .{ .player_id = null };
+    defer hair_state.nodes.deinit(allocator.allocator);
+    try hair_state.nodes.ensureTotalCapacity(allocator.allocator, pack.hair.?.definition.anchors.len * 12);
+    for ([_]u8{ 3, 6, 12 }) |points| {
+        pack.hair.?.definition.motion.points_per_lock = points;
+        for ([_]f32{ 0.01, 0.05, 0.2, 0.8, 2 }) |length| {
+            var frame = hairTestFrame(&set, &pack);
+            frame.appearance.length_m = length;
+            for (0..180) |tick| {
+                frame.head.facing_right = tick < 90;
+                character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+                try checkHairChain(&pack, hair_state);
+            }
+        }
+    }
+}
+
+test "death on a turning tick mirrors inherited hair positions and velocities before attachment" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const source: box2d.c.b2BodyId = .{ .index1 = 501, .world0 = 0, .generation = 1 };
+    const target: box2d.c.b2BodyId = .{ .index1 = 502, .world0 = 0, .generation = 1 };
+    defer character_hair.cleanup();
+    try character_hair.prepare(source, null, pack.hair.?.definition);
+    try character_hair.prepare(target, null, pack.hair.?.definition);
+    var frame = hairTestFrame(&set, &pack);
+    frame.head.angle = 0;
+    frame.head.position = vec.zero;
+    frame.torso = null;
+    character_hair.step(character_hair.states.getPtr(source).?, &pack, frame, 1.0 / 60.0);
+    const old = character_hair.states.getPtr(source).?;
+    for (old.nodes.items) |*node| node.velocity = .{ .x = 1, .y = 2 };
+    const saved = try std.testing.allocator.dupe(character_hair.Node, old.nodes.items);
+    defer std.testing.allocator.free(saved);
+    frame.head.facing_right = false;
+    frame.head.position = .{ .x = 4, .y = 5 };
+    character_hair.inherit(source, target, frame.head, .{ .x = 3, .y = 4 });
+    const inherited = character_hair.states.getPtr(target).?;
+    for (saved, inherited.nodes.items) |before, after| {
+        try nearPoint(.{ .x = 4 - before.position.x, .y = 5 + before.position.y }, after.position, 0.00001);
+        try nearPoint(.{ .x = 2, .y = 6 }, after.velocity, 0.00001);
+    }
+    try checkHairChain(&pack, inherited.*);
+    character_hair.step(inherited, &pack, frame, 1.0 / 60.0);
+    try checkHairChain(&pack, inherited.*);
+}
+
+test "resting hair stops on upright and rotated heads despite contact jitter and wakes on real motion" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    var hair_state: character_hair.State = .{ .player_id = null };
+    defer hair_state.nodes.deinit(allocator.allocator);
+    const definition = pack.hair.?.definition;
+    try hair_state.nodes.ensureTotalCapacity(allocator.allocator, definition.anchors.len * definition.motion.points_per_lock);
+    for ([_]f32{ 0, 0.7, -1.6, std.math.pi }) |angle| {
+        hair_state.initialized = false;
+        var frame = hairTestFrame(&set, &pack);
+        frame.head.angle = angle;
+        frame.torso = null;
+        // No Box2D sleep flag: live idle characters and awake resting bodies
+        // must both settle based on their actual attachment motion.
+        for (0..180) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        try std.testing.expect(hair_state.sleeping);
+        const settled = try std.testing.allocator.dupe(character_hair.Node, hair_state.nodes.items);
+        defer std.testing.allocator.free(settled);
+        const resting_position = frame.head.position;
+        for (0..120) |tick| {
+            frame.head.position.x = resting_position.x + 0.0002 * @sin(@as(f32, @floatFromInt(tick)));
+            frame.head.angle = angle + 0.0002 * @cos(@as(f32, @floatFromInt(tick)));
+            character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+            try std.testing.expect(hair_state.sleeping);
+            for (settled, hair_state.nodes.items) |before, after| {
+                try nearPoint(before.position, after.position, 0);
+                try nearPoint(vec.zero, after.velocity, 0);
+            }
+        }
+        // Individually tiny steps must eventually wake the chain; drift cannot
+        // evade detection by staying below the threshold on every fixed step.
+        for (0..8) |_| {
+            frame.head.position.x += 0.001;
+            character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        }
+        try std.testing.expect(!hair_state.sleeping);
+        try checkHairChain(&pack, hair_state);
+    }
+}
+
+test "crown locks lift above their roots during a fall and settle when the head stops" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    var hair_state: character_hair.State = .{ .player_id = null };
+    defer hair_state.nodes.deinit(allocator.allocator);
+    const definition = pack.hair.?.definition;
+    try hair_state.nodes.ensureTotalCapacity(allocator.allocator, definition.anchors.len * definition.motion.points_per_lock);
+    for ([_]bool{ false, true }) |facing| {
+        hair_state.initialized = false;
+        var frame = hairTestFrame(&set, &pack);
+        frame.head.facing_right = facing;
+        frame.torso = null;
+        for (0..180) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        for (0..60) |tick| {
+            frame.velocity.y = @as(f32, @floatFromInt(tick + 1)) * 0.2;
+            frame.head.position.y += frame.velocity.y / 60;
+            character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+            try std.testing.expect(!hair_state.sleeping);
+        }
+        var lifted: usize = 0;
+        for (definition.anchors, 0..) |anchor, index| {
+            if (!std.mem.startsWith(u8, anchor.id, "crown_")) continue;
+            const nodes = hair_state.nodes.items[index * hair_state.points_per_lock ..][0..hair_state.points_per_lock];
+            if (nodes[nodes.len - 1].position.y < nodes[0].position.y - 0.15) lifted += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 3), lifted);
+        frame.velocity = vec.zero;
+        for (0..150) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        try std.testing.expect(hair_state.sleeping);
+        // Stopping the fall must let the locks drop again before holding still.
+        for (definition.anchors, 0..) |anchor, index| {
+            if (!std.mem.startsWith(u8, anchor.id, "crown_")) continue;
+            const count = hair_state.points_per_lock;
+            const nodes = hair_state.nodes.items[index * count ..][0..count];
+            try std.testing.expect(nodes[count - 1].position.y > nodes[0].position.y + 0.15);
+        }
+    }
+}
+
+test "near-side hair hangs across the head and small head motion does not amplify into a large swing" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    var hair_state: character_hair.State = .{ .player_id = null };
+    defer hair_state.nodes.deinit(allocator.allocator);
+    const definition = pack.hair.?.definition;
+    try hair_state.nodes.ensureTotalCapacity(allocator.allocator, definition.anchors.len * definition.motion.points_per_lock);
+    for ([_]bool{ false, true }) |facing| {
+        hair_state.initialized = false;
+        var frame = hairTestFrame(&set, &pack);
+        frame.head.facing_right = facing;
+        for (0..300) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        try std.testing.expect(hair_state.sleeping);
+        const settled = try std.testing.allocator.dupe(character_hair.Node, hair_state.nodes.items);
+        defer std.testing.allocator.free(settled);
+        for (definition.anchors, 0..) |anchor, index| {
+            if (anchor.layer != .front) continue;
+            const count = hair_state.points_per_lock;
+            const nodes = settled[index * count ..][0..count];
+            const length = frame.appearance.length_m * anchor.length_scale;
+            try std.testing.expect(nodes[count - 1].position.y - nodes[0].position.y > 0.85 * length);
+            try std.testing.expect(@abs(nodes[count - 1].position.x - nodes[0].position.x) < 0.06);
+        }
+        const resting_frame = frame;
+        var maximum_excursion: f32 = 0;
+        for (0..60) |tick| {
+            const seconds = @as(f32, @floatFromInt(tick)) / 60;
+            const offset = 0.015 * @sin(seconds * 2 * std.math.pi * 2);
+            frame.head.position.x = resting_frame.head.position.x + offset;
+            frame.torso.?.a.x = resting_frame.torso.?.a.x + offset;
+            frame.torso.?.b.x = resting_frame.torso.?.b.x + offset;
+            character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+            for (settled, hair_state.nodes.items) |before, after| {
+                maximum_excursion = @max(maximum_excursion, vec.magnitude(vec.subtract(after.position, before.position)));
+            }
+        }
+        try std.testing.expect(maximum_excursion < 0.06);
+        frame = resting_frame;
+        for (0..240) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
+        try std.testing.expect(hair_state.sleeping);
     }
 }

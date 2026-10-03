@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const std = @import("std");
 const animation = @import("character_animation.zig");
 const data = @import("data.zig");
@@ -172,6 +173,7 @@ fn prepareHair(
     if (definition.anchors.len == 0 or definition.anchors.len > 64) {
         return invalid(detail, "hair.anchors: expected 1..64 named anchors", .{});
     }
+    try character_hair.validate(definition.motion, detail);
     try validateHairAppearance(definition.default, detail);
     var players: std.AutoHashMapUnmanaged(usize, data.CharacterHairAppearance) = .empty;
     for (definition.players) |entry| {
@@ -435,6 +437,11 @@ pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
         }
     }
     try loadHairImage(&hair.lock, head.definition.meters_per_pixel, detail);
+    const lock_canvas = sprite.getSprite(hair.lock.sprite_id.?).?.surface;
+    const tip = hair.lock.definition.pivot[1] + hair.definition.lock.source_size[1];
+    if (tip > @as(f32, @floatFromInt(lock_canvas.h))) {
+        return invalid(detail, "hair.lock.source_size: tip outside image canvas", .{});
+    }
 }
 
 pub fn destroy(pack: *Pack) void {
@@ -457,11 +464,13 @@ pub fn install(replacement: Pack) void {
     // Replacement bodies are already registered; only retire the old assets.
     var previous = assets;
     assets = replacement;
+    character_hair.resetAll();
     if (previous == null) return;
     destroy(&previous.?);
 }
 
 pub fn cleanup() void {
+    character_hair.cleanup();
     bodyParts.clearAndFree(allocator);
     if (assets == null) return;
     destroy(&assets.?);
@@ -557,6 +566,7 @@ fn drawHairLayer(
     maybe_head: ?PlacedPart,
     appearance: ?data.CharacterHairAppearance,
     layer: data.CharacterHairLayer,
+    owner: ?box2d.c.b2BodyId,
 ) !void {
     if (pack.hair == null or appearance == null) {
         return; // Optional style/appearance.
@@ -574,9 +584,11 @@ fn drawHairLayer(
         }, value.color);
     }
     if (value.length_m == 0) return; // A zero-length cut keeps scalp coverage.
-    for (hair.definition.anchors) |anchor| {
+    for (hair.definition.anchors, 0..) |anchor, index| {
         if (anchor.layer != layer) continue;
-        try drawHairImage(hair.lock, placeHairLock(pack, head, anchor, value), value.color);
+        const placed = placeHairLock(pack, head, anchor, value);
+        if (try character_hair.drawLock(owner, index, hair.lock, placed, value.color)) continue;
+        try drawHairImage(hair.lock, placed, value.color);
     }
 }
 
@@ -595,7 +607,7 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
     const weapon_depth: data.CharacterArtDepth = if (pack.weapon_joint == .right_hand) .right else .left;
     const appearance = hairForPlayer(pack, player_id);
     const head = if (pack.hair == null) null else placePart(pack, pack.hair.?.head_binding, points, frame, false);
-    try drawHairLayer(pack, head, appearance, .back);
+    try drawHairLayer(pack, head, appearance, .back, p.bodyId);
     for (pack.order[@intFromBool(frame.facing_right)]) |item| {
         switch (item) {
             .holster => {
@@ -611,11 +623,11 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
                     .part = placed.part,
                     .facing_right = placed.facing_right,
                     .skin_color = tint,
-                }, placed.position, placed.angle);
+                }, placed.position, placed.angle, null);
             },
         }
     }
-    try drawHairLayer(pack, head, appearance, .front);
+    try drawHairLayer(pack, head, appearance, .front, p.bodyId);
 }
 
 // Connected heads use scene hair passes so torso/arm pool insertion order cannot
@@ -648,19 +660,19 @@ pub fn drawAllConnectedHair(layer: data.CharacterHairLayer) !void {
     const pack = &assets.?;
     for (bodyParts.keys()) |body_id| {
         const frame = connectedHairFrame(body_id) orelse continue;
-        try drawHairLayer(pack, frame.head, frame.appearance, layer);
+        try drawHairLayer(pack, frame.head, frame.appearance, layer, body_id);
     }
 }
 
 // Entity drawing supplies its existing interpolated transform and draw order.
 pub fn drawBodyPart(bodyId: box2d.c.b2BodyId, position: vec.Vec2, angle: f32) !bool {
     const visual = bodyParts.get(bodyId) orelse return false;
-    try drawPart(visual, position, angle);
+    try drawPart(visual, position, angle, bodyId);
     return true;
 }
 
 // Living and detached parts share placement; only severed pieces draw blood.
-pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void {
+pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32, owner: ?box2d.c.b2BodyId) !void {
     if (assets == null or part_visual.part >= assets.?.parts.len) {
         std.log.warn("character_art.drawPart: detached artwork is unavailable", .{});
         return;
@@ -674,7 +686,7 @@ pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void
         .far = false,
     };
     const hair = if (part_visual.severed) part_visual.hair else null;
-    try drawHairLayer(&assets.?, placed_head, hair, .back);
+    try drawHairLayer(&assets.?, placed_head, hair, .back, owner);
     const anchor = camera.relativePosition(conv.m2Pixel(vec.toBox2d(position)));
     const scale = part.definition.meters_per_pixel;
     const pivot: vec.IVec2 = .{
@@ -701,5 +713,5 @@ pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void
         };
         try sprite.drawPlacedTinted(visual, placement, tint);
     }
-    try drawHairLayer(&assets.?, placed_head, hair, .front);
+    try drawHairLayer(&assets.?, placed_head, hair, .front, owner);
 }

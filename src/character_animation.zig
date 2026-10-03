@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const std = @import("std");
 const allocator = @import("allocator.zig").allocator;
 const data = @import("data.zig");
@@ -700,6 +701,7 @@ fn loadAssets() !void {
     var art = try character_art.prepare(try data.loadCharacterArtData(allocator, &diagnostic), replacement.rig, &diagnostic);
     errdefer character_art.destroy(&art);
     try character_art.loadSprites(&art, &diagnostic);
+    try character_hair.preparePlayers(&art);
     try gibbing.replaceArtwork(&art);
     installAssets(replacement);
     character_art.install(art);
@@ -763,6 +765,8 @@ pub fn resetPlayer(player_id: usize) void {
         return;
     };
     state.* = .{ .facing_right = state.facing_right };
+    const p = player.players.get(player_id) orelse return; // Isolated pose tests have no entity.
+    character_hair.reset(p.bodyId);
 }
 
 pub fn clearPlayers() void {

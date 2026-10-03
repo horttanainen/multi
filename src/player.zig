@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const std = @import("std");
 const sdl = @import("sdl.zig");
 const tex = @import("texture.zig");
@@ -408,6 +409,7 @@ fn spawnImpl(existingCameraId: ?usize) !usize {
 
     try score.registerPlayer(playerId);
     try character_animation.register(playerId);
+    try character_hair.registerPlayer(playerId);
 
     return playerId;
 }

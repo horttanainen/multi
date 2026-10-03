@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const box2d = @import("box2d.zig");
 
 const config = @import("config.zig");
@@ -59,6 +60,7 @@ pub fn step() !usize {
             try sensor.processSensorEvents();
             character_animation.fixedUpdate(config.physics.dt);
             try processContacts();
+            character_hair.fixedUpdate(config.physics.dt);
         }
         time.accumulator -= config.physics.dt;
         stepCount += 1;

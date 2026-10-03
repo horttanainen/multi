@@ -392,6 +392,24 @@ pub const CharacterHairAnchor = struct {
     length_scale: f32,
     layer: CharacterHairLayer,
 };
+pub const CharacterHairMotion = struct {
+    points_per_lock: u8 = 6,
+    iterations: u8 = 6,
+    gravity_mps2: f32 = 9,
+    damping_per_second: f32 = 2.5,
+    stiffness_per_second: f32 = 1.5,
+    root_bend_radians: f32 = 3.0,
+    bend_radians: f32 = 0.85,
+    head_radius_m: f32 = 0.13,
+    torso_radius_m: f32 = 0.13,
+    teleport_distance_m: f32 = 1.5,
+    sleep_speed_mps: f32 = 0.04,
+    sleep_seconds: f32 = 0.6,
+    settle_seconds: f32 = 1.8,
+    rest_distance_m: f32 = 0.003,
+    bend_damping_per_second: f32 = 12,
+    motion_transfer: f32 = 0.2,
+};
 pub const CharacterHairData = struct {
     head_binding: []const u8,
     scalp: CharacterHairImage,
@@ -399,6 +417,7 @@ pub const CharacterHairData = struct {
     anchors: []const CharacterHairAnchor,
     default: CharacterHairAppearance,
     players: []const struct { player_id: usize, appearance: CharacterHairAppearance } = &.{},
+    motion: CharacterHairMotion = .{},
 };
 pub const CharacterArtLayer = struct { role: enum { skin, fixed }, file: []const u8 };
 pub const CharacterPartPhysics = struct {

@@ -1,14 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="150" height="170" viewBox="0 0 150 170">
   <title>Curb Rat / hair scalp</title>
   <g id="hair" stroke="#222222" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M13 83 Q2 60 10 42 Q19 19 40 11 Q63 0 87 9 Q111 15 119 34 L106 33 L96 28 L87 32 L76 26 L65 33 L52 32 L42 45 L28 52 L24 69 L23 83 Z" fill="#515151" stroke-width="3.5" />
-    <path d="M116 30 Q103 9 81 8 Q59 4 44 15 L50 24 Q76 10 92 18 L104 28 Z" fill="#989898" stroke-width="2.6" />
-    <path d="M93 25 Q73 6 49 12 Q22 17 13 39 L22 48 Q30 28 48 24 Q66 18 79 32 Z" fill="#767676" stroke-width="2.8" />
-    <path d="M67 29 Q48 13 28 27 Q11 38 10 56 L20 64 Q19 44 34 37 Q47 31 55 37 Z" fill="#b5b5b5" stroke-width="2.8" />
+    <path d="M37 110 Q23 99 15 84 Q7 65 12 44 Q19 23 40 13 Q63 2 85 10 Q100 15 108 25 Q95 23 87 30 Q75 40 68 58 L63 76 Q60 82 53 78 Q43 71 36 76 Q29 82 33 94 L39 104 Q41 109 37 110 Z" fill="#515151" stroke-width="3.5" />
+    <path d="M104 23 Q85 7 66 10 Q48 11 37 22 L45 29 Q64 16 82 23 L91 28 Z" fill="#989898" stroke-width="2.6" />
+    <path d="M82 34 Q66 15 45 24 Q22 34 17 54 L26 62 Q29 43 44 38 Q59 33 70 45 Z" fill="#767676" stroke-width="2.8" />
+    <path d="M66 53 Q50 37 32 49 Q18 60 19 76 L28 86 Q27 69 38 62 Q48 57 60 66 Z" fill="#b5b5b5" stroke-width="2.8" />
+    <path d="M28 70 Q16 77 22 89 Q28 100 36 106 L35 100 Q25 88 32 77 Z" fill="#767676" stroke-width="2.6" />
     <g fill="none" stroke="#f7f7f7" stroke-width="2.9">
-      <path d="M56 16 Q72 8 89 17 M100 20 L107 25" />
-      <path d="M24 35 Q41 17 59 21 M68 23 L77 28" />
-      <path d="M18 49 Q25 33 42 32" />
+      <path d="M49 19 Q69 10 84 19 M92 21 L99 24" />
+      <path d="M27 43 Q42 25 60 29 M68 32 L73 36" />
+      <path d="M25 66 Q35 48 50 53 M56 56 L60 60" />
+      <path d="M24 82 Q24 93 30 98" />
     </g>
   </g>
 </svg>

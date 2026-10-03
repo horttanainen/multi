@@ -411,7 +411,7 @@ stick-figure overlay remains available for diagnosis.
 
 #### 5A. Hair appearance and head anchors
 
-Accepted by the user for commit, before hair motion: a hair-colored scalp layer and
+Committed as `9383af0`, before hair motion: a hair-colored scalp layer and
 twelve instances of one hand-authored lock SVG, including temple locks in front of the ear.
 The existing art manifest defines named head-local roots, lock widths, length
 ratios, rest angles and draw layers, with independent per-player hair color and
@@ -419,8 +419,23 @@ base length. Hair follows live, ragdoll and giblet heads through the existing
 artwork owner. No new hair physics or rig changes are part of this commit.
 See [configuration and review steps](character_animation_hair.md).
 
-The next proposed phase adds moving locks; agree on its implementation plan
-before starting. Ponytail and loose-hair styles remain later work.
+#### 5B. Hair motion
+
+Implemented and accepted by the user for commit, including the extended side scalp.
+Short preallocated chains pin to the existing named roots and deform the shared
+lock texture through existing GPU sprite batches. Gravity, damping, bend limits,
+resolution and simple head/torso collision are configured in the art manifest.
+Fixed-step motion survives death into pooled heads, resets on reuse/teleport/reload,
+and sleeps after hair settles on still heads, independently of Box2D's sleep flag.
+User feedback adds three crown locks and a downward curtain over the near ear and
+cheek. Near-side locks overlap the body in projection; rear locks use the obstacles.
+Reduced motion transmission and relative damping soften the response, while
+measured quiet motion controls sleep after the locks settle. No Box2D hair bodies
+or new editor.
+
+Validate with the existing character checks and repeated-death benchmark, then
+review running, jumps, turns, wall poses and deaths in game. Environment/self-hair
+collision, ponytail and loose-hair styles remain later work.
 
 ### 6. Body-part giblets, ragdolls and shared gibbing rules
 

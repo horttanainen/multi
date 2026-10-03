@@ -1,3 +1,4 @@
+const character_hair = @import("character_hair.zig");
 const std = @import("std");
 const sdl = @import("sdl.zig");
 
@@ -401,6 +402,7 @@ pub fn cleanupEntities() void {
 }
 
 pub fn cleanupOne(entity: Entity) void {
+    character_hair.remove(entity.bodyId);
     _ = character_art.bodyParts.swapRemove(entity.bodyId);
     _ = damage.unregister(entity.bodyId);
     _ = pool.discardBody(entity.bodyId);
