@@ -44,6 +44,7 @@ pub const PartSnapshot = struct {
     velocity: vec.Vec2,
     angular_velocity: f32,
     survival_weight: f32,
+    hair: ?data.CharacterHairAppearance = null,
 };
 pub const Snapshot = struct { parts: [64]PartSnapshot = undefined, count: usize = 0 };
 
@@ -65,6 +66,7 @@ pub fn snapshotPose(
     carrying: bool,
     color: sprite.Color,
     velocity: vec.Vec2,
+    hair: ?data.CharacterHairAppearance,
 ) Snapshot {
     var result: Snapshot = .{};
     const points = character_art.worldJoints(rig, frame);
@@ -80,6 +82,7 @@ pub fn snapshotPose(
             .velocity = velocity,
             .angular_velocity = 0,
             .survival_weight = pack.bindings[index].survival_weight,
+            .hair = if (pack.hair != null and index == pack.hair.?.head_binding) hair else null,
         };
         result.count += 1;
     }
@@ -340,6 +343,7 @@ pub fn activatePart(part: PartSnapshot, scatter_velocity: vec.Vec2, scatter_spin
         .facing_right = part.placed.facing_right,
         .skin_color = part.skin_color,
         .severed = true,
+        .hair = part.hair,
     };
     box2d.c.b2Body_SetTransform(
         body,
@@ -437,7 +441,8 @@ pub fn snapshotPlayer(player_id: usize) ?Snapshot {
     const rig = character_animation.assets.?.rig;
     const carrying = player.usesProceduralWeapon(p);
     const velocity = vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(p.bodyId));
-    var snapshot = snapshotPose(pack, rig, frame, carrying, p.color, velocity);
+    const hair = character_art.hairForPlayer(pack, player_id);
+    var snapshot = snapshotPose(pack, rig, frame, carrying, p.color, velocity, hair);
     const state = character_animation.states.get(player_id) orelse {
         std.log.warn("gibbing.snapshotPlayer: animation state is missing", .{});
         return null;
@@ -447,7 +452,7 @@ pub fn snapshotPlayer(player_id: usize) ?Snapshot {
         return null;
     };
     if (state.initialized and state.facing_right == state.previous_facing_right) {
-        const previous = snapshotPose(pack, rig, before, carrying, p.color, vec.zero);
+        const previous = snapshotPose(pack, rig, before, carrying, p.color, vec.zero, hair);
         inheritPoseMotion(&snapshot, previous, frame.body, before.body, state.step_seconds);
     }
     return snapshot;

@@ -17,6 +17,7 @@ const movement = @import("src/movement.zig");
 const player_input = @import("src/player_input.zig");
 const gamepad = @import("src/gamepad.zig");
 const sprite = @import("src/sprite.zig");
+const texture = @import("src/texture.zig");
 const weapon = @import("src/weapon.zig");
 const control = @import("src/control.zig");
 const entity = @import("src/entity.zig");
@@ -70,7 +71,8 @@ test "death snapshots preserve every anatomical part pose layer tint and carried
                     0.5,
                     null,
                 );
-                const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, true, color, .{ .x = 5, .y = -3 });
+                const hair = character_art.hairForPlayer(&pack, 1);
+                const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, true, color, .{ .x = 5, .y = -3 }, hair);
                 try std.testing.expectEqual(pack.bindings.len, snapshot.count);
                 var seen = [_]bool{false} ** 64;
                 var grips: usize = 0;
@@ -80,6 +82,8 @@ test "death snapshots preserve every anatomical part pose layer tint and carried
                     seen[part.binding] = true;
                     const expected = character_art.placePart(&pack, part.binding, joints, frame, true);
                     try std.testing.expectEqualDeep(expected, part.placed);
+                    const expected_hair = if (part.binding == pack.hair.?.head_binding) hair else null;
+                    try std.testing.expectEqualDeep(expected_hair, part.hair);
                     const multiplier = if (expected.far) pack.far_skin_multiplier else 1;
                     try std.testing.expectEqualDeep(
                         character_art.skinColor(color, multiplier),
@@ -103,7 +107,7 @@ test "weighted survival is reproducible per anatomical part and may consume ever
     defer character_art.destroy(&pack);
     const pose = animation.evaluatePose(&set, 0, .neutral);
     const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
-    var snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero);
+    var snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero, null);
     var first = std.Random.DefaultPrng.init(901);
     var second = std.Random.DefaultPrng.init(901);
     var counts = [_]usize{0} ** 64;
@@ -129,7 +133,7 @@ test "detached motion adds limb swing without doubling root velocity or spinning
     defer character_art.destroy(&pack);
     const pose = animation.evaluatePose(&set, 0, .neutral);
     const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
-    var before = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero);
+    var before = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 255, .b = 255 }, vec.zero, null);
     before.parts[0].placed.angle = std.math.pi - 0.01;
     var after = before;
     for (after.parts[0..after.count]) |*part| {
@@ -188,6 +192,7 @@ test "anatomical pools preserve colliders and activation identity through damage
             true,
             .{ .r = 90, .g = 150, .b = 210 },
             .{ .x = 7, .y = -2 },
+            character_art.hairForPlayer(&pack, 1),
         );
         for (snapshot.parts[0..snapshot.count]) |part| {
             const body = try gibbing.activatePart(part, .{ .x = 1, .y = -1 }, 2);
@@ -199,6 +204,7 @@ test "anatomical pools preserve colliders and activation identity through damage
             try std.testing.expectApproxEqAbs(@as(f32, 2), box2d.c.b2Body_GetAngularVelocity(body), 0.00001);
             const visual = character_art.bodyParts.get(body).?;
             try std.testing.expectEqualDeep(part.skin_color, visual.skin_color);
+            try std.testing.expectEqualDeep(part.hair, visual.hair);
             try std.testing.expectEqual(part.placed.part, visual.part);
             try std.testing.expectEqual(facing, visual.facing_right);
             try std.testing.expect(visual.severed);
@@ -224,9 +230,12 @@ test "anatomical pools preserve colliders and activation identity through damage
             try std.testing.expectEqual(@as(u64, 0), pool.memberships.get(body).?.activation);
             var next_part = part;
             next_part.skin_color = .{ .r = 10, .g = 210, .b = 80 };
+            // Recycling also removes any previous owner's hairstyle.
+            next_part.hair = null;
             const reused = try gibbing.activatePart(next_part, vec.zero, 0);
             try std.testing.expect(box2d.c.B2_ID_EQUALS(body, reused));
             try std.testing.expectEqualDeep(next_part.skin_color, character_art.bodyParts.get(reused).?.skin_color);
+            try std.testing.expect(character_art.bodyParts.get(reused).?.hair == null);
             try std.testing.expect(character_art.bodyParts.get(reused).?.severed);
             try std.testing.expect(pool.memberships.get(body).?.activation != activation);
             try std.testing.expectEqual(@as(f32, 1), damage.components.get(body).?.model.health.current);
@@ -378,9 +387,9 @@ test "previous physics frame preserves aimed arm motion when the root remains st
         try nearPoint(before.pose.joints[index], sampled_before.pose.joints[index], 0.00001);
     }
     const tint: sprite.Color = .{ .r = 100, .g = 120, .b = 140 };
-    const original = gibbing.snapshotPose(&pack, animation.assets.?.rig, before, true, tint, vec.zero);
-    const previous = gibbing.snapshotPose(&pack, animation.assets.?.rig, sampled_before, true, tint, vec.zero);
-    var current = gibbing.snapshotPose(&pack, animation.assets.?.rig, after, true, tint, vec.zero);
+    const original = gibbing.snapshotPose(&pack, animation.assets.?.rig, before, true, tint, vec.zero, null);
+    const previous = gibbing.snapshotPose(&pack, animation.assets.?.rig, sampled_before, true, tint, vec.zero, null);
+    var current = gibbing.snapshotPose(&pack, animation.assets.?.rig, after, true, tint, vec.zero, null);
     gibbing.inheritPoseMotion(&current, previous, after.body, sampled_before.body, 1.0 / 60.0);
     var swinging_parts: usize = 0;
     for (current.parts[0..current.count], original.parts[0..original.count]) |part, old| {
@@ -468,7 +477,7 @@ test "artwork reload prepares absent giblet pools after subsystem initialization
     try std.testing.expectEqual(pool.memberships.count(), character_art.bodyParts.count());
     const pose = animation.evaluatePose(&set, 0, .neutral);
     const frame = animation.solveAimedPose(&set, pose, vec.zero, true, vec.east, 0, null);
-    const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 100, .b = 50 }, vec.zero);
+    const snapshot = gibbing.snapshotPose(&pack, set.rig, frame, false, .{ .r = 255, .g = 100, .b = 50 }, vec.zero, null);
     const body = try gibbing.activatePart(snapshot.parts[0], vec.zero, 0);
     const corpse_root = (try ragdoll.create(snapshot, &pack)).?;
     const corpse = ragdoll.corpses.get(corpse_root).?;
@@ -1112,6 +1121,7 @@ fn createRagdollFixture(set: *const animation.Assets, position: vec.Vec2, facing
         false,
         .{ .r = 70, .g = 140, .b = 210 },
         .{ .x = 3, .y = -2 },
+        character_art.hairForPlayer(&character_art.assets.?, 1),
     );
     return (try ragdoll.create(snapshot, &character_art.assets.?)).?;
 }
@@ -1227,6 +1237,7 @@ test "ragdolls preserve death pose and velocity and enforce mirrored anatomical 
             try nearPoint(part.placed.position, vec.fromBox2d(box2d.c.b2Body_GetPosition(body)), 0.00001);
             try nearPoint(part.velocity, vec.fromBox2d(box2d.c.b2Body_GetLinearVelocity(body)), 0.00001);
             try std.testing.expectEqualDeep(part.skin_color, character_art.bodyParts.get(body).?.skin_color);
+            try std.testing.expectEqualDeep(part.hair, character_art.bodyParts.get(body).?.hair);
             try std.testing.expect(pool.memberships.get(body).?.reserved);
             try std.testing.expect(!character_art.bodyParts.get(body).?.severed);
             try std.testing.expect(box2d.c.B2_ID_EQUALS(root, damage.healthOwner(body)));
@@ -1235,6 +1246,36 @@ test "ragdolls preserve death pose and velocity and enforce mirrored anatomical 
             try std.testing.expectEqual(corpse.collision_group, filter.groupIndex);
             try std.testing.expect((filter.maskBits & collision.CATEGORY_PLAYER) != 0);
             try std.testing.expect((filter.maskBits & collision.CATEGORY_RUBBLE) != 0);
+            const hair_frame = character_art.connectedHairFrame(body);
+            if (part.hair == null) {
+                try std.testing.expect(hair_frame == null);
+                continue;
+            }
+            try std.testing.expectEqualDeep(part.hair.?, hair_frame.?.appearance);
+            try nearPoint(part.placed.position, hair_frame.?.head.position, 0.00001);
+            try std.testing.expectEqual(part.placed.facing_right, hair_frame.?.head.facing_right);
+            const head_angle = box2d.getState(body).rotAngle;
+            try std.testing.expectApproxEqAbs(head_angle, hair_frame.?.head.angle, 0.00001);
+            // The two scene passes must use the same interpolation as the head.
+            const e = entity.getEntity(body).?;
+            const previous_state = e.state;
+            defer e.state = previous_state;
+            const previous_alpha = time.alpha;
+            defer time.alpha = previous_alpha;
+            e.state = .{
+                .pos = .{ .x = part.placed.position.x + 1, .y = part.placed.position.y },
+                .rotAngle = head_angle + 0.4,
+            };
+            time.alpha = 0.25;
+            const interpolated = character_art.connectedHairFrame(body).?;
+            try nearPoint(vec.add(part.placed.position, .{ .x = 0.75, .y = 0 }), interpolated.head.position, 0.00001);
+            try std.testing.expectApproxEqAbs(head_angle + 0.3, interpolated.head.angle, 0.00001);
+            e.enabled = false;
+            try std.testing.expect(character_art.connectedHairFrame(body) == null);
+            e.enabled = true;
+            character_art.bodyParts.getPtr(body).?.severed = true;
+            try std.testing.expect(character_art.connectedHairFrame(body) == null);
+            character_art.bodyParts.getPtr(body).?.severed = false;
         }
     }
     // Allow the ragdolls to settle before measuring the soft joint limits.
@@ -1612,6 +1653,173 @@ fn loadArt(rig: animation.Rig) !character_art.Pack {
     return character_art.prepare(try data.parseCharacterArtData(std.testing.allocator, art_json, &detail), rig, &detail);
 }
 
+test "hair settings support per-player lengths and colors and legacy packs without hair" {
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const first = character_art.hairForPlayer(&pack, 0).?;
+    const second = character_art.hairForPlayer(&pack, 1).?;
+    try std.testing.expectEqualDeep(first, character_art.hairForPlayer(&pack, 999).?);
+    try std.testing.expect(first.length_m != second.length_m);
+    try std.testing.expect(!std.meta.eql(first.color, second.color));
+    try std.testing.expectEqual(@as(usize, 12), pack.hair.?.definition.anchors.len);
+    try std.testing.expectEqualStrings("character_art/curb_rat_v1/export/hair_lock.svg", pack.hair.?.lock.path);
+
+    for ([_]bool{ false, true }) |explicit_null| {
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, art_json, .{});
+        defer parsed.deinit();
+        if (explicit_null) {
+            parsed.value.object.getPtr("hair").?.* = .null;
+        } else {
+            _ = parsed.value.object.swapRemove("hair");
+        }
+        const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, parsed.value, .{});
+        defer std.testing.allocator.free(bytes);
+        var detail: data.CharacterAssetDiagnostic = .{};
+        var legacy = try character_art.prepare(
+            try data.parseCharacterArtData(std.testing.allocator, bytes, &detail),
+            set.rig,
+            &detail,
+        );
+        defer character_art.destroy(&legacy);
+        try std.testing.expect(character_art.hairForPlayer(&legacy, 0) == null);
+        try std.testing.expectEqual(pack.bindings.len, legacy.bindings.len);
+    }
+}
+
+test "hair roots follow posed and mirrored heads while length changes preserve roots and thickness" {
+    runtime.init(std.testing.io);
+    var set = try load();
+    defer set.arena.deinit();
+    var pack = try loadArt(set.rig);
+    defer character_art.destroy(&pack);
+    const hair = pack.hair.?;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const memory = arena.allocator();
+    const Review = struct {
+        facing_right: bool,
+        hair: data.CharacterHairAppearance,
+        joints: [std.meta.fields(animation.Joint).len]vec.Vec2,
+        head: character_art.PlacedPart,
+        locks: []character_art.HairPlacement,
+    };
+    var reviews: std.ArrayList(Review) = .empty;
+    for (0..63) |sample| {
+        var pose = animation.evaluatePose(&set, @as(f64, @floatFromInt(sample)) / 60, .run);
+        if (sample == 0) pose = animation.evaluatePose(&set, 0, .neutral);
+        if (sample > 60) {
+            var controls = set.rig.neutral;
+            controls[@intFromEnum(animation.Control.torso_angle)] = if (sample == 61) 1.05 else -0.8;
+            pose = animation.solvePose(set.rig, controls);
+        }
+        for ([_]bool{ false, true }) |facing| {
+            var frame: animation.FramePose = .{
+                .pose = pose,
+                .body = vec.zero,
+                .facing_right = facing,
+                .weapon = .{ .position = vec.zero, .angle = 0 },
+                .weapon_facing_right = facing,
+            };
+            const joints = character_art.worldJoints(set.rig, frame);
+            const head = character_art.placePart(&pack, hair.head_binding, joints, frame, false);
+            frame.facing_right = !facing;
+            const other_joints = character_art.worldJoints(set.rig, frame);
+            const other_head = character_art.placePart(&pack, hair.head_binding, other_joints, frame, false);
+            for ([_]usize{ 0, 1 }) |player_id| {
+                const appearance = character_art.hairForPlayer(&pack, player_id).?;
+                const placements = try memory.alloc(character_art.HairPlacement, hair.definition.anchors.len);
+                for (hair.definition.anchors, placements) |anchor, *placed| {
+                    placed.* = character_art.placeHairLock(&pack, head, anchor, appearance);
+                    const source_size = hair.definition.lock.source_size;
+                    try std.testing.expectApproxEqAbs(anchor.width_m, placed.scale.x * source_size[0], 0.000001);
+                    try std.testing.expectApproxEqAbs(
+                        appearance.length_m * anchor.length_scale,
+                        placed.scale.y * source_size[1],
+                        0.000001,
+                    );
+                    var shorter = appearance;
+                    shorter.length_m *= 0.4;
+                    const short = character_art.placeHairLock(&pack, head, anchor, shorter);
+                    try nearPoint(placed.position, short.position, 0.000001);
+                    try std.testing.expectEqual(placed.scale.x, short.scale.x);
+                    try std.testing.expectApproxEqAbs(placed.scale.y * 0.4, short.scale.y, 0.000001);
+                    const mirrored = character_art.placeHairLock(&pack, other_head, anchor, appearance);
+                    try nearPoint(.{ .x = -placed.position.x, .y = placed.position.y }, mirrored.position, 0.000001);
+                    try std.testing.expectApproxEqAbs(@as(f32, 0), @sin(placed.angle + mirrored.angle), 0.000001);
+                    const definition = pack.parts[head.part].definition;
+                    const local = vec.Vec2{
+                        .x = anchor.position[0] - definition.pivot[0],
+                        .y = anchor.position[1] - definition.pivot[1],
+                    };
+                    const radius = vec.magnitude(local) * definition.meters_per_pixel;
+                    try std.testing.expectApproxEqAbs(radius, vec.magnitude(vec.subtract(placed.position, head.position)), 0.000001);
+                    shorter.length_m = 0;
+                    const shaved = character_art.placeHairLock(&pack, head, anchor, shorter);
+                    try nearPoint(placed.position, shaved.position, 0.000001);
+                    try std.testing.expectEqual(@as(f32, 0), shaved.scale.y);
+                }
+                if (sample == 0) {
+                    try reviews.append(memory, .{
+                        .facing_right = facing,
+                        .hair = appearance,
+                        .joints = joints,
+                        .head = head,
+                        .locks = placements,
+                    });
+                }
+            }
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(memory, reviews.items, .{});
+    try fs.writeFile("artifacts/character_animation/hair_samples.json", bytes);
+}
+
+test "draw-local hair scaling keeps the sprite root pinned without changing shared geometry" {
+    var surface = std.mem.zeroes(sdl.Surface);
+    surface.w = 160;
+    surface.h = 320;
+    var image = texture.Texture{ .width = 160, .height = 320 };
+    const visual = sprite.Sprite{
+        .texture = &image,
+        .surface = &surface,
+        .sizeBasis = .world_meters,
+        .sourceScale = .{ .x = 1, .y = 1 },
+        .basisOffset = vec.zero,
+        .basisAnchorPointLeft = null,
+        .basisAnchorPointRight = null,
+        .basisMuzzlePoint = null,
+        .scale = .{ .x = 1, .y = 1 },
+        .sizeM = .{ .x = 1, .y = 2 },
+        .sizeP = .{ .x = 160, .y = 320 },
+        .offset = .{ .x = 0, .y = 0 },
+        .imgPath = "hair-test",
+        .atlasProfile = .preserve_detail,
+        .geometryId = 0,
+    };
+    const before = visual;
+    for ([_]f32{ 40, 80, 160 }) |pixels_per_meter| {
+        for ([_]f32{ 0.1, 0.8, 2 }) |length| {
+            const scale = vec.Vec2{ .x = 0.003225 * pixels_per_meter, .y = length / 200 * pixels_per_meter };
+            const scaled = try sprite.scaledForDraw(visual, scale);
+            const pivot = vec.IVec2{
+                .x = @intFromFloat(@round(80 * scale.x)),
+                .y = @intFromFloat(@round(20 * scale.y)),
+            };
+            for ([_]bool{ false, true }) |flip| {
+                for ([_]f32{ -2.5, 0, 1.2 }) |angle| {
+                    const placed = sprite.placeAtAnchor(scaled, pivot, .{ .x = 170, .y = 230 }, angle, flip);
+                    try std.testing.expectEqualDeep(placed.anchorPosition, sprite.placedPoint(scaled, placed, pivot));
+                }
+            }
+            try std.testing.expectEqualDeep(before.sizeP, visual.sizeP);
+            try std.testing.expectEqualDeep(before.scale, visual.scale);
+            try std.testing.expect(before.texture == scaled.texture);
+        }
+    }
+}
+
 test "art files use shared strict decoding and own their data after input is freed" {
     runtime.init(std.testing.io);
     var set = try load();
@@ -1668,6 +1876,17 @@ test "invalid art candidates preserve the installed pack and report named fields
         .{ "\"near_foot\"", "\"near_shin\"", "duplicate binding" },
         .{ "\"length_mode\": \"rig_bone\"", "\"length_mode\": \"typo\"", "length_mode" },
         .{ "\"meters_per_pixel\": 0.005", "\"meters_per_pixel\": 0.007", "length differs" },
+        .{ "\"head_binding\": \"head\"", "\"head_binding\": \"missing\"", "hair.head_binding" },
+        .{ "\"head_binding\": \"head\"", "\"head_binding\": \"torso\"", "hair.head_binding" },
+        .{ "\"length_m\": 0.8", "\"length_m\": -1", "hair appearance.length_m" },
+        .{ "\"length_m\": 0.58", "\"length_m\": 3", "hair appearance.length_m" },
+        .{ "\"width_m\": 0.04,", "\"width_m\": 0,", "width_m" },
+        .{ "\"length_m\": 0.8", "\"length_m\": 1e999", "finite" },
+        .{ "\"export/hair_scalp.svg\"", "\"../hair.svg\"", "hair image" },
+        .{ "\"export/hair_lock.svg\"", "\"../lock.svg\"", "hair image" },
+        .{ "168.29735589", "0", "hair.lock.source_size" },
+        .{ "\"id\": \"temple_front\"", "\"id\": \"temple_long\"", "hair.anchors" },
+        .{ "\"layer\": \"back\"", "\"layer\": \"sideways\"", "layer" },
     };
     for (cases) |case| {
         var detail: data.CharacterAssetDiagnostic = .{};
@@ -1699,29 +1918,44 @@ test "art SVGs decode in SDL with matching canvases and neutral skin and blood m
             defer sdl.destroySurface(surface);
             if (layer == 0) canvas = .{ surface.w, surface.h };
             try std.testing.expectEqual(canvas, [2]c_int{ surface.w, surface.h });
-            var visible: usize = 0;
-            var transparent: usize = 0;
-            var y: c_int = 0;
-            while (y < surface.h) : (y += 1) {
-                var x: c_int = 0;
-                while (x < surface.w) : (x += 1) {
-                    var color: sdl.Color = undefined;
-                    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, x, y, &color.r, &color.g, &color.b, &color.a));
-                    if (color.a == 0) {
-                        transparent += 1;
-                        continue;
-                    }
-                    visible += 1;
-                    if (layer == 1) continue;
-                    try std.testing.expectEqual(color.r, color.g);
-                    try std.testing.expectEqual(color.g, color.b);
-                }
-            }
-            try std.testing.expect(transparent > 0);
-            if (layer != 0) {
-                try std.testing.expect(visible > 0);
-            }
+            try checkArtSurface(surface, layer != 1, layer != 0);
         }
+    }
+    if (pack.hair == null) return;
+    const hair = pack.hair.?;
+    for ([_]character_art.HairImage{ hair.scalp, hair.lock }) |image| {
+        const terminated = try std.testing.allocator.dupeZ(u8, image.path);
+        defer std.testing.allocator.free(terminated);
+        const surface = try sdl.image.load(terminated);
+        defer sdl.destroySurface(surface);
+        try checkArtSurface(surface, true, true);
+        try std.testing.expect(image.definition.pivot[0] <= @as(f32, @floatFromInt(surface.w)));
+        try std.testing.expect(image.definition.pivot[1] <= @as(f32, @floatFromInt(surface.h)));
+    }
+}
+
+fn checkArtSurface(surface: *sdl.Surface, neutral: bool, require_visible: bool) !void {
+    var visible: usize = 0;
+    var transparent: usize = 0;
+    var y: c_int = 0;
+    while (y < surface.h) : (y += 1) {
+        var x: c_int = 0;
+        while (x < surface.w) : (x += 1) {
+            var color: sdl.Color = undefined;
+            try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(surface, x, y, &color.r, &color.g, &color.b, &color.a));
+            if (color.a == 0) {
+                transparent += 1;
+                continue;
+            }
+            visible += 1;
+            if (!neutral) continue;
+            try std.testing.expectEqual(color.r, color.g);
+            try std.testing.expectEqual(color.g, color.b);
+        }
+    }
+    try std.testing.expect(transparent > 0);
+    if (require_visible) {
+        try std.testing.expect(visible > 0);
     }
 }
 

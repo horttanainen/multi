@@ -693,5 +693,185 @@
     "Fixed layers retain colors; only skin layers receive player tint and depth shading.",
     "Head is decorative and intentionally larger than the debug head ring.",
     "Foot contacts match the existing heel and toe; claw tips extend beyond that support span."
-  ]
+  ],
+  "hair": {
+    "head_binding": "head",
+    "scalp": {
+      "source": "source/hair_scalp.svg",
+      "file": "export/hair_scalp.svg",
+      "pivot": [
+        79,
+        148
+      ]
+    },
+    "anchors": [
+      {
+        "id": "rear_outer",
+        "position": [
+          79,
+          20
+        ],
+        "angle_radians": 0.59687436,
+        "width_m": 0.04,
+        "length_scale": 0.88219004,
+        "layer": "back"
+      },
+      {
+        "id": "rear_upper",
+        "position": [
+          45,
+          27
+        ],
+        "angle_radians": 0.37700069,
+        "width_m": 0.036,
+        "length_scale": 0.85413997,
+        "layer": "back"
+      },
+      {
+        "id": "rear_middle",
+        "position": [
+          32,
+          43
+        ],
+        "angle_radians": 0.27225541,
+        "width_m": 0.041,
+        "length_scale": 0.82452614,
+        "layer": "back"
+      },
+      {
+        "id": "rear_long",
+        "position": [
+          23,
+          68
+        ],
+        "angle_radians": 0.18725392,
+        "width_m": 0.039,
+        "length_scale": 0.77956496,
+        "layer": "back"
+      },
+      {
+        "id": "nape_long",
+        "position": [
+          36,
+          87
+        ],
+        "angle_radians": 0.14666649,
+        "width_m": 0.042,
+        "length_scale": 0.71720005,
+        "layer": "back"
+      },
+      {
+        "id": "rear_inner",
+        "position": [
+          42,
+          51
+        ],
+        "angle_radians": 0.27651395,
+        "width_m": 0.034,
+        "length_scale": 0.62018394,
+        "layer": "back"
+      },
+      {
+        "id": "rear_short",
+        "position": [
+          17,
+          62
+        ],
+        "angle_radians": 0.46058951,
+        "width_m": 0.036,
+        "length_scale": 0.5895281,
+        "layer": "back"
+      },
+      {
+        "id": "side_upper",
+        "position": [
+          44,
+          42
+        ],
+        "angle_radians": 0.47018346,
+        "width_m": 0.037,
+        "length_scale": 0.5516777,
+        "layer": "front"
+      },
+      {
+        "id": "side_lower",
+        "position": [
+          33,
+          65
+        ],
+        "angle_radians": 0.24702365,
+        "width_m": 0.033,
+        "length_scale": 0.47810693,
+        "layer": "front"
+      },
+      {
+        "id": "temple_back",
+        "position": [
+          52,
+          37
+        ],
+        "angle_radians": 0.11379201,
+        "width_m": 0.034,
+        "length_scale": 0.56804876,
+        "layer": "front"
+      },
+      {
+        "id": "temple_long",
+        "position": [
+          64,
+          34
+        ],
+        "angle_radians": 0.05945366,
+        "width_m": 0.038,
+        "length_scale": 0.67844872,
+        "layer": "front"
+      },
+      {
+        "id": "temple_front",
+        "position": [
+          76,
+          31
+        ],
+        "angle_radians": -0.05180546,
+        "width_m": 0.032,
+        "length_scale": 0.54494986,
+        "layer": "front"
+      }
+    ],
+    "default": {
+      "color": {
+        "r": 166,
+        "g": 142,
+        "b": 116
+      },
+      "length_m": 0.8
+    },
+    "players": [
+      {
+        "player_id": 1,
+        "appearance": {
+          "color": {
+            "r": 210,
+            "g": 185,
+            "b": 130
+          },
+          "length_m": 0.58
+        }
+      }
+    ],
+    "lock": {
+      "image": {
+        "source": "source/hair_lock.svg",
+        "file": "export/hair_lock.svg",
+        "pivot": [
+          80,
+          20
+        ]
+      },
+      "source_size": [
+        12,
+        168.29735589
+      ]
+    }
+  }
 }

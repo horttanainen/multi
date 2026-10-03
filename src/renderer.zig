@@ -32,6 +32,7 @@ const explosion_visual = @import("explosion_visual.zig");
 const hot_rim_visual = @import("hot_rim_visual.zig");
 const visual_particle = @import("visual_particle.zig");
 const character_animation = @import("character_animation.zig");
+const character_art = @import("character_art.zig");
 
 const RendererError = error{RendererUninitialized};
 
@@ -104,7 +105,9 @@ pub fn renderOverview(layer: OverviewLayer) !*sdl.Surface {
     switch (layer) {
         .entities => {
             try sensor.drawAllSensors();
+            try character_art.drawAllConnectedHair(.back);
             try entity.drawAllForOverview();
+            try character_art.drawAllConnectedHair(.front);
         },
         .collision => {
             try debug.drawOverview();
@@ -126,7 +129,9 @@ fn renderCamera(cameraId: usize) !void {
     try sensor.drawAllSensors();
     try player.drawAllWeaponsBehind();
     try player.drawAllLeftHandsBehind();
+    try character_art.drawAllConnectedHair(.back);
     try entity.drawAll();
+    try character_art.drawAllConnectedHair(.front);
     try character_animation.drawAll();
     try hot_rim_visual.draw();
     try player.drawAllWeaponsFront();

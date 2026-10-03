@@ -425,6 +425,17 @@ pub fn drawWithScale(spriteValue: Sprite, centerPos: vec.IVec2, angle: f32, scal
         return;
     }
 
+    const scaledSprite = try scaledForDraw(spriteValue, scale);
+    try drawWithOptions(scaledSprite, centerPos, angle, false, false, 0, maybeColor, null);
+}
+
+// A draw-local copy preserves the shared texture and stored sprite geometry.
+// Scale uses rendered pixels per source pixel, like drawWithScale.
+pub fn scaledForDraw(spriteValue: Sprite, scale: vec.Vec2) !Sprite {
+    if (!validRuntimeScale(scale)) {
+        std.log.warn("sprite.scaledForDraw: invalid scale ({d},{d})", .{ scale.x, scale.y });
+        return error.InvalidSpriteScale;
+    }
     var scaledSprite = spriteValue;
     scaledSprite.scale = scale;
     scaledSprite.sizeP = .{
@@ -432,7 +443,7 @@ pub fn drawWithScale(spriteValue: Sprite, centerPos: vec.IVec2, angle: f32, scal
         .y = @max(1, @as(i32, @intFromFloat(@round(@as(f32, @floatFromInt(spriteValue.surface.h)) * scale.y)))),
     };
     scaledSprite.sizeM = conv.pixel2M(scaledSprite.sizeP);
-    try drawWithOptions(scaledSprite, centerPos, angle, false, false, 0, maybeColor, null);
+    return scaledSprite;
 }
 
 pub fn drawSelectionMask(s: Sprite, centerPos: vec.IVec2, angle: f32, flip: bool, alpha: u8) !void {

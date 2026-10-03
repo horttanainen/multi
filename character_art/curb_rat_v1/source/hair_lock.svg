@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="320" viewBox="0 0 160 320">
+  <title>Curb Rat / shared dreadlock</title>
+  <g id="hair" stroke="#222222" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(80 20) rotate(-3.40644375) translate(-64 -34)">
+      <path d="M59 30 Q48 42 51 61 C54 77 51 93 52 107 C55 126 49 141 49 154 C49 169 57 180 52 194 Q49 203 54 205 Q62 201 64 191 C67 176 60 166 61 153 C62 137 67 121 64 104 C61 87 65 70 63 57 Q62 45 69 36 Z" fill="#a4a4a4" stroke-width="3.2" />
+      <path d="M58 45 Q54 58 58 73 M58 89 Q56 107 59 120 M56 139 L55 156 M57 174 Q60 184 56 194" stroke="#fcfcfc" fill="none" stroke-width="3" />
+      <path d="M55 66 L62 70  M55 102 L63 105  M51 148 L59 151  M56 180 L63 184 " fill="none" stroke="#3f3f3f" stroke-width="1.8" />
+    </g>
+  </g>
+</svg>

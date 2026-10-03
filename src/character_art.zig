@@ -3,6 +3,7 @@ const animation = @import("character_animation.zig");
 const data = @import("data.zig");
 const sprite = @import("sprite.zig");
 const player = @import("player.zig");
+const entity = @import("entity.zig");
 const vec = @import("vector.zig");
 const conv = @import("conversion.zig");
 const camera = @import("camera.zig");
@@ -29,6 +30,25 @@ pub const Binding = struct {
 };
 pub const RagdollJoint = struct { parent: usize, reference_angle: f32, limits: [2]f32 };
 pub const DrawItem = union(enum) { part: usize, weapon: data.CharacterArtDepth, holster };
+pub const HairImage = struct {
+    definition: data.CharacterHairImage,
+    path: []const u8,
+    sprite_id: ?u64 = null,
+};
+pub const Hair = struct {
+    definition: data.CharacterHairData,
+    head_binding: usize,
+    scalp: HairImage,
+    lock: HairImage,
+    players: std.AutoHashMapUnmanaged(usize, data.CharacterHairAppearance),
+};
+pub const HairPlacement = struct {
+    position: vec.Vec2,
+    angle: f32,
+    scale: vec.Vec2, // World meters per source pixel, independently across/along the lock.
+    facing_right: bool,
+};
+pub const HairFrame = struct { head: PlacedPart, appearance: data.CharacterHairAppearance };
 pub const Pack = struct {
     arena: std.heap.ArenaAllocator,
     id: []const u8,
@@ -38,6 +58,7 @@ pub const Pack = struct {
     grip_part: usize,
     weapon_joint: animation.Joint,
     far_skin_multiplier: f32,
+    hair: ?Hair = null,
 };
 pub const PlacedPart = struct { part: usize, position: vec.Vec2, angle: f32, facing_right: bool, far: bool };
 pub const DetachedPart = struct {
@@ -45,6 +66,7 @@ pub const DetachedPart = struct {
     facing_right: bool,
     skin_color: sprite.Color,
     severed: bool = false,
+    hair: ?data.CharacterHairAppearance = null,
 };
 pub var assets: ?Pack = null;
 pub var bodyParts = std.AutoArrayHashMapUnmanaged(box2d.c.b2BodyId, DetachedPart).empty;
@@ -105,6 +127,93 @@ fn validatePart(name: []const u8, part: data.CharacterArtPart, detail: *data.Cha
             return invalid(detail, "parts.{s}: gib_blood must use a distinct file", .{name});
         }
     }
+}
+
+fn validateHairAppearance(value: data.CharacterHairAppearance, detail: *data.CharacterAssetDiagnostic) !void {
+    if (!std.math.isFinite(value.length_m) or value.length_m < 0 or value.length_m > 2) {
+        return invalid(detail, "hair appearance.length_m: expected 0..2 meters", .{});
+    }
+}
+
+fn prepareHairImage(
+    memory: std.mem.Allocator,
+    definition: data.CharacterHairImage,
+    detail: *data.CharacterAssetDiagnostic,
+) !HairImage {
+    if (!relativePath(definition.source) or !relativePath(definition.file)) {
+        return invalid(detail, "hair image: invalid relative path", .{});
+    }
+    for (definition.pivot) |value| {
+        if (!std.math.isFinite(value) or value < 0 or value > 10000) {
+            return invalid(detail, "hair image.pivot: invalid source coordinate", .{});
+        }
+    }
+    return .{
+        .definition = definition,
+        .path = try std.fs.path.join(memory, &.{ std.fs.path.dirname(data.characterArtPath).?, definition.file }),
+    };
+}
+
+fn prepareHair(
+    memory: std.mem.Allocator,
+    definition: data.CharacterHairData,
+    ids: std.StringHashMapUnmanaged(usize),
+    bindings: []const Binding,
+    detail: *data.CharacterAssetDiagnostic,
+) !Hair {
+    const head = ids.get(definition.head_binding) orelse {
+        return invalid(detail, "hair.head_binding: unknown binding", .{});
+    };
+    if (bindings[head].anchor != .neck or bindings[head].axis[0] != .neck or
+        bindings[head].axis[1] != .head)
+    {
+        return invalid(detail, "hair.head_binding: expected neck-to-head artwork", .{});
+    }
+    if (definition.anchors.len == 0 or definition.anchors.len > 64) {
+        return invalid(detail, "hair.anchors: expected 1..64 named anchors", .{});
+    }
+    try validateHairAppearance(definition.default, detail);
+    var players: std.AutoHashMapUnmanaged(usize, data.CharacterHairAppearance) = .empty;
+    for (definition.players) |entry| {
+        try validateHairAppearance(entry.appearance, detail);
+        if (players.contains(entry.player_id)) {
+            return invalid(detail, "hair.players: duplicate player_id {d}", .{entry.player_id});
+        }
+        try players.put(memory, entry.player_id, entry.appearance);
+    }
+    for (definition.lock.source_size) |value| {
+        if (!std.math.isFinite(value) or value < 1 or value > 10000) {
+            return invalid(detail, "hair.lock.source_size: expected 1..10000 pixels", .{});
+        }
+    }
+    var names: std.StringHashMapUnmanaged(void) = .empty;
+    for (definition.anchors) |anchor| {
+        if (anchor.id.len == 0 or anchor.id.len > 96 or names.contains(anchor.id)) {
+            return invalid(detail, "hair.anchors: empty, duplicate or too long id", .{});
+        }
+        try names.put(memory, anchor.id, {});
+        for (anchor.position) |value| {
+            if (!std.math.isFinite(value) or value < 0 or value > 10000) {
+                return invalid(detail, "hair.anchors.{s}.position: invalid head coordinate", .{anchor.id});
+            }
+        }
+        if (!std.math.isFinite(anchor.angle_radians) or @abs(anchor.angle_radians) > std.math.pi) {
+            return invalid(detail, "hair.anchors.{s}.angle_radians: expected -pi..pi", .{anchor.id});
+        }
+        if (!std.math.isFinite(anchor.width_m) or anchor.width_m < 0.001 or anchor.width_m > 0.2) {
+            return invalid(detail, "hair.anchors.{s}.width_m: expected 0.001..0.2 meters", .{anchor.id});
+        }
+        if (!std.math.isFinite(anchor.length_scale) or anchor.length_scale <= 0 or anchor.length_scale > 2) {
+            return invalid(detail, "hair.anchors.{s}.length_scale: expected >0..2", .{anchor.id});
+        }
+    }
+    return .{
+        .definition = definition,
+        .head_binding = head,
+        .scalp = try prepareHairImage(memory, definition.scalp, detail),
+        .lock = try prepareHairImage(memory, definition.lock.image, detail),
+        .players = players,
+    };
 }
 
 // Consumes parsed data on both success and failure; preparation needs no GPU.
@@ -242,7 +351,39 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
         }
         if (!weapon_seen[0] or !weapon_seen[1] or !holster_seen) return invalid(detail, "draw_order: needs both weapon depths and holstered_weapon", .{});
     }
-    return .{ .arena = arena, .id = file.id, .parts = parts, .bindings = bindings, .order = order, .grip_part = grip_part, .weapon_joint = attachment.joint, .far_skin_multiplier = file.far_skin_multiplier };
+    const hair = if (file.hair == null) null else try prepareHair(memory, file.hair.?, ids, bindings, detail);
+    return .{
+        .arena = arena,
+        .id = file.id,
+        .parts = parts,
+        .bindings = bindings,
+        .order = order,
+        .grip_part = grip_part,
+        .weapon_joint = attachment.joint,
+        .far_skin_multiplier = file.far_skin_multiplier,
+        .hair = hair,
+    };
+}
+
+fn loadHairImage(image: *HairImage, scale: f32, detail: *data.CharacterAssetDiagnostic) !void {
+    image.sprite_id = sprite.createFromImgWithAtlasProfile(
+        image.path,
+        .{ .x = scale, .y = scale },
+        vec.zero,
+        .standalone,
+        .world_meters,
+        .preserve_detail,
+        .{},
+    ) catch |err| {
+        return invalid(detail, "hair image {s}: {s}", .{ image.path, @errorName(err) });
+    };
+    const visual = sprite.getSprite(image.sprite_id.?).?; // Just created and owned by this candidate.
+    const pivot = image.definition.pivot;
+    if (pivot[0] > @as(f32, @floatFromInt(visual.surface.w)) or
+        pivot[1] > @as(f32, @floatFromInt(visual.surface.h)))
+    {
+        return invalid(detail, "hair image {s}: pivot outside image canvas", .{image.path});
+    }
 }
 
 // Owned textures bypass the immutable path cache so SVG edits reload as well as
@@ -281,16 +422,35 @@ pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
             if (p[0] > @as(f32, @floatFromInt(skin.surface.w)) or p[1] > @as(f32, @floatFromInt(skin.surface.h))) return invalid(detail, "{s}: pivot/axis outside image canvas", .{part.paths[0]});
         }
     }
+    if (pack.hair == null) return; // Legacy packs have no hair decoration.
+    const hair = &pack.hair.?;
+    const head = pack.parts[pack.bindings[hair.head_binding].part];
+    try loadHairImage(&hair.scalp, head.definition.meters_per_pixel, detail);
+    const canvas = sprite.getSprite(head.sprites[0].?).?.surface;
+    for (hair.definition.anchors) |anchor| {
+        if (anchor.position[0] > @as(f32, @floatFromInt(canvas.w)) or
+            anchor.position[1] > @as(f32, @floatFromInt(canvas.h)))
+        {
+            return invalid(detail, "hair.anchors.{s}: position outside head canvas", .{anchor.id});
+        }
+    }
+    try loadHairImage(&hair.lock, head.definition.meters_per_pixel, detail);
 }
 
 pub fn destroy(pack: *Pack) void {
+    defer pack.arena.deinit();
     for (pack.parts) |part| {
         for ([_]?u64{ part.sprites[0], part.sprites[1], part.gib_blood_sprite }) |id| {
             if (id == null) continue; // Preparation and failed loads can own no texture.
             sprite.destroy(id.?);
         }
     }
-    pack.arena.deinit();
+    const hair = pack.hair orelse return;
+    // Each shared texture is owned once, even when many anchors draw the lock.
+    for ([_]?u64{ hair.scalp.sprite_id, hair.lock.sprite_id }) |id| {
+        if (id == null) continue; // Preparation or partial loading.
+        sprite.destroy(id.?);
+    }
 }
 
 pub fn install(replacement: Pack) void {
@@ -340,6 +500,86 @@ pub fn skinColor(color: sprite.Color, multiplier: f32) sprite.Color {
     return .{ .r = @intFromFloat(@round(@as(f32, @floatFromInt(color.r)) * multiplier)), .g = @intFromFloat(@round(@as(f32, @floatFromInt(color.g)) * multiplier)), .b = @intFromFloat(@round(@as(f32, @floatFromInt(color.b)) * multiplier)) };
 }
 
+pub fn hairForPlayer(pack: *const Pack, player_id: usize) ?data.CharacterHairAppearance {
+    if (pack.hair == null) return null; // A pack can intentionally omit hair.
+    const hair = pack.hair.?;
+    return hair.players.get(player_id) orelse hair.definition.default;
+}
+
+pub fn hairAnchor(pack: *const Pack, head: PlacedPart, anchor: data.CharacterHairAnchor) vec.Vec2 {
+    const part = pack.parts[head.part].definition;
+    var local = vec.mul(vec.subtract(point(anchor.position), point(part.pivot)), part.meters_per_pixel);
+    if (!head.facing_right) local.x = -local.x;
+    const rotation = box2d.c.b2MakeRot(head.angle);
+    return vec.add(head.position, vec.fromBox2d(box2d.c.b2RotateVector(rotation, vec.toBox2d(local))));
+}
+
+pub fn placeHairLock(
+    pack: *const Pack,
+    head: PlacedPart,
+    anchor: data.CharacterHairAnchor,
+    appearance: data.CharacterHairAppearance,
+) HairPlacement {
+    const source_size = pack.hair.?.definition.lock.source_size; // Caller resolved the hair style.
+    return .{
+        .position = hairAnchor(pack, head, anchor),
+        .angle = head.angle + anchor.angle_radians * @as(f32, if (head.facing_right) 1 else -1),
+        .scale = .{
+            .x = anchor.width_m / source_size[0],
+            .y = appearance.length_m * anchor.length_scale / source_size[1],
+        },
+        .facing_right = head.facing_right,
+    };
+}
+
+fn drawHairImage(image: HairImage, placed: HairPlacement, color: sprite.Color) !void {
+    const id = image.sprite_id orelse {
+        std.log.warn("character_art.drawHairImage: image {s} is not loaded", .{image.path});
+        return;
+    };
+    const original = sprite.getSprite(id) orelse {
+        std.log.warn("character_art.drawHairImage: sprite {d} is missing", .{id});
+        return;
+    };
+    const scale = vec.mul(placed.scale, conv.met2pix);
+    const visual = try sprite.scaledForDraw(original, scale);
+    const pivot: vec.IVec2 = .{
+        .x = @intFromFloat(@round(image.definition.pivot[0] * scale.x)),
+        .y = @intFromFloat(@round(image.definition.pivot[1] * scale.y)),
+    };
+    const position = camera.relativePosition(conv.m2Pixel(vec.toBox2d(placed.position)));
+    const placement = sprite.placeAtAnchor(visual, pivot, position, placed.angle, !placed.facing_right);
+    try sprite.drawPlacedTinted(visual, placement, color);
+}
+
+fn drawHairLayer(
+    pack: *const Pack,
+    maybe_head: ?PlacedPart,
+    appearance: ?data.CharacterHairAppearance,
+    layer: data.CharacterHairLayer,
+) !void {
+    if (pack.hair == null or appearance == null) {
+        return; // Optional style/appearance.
+    }
+    const head = maybe_head orelse return;
+    const hair = pack.hair.?;
+    const value = appearance.?;
+    if (layer == .front) {
+        const scale = pack.parts[head.part].definition.meters_per_pixel;
+        try drawHairImage(hair.scalp, .{
+            .position = head.position,
+            .angle = head.angle,
+            .scale = .{ .x = scale, .y = scale },
+            .facing_right = head.facing_right,
+        }, value.color);
+    }
+    if (value.length_m == 0) return; // A zero-length cut keeps scalp coverage.
+    for (hair.definition.anchors) |anchor| {
+        if (anchor.layer != layer) continue;
+        try drawHairImage(hair.lock, placeHairLock(pack, head, anchor, value), value.color);
+    }
+}
+
 pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !void {
     if (assets == null) {
         std.log.warn("character_art.draw: artwork is not loaded", .{});
@@ -353,6 +593,9 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
     const carrying = player.usesProceduralWeapon(p);
     const points = worldJoints(rig, frame);
     const weapon_depth: data.CharacterArtDepth = if (pack.weapon_joint == .right_hand) .right else .left;
+    const appearance = hairForPlayer(pack, player_id);
+    const head = if (pack.hair == null) null else placePart(pack, pack.hair.?.head_binding, points, frame, false);
+    try drawHairLayer(pack, head, appearance, .back);
     for (pack.order[@intFromBool(frame.facing_right)]) |item| {
         switch (item) {
             .holster => {
@@ -372,6 +615,41 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
             },
         }
     }
+    try drawHairLayer(pack, head, appearance, .front);
+}
+
+// Connected heads use scene hair passes so torso/arm pool insertion order cannot
+// cover the front locks. Isolated giblet heads keep their hair in drawPart.
+pub fn connectedHairFrame(body_id: box2d.c.b2BodyId) ?HairFrame {
+    const visual = bodyParts.get(body_id) orelse return null;
+    if (visual.severed or visual.hair == null) {
+        return null;
+    }
+    const e = entity.getEntity(body_id) orelse {
+        std.log.warn("character_art.connectedHairFrame: head entity is missing", .{});
+        return null;
+    };
+    if (!e.enabled) return null; // Pool entries remain registered while inactive.
+    const state = box2d.getInterpolatedState(e.state, box2d.getState(body_id));
+    return .{
+        .head = .{
+            .part = visual.part,
+            .position = vec.fromBox2d(state.pos),
+            .angle = state.rotAngle,
+            .facing_right = visual.facing_right,
+            .far = false,
+        },
+        .appearance = visual.hair.?,
+    };
+}
+
+pub fn drawAllConnectedHair(layer: data.CharacterHairLayer) !void {
+    if (assets == null) return;
+    const pack = &assets.?;
+    for (bodyParts.keys()) |body_id| {
+        const frame = connectedHairFrame(body_id) orelse continue;
+        try drawHairLayer(pack, frame.head, frame.appearance, layer);
+    }
 }
 
 // Entity drawing supplies its existing interpolated transform and draw order.
@@ -388,6 +666,15 @@ pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void
         return;
     }
     const part = assets.?.parts[part_visual.part];
+    const placed_head: PlacedPart = .{
+        .part = part_visual.part,
+        .position = position,
+        .angle = angle,
+        .facing_right = part_visual.facing_right,
+        .far = false,
+    };
+    const hair = if (part_visual.severed) part_visual.hair else null;
+    try drawHairLayer(&assets.?, placed_head, hair, .back);
     const anchor = camera.relativePosition(conv.m2Pixel(vec.toBox2d(position)));
     const scale = part.definition.meters_per_pixel;
     const pivot: vec.IVec2 = .{
@@ -414,4 +701,5 @@ pub fn drawPart(part_visual: DetachedPart, position: vec.Vec2, angle: f32) !void
         };
         try sprite.drawPlacedTinted(visual, placement, tint);
     }
+    try drawHairLayer(&assets.?, placed_head, hair, .front);
 }

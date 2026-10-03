@@ -25,6 +25,13 @@ SVG = 'http://www.w3.org/2000/svg'
 ET.register_namespace('', SVG)
 
 
+def hair_images(manifest):
+    hair = manifest.get('hair')
+    if hair is None:
+        return []
+    return [hair['scalp'], hair['lock']['image']]
+
+
 def load_assets():
     manifest = json.loads((PACK / 'manifest.json').read_text())
     rig = json.loads((ROOT / 'character_rigs/humanoid.json').read_text())
@@ -59,6 +66,19 @@ def load_assets():
                     if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
                         raise ValueError(f'{name}: {role} layer contains non-neutral {color}')
         sources[name] = source
+    for definition in hair_images(manifest):
+        source = ET.parse(PACK / definition['source']).getroot()
+        layer = source.find(f'{{{SVG}}}g[@id="hair"]')
+        if layer is None or len(source.findall(f'{{{SVG}}}g')) != 1:
+            raise ValueError(f"{definition['source']}: expected one hair group")
+        for element in layer.iter():
+            for prop in ('fill', 'stroke'):
+                color = element.get(prop, 'none')
+                if color == 'none':
+                    continue
+                if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
+                    raise ValueError(f"{definition['source']}: hair must use neutral grayscale")
+        sources['hair:' + definition['file']] = source
     bindings = {binding['id']: binding for binding in manifest['bindings']}
     if len(bindings) != len(manifest['bindings']):
         raise ValueError('Duplicate binding IDs')
@@ -101,24 +121,30 @@ def resolved_order(manifest, facing):
 
 def export_layers(manifest, sources, check):
     count = 0
+    exports = []
     for name, part in manifest['parts'].items():
         source = sources[name]
         layers = part['layers'] + ([{'role': 'gib_blood', 'file': part['gib_blood']}] if part.get('gib_blood') else [])
         for layer in layers:
-            output = ET.Element(f'{{{SVG}}}svg', source.attrib)
-            title = ET.SubElement(output, f'{{{SVG}}}title')
-            title.text = f"Generated: {part['source']} / {layer['role']}; edit the source"
-            output.append(copy.deepcopy(source.find(f"{{{SVG}}}g[@id='{layer['role']}']")))
-            ET.indent(output, space='  ')
-            text = ET.tostring(output, encoding='unicode') + '\n'
-            path = PACK / layer['file']
-            if check:
-                if not path.exists() or path.read_text() != text:
-                    raise ValueError(f'Stale export: {path.relative_to(ROOT)}')
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text)
-            count += 1
+            exports.append((source, part['source'], layer))
+    for definition in hair_images(manifest):
+        exports.append((sources['hair:' + definition['file']], definition['source'],
+                        {'role': 'hair', 'file': definition['file']}))
+    for source, source_path, layer in exports:
+        output = ET.Element(f'{{{SVG}}}svg', source.attrib)
+        title = ET.SubElement(output, f'{{{SVG}}}title')
+        title.text = f"Generated: {source_path} / {layer['role']}; edit the source"
+        output.append(copy.deepcopy(source.find(f"{{{SVG}}}g[@id='{layer['role']}']")))
+        ET.indent(output, space='  ')
+        text = ET.tostring(output, encoding='unicode') + '\n'
+        path = PACK / layer['file']
+        if check:
+            if not path.exists() or path.read_text() != text:
+                raise ValueError(f'Stale export: {path.relative_to(ROOT)}')
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        count += 1
     print(f"{'Checked' if check else 'Exported'} {count} SVG layers; rig lengths, contacts, colors and draw order valid")
 
 
@@ -129,8 +155,8 @@ def tinted_part(source, color, depth, severed=False, blood_color=None):
             continue
         layer = copy.deepcopy(child)
         layer.attrib.pop('id')
-        if child.get('id') in ('skin', 'gib_blood'):
-            tint = color if child.get('id') == 'skin' else blood_color
+        if child.get('id') in ('skin', 'gib_blood', 'hair'):
+            tint = blood_color if child.get('id') == 'gib_blood' else color
             if tint is None:
                 raise ValueError('Severed artwork needs a blood color')
             channels = [int(tint[i:i+2], 16) for i in (1, 3, 5)]
@@ -196,12 +222,48 @@ def weapon_svg(frame):
     return f'<g transform="translate({anchor["x"]} {anchor["y"]}) rotate({angle}) scale({.00375 * sign} .00375) translate(-49 -64)">{content}</g>'
 
 
-def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=None, overlay=False):
+def hair_layer(manifest, sources, joints, facing, layer, appearance):
+    hair = manifest.get('hair')
+    if hair is None:
+        return ''
+    appearance = hair['default'] if appearance is None else appearance
+    color = '#' + ''.join(f"{appearance['color'][channel]:02x}" for channel in ('r', 'g', 'b'))
+    binding = next(item for item in manifest['bindings'] if item['id'] == hair['head_binding'])
+    head = manifest['parts'][binding['part']]
+    start, end = (joints[joint] for joint in binding['axis'])
+    transform = part_placement(head, joints[binding['anchor']],
+                               [end[0]-start[0], end[1]-start[1]], facing)
+    content = []
+    if layer == 'front':
+        scalp = hair['scalp']
+        offset = [a-b for a, b in zip(head['pivot'], scalp['pivot'])]
+        content.append(f'<g transform="translate({offset[0]} {offset[1]})">'
+                       + tinted_part(sources['hair:' + scalp['file']], color, 1) + '</g>')
+    if appearance['length_m'] > 0:
+        for anchor in hair['anchors']:
+            if anchor['layer'] != layer:
+                continue
+            image = hair['lock']['image']
+            source_size = hair['lock']['source_size']
+            scale_x = anchor['width_m'] / source_size[0] / head['meters_per_pixel']
+            scale_y = (appearance['length_m'] * anchor['length_scale'] /
+                       source_size[1] / head['meters_per_pixel'])
+            x, y = anchor['position']
+            px, py = image['pivot']
+            angle = math.degrees(anchor['angle_radians'])
+            content.append(f'<g transform="translate({x} {y}) rotate({angle}) '
+                           f'scale({scale_x} {scale_y}) translate({-px} {-py})">'
+                           + tinted_part(sources['hair:' + image['file']], color, 1) + '</g>')
+    return f'<g transform="{transform}">' + ''.join(content) + '</g>'
+
+
+def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=None, overlay=False,
+                hair_appearance=None):
     bindings = {binding['id']: binding for binding in manifest['bindings']}
     weapon_joint = next(a for a in rig['attachments'] if a['id'] == manifest['weapon_hand']['attachment'])['joint']
     weapon_side = weapon_joint.split('_')[0]
     far = 'right' if facing else 'left'
-    drawing = []
+    drawing = [hair_layer(manifest, sources, joints, facing, 'back', hair_appearance)]
     for name in resolved_order(manifest, facing):
         if name == 'holstered_weapon':
             if frame and frame['weapon_stowed']:
@@ -227,6 +289,7 @@ def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=N
         depth = manifest['far_skin_multiplier'] if binding['depth'] == far else 1
         transform = part_placement(part, anchor, direction, part_facing)
         drawing.append(f'<g transform="{transform}">{tinted_part(sources[part_name], color, depth)}</g>')
+    drawing.append(hair_layer(manifest, sources, joints, facing, 'front', hair_appearance))
     if overlay:
         for joint in rig['joints']:
             p = joints[joint['id']]
@@ -288,9 +351,29 @@ def previews(manifest, rig, sources, output):
     output.mkdir(parents=True, exist_ok=True)
     blood_preset = next(p for p in json.loads((ROOT / 'particles.json').read_text()) if p['key'] == 'blood')
     blood_color = '#' + ''.join(f'{blood_preset["color"][channel]:02x}' for channel in ('r', 'g', 'b'))
-    giblet_preview(sources, output, blood_color)
-    giblet_preview(sources, output, '#61cf45', 'giblets_green.svg')
-    giblet_preview(sources, output, '#668cff', 'giblets_blue.svg')
+    part_sources = {name: sources[name] for name in manifest['parts']}
+    giblet_preview(part_sources, output, blood_color)
+    giblet_preview(part_sources, output, '#61cf45', 'giblets_green.svg')
+    giblet_preview(part_sources, output, '#668cff', 'giblets_blue.svg')
+    hair_link = ''
+    if manifest.get('hair') is not None:
+        samples = json.loads((artifacts / 'hair_samples.json').read_text())
+        cells = []
+        for index, sample in enumerate(samples):
+            joints = {joint['id']: xy(point) for joint, point in zip(rig['joints'], sample['joints'])}
+            appearance = sample['hair']
+            facing = sample['facing_right']
+            drawing = render_pose(manifest, rig, sources, joints, facing,
+                                  '#ffffff' if index % 2 == 0 else '#61d9df',
+                                  hair_appearance=appearance)
+            color = '#' + ''.join(f"{appearance['color'][channel]:02x}" for channel in ('r', 'g', 'b'))
+            label = f"{appearance['length_m']:g} m / {color} / {'RIGHT' if facing else 'LEFT'}"
+            cells.append(panel(drawing, joints, 24 + index % 2 * 624, 108 + index // 2 * 554,
+                               608, 532, label, scale=220))
+        (output / 'hair.svg').write_text(page('CURB RAT / STATIC LOCKS',
+            'One shared lock SVG, twelve varied head anchors and a tinted scalp. Native idle pose samples.',
+            ''.join(cells)))
+        hair_link = ' · <a href="hair.svg">Idle hair and facing</a>'
     cells = []
     for index in range(12):
         sample = run[round(index * len(run) / 12)]
@@ -324,7 +407,7 @@ def previews(manifest, rig, sources, output):
         cells.append(panel(drawing, joints, 24 + index % 3 * 415, 108 + index // 3 * 554, 398, 532, label, scale=170, center_x=center_x))
     (output / 'poses.svg').write_text(page('CURB RAT / ACTION FIT', 'Existing kneel, aim and wall-slide solver exports. White, cyan and pink skin; fixed-color accessories.', ''.join(cells)))
     cells = []
-    for index, (name, source) in enumerate(sources.items()):
+    for index, (name, source) in enumerate(part_sources.items()):
         x, y = 24 + index % 5 * 249, 110 + index // 5 * 305
         part = manifest['parts'][name]
         width, height = float(source.get('width')), float(source.get('height'))
@@ -353,7 +436,7 @@ def previews(manifest, rig, sources, output):
 <h1>Curb Rat — articulated art review</h1><p>Offline preview of existing solved run poses, {seconds:g}s per cycle. Review the in-game artwork for final rendering.</p>
 <button id="play">Pause</button><label>Frame <input id="frame" type="range" min="0" max="{len(frames)-1}" value="0"></label><label>Speed <select id="speed"><option value="1">1×</option><option value=".25">¼×</option></select></label><label>Size <select id="size"><option value="100%">Close up</option><option value="192px">80 px/m</option></select></label>
 <div><svg id="run" xmlns="{SVG}" viewBox="-1.2 -1.9 2.4 2.4"><path d="M-1.2 .3 H1.2" stroke="#b9b5a1" stroke-width=".012"/>{''.join(frames)}</svg></div>
-<p><a href="parts.svg">Parts and joint overlay</a> · <a href="giblets.svg">Bloody severed ends</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a></p>
+<p><a href="parts.svg">Parts and joint overlay</a> · <a href="giblets.svg">Bloody severed ends</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a>{hair_link}</p>
 <p>Blood tint examples: <a href="giblets_green.svg">Green</a> · <a href="giblets_blue.svg">Blue</a>. These previews do not change particles.json.</p>
 <img src="poses.svg" alt="Six solved action poses with segmented artwork">
 <script>

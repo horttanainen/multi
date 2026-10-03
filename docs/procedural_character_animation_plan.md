@@ -409,6 +409,19 @@ Accepted and committed as `0171fd9`. Body segments use the existing named bones
 and attachment points, explicit pivots, player tint and draw order. The
 stick-figure overlay remains available for diagnosis.
 
+#### 5A. Hair appearance and head anchors
+
+Accepted by the user for commit, before hair motion: a hair-colored scalp layer and
+twelve instances of one hand-authored lock SVG, including temple locks in front of the ear.
+The existing art manifest defines named head-local roots, lock widths, length
+ratios, rest angles and draw layers, with independent per-player hair color and
+base length. Hair follows live, ragdoll and giblet heads through the existing
+artwork owner. No new hair physics or rig changes are part of this commit.
+See [configuration and review steps](character_animation_hair.md).
+
+The next proposed phase adds moving locks; agree on its implementation plan
+before starting. Ponytail and loose-hair styles remain later work.
+
 ### 6. Body-part giblets, ragdolls and shared gibbing rules
 
 Requested follow-up, planned before returning to Blender. This section records

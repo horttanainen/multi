@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="170" viewBox="0 0 150 170">
+  <title>Generated: source/hair_scalp.svg / hair; edit the source</title>
+  <g id="hair" stroke="#222222" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 83 Q2 60 10 42 Q19 19 40 11 Q63 0 87 9 Q111 15 119 34 L106 33 L96 28 L87 32 L76 26 L65 33 L52 32 L42 45 L28 52 L24 69 L23 83 Z" fill="#515151" stroke-width="3.5" />
+    <path d="M116 30 Q103 9 81 8 Q59 4 44 15 L50 24 Q76 10 92 18 L104 28 Z" fill="#989898" stroke-width="2.6" />
+    <path d="M93 25 Q73 6 49 12 Q22 17 13 39 L22 48 Q30 28 48 24 Q66 18 79 32 Z" fill="#767676" stroke-width="2.8" />
+    <path d="M67 29 Q48 13 28 27 Q11 38 10 56 L20 64 Q19 44 34 37 Q47 31 55 37 Z" fill="#b5b5b5" stroke-width="2.8" />
+    <g fill="none" stroke="#f7f7f7" stroke-width="2.9">
+      <path d="M56 16 Q72 8 89 17 M100 20 L107 25" />
+      <path d="M24 35 Q41 17 59 21 M68 23 L77 28" />
+      <path d="M18 49 Q25 33 42 32" />
+    </g>
+  </g>
+</svg>

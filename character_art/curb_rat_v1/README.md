@@ -77,6 +77,19 @@ These fit choices are visible in the review sheets and the game; no gameplay rig
 changes are included. Art thickness is not collision clearance: ground/wall
 clipping and readability in motion still need user review.
 
+### Hair
+
+The optional `hair` section adds a grayscale scalp layer and twelve instances of
+one shared lock SVG, each with a named root in head SVG pixels. Overall length and RGB hair color can
+vary per player; each lock has its own width, relative length, rest angle and
+front/back layer. Defaults currently demonstrate two colors and lengths.
+The two files `source/hair_scalp.svg` and `source/hair_lock.svg` each contain one
+neutral `hair` group. Width, length and angle vary per anchor in code; all locks
+share one loaded texture and its authored curve.
+Roots follow the final head placement, including detached heads. Hair is rigid
+in this phase; movement will follow after visual review. See
+[configuration and review steps](../../docs/character_animation_hair.md).
+
 ## Export and review
 
 No external Python packages are required. From the repository root:
@@ -88,7 +101,7 @@ python3 scripts/export_character_art.py --preview agent-temp-files/curb-rat-segm
 python3 scripts/export_character_art.py --check
 ```
 
-The exporter writes thirty generated `export/*_{skin,fixed,gib_blood}.svg` files. Edit
+The exporter writes thirty body layers and two hair layers (32 SVGs). Edit
 `source/` and the manifest, then rerun the exporter; never hand-edit exports.
 `--check` compares generated content without writing it and checks rig bindings,
 limb lengths, foot offsets, neutral tint layers and complete draw order.
@@ -108,6 +121,7 @@ existing blaster and its exported grip transform. Links open:
 - `run.svg`: twelve reference-run frames at a fixed scale and ground reference.
 - `poses.svg`: kneeling, aiming, kneeling aim and wall slides on both sides,
   including white/cyan/pink tint examples.
+- `hair.svg`: native idle poses with both hair lengths/colors and facings.
 
 These are deterministic vector assemblies of test exports, **not screenshots of
 an integrated character**. The script adapts the tests' existing coordinate

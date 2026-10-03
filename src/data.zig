@@ -373,6 +373,33 @@ pub const CharacterAssetDiagnostic = struct {
 };
 
 pub const CharacterArtDepth = enum { center, left, right };
+pub const CharacterHairLayer = enum { back, front };
+pub const CharacterHairAppearance = struct { color: sprite.Color, length_m: f32 };
+pub const CharacterHairImage = struct {
+    source: []const u8,
+    file: []const u8,
+    pivot: [2]f32,
+};
+pub const CharacterHairLock = struct {
+    image: CharacterHairImage,
+    source_size: [2]f32, // Nominal width and root-to-tip length in source pixels.
+};
+pub const CharacterHairAnchor = struct {
+    id: []const u8,
+    position: [2]f32, // Head artwork pixels, before facing and rotation.
+    angle_radians: f32, // Clockwise from the template's downward axis.
+    width_m: f32,
+    length_scale: f32,
+    layer: CharacterHairLayer,
+};
+pub const CharacterHairData = struct {
+    head_binding: []const u8,
+    scalp: CharacterHairImage,
+    lock: CharacterHairLock,
+    anchors: []const CharacterHairAnchor,
+    default: CharacterHairAppearance,
+    players: []const struct { player_id: usize, appearance: CharacterHairAppearance } = &.{},
+};
 pub const CharacterArtLayer = struct { role: enum { skin, fixed }, file: []const u8 };
 pub const CharacterPartPhysics = struct {
     // Source pixels, transformed by the same pivot, scale and facing as the art.
@@ -418,6 +445,7 @@ pub const CharacterArtManifest = struct {
     bindings: []const CharacterArtBinding,
     draw_order: []const []const u8,
     weapon_hand: struct { attachment: []const u8, part: []const u8, orientation: enum { weapon_transform } },
+    hair: ?CharacterHairData = null,
     notes: []const []const u8,
 };
 pub const CharacterArtData = struct { arena: std.heap.ArenaAllocator, manifest: CharacterArtManifest };
