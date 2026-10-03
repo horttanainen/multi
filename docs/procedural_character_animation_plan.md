@@ -356,6 +356,13 @@ Split this work into independently reviewed commits:
 - **3B, wall-slide revision (accepted):** Raised support hand,
   outward-facing slide, one near-straight leg, one bent knee, downward toes and a ready blaster. Keep the gun in
   hand through push-off; extend the existing contact, facing and limb blending.
+- **Knife artwork and wall poses (accepted):** Straight dagger
+  in reverse grip, hidden tip and pooled slide debris at the blade contact.
+  Ready it on approach and through wall-jump push-off; lean forward over a shared
+  two-hand grip when pushing into the wall. Reuse character art, sparse action
+  curves, ordinary arm IK, SVG export and particles; retain physical movement
+  and gun-arm aiming priority. See
+  [the wall-slide follow-up](character_animation_wall_slide.md#knife-artwork-follow-up--accepted).
 - **3B, deferred:** Grappling and rope animation, with explicit control priorities.
 - **Running polish (accepted):** Reshape the sparse run curves using the existing
   exporter, preserve the original regression assets, and verify foot contact,

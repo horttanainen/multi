@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="120" viewBox="0 0 80 120">
+  <title>Generated: source/knife.svg / buried; edit the source</title>
+  <g id="buried" stroke-linecap="butt" stroke-linejoin="round">
+    <path d="M30 70 L49 89 L40 110 L31 89 Z" fill="#91a8b6" stroke="none" />
+    <path d="M40 80 L48 88 L48 89 L40 108 Z" fill="#eaf4ee" stroke="none" />
+    <path d="M49 89 L40 110 L31 89 L30 70" fill="none" stroke="#141d27" stroke-width="2.5" />
+    <path d="M40 80 L40 100" fill="none" stroke="#557583" stroke-width="1.4" />
+  </g>
+</svg>

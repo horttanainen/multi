@@ -46,5 +46,27 @@
         "friction": 0.8,
         "restitution": 0.08,
         "groupIndex": -4
+    },
+    {
+        "key": "wall_scrape",
+        "particlesPerUnit": 1,
+        "maxParticles": 3,
+        "minSpeedVariation": 0.6,
+        "maxSpeedVariation": 1.8,
+        "minScale": 0.025,
+        "maxScale": 0.06,
+        "defaultDirection": "radial",
+        "lifetimeMs": 450,
+        "color": {
+            "r": 157,
+            "g": 147,
+            "b": 128
+        },
+        "linearDamping": 0.4,
+        "gravityScale": 0.8,
+        "density": 0.2,
+        "friction": 0.6,
+        "restitution": 0.15,
+        "groupIndex": -4
     }
 ]

@@ -518,8 +518,8 @@ pub fn ribbonRow(
 pub fn drawLock(
     owner: ?box2d.c.b2BodyId,
     lock: usize,
-    image: character_art.HairImage,
-    placed: character_art.HairPlacement,
+    image: character_art.Image,
+    placed: character_art.ImagePlacement,
     color: sprite.Color,
 ) !bool {
     const state = states.get(owner orelse return false) orelse return false;

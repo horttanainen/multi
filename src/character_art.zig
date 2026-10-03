@@ -31,22 +31,28 @@ pub const Binding = struct {
 };
 pub const RagdollJoint = struct { parent: usize, reference_angle: f32, limits: [2]f32 };
 pub const DrawItem = union(enum) { part: usize, weapon: data.CharacterArtDepth, holster };
-pub const HairImage = struct {
-    definition: data.CharacterHairImage,
+pub const Image = struct {
+    definition: data.CharacterArtImage,
     path: []const u8,
     sprite_id: ?u64 = null,
+};
+pub const Knife = struct {
+    definition: data.CharacterKnife,
+    image: Image,
+    buried: Image,
+    horizontal: Image,
 };
 pub const Hair = struct {
     definition: data.CharacterHairData,
     head_binding: usize,
-    scalp: HairImage,
-    lock: HairImage,
+    scalp: Image,
+    lock: Image,
     players: std.AutoHashMapUnmanaged(usize, data.CharacterHairAppearance),
 };
-pub const HairPlacement = struct {
+pub const ImagePlacement = struct {
     position: vec.Vec2,
     angle: f32,
-    scale: vec.Vec2, // World meters per source pixel, independently across/along the lock.
+    scale: vec.Vec2, // World meters per source pixel.
     facing_right: bool,
 };
 pub const HairFrame = struct { head: PlacedPart, appearance: data.CharacterHairAppearance };
@@ -60,6 +66,7 @@ pub const Pack = struct {
     weapon_joint: animation.Joint,
     far_skin_multiplier: f32,
     hair: ?Hair = null,
+    knife: ?Knife = null,
 };
 pub const PlacedPart = struct { part: usize, position: vec.Vec2, angle: f32, facing_right: bool, far: bool };
 pub const DetachedPart = struct {
@@ -136,22 +143,59 @@ fn validateHairAppearance(value: data.CharacterHairAppearance, detail: *data.Cha
     }
 }
 
-fn prepareHairImage(
+fn prepareImage(
     memory: std.mem.Allocator,
-    definition: data.CharacterHairImage,
+    definition: data.CharacterArtImage,
     detail: *data.CharacterAssetDiagnostic,
-) !HairImage {
+) !Image {
     if (!relativePath(definition.source) or !relativePath(definition.file)) {
-        return invalid(detail, "hair image: invalid relative path", .{});
+        return invalid(detail, "art image: invalid relative path", .{});
     }
     for (definition.pivot) |value| {
         if (!std.math.isFinite(value) or value < 0 or value > 10000) {
-            return invalid(detail, "hair image.pivot: invalid source coordinate", .{});
+            return invalid(detail, "art image.pivot: invalid source coordinate", .{});
         }
     }
     return .{
         .definition = definition,
         .path = try std.fs.path.join(memory, &.{ std.fs.path.dirname(data.characterArtPath).?, definition.file }),
+    };
+}
+
+fn prepareKnife(
+    memory: std.mem.Allocator,
+    definition: data.CharacterKnife,
+    detail: *data.CharacterAssetDiagnostic,
+) !Knife {
+    for (definition.blade_base ++ definition.blade_tip ++ definition.second_grip) |coordinate| {
+        if (!std.math.isFinite(coordinate) or coordinate < 0 or coordinate > 10000) {
+            return invalid(detail, "knife: invalid blade coordinate", .{});
+        }
+    }
+    if (definition.blade_base[0] != definition.image.pivot[0] or
+        definition.blade_tip[0] != definition.image.pivot[0] or
+        definition.blade_base[1] <= definition.image.pivot[1] or
+        definition.blade_tip[1] <= definition.blade_base[1] + 1)
+    {
+        return invalid(detail, "knife: expected a straight blade below the grip", .{});
+    }
+    if (definition.second_grip[0] != definition.image.pivot[0] or
+        definition.second_grip[1] >= definition.image.pivot[1] or
+        std.mem.eql(u8, definition.buried_file, definition.image.file) or
+        std.mem.eql(u8, definition.horizontal_file, definition.image.file) or
+        std.mem.eql(u8, definition.horizontal_file, definition.buried_file))
+    {
+        return invalid(detail, "knife: expected a second grip above the first and distinct images", .{});
+    }
+    var buried = definition.image;
+    buried.file = definition.buried_file;
+    var horizontal = definition.image;
+    horizontal.file = definition.horizontal_file;
+    return .{
+        .definition = definition,
+        .image = try prepareImage(memory, definition.image, detail),
+        .buried = try prepareImage(memory, buried, detail),
+        .horizontal = try prepareImage(memory, horizontal, detail),
     };
 }
 
@@ -212,8 +256,8 @@ fn prepareHair(
     return .{
         .definition = definition,
         .head_binding = head,
-        .scalp = try prepareHairImage(memory, definition.scalp, detail),
-        .lock = try prepareHairImage(memory, definition.lock.image, detail),
+        .scalp = try prepareImage(memory, definition.scalp, detail),
+        .lock = try prepareImage(memory, definition.lock.image, detail),
         .players = players,
     };
 }
@@ -364,10 +408,11 @@ pub fn prepare(files: data.CharacterArtData, rig: animation.Rig, detail: *data.C
         .weapon_joint = attachment.joint,
         .far_skin_multiplier = file.far_skin_multiplier,
         .hair = hair,
+        .knife = if (file.knife == null) null else try prepareKnife(memory, file.knife.?, detail),
     };
 }
 
-fn loadHairImage(image: *HairImage, scale: f32, detail: *data.CharacterAssetDiagnostic) !void {
+fn loadImage(image: *Image, scale: f32, detail: *data.CharacterAssetDiagnostic) !void {
     image.sprite_id = sprite.createFromImgWithAtlasProfile(
         image.path,
         .{ .x = scale, .y = scale },
@@ -377,14 +422,14 @@ fn loadHairImage(image: *HairImage, scale: f32, detail: *data.CharacterAssetDiag
         .preserve_detail,
         .{},
     ) catch |err| {
-        return invalid(detail, "hair image {s}: {s}", .{ image.path, @errorName(err) });
+        return invalid(detail, "art image {s}: {s}", .{ image.path, @errorName(err) });
     };
     const visual = sprite.getSprite(image.sprite_id.?).?; // Just created and owned by this candidate.
     const pivot = image.definition.pivot;
     if (pivot[0] > @as(f32, @floatFromInt(visual.surface.w)) or
         pivot[1] > @as(f32, @floatFromInt(visual.surface.h)))
     {
-        return invalid(detail, "hair image {s}: pivot outside image canvas", .{image.path});
+        return invalid(detail, "art image {s}: pivot outside image canvas", .{image.path});
     }
 }
 
@@ -424,10 +469,31 @@ pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
             if (p[0] > @as(f32, @floatFromInt(skin.surface.w)) or p[1] > @as(f32, @floatFromInt(skin.surface.h))) return invalid(detail, "{s}: pivot/axis outside image canvas", .{part.paths[0]});
         }
     }
+    if (pack.knife != null) {
+        const scale = pack.parts[pack.grip_part].definition.meters_per_pixel;
+        const knife = &pack.knife.?;
+        try loadImage(&knife.image, scale, detail);
+        try loadImage(&knife.buried, scale, detail);
+        try loadImage(&knife.horizontal, scale, detail);
+        const canvas = sprite.getSprite(knife.image.sprite_id.?).?.surface;
+        for ([_]Image{ knife.buried, knife.horizontal }) |image| {
+            const other_canvas = sprite.getSprite(image.sprite_id.?).?.surface;
+            if (other_canvas.w != canvas.w or other_canvas.h != canvas.h) {
+                return invalid(detail, "knife: image canvases differ", .{});
+            }
+        }
+        for ([_][2]f32{ knife.definition.blade_base, knife.definition.blade_tip, knife.definition.second_grip }) |coordinate| {
+            if (coordinate[0] > @as(f32, @floatFromInt(canvas.w)) or
+                coordinate[1] > @as(f32, @floatFromInt(canvas.h)))
+            {
+                return invalid(detail, "knife: blade outside image canvas", .{});
+            }
+        }
+    }
     if (pack.hair == null) return; // Legacy packs have no hair decoration.
     const hair = &pack.hair.?;
     const head = pack.parts[pack.bindings[hair.head_binding].part];
-    try loadHairImage(&hair.scalp, head.definition.meters_per_pixel, detail);
+    try loadImage(&hair.scalp, head.definition.meters_per_pixel, detail);
     const canvas = sprite.getSprite(head.sprites[0].?).?.surface;
     for (hair.definition.anchors) |anchor| {
         if (anchor.position[0] > @as(f32, @floatFromInt(canvas.w)) or
@@ -436,7 +502,7 @@ pub fn loadSprites(pack: *Pack, detail: *data.CharacterAssetDiagnostic) !void {
             return invalid(detail, "hair.anchors.{s}: position outside head canvas", .{anchor.id});
         }
     }
-    try loadHairImage(&hair.lock, head.definition.meters_per_pixel, detail);
+    try loadImage(&hair.lock, head.definition.meters_per_pixel, detail);
     const lock_canvas = sprite.getSprite(hair.lock.sprite_id.?).?.surface;
     const tip = hair.lock.definition.pivot[1] + hair.definition.lock.source_size[1];
     if (tip > @as(f32, @floatFromInt(lock_canvas.h))) {
@@ -449,6 +515,13 @@ pub fn destroy(pack: *Pack) void {
     for (pack.parts) |part| {
         for ([_]?u64{ part.sprites[0], part.sprites[1], part.gib_blood_sprite }) |id| {
             if (id == null) continue; // Preparation and failed loads can own no texture.
+            sprite.destroy(id.?);
+        }
+    }
+    if (pack.knife != null) {
+        const knife = pack.knife.?;
+        for ([_]?u64{ knife.image.sprite_id, knife.buried.sprite_id, knife.horizontal.sprite_id }) |id| {
+            if (id == null) continue; // Preparation or partial loading owns no image yet.
             sprite.destroy(id.?);
         }
     }
@@ -490,6 +563,16 @@ pub fn placePart(pack: *const Pack, binding_index: usize, points: [joint_count]v
     var position = points[@intFromEnum(binding.anchor)];
     var direction = vec.subtract(points[@intFromEnum(binding.axis[1])], points[@intFromEnum(binding.axis[0])]);
     var facing = frame.facing_right;
+    if (pack.knife != null and frame.knife != null and
+        (binding.anchor == frame.knife.?.joint or
+            binding.anchor == frame.knife.?.second_hand))
+    {
+        part_index = pack.grip_part;
+        facing = frame.knife.?.side < 0;
+        const angle = knifeAngle(frame.knife.?.side, frame.knife.?.horizontal);
+        const sign: f32 = if (facing) 1 else -1;
+        direction = .{ .x = @cos(angle) * sign, .y = @sin(angle) * sign };
+    }
     // The gun travels independently toward its holster during wall bracing;
     // keep the open hand on the solved wrist throughout either transition.
     if (carrying and !frame.weapon_stowed and frame.weapon_stow_weight == 0 and binding.anchor == pack.weapon_joint) {
@@ -503,6 +586,43 @@ pub fn placePart(pack: *const Pack, binding_index: usize, points: [joint_count]v
     const source = vec.subtract(point(part.axis_end), point(part.pivot));
     const source_angle = std.math.atan2(source.y, source.x * @as(f32, if (facing) 1 else -1));
     return .{ .part = part_index, .position = position, .angle = std.math.atan2(direction.y, direction.x) - source_angle, .facing_right = facing, .far = isFar(binding.depth, frame.facing_right) };
+}
+
+pub fn knifeAngle(side: i8, horizontal: bool) f32 {
+    const angle: f32 = if (horizontal) std.math.pi / 2.0 else std.math.pi / 4.0;
+    return -@as(f32, @floatFromInt(side)) * angle;
+}
+
+// The middle of the blade meets the wall; the grip remains outside it.
+pub fn knifeContactOffset(pack: *const Pack, side: i8, horizontal: bool) vec.Vec2 {
+    const knife = pack.knife orelse return vec.zero;
+    const middle = vec.mul(vec.add(point(knife.definition.blade_base), point(knife.definition.blade_tip)), 0.5);
+    return knifePointOffset(pack, side, horizontal, .{ middle.x, middle.y });
+}
+
+pub fn knifePointOffset(pack: *const Pack, side: i8, horizontal: bool, source: [2]f32) vec.Vec2 {
+    const knife = pack.knife orelse return vec.zero;
+    const scale = pack.parts[pack.grip_part].definition.meters_per_pixel;
+    var local = vec.mul(vec.subtract(point(source), point(knife.image.definition.pivot)), scale);
+    if (side > 0) local.x = -local.x;
+    const rotation = box2d.c.b2MakeRot(knifeAngle(side, horizontal));
+    return vec.fromBox2d(box2d.c.b2RotateVector(rotation, vec.toBox2d(local)));
+}
+
+pub fn placeKnife(
+    pack: *const Pack,
+    points: [joint_count]vec.Vec2,
+    frame: animation.FramePose,
+) ?ImagePlacement {
+    if (pack.knife == null) return null; // Optional artwork.
+    const grip = frame.knife orelse return null;
+    const scale = pack.parts[pack.grip_part].definition.meters_per_pixel;
+    return .{
+        .position = points[@intFromEnum(grip.joint)],
+        .angle = knifeAngle(grip.side, grip.horizontal),
+        .scale = .{ .x = scale, .y = scale },
+        .facing_right = grip.side < 0,
+    };
 }
 
 pub fn skinColor(color: sprite.Color, multiplier: f32) sprite.Color {
@@ -528,7 +648,7 @@ pub fn placeHairLock(
     head: PlacedPart,
     anchor: data.CharacterHairAnchor,
     appearance: data.CharacterHairAppearance,
-) HairPlacement {
+) ImagePlacement {
     const source_size = pack.hair.?.definition.lock.source_size; // Caller resolved the hair style.
     return .{
         .position = hairAnchor(pack, head, anchor),
@@ -541,13 +661,13 @@ pub fn placeHairLock(
     };
 }
 
-fn drawHairImage(image: HairImage, placed: HairPlacement, color: sprite.Color) !void {
+fn drawImage(image: Image, placed: ImagePlacement, color: sprite.Color) !void {
     const id = image.sprite_id orelse {
-        std.log.warn("character_art.drawHairImage: image {s} is not loaded", .{image.path});
+        std.log.warn("character_art.drawImage: image {s} is not loaded", .{image.path});
         return;
     };
     const original = sprite.getSprite(id) orelse {
-        std.log.warn("character_art.drawHairImage: sprite {d} is missing", .{id});
+        std.log.warn("character_art.drawImage: sprite {d} is missing", .{id});
         return;
     };
     const scale = vec.mul(placed.scale, conv.met2pix);
@@ -576,7 +696,7 @@ fn drawHairLayer(
     const value = appearance.?;
     if (layer == .front) {
         const scale = pack.parts[head.part].definition.meters_per_pixel;
-        try drawHairImage(hair.scalp, .{
+        try drawImage(hair.scalp, .{
             .position = head.position,
             .angle = head.angle,
             .scale = .{ .x = scale, .y = scale },
@@ -588,7 +708,7 @@ fn drawHairLayer(
         if (anchor.layer != layer) continue;
         const placed = placeHairLock(pack, head, anchor, value);
         if (try character_hair.drawLock(owner, index, hair.lock, placed, value.color)) continue;
-        try drawHairImage(hair.lock, placed, value.color);
+        try drawImage(hair.lock, placed, value.color);
     }
 }
 
@@ -604,6 +724,8 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
     };
     const carrying = player.usesProceduralWeapon(p);
     const points = worldJoints(rig, frame);
+    const knife = placeKnife(pack, points, frame);
+    var knife_drawn = false;
     const weapon_depth: data.CharacterArtDepth = if (pack.weapon_joint == .right_hand) .right else .left;
     const appearance = hairForPlayer(pack, player_id);
     const head = if (pack.hair == null) null else placePart(pack, pack.hair.?.head_binding, points, frame, false);
@@ -617,6 +739,21 @@ pub fn draw(player_id: usize, rig: animation.Rig, frame: animation.FramePose) !v
                 if (carrying and !frame.weapon_stowed and depth == weapon_depth) try player.drawProceduralWeapon(player_id, frame.weapon, frame.weapon_facing_right);
             },
             .part => |index| {
+                // Draw before the first gripping hand, so both sets of fingers cover
+                // the handle during a push regardless of which arm is nearer.
+                if (knife != null and !knife_drawn and
+                    (pack.bindings[index].anchor == frame.knife.?.joint or
+                        pack.bindings[index].anchor == frame.knife.?.second_hand))
+                {
+                    const grip = frame.knife.?;
+                    const artwork = pack.knife.?;
+                    const exposed = if (grip.horizontal and !grip.show_tip) artwork.horizontal else artwork.image;
+                    try drawImage(exposed, knife.?, .{ .r = 255, .g = 255, .b = 255 });
+                    if (grip.show_tip) {
+                        try drawImage(artwork.buried, knife.?, .{ .r = 255, .g = 255, .b = 255 });
+                    }
+                    knife_drawn = true;
+                }
                 const placed = placePart(pack, index, points, frame, carrying);
                 const tint = skinColor(p.color, if (placed.far) pack.far_skin_multiplier else 1);
                 try drawPart(.{

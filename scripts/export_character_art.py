@@ -25,11 +25,17 @@ SVG = 'http://www.w3.org/2000/svg'
 ET.register_namespace('', SVG)
 
 
-def hair_images(manifest):
+def decoration_images(manifest):
+    images = []
     hair = manifest.get('hair')
-    if hair is None:
-        return []
-    return [hair['scalp'], hair['lock']['image']]
+    if hair is not None:
+        images.extend((image, 'hair') for image in (hair['scalp'], hair['lock']['image']))
+    if manifest.get('knife') is not None:
+        knife = manifest['knife']
+        images.append((knife['image'], 'fixed'))
+        images.append((dict(knife['image'], file=knife['buried_file']), 'buried'))
+        images.append((dict(knife['image'], file=knife['horizontal_file']), 'horizontal'))
+    return images
 
 
 def load_assets():
@@ -66,19 +72,21 @@ def load_assets():
                     if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
                         raise ValueError(f'{name}: {role} layer contains non-neutral {color}')
         sources[name] = source
-    for definition in hair_images(manifest):
+    for definition, role in decoration_images(manifest):
         source = ET.parse(PACK / definition['source']).getroot()
-        layer = source.find(f'{{{SVG}}}g[@id="hair"]')
-        if layer is None or len(source.findall(f'{{{SVG}}}g')) != 1:
-            raise ValueError(f"{definition['source']}: expected one hair group")
-        for element in layer.iter():
+        layer = source.find(f'{{{SVG}}}g[@id="{role}"]')
+        knife = manifest.get('knife')
+        expected = {'hilt', 'fixed', 'buried', 'horizontal'} if knife and definition['source'] == knife['image']['source'] else {role}
+        if layer is None or {g.get('id') for g in source.findall(f'{{{SVG}}}g')} != expected:
+            raise ValueError(f"{definition['source']}: expected groups {sorted(expected)}")
+        for element in layer.iter() if role == 'hair' else ():
             for prop in ('fill', 'stroke'):
                 color = element.get(prop, 'none')
                 if color == 'none':
                     continue
                 if len(color) != 7 or color[0] != '#' or not color[1:3] == color[3:5] == color[5:7]:
                     raise ValueError(f"{definition['source']}: hair must use neutral grayscale")
-        sources['hair:' + definition['file']] = source
+        sources['image:' + definition['file']] = source
     bindings = {binding['id']: binding for binding in manifest['bindings']}
     if len(bindings) != len(manifest['bindings']):
         raise ValueError('Duplicate binding IDs')
@@ -127,14 +135,17 @@ def export_layers(manifest, sources, check):
         layers = part['layers'] + ([{'role': 'gib_blood', 'file': part['gib_blood']}] if part.get('gib_blood') else [])
         for layer in layers:
             exports.append((source, part['source'], layer))
-    for definition in hair_images(manifest):
-        exports.append((sources['hair:' + definition['file']], definition['source'],
-                        {'role': 'hair', 'file': definition['file']}))
+    for definition, role in decoration_images(manifest):
+        exports.append((sources['image:' + definition['file']], definition['source'],
+                        {'role': role, 'file': definition['file']}))
     for source, source_path, layer in exports:
         output = ET.Element(f'{{{SVG}}}svg', source.attrib)
         title = ET.SubElement(output, f'{{{SVG}}}title')
         title.text = f"Generated: {source_path} / {layer['role']}; edit the source"
         output.append(copy.deepcopy(source.find(f"{{{SVG}}}g[@id='{layer['role']}']")))
+        hilt = source.find(f"{{{SVG}}}g[@id='hilt']")
+        if hilt is not None and layer['role'] in ('fixed', 'horizontal'):
+            output.append(copy.deepcopy(hilt))
         ET.indent(output, space='  ')
         text = ET.tostring(output, encoding='unicode') + '\n'
         path = PACK / layer['file']
@@ -148,10 +159,15 @@ def export_layers(manifest, sources, check):
     print(f"{'Checked' if check else 'Exported'} {count} SVG layers; rig lengths, contacts, colors and draw order valid")
 
 
-def tinted_part(source, color, depth, severed=False, blood_color=None):
+def tinted_part(source, color, depth, severed=False, blood_color=None, show_buried=False,
+                horizontal_knife=False):
     output = ET.Element(f'{{{SVG}}}g')
     for child in source.findall(f'{{{SVG}}}g'):
-        if child.get('id') == 'gib_blood' and not severed:
+        if child.get('id') == 'horizontal' and not horizontal_knife:
+            continue
+        if horizontal_knife and child.get('id') in ('fixed', 'buried'):
+            continue
+        if (child.get('id') == 'buried' and not show_buried) or (child.get('id') == 'gib_blood' and not severed):
             continue
         layer = copy.deepcopy(child)
         layer.attrib.pop('id')
@@ -238,7 +254,7 @@ def hair_layer(manifest, sources, joints, facing, layer, appearance):
         scalp = hair['scalp']
         offset = [a-b for a, b in zip(head['pivot'], scalp['pivot'])]
         content.append(f'<g transform="translate({offset[0]} {offset[1]})">'
-                       + tinted_part(sources['hair:' + scalp['file']], color, 1) + '</g>')
+                       + tinted_part(sources['image:' + scalp['file']], color, 1) + '</g>')
     if appearance['length_m'] > 0:
         for anchor in hair['anchors']:
             if anchor['layer'] != layer:
@@ -253,7 +269,7 @@ def hair_layer(manifest, sources, joints, facing, layer, appearance):
             angle = math.degrees(anchor['angle_radians'])
             content.append(f'<g transform="translate({x} {y}) rotate({angle}) '
                            f'scale({scale_x} {scale_y}) translate({-px} {-py})">'
-                           + tinted_part(sources['hair:' + image['file']], color, 1) + '</g>')
+                           + tinted_part(sources['image:' + image['file']], color, 1) + '</g>')
     return f'<g transform="{transform}">' + ''.join(content) + '</g>'
 
 
@@ -262,6 +278,9 @@ def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=N
     bindings = {binding['id']: binding for binding in manifest['bindings']}
     weapon_joint = next(a for a in rig['attachments'] if a['id'] == manifest['weapon_hand']['attachment'])['joint']
     weapon_side = weapon_joint.split('_')[0]
+    knife = manifest.get('knife')
+    knife_grip = frame.get('knife') if frame and knife else None
+    knife_drawn = False
     far = 'right' if facing else 'left'
     drawing = [hair_layer(manifest, sources, joints, facing, 'back', hair_appearance)]
     for name in resolved_order(manifest, facing):
@@ -279,6 +298,25 @@ def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=N
         start, end = (joints[joint] for joint in binding['axis'])
         direction = [end[0] - start[0], end[1] - start[1]]
         part_facing = facing
+        if knife_grip and binding['anchor'] in (knife_grip['joint'], knife_grip.get('second_hand')):
+            part_name = manifest['weapon_hand']['part']
+            part_facing = knife_grip['side'] < 0
+            sign = 1 if part_facing else -1
+            horizontal = knife_grip.get('horizontal', False)
+            angle = -knife_grip['side'] * math.pi / (2 if horizontal else 4)
+            direction = [math.cos(angle) * sign, math.sin(angle) * sign]
+            scale = manifest['parts'][part_name]['meters_per_pixel']
+            image = knife['image']
+            px, py = image['pivot']
+            if not knife_drawn:
+                knife_anchor = joints[knife_grip['joint']]
+                drawing.append(f'<g transform="translate({knife_anchor[0]} {knife_anchor[1]}) '
+                               f'rotate({math.degrees(angle)}) '
+                               f'scale({scale * sign} {scale}) translate({-px} {-py})">'
+                               + tinted_part(sources['image:' + image['file']], color, 1,
+                                             show_buried=knife_grip['show_tip'],
+                                             horizontal_knife=horizontal and not knife_grip['show_tip']) + '</g>')
+                knife_drawn = True
         if frame and not frame['weapon_stowed'] and frame.get('weapon_stow_weight', 0) == 0 and name == weapon_side + '_hand_open':
             part_name = manifest['weapon_hand']['part']
             angle = frame['weapon']['angle']
@@ -319,7 +357,8 @@ def panel(drawing, joints, x, y, width, height, label, scale=150, ground=None, c
     origin_y = y + height - 32 - floor * scale
     return f'''<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="12" fill="#eae8d9"/>
 <text x="{x+16}" y="{y+28}" fill="#374c56" font-size="16" font-weight="bold">{html.escape(label)}</text>
-<g transform="translate({origin_x} {origin_y}) scale({scale})">{drawing}</g>'''
+<defs><clipPath id="panel_{x}_{y}"><rect x="{x}" y="{y+44}" width="{width}" height="{height-44}"/></clipPath></defs>
+<g clip-path="url(#panel_{x}_{y})"><g transform="translate({origin_x} {origin_y}) scale({scale})">{drawing}</g></g>'''
 
 
 def giblet_preview(sources, output, blood_color, filename='giblets.svg'):
@@ -406,6 +445,30 @@ def previews(manifest, rig, sources, output):
         center_x = (min(xs) + max(xs)) / 2
         cells.append(panel(drawing, joints, 24 + index % 3 * 415, 108 + index // 3 * 554, 398, 532, label, scale=170, center_x=center_x))
     (output / 'poses.svg').write_text(page('CURB RAT / ACTION FIT', 'Existing kneel, aim and wall-slide solver exports. White, cyan and pink skin; fixed-color accessories.', ''.join(cells)))
+    if manifest.get('knife') is not None:
+        grounded = json.loads((artifacts / 'wall_knife_action_samples.json').read_text())
+        for filename, samples, labels in (
+                ('knife.svg', walls, ('slide', 'aim wall', 'depart')),
+                ('knife_actions.svg', grounded, ('ready', 'push', 'aim'))):
+            cells = []
+            cases = [(side, label) for label in labels for side in (-1, 1)]
+            for index, (side, label) in enumerate(cases):
+                frame = next(s['frame'] for s in samples if s['label'] == label and s['side'] == side)
+                joints = pose_joints(frame, rig, local=True)
+                wall_x = side if side > 0 else side - .4
+                top = min(point[1] for point in joints.values()) - .35
+                bottom = max(point[1] for point in joints.values()) + .1
+                drawing = (f'<rect x="{wall_x}" y="{top}" width=".4" height="{bottom-top}" fill="#798888"/>'
+                           f'<path d="M{side} {top} V{bottom}" stroke="#3f545d" stroke-width=".012"/>')
+                drawing += render_pose(manifest, rig, sources, joints, frame['facing_right'],
+                                       '#ffffff', frame)
+                positions_x = [point[0] for point in joints.values()] + [side]
+                cells.append(panel(drawing, joints, 24 + index % 3 * 415, 108 + index // 3 * 554,
+                                   398, 532, f'{"LEFT" if side < 0 else "RIGHT"} WALL / {label.upper()}',
+                                   scale=170, center_x=(min(positions_x) + max(positions_x)) / 2))
+            (output / filename).write_text(page('CURB RAT / WALL DAGGER',
+                'Native solved poses: preparation, contact and grip transitions. Hair uses its static preview.',
+                ''.join(cells)))
     cells = []
     for index, (name, source) in enumerate(part_sources.items()):
         x, y = 24 + index % 5 * 249, 110 + index // 5 * 305
@@ -436,7 +499,7 @@ def previews(manifest, rig, sources, output):
 <h1>Curb Rat — articulated art review</h1><p>Offline preview of existing solved run poses, {seconds:g}s per cycle. Review the in-game artwork for final rendering.</p>
 <button id="play">Pause</button><label>Frame <input id="frame" type="range" min="0" max="{len(frames)-1}" value="0"></label><label>Speed <select id="speed"><option value="1">1×</option><option value=".25">¼×</option></select></label><label>Size <select id="size"><option value="100%">Close up</option><option value="192px">80 px/m</option></select></label>
 <div><svg id="run" xmlns="{SVG}" viewBox="-1.2 -1.9 2.4 2.4"><path d="M-1.2 .3 H1.2" stroke="#b9b5a1" stroke-width=".012"/>{''.join(frames)}</svg></div>
-<p><a href="parts.svg">Parts and joint overlay</a> · <a href="giblets.svg">Bloody severed ends</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a>{hair_link}</p>
+<p><a href="parts.svg">Parts and joint overlay</a> · <a href="giblets.svg">Bloody severed ends</a> · <a href="run.svg">12 running frames</a> · <a href="poses.svg">Kneeling, aiming and walls</a>{hair_link}{' · <a href="knife.svg">Slide / jump dagger</a> · <a href="knife_actions.svg">Approach / push dagger</a>' if manifest.get('knife') else ''}</p>
 <p>Blood tint examples: <a href="giblets_green.svg">Green</a> · <a href="giblets_blue.svg">Blue</a>. These previews do not change particles.json.</p>
 <img src="poses.svg" alt="Six solved action poses with segmented artwork">
 <script>

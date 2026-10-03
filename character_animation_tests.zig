@@ -1704,7 +1704,7 @@ test "hair roots follow posed and mirrored heads while length changes preserve r
         hair: data.CharacterHairAppearance,
         joints: [std.meta.fields(animation.Joint).len]vec.Vec2,
         head: character_art.PlacedPart,
-        locks: []character_art.HairPlacement,
+        locks: []character_art.ImagePlacement,
     };
     var reviews: std.ArrayList(Review) = .empty;
     for (0..63) |sample| {
@@ -1730,7 +1730,7 @@ test "hair roots follow posed and mirrored heads while length changes preserve r
             const other_head = character_art.placePart(&pack, hair.head_binding, other_joints, frame, false);
             for ([_]usize{ 0, 1 }) |player_id| {
                 const appearance = character_art.hairForPlayer(&pack, player_id).?;
-                const placements = try memory.alloc(character_art.HairPlacement, hair.definition.anchors.len);
+                const placements = try memory.alloc(character_art.ImagePlacement, hair.definition.anchors.len);
                 for (hair.definition.anchors, placements) |anchor, *placed| {
                     placed.* = character_art.placeHairLock(&pack, head, anchor, appearance);
                     const source_size = hair.definition.lock.source_size;
@@ -1883,8 +1883,10 @@ test "invalid art candidates preserve the installed pack and report named fields
         .{ "\"length_m\": 0.58", "\"length_m\": 3", "hair appearance.length_m" },
         .{ "\"width_m\": 0.04,", "\"width_m\": 0,", "width_m" },
         .{ "\"length_m\": 0.8", "\"length_m\": 1e999", "finite" },
-        .{ "\"export/hair_scalp.svg\"", "\"../hair.svg\"", "hair image" },
-        .{ "\"export/hair_lock.svg\"", "\"../lock.svg\"", "hair image" },
+        .{ "\"export/hair_scalp.svg\"", "\"../hair.svg\"", "art image" },
+        .{ "\"export/hair_lock.svg\"", "\"../lock.svg\"", "art image" },
+        .{ "\"export/knife.svg\"", "\"../knife.svg\"", "art image" },
+        .{ "\"export/knife_horizontal.svg\"", "\"../knife.svg\"", "art image" },
         .{ "168.29735589", "0", "hair.lock.source_size" },
         .{ "\"points_per_lock\": 6", "\"points_per_lock\": 2", "hair.motion" },
         .{ "\"iterations\": 6", "\"iterations\": 0", "hair.motion" },
@@ -1925,9 +1927,41 @@ test "art SVGs decode in SDL with matching canvases and neutral skin and blood m
             try checkArtSurface(surface, layer != 1, layer != 0);
         }
     }
+    const knife = pack.knife.?.image;
+    const knife_path = try std.testing.allocator.dupeZ(u8, knife.path);
+    defer std.testing.allocator.free(knife_path);
+    const knife_surface = try sdl.image.load(knife_path);
+    defer sdl.destroySurface(knife_surface);
+    try checkArtSurface(knife_surface, false, true);
+    var knife_pixel: sdl.Color = undefined;
+    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(knife_surface, 40, 65, &knife_pixel.r, &knife_pixel.g, &knife_pixel.b, &knife_pixel.a));
+    try std.testing.expect(knife_pixel.a > 0); // The exposed half remains visible.
+    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(knife_surface, 40, 95, &knife_pixel.r, &knife_pixel.g, &knife_pixel.b, &knife_pixel.a));
+    try std.testing.expectEqual(@as(u8, 0), knife_pixel.a); // The buried half is masked.
+    const tip_path = try std.testing.allocator.dupeZ(u8, pack.knife.?.buried.path);
+    defer std.testing.allocator.free(tip_path);
+    const tip_surface = try sdl.image.load(tip_path);
+    defer sdl.destroySurface(tip_surface);
+    try checkArtSurface(tip_surface, false, true);
+    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(tip_surface, 40, 95, &knife_pixel.r, &knife_pixel.g, &knife_pixel.b, &knife_pixel.a));
+    try std.testing.expect(knife_pixel.a > 0); // Restored only when clear of the wall.
+    const horizontal_path = try std.testing.allocator.dupeZ(u8, pack.knife.?.horizontal.path);
+    defer std.testing.allocator.free(horizontal_path);
+    const horizontal_surface = try sdl.image.load(horizontal_path);
+    defer sdl.destroySurface(horizontal_surface);
+    try checkArtSurface(horizontal_surface, false, true);
+    try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(horizontal_surface, 40, 65, &knife_pixel.r, &knife_pixel.g, &knife_pixel.b, &knife_pixel.a));
+    try std.testing.expect(knife_pixel.a > 0);
+    // Every column of the horizontal blade stops at the wall, not a diagonal cut.
+    for (0..@intCast(horizontal_surface.w)) |x| {
+        try std.testing.expect(sdl.c.SDL_ReadSurfacePixel(horizontal_surface, @intCast(x), 82, &knife_pixel.r, &knife_pixel.g, &knife_pixel.b, &knife_pixel.a));
+        try std.testing.expectEqual(@as(u8, 0), knife_pixel.a);
+    }
+    try std.testing.expect(knife.definition.pivot[0] <= @as(f32, @floatFromInt(knife_surface.w)));
+    try std.testing.expect(knife.definition.pivot[1] <= @as(f32, @floatFromInt(knife_surface.h)));
     if (pack.hair == null) return;
     const hair = pack.hair.?;
-    for ([_]character_art.HairImage{ hair.scalp, hair.lock }) |image| {
+    for ([_]character_art.Image{ hair.scalp, hair.lock }) |image| {
         const terminated = try std.testing.allocator.dupeZ(u8, image.path);
         defer std.testing.allocator.free(terminated);
         const surface = try sdl.image.load(terminated);
@@ -6032,6 +6066,7 @@ test "wall approach braces before contact and sustained input plants both hands 
         try std.testing.expectEqual(side > 0, pushing.facing_right);
         const stowed = animation.playerFrame(7, .physics, null).?;
         try std.testing.expect(stowed.weapon_stowed);
+        try std.testing.expect(stowed.knife == null);
         const rig = animation.assets.?.rig;
         const hip = animation.attachmentToWorld(rig, animation.attachmentTransform(rig, stowed.pose, "weapon_holster").?, stowed.body, stowed.facing_right);
         try nearPoint(hip.position, stowed.weapon.position, 0.00001);
@@ -6303,6 +6338,298 @@ test "sliding wall contacts follow authored foot height curves" {
     }
 }
 
+fn checkWallKnifeArtwork(
+    pack: *const character_art.Pack,
+    rig: animation.Rig,
+    frame: animation.FramePose,
+    side: f32,
+) !void {
+    const grip = frame.knife.?;
+    try std.testing.expectEqual(animation.Joint.left_hand, grip.joint);
+    try std.testing.expectEqual(side, @as(f32, @floatFromInt(grip.side)));
+    const points = character_art.worldJoints(rig, frame);
+    const knife = character_art.placeKnife(pack, points, frame).?;
+    try nearPoint(points[@intFromEnum(grip.joint)], knife.position, 0.000001);
+    try std.testing.expectEqual(side < 0, knife.facing_right);
+    var definition = pack.parts[pack.grip_part].definition;
+    definition.pivot = pack.knife.?.image.definition.pivot;
+    const tip = placedArtPoint(definition, .{
+        .part = pack.grip_part,
+        .position = knife.position,
+        .angle = knife.angle,
+        .facing_right = knife.facing_right,
+        .far = false,
+    }, pack.knife.?.definition.blade_tip);
+    const offset = character_art.knifeContactOffset(pack, grip.side, grip.horizontal);
+    const contact = vec.add(knife.position, offset);
+    try nearPoint(grip.contact.?, contact, 0.00003);
+    try std.testing.expectApproxEqAbs(side, contact.x, 0.00003);
+    try std.testing.expect(tip.x * side > 1.07);
+    try std.testing.expect(tip.y > knife.position.y + 0.2);
+    try std.testing.expect(knife.position.x * side < 0.85);
+    try std.testing.expect(!grip.show_tip);
+    for (pack.bindings, 0..) |binding, index| {
+        const placed = character_art.placePart(pack, index, points, frame, true);
+        if (binding.anchor == pack.weapon_joint) {
+            try nearPoint(frame.weapon.position, placed.position, 0.000001);
+            try std.testing.expectEqual(pack.grip_part, placed.part);
+        }
+        if (binding.anchor != grip.joint) continue;
+        try std.testing.expectEqual(pack.grip_part, placed.part);
+        try nearPoint(knife.position, placed.position, 0.000001);
+        try std.testing.expectEqual(knife.facing_right, placed.facing_right);
+        try std.testing.expectApproxEqAbs(knife.angle, placed.angle, 0.000001);
+        try std.testing.expectEqual(character_art.isFar(binding.depth, frame.facing_right), placed.far);
+    }
+}
+
+test "wall knife releases on wall removal and preserves previous physics sampling" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |side| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        const wall = try createAnimationWall(side, 1);
+        character_art.install(try loadArt(animation.assets.?.rig));
+        const input: animation.LocomotionInput = .{
+            .body = .{ .x = side * 0.7, .y = -1.5 },
+            .supported = false,
+            .ground_y = null,
+            .facing_right = side < 0,
+            .vertical_speed_mps = 2,
+            .separation_speed_mps = 0,
+            .movement_direction = side,
+            .wall_sliding = true,
+        };
+        box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+        for (0..90) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.knife != null);
+        box2d.c.b2DestroyBody(wall);
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.knife == null);
+        try std.testing.expect(animation.playerFrame(7, .previous_physics, null).?.knife != null);
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expect(animation.playerFrame(7, .previous_physics, null).?.knife == null);
+    }
+}
+
+test "wall scrape uses the dagger contact with bounded emission and no idle or released particles" {
+    const old_view = animation.view;
+    const old_alpha = time.alpha;
+    defer animation.view = old_view;
+    defer time.alpha = old_alpha;
+    for ([_]f32{ -1, 1 }) |side| {
+        for ([_]usize{ 60, 120 }) |steps| {
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            const wall = try createAnimationWall(side, 1);
+            character_art.install(try loadArt(animation.assets.?.rig));
+            animation.view = .artwork;
+            const dt = 1.0 / @as(f64, @floatFromInt(steps));
+            var input: animation.LocomotionInput = .{
+                .body = .{ .x = side * 0.7, .y = -2 },
+                .supported = false,
+                .ground_y = null,
+                .facing_right = side < 0,
+                .vertical_speed_mps = 2,
+                .separation_speed_mps = 0,
+                .movement_direction = side,
+                .wall_sliding = true,
+            };
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            for (0..steps) |_| {
+                animation.updatePlayer(7, input, dt);
+                try std.testing.expect(animation.wallScrapeEmission(7, dt) == null);
+            }
+            var count: f32 = 0;
+            for (0..steps) |_| {
+                entity.entities.getPtrLocking(body).?.state = box2d.getState(body);
+                input.body.y += @as(f32, @floatCast(dt * 2));
+                box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+                animation.updatePlayer(7, input, dt);
+                for ([_]f64{ 0, 0.5, 1 }) |alpha| {
+                    time.alpha = alpha;
+                    const frame = animation.playerFrame(7, .render, null).?;
+                    try checkWallKnifeArtwork(&character_art.assets.?, animation.assets.?.rig, frame, side);
+                }
+                const emission = animation.wallScrapeEmission(7, dt) orelse continue;
+                const grip = animation.playerFrame(7, .physics, null).?.knife.?;
+                try std.testing.expectApproxEqAbs(grip.contact.?.y, emission.position.y, 0.00001);
+                try std.testing.expectApproxEqAbs(side * 0.975, emission.position.x, 0.00001);
+                try std.testing.expectEqual(@as(f32, 0), emission.spawn_radius_m);
+                try std.testing.expect(emission.direction.?.x * side < 0);
+                try std.testing.expect(emission.amount <= 2);
+                count += emission.amount;
+            }
+            try std.testing.expect(count >= 39 and count <= 40);
+            animation.updatePlayer(7, input, dt);
+            try std.testing.expect(animation.wallScrapeEmission(7, dt) == null);
+            try std.testing.expectEqual(@as(f32, 0), animation.states.get(7).?.scrape_particles);
+            // Destroyed support must stop emission, even with downward displacement.
+            box2d.c.b2DestroyBody(wall);
+            input.body.y += 0.1;
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            animation.updatePlayer(7, input, dt);
+            try std.testing.expect(animation.wallScrapeEmission(7, dt) == null);
+        }
+    }
+}
+
+test "wall dagger readies on approach and both hands drive it from a forward leaning push" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var samples: std.ArrayListUnmanaged(WallPoseSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]f32{ -1, 1 }) |side| {
+        for ([_]f32{ 0.3, 0.25, 0.349 }) |distance| {
+            errdefer std.debug.print("wall dagger side={d}, distance={d}\n", .{ side, distance });
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            _ = try createAnimationWall(side, 1);
+            character_art.install(try loadArt(animation.assets.?.rig));
+            const pack = &character_art.assets.?;
+            const rig = animation.assets.?.rig;
+            var input: animation.LocomotionInput = .{
+                .body = .{ .x = side * 0.5, .y = 0 },
+                .supported = true,
+                .ground_y = 0.3,
+                .facing_right = side > 0,
+                .horizontal_speed_mps = side * 6,
+                .vertical_speed_mps = 0,
+                .separation_speed_mps = 0,
+                .movement_direction = side,
+            };
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            for (0..8) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            const ready = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expectEqual(animation.WallAction.brace, animation.states.get(7).?.wall.action);
+            try std.testing.expect(ready.knife != null);
+            try std.testing.expect(ready.knife.?.contact == null);
+            try std.testing.expect(ready.knife.?.show_tip);
+            try captureWallPose(&samples, "ready", side);
+            input.body.x = side * (1 - distance);
+            input.horizontal_speed_mps = 0;
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            const pushed = animation.playerFrame(7, .physics, null).?;
+            const grip = pushed.knife.?;
+            try std.testing.expectEqual(animation.WallAction.push, animation.states.get(7).?.wall.action);
+            try std.testing.expect(grip.horizontal);
+            try std.testing.expect(pushed.weapon_stowed);
+            try std.testing.expect(!grip.show_tip);
+            try std.testing.expect(grip.contact != null);
+            try std.testing.expectEqual(animation.Joint.right_hand, grip.second_hand.?);
+            const points = character_art.worldJoints(rig, pushed);
+            const primary = points[@intFromEnum(grip.joint)];
+            const secondary = points[@intFromEnum(grip.second_hand.?)];
+            const offset = character_art.knifePointOffset(pack, grip.side, grip.horizontal, pack.knife.?.definition.second_grip);
+            try nearPoint(vec.add(primary, offset), secondary, 0.00003);
+            const tip_offset = character_art.knifePointOffset(pack, grip.side, grip.horizontal, pack.knife.?.definition.blade_tip);
+            try std.testing.expectApproxEqAbs(@as(f32, 0), tip_offset.y, 0.000001);
+            const blade_contact = vec.add(primary, character_art.knifeContactOffset(pack, grip.side, grip.horizontal));
+            try nearPoint(grip.contact.?, blade_contact, 0.00003);
+            try std.testing.expectApproxEqAbs(side, blade_contact.x, 0.00003);
+            const pelvis = points[@intFromEnum(animation.Joint.pelvis)];
+            const chest = points[@intFromEnum(animation.Joint.chest)];
+            try std.testing.expect((side - pelvis.x) * side > 0.75);
+            try std.testing.expect((chest.x - pelvis.x) * side > 0.15);
+            try std.testing.expect(@abs(chest.y - primary.y) < 0.1);
+            for (rig.limbs[2..]) |limb| {
+                const upper = vec.subtract(points[@intFromEnum(limb.middle)], points[@intFromEnum(limb.root)]);
+                const lower = vec.subtract(points[@intFromEnum(limb.end)], points[@intFromEnum(limb.middle)]);
+                const bend = vec.dot(upper, lower) / (vec.magnitude(upper) * vec.magnitude(lower));
+                try std.testing.expect(bend > -0.3);
+                try std.testing.expect(points[@intFromEnum(limb.middle)].x * side < 1);
+            }
+            for (rig.limbs[0..2], 0..) |limb, index| {
+                const upper = vec.subtract(points[@intFromEnum(limb.middle)], pelvis);
+                const lower = vec.subtract(points[@intFromEnum(limb.end)], points[@intFromEnum(limb.middle)]);
+                const bend = vec.dot(upper, lower) / (vec.magnitude(upper) * vec.magnitude(lower));
+                try std.testing.expect(if (index == 0) bend < 0.5 else bend > 0.75);
+                try std.testing.expect((points[@intFromEnum(limb.end)].x - pelvis.x) * side < 0);
+            }
+            for (pack.bindings, 0..) |binding, index| {
+                if (binding.anchor != grip.joint and binding.anchor != grip.second_hand) continue;
+                try std.testing.expectEqual(pack.grip_part, character_art.placePart(pack, index, points, pushed, true).part);
+            }
+            try captureWallPose(&samples, "push", side);
+            input.aiming = true;
+            input.movement_direction = 0; // Gameplay consumes movement while aiming on the ground.
+            input.aim_direction = .{ .x = -side, .y = 0 };
+            for (0..45) |_| {
+                const before = animation.states.get(7).?;
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                const after = animation.states.get(7).?;
+                try checkWallPoseBoundary(before, after);
+                try std.testing.expectEqual(animation.WallAction.push, after.wall.action);
+                for ([_]f64{ 0, 0.5, 1 }) |alpha| {
+                    const pose = animation.interpolatedPose(&animation.assets.?, after, alpha);
+                    const hand = animation.toWorld(rig, pose.joints[@intFromEnum(grip.joint)], after.body, after.facing_right);
+                    try nearPoint(primary, hand, 0.00003);
+                    const soles = [_]animation.Joint{ .left_toe, .left_heel, .right_toe, .right_heel };
+                    for (soles) |joint| {
+                        const point = animation.toWorld(rig, pose.joints[@intFromEnum(joint)], after.body, after.facing_right);
+                        try std.testing.expect(point.y <= input.ground_y.? + 0.00003);
+                    }
+                }
+            }
+            const aimed = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expect(!aimed.weapon_stowed);
+            try std.testing.expect(aimed.knife.?.second_hand == null);
+            try std.testing.expect(aimed.knife.?.contact != null);
+            const aimed_points = character_art.worldJoints(rig, aimed);
+            const support_arm = rig.limbs[@intFromEnum(animation.Limb.left_arm)];
+            const upper = vec.subtract(aimed_points[@intFromEnum(support_arm.middle)], aimed_points[@intFromEnum(support_arm.root)]);
+            const lower = vec.subtract(aimed_points[@intFromEnum(support_arm.end)], aimed_points[@intFromEnum(support_arm.middle)]);
+            try std.testing.expect(vec.dot(upper, lower) / (vec.magnitude(upper) * vec.magnitude(lower)) > 0.94);
+            try nearPoint(primary, aimed_points[@intFromEnum(grip.joint)], 0.00003);
+            try std.testing.expectApproxEqAbs(-side, player.weaponDirection(player.weaponFrame(7, .physics, null).?).x, 0.00003);
+            try captureWallPose(&samples, "aim", side);
+            input.aiming = false;
+            input.movement_direction = side;
+            for (0..60) |_| {
+                const before = animation.states.get(7).?;
+                animation.updatePlayer(7, input, 1.0 / 60.0);
+                try checkWallPoseBoundary(before, animation.states.get(7).?);
+            }
+            const resumed = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expectEqual(animation.Joint.right_hand, resumed.knife.?.second_hand.?);
+            try std.testing.expect(resumed.weapon_stowed);
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try fs.writeFile("artifacts/character_animation/wall_knife_action_samples.json", bytes);
+}
+
+test "knife is optional and independent of hair decoration" {
+    var set = try load();
+    defer set.arena.deinit();
+    for ([_]bool{ false, true }) |explicit_null| {
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, art_json, .{});
+        defer parsed.deinit();
+        _ = parsed.value.object.swapRemove("hair");
+        var detail: data.CharacterAssetDiagnostic = .{};
+        const with_knife = try std.json.Stringify.valueAlloc(std.testing.allocator, parsed.value, .{});
+        defer std.testing.allocator.free(with_knife);
+        var knife_only = try character_art.prepare(try data.parseCharacterArtData(std.testing.allocator, with_knife, &detail), set.rig, &detail);
+        defer character_art.destroy(&knife_only);
+        try std.testing.expect(knife_only.hair == null);
+        try std.testing.expect(knife_only.knife != null);
+        if (explicit_null) {
+            parsed.value.object.getPtr("knife").?.* = .null;
+        } else {
+            _ = parsed.value.object.swapRemove("knife");
+        }
+        const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, parsed.value, .{});
+        defer std.testing.allocator.free(bytes);
+        var legacy = try character_art.prepare(try data.parseCharacterArtData(std.testing.allocator, bytes, &detail), set.rig, &detail);
+        defer character_art.destroy(&legacy);
+        try std.testing.expect(legacy.knife == null);
+        try std.testing.expectEqual(knife_only.bindings.len, legacy.bindings.len);
+    }
+}
+
 test "one-handed wall slide faces outward and keeps the blaster ready through aiming and push-off" {
     const old_view = animation.view;
     defer animation.view = old_view;
@@ -6312,6 +6639,8 @@ test "one-handed wall slide faces outward and keeps the blaster ready through ai
         const body = try beginAimingPlayer();
         defer endAimingPlayer(body);
         _ = try createAnimationWall(side, 1);
+        character_art.install(try loadArt(animation.assets.?.rig));
+        const pack = &character_art.assets.?;
         var input: animation.LocomotionInput = .{ .body = .{ .x = side * 0.7, .y = -1.5 }, .supported = false, .ground_y = null, .facing_right = side > 0, .vertical_speed_mps = 2, .separation_speed_mps = 0, .movement_direction = side, .wall_sliding = true };
         box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
         animation.resetPlayer(7);
@@ -6327,6 +6656,7 @@ test "one-handed wall slide faces outward and keeps the blaster ready through ai
         try std.testing.expect(sliding.wall.hands[0] != null and sliding.wall.hands[1] == null);
         try std.testing.expectEqual(@as(f32, 0), sliding.stow_weight);
         try checkWallSlideLegs(ready, side);
+        try checkWallKnifeArtwork(pack, set.rig, ready, side);
         const hand = animation.toWorld(set.rig, ready.pose.joints[@intFromEnum(animation.Joint.left_hand)], ready.body, ready.facing_right);
         const head = animation.toWorld(set.rig, ready.pose.joints[@intFromEnum(animation.Joint.head)], ready.body, ready.facing_right);
         try nearPoint(sliding.wall.hands[0].?, hand, 0.00003);
@@ -6355,11 +6685,13 @@ test "one-handed wall slide faces outward and keeps the blaster ready through ai
             try std.testing.expect(!frame.weapon_stowed);
             try std.testing.expect(animation.states.get(7).?.wall.hands[1] == null);
             try checkWallSlideLegs(frame, side);
+            try checkWallKnifeArtwork(pack, set.rig, frame, side);
             const support = animation.toWorld(set.rig, frame.pose.joints[@intFromEnum(animation.Joint.left_hand)], frame.body, frame.facing_right);
             try nearPoint(animation.states.get(7).?.wall.hands[0].?, support, 0.00003);
             try nearPoint(aim, player.weaponDirection(player.weaponFrame(7, .physics, null).?), 0.00003);
             const forced = animation.playerFrame(7, .physics, .{ .x = -side, .y = 0 }).?;
             try std.testing.expect(!forced.weapon_stowed);
+            try checkWallKnifeArtwork(pack, set.rig, forced, side);
             try captureWallPose(&samples, label, side);
         }
         input.aiming = false;
@@ -6379,6 +6711,13 @@ test "one-handed wall slide faces outward and keeps the blaster ready through ai
             try std.testing.expectEqual(side < 0, frame.facing_right);
             try std.testing.expect(!frame.weapon_stowed);
             try std.testing.expect(after.wall.hands[0] == null and after.wall.hands[1] == null);
+            if (after.wall.action == .jump) {
+                try std.testing.expect(frame.knife != null);
+                try std.testing.expect(frame.knife.?.contact == null);
+                if (tick == 5) try std.testing.expect(frame.knife.?.show_tip);
+            } else {
+                try std.testing.expect(frame.knife == null);
+            }
             try checkWallPoseBoundary(before, after);
             try nearPoint(animation.toWorld(set.rig, animation.attachmentPosition(set.rig, frame.pose, "weapon_hand").?, frame.body, frame.facing_right), frame.weapon.position, 0.00003);
             if (tick == 0) try captureWallPose(&samples, "push off", side);
@@ -6499,11 +6838,14 @@ fn checkWallPoseBoundary(before: animation.PlayerState, after: animation.PlayerS
     try checkBones(set.rig, start);
     // Facing reflects anatomical offsets. Account for the forward neck exactly;
     // allow the small shoulder shift, but catch a switched elbow/knee branch.
+    // Near extension, that shift produces up to 4 cm of elbow motion while the
+    // hand remains fixed. Other joints retain the 2 cm turning tolerance.
     const turning = before.facing_right != after.facing_right;
-    const tolerance: f32 = if (turning) 0.02 else 0.00003;
     for (end.joints, start.joints, 0..) |a, b, index| {
         var expected = a;
         const joint: animation.Joint = @enumFromInt(index);
+        const elbow = joint == .left_elbow or joint == .right_elbow;
+        const tolerance: f32 = if (!turning) 0.00003 else if (elbow) 0.04 else 0.02;
         if (turning and (joint == .neck or joint == .head)) {
             const torso = vec.normalize(vec.subtract(
                 end.joints[@intFromEnum(animation.Joint.chest)],

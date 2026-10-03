@@ -375,13 +375,21 @@ pub const CharacterAssetDiagnostic = struct {
 pub const CharacterArtDepth = enum { center, left, right };
 pub const CharacterHairLayer = enum { back, front };
 pub const CharacterHairAppearance = struct { color: sprite.Color, length_m: f32 };
-pub const CharacterHairImage = struct {
+pub const CharacterArtImage = struct {
     source: []const u8,
     file: []const u8,
     pivot: [2]f32,
 };
+pub const CharacterKnife = struct {
+    image: CharacterArtImage,
+    buried_file: []const u8,
+    horizontal_file: []const u8,
+    blade_base: [2]f32,
+    blade_tip: [2]f32,
+    second_grip: [2]f32,
+};
 pub const CharacterHairLock = struct {
-    image: CharacterHairImage,
+    image: CharacterArtImage,
     source_size: [2]f32, // Nominal width and root-to-tip length in source pixels.
 };
 pub const CharacterHairAnchor = struct {
@@ -412,7 +420,7 @@ pub const CharacterHairMotion = struct {
 };
 pub const CharacterHairData = struct {
     head_binding: []const u8,
-    scalp: CharacterHairImage,
+    scalp: CharacterArtImage,
     lock: CharacterHairLock,
     anchors: []const CharacterHairAnchor,
     default: CharacterHairAppearance,
@@ -465,6 +473,7 @@ pub const CharacterArtManifest = struct {
     draw_order: []const []const u8,
     weapon_hand: struct { attachment: []const u8, part: []const u8, orientation: enum { weapon_transform } },
     hair: ?CharacterHairData = null,
+    knife: ?CharacterKnife = null, // Uses the grip hand's source pixel scale.
     notes: []const []const u8,
 };
 pub const CharacterArtData = struct { arena: std.heap.ArenaAllocator, manifest: CharacterArtManifest };

@@ -18,8 +18,8 @@ The references supplied by the user are the
 and [Dylan Greenwood's slide](https://cdna.artstation.com/p/assets/images/images/023/618/038/original/dylan-greenwood-slide-animation.gif?1579789490).
 All six frames of the first and four frames of the second were inspected. The
 raised grip, open torso, free arm and staggered legs informed this pose. The
-support hand provides a place for later knife artwork; this phase implements
-the stick-figure pose and existing blaster placement.
+support hand originally reserved a place for knife artwork; the follow-up below
+adds that artwork to the accepted pose and blaster placement.
 
 On a wall jump, the support hand releases and both legs extend through the
 accepted push-off. The character continues facing outward, or follows active
@@ -123,3 +123,80 @@ generated artwork. Controller feel and rapid transitions still need user testing
    the legs should extend, and the gun should stay in hand through push-off.
 5. Release the wall, land, or leave its edge. Check the return to ordinary motion
    at normal speed and with **§ → S** slow motion.
+
+
+## Knife artwork follow-up — accepted
+
+The character now carries a straight double-edged dagger in reverse grip for
+wall actions. On approach the dagger is readied before contact. Sustained ground
+pushing drives it horizontally into the wall with both hands on the handle, bent
+elbows and a forward torso lean over the knife (about 52 degrees). The raised
+grip, bent front knee and nearly extended rear leg follow the supplied pushing
+reference, with the staggered feet behind the hips and the arms reaching forward.
+The stance fits the actual grip distance, including contacts near the maximum
+pushing distance and optional artwork packs that use bare hands. This shifts
+the hips and foot targets together using the existing arm limits. The gun uses the
+existing holster transition. Aiming retains an established push even after gameplay
+consumes horizontal input. Turning to shoot away from the wall frees the gun
+arm and eases the torso upright until the knife arm is nearly straight. The
+existing two-link solver derives that torso angle from the planted hand and
+the rig lengths, using the aiming profile's hand reach. Feet and knife contact
+keep their contact targets. Knees use the existing limb-release blend as the
+feet turn, avoiding a sudden bend reversal. Releasing aim blends back into the
+two-handed pushing pose.
+
+During sliding the left hand holds the dagger angled 45 degrees down into the
+wall, with half the blade buried. The right hand keeps the blaster. On wall jump
+the dagger stays in the support hand through the short push-off clip before the
+normal airborne pose resumes. All mirroring follows the wall side independently
+of aim-facing. The blade draws before the first gripping hand so both sets of
+fingers cover the handle during two-handed pushes.
+
+The optional `knife` manifest entry supplies image paths, grip pivot,
+blade base/tip and a second grip point on the handle. These use the closed hand's
+source pixel scale. The blade midpoint determines both the wall contact and the
+wrist offset; the second hand uses the same transform. Existing wall rays query
+that contact height and ordinary arm IK reaches the two grip targets. Physical
+movement and bone lengths are unchanged. The existing sparse brace/push/jump
+curves author the preparation and forward effort pose.
+
+The source SVG shares a `hilt` between the angled and horizontal blade views.
+The `fixed` and `buried` groups make the full straight blade; `horizontal` ends
+at the midpoint with the correct cut for a level push. They export separately
+because SDL's SVG reader does not apply clip paths. A planted dagger draws only
+the matching exposed portion; its tip stays hidden until it clears the wall
+during withdrawal. `FramePose.knife` shares contact, readiness, orientation
+and second-hand information with artwork and particle placement.
+The blade layers follow the same texture loading, validation, atomic reload
+and cleanup ownership as the rest of the art pack.
+
+Downward sliding emits small debris through the existing `particle_effect` and
+pooled `particle` components. The `wall_scrape` preset in `particles.json` controls
+chip size, color, speed and lifetime. A fixed-step fractional budget limits the
+shipped effect to 40 chips/second and scales slower movement by distance. Idle,
+upward movement, missing/released contacts and discontinuous movement produce
+no debris. Chips start at the shared blade contact, offset 2.5 cm outward to
+clear their collider radius, and scatter away from the surface. The emitter's
+optional `spawn_radius_m` preserves the old 18 cm default for existing effects;
+the dagger uses zero spread in spawn position. There is no stain behavior.
+
+Edit `character_art/curb_rat_v1/source/knife.svg` and check with:
+
+```sh
+python3 scripts/export_character_art.py
+bash scripts/character_animation_check.sh
+python3 scripts/export_character_art.py --preview agent-temp-files/wall-knife-reference/preview
+```
+
+`knife.svg` shows slide, aim-facing and jump departure. `knife_actions.svg` shows
+preparation, pushing and returning to aim on both walls. These are native solved
+poses. Their hair uses the existing static SVG preview and they do not simulate
+debris. In game the accepted custom hair simulation remains active.
+
+Automated coverage checks the two grip positions, forward lean, bent elbows,
+horizontal pushing, body clearance, blade midpoint and hidden/visible tip layers,
+approach/jump readiness, aiming, removal, physics/render sampling and bounded
+emission at 60/120 fixed steps per second. Push-to-aim coverage uses neutral movement input and verifies knife-hand
+continuity, near-straight support-arm reach, gun direction and returning to push
+on both sides at ordinary, close and near-limit contact distances. In-game
+transitions and debris appearance can be reviewed in artwork view with **§ → Z** for a close view.

@@ -924,5 +924,29 @@
       "bend_damping_per_second": 12,
       "motion_transfer": 0.2
     }
+  },
+  "knife": {
+    "image": {
+      "source": "source/knife.svg",
+      "file": "export/knife.svg",
+      "pivot": [
+        40,
+        30
+      ]
+    },
+    "blade_base": [
+      40,
+      50
+    ],
+    "blade_tip": [
+      40,
+      110
+    ],
+    "buried_file": "export/knife_buried.svg",
+    "horizontal_file": "export/knife_horizontal.svg",
+    "second_grip": [
+      40,
+      15
+    ]
   }
 }

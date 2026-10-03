@@ -12,6 +12,7 @@ pub const Id = u64;
 
 pub const Emission = struct {
     position: vec.Vec2,
+    spawn_radius_m: f32 = 0.18,
     amount: f32,
     direction: ?vec.Vec2 = null,
     spread_radians: f32 = std.math.pi * 2.0,
@@ -163,9 +164,9 @@ fn randomDirection(preset: data.ParticleData, direction: ?vec.Vec2, spreadRadian
     return .{ .x = @cos(angle), .y = @sin(angle) };
 }
 
-fn randomSpawnPosition(position: vec.Vec2) vec.Vec2 {
+fn randomSpawnPosition(position: vec.Vec2, radius: f32) vec.Vec2 {
     const angle = runtime.random().float(f32) * std.math.pi * 2.0;
-    const distance = runtime.random().float(f32) * 0.18;
+    const distance = runtime.random().float(f32) * radius;
     return .{
         .x = position.x + @cos(angle) * distance,
         .y = position.y + @sin(angle) * distance,
@@ -202,6 +203,10 @@ pub fn particleCount(preset: data.ParticleData, amount: f32) u32 {
 
 pub fn emit(effectId: Id, emission: Emission) !void {
     if (emission.amount <= 0) return;
+    if (!std.math.isFinite(emission.spawn_radius_m) or emission.spawn_radius_m < 0) {
+        std.log.err("particle_effect.emit: invalid spawn radius", .{});
+        return error.InvalidParticleSpawnRadius;
+    }
 
     const preset = presets.get(effectId) orelse {
         std.log.err("particle_effect.emit: preset {d} is missing", .{effectId});
@@ -236,7 +241,7 @@ pub fn emit(effectId: Id, emission: Emission) !void {
         const stainRadius = randomStainRadius(preset);
 
         _ = try particle.spawnCircle(.{
-            .position = randomSpawnPosition(emission.position),
+            .position = randomSpawnPosition(emission.position, emission.spawn_radius_m),
             .velocity = velocity,
             .visual_scale = visualScale,
             .lifetime_ms = preset.lifetimeMs,

@@ -19,6 +19,7 @@ const sprite = @import("sprite.zig");
 const collision = @import("collision.zig");
 const character_art = @import("character_art.zig");
 const gibbing = @import("gibbing.zig");
+const particle_effect = @import("particle_effect.zig");
 
 pub const Joint = enum(u8) {
     pelvis,
@@ -150,6 +151,8 @@ pub const WallState = struct {
     impact: f32 = 0,
     weight: f32 = 0,
     hands: [2]?vec.Vec2 = .{ null, null },
+    knife_contact: ?vec.Vec2 = null,
+    surface_x: ?f32 = null,
     // Toe targets slide with the body, then stay in world space for push-off.
     feet: [2]?vec.Vec2 = .{ null, null },
     feet_planted: [2]bool = .{ false, false },
@@ -218,6 +221,7 @@ pub const PlayerState = struct {
     previous_weapon_angle: ?f32 = null,
     wall: WallState = .{},
     previous_wall: WallState = .{},
+    scrape_particles: f32 = 0,
     stow_weight: f32 = 0,
     previous_stow_weight: f32 = 0,
     limb_release_angles: [limbCount][2]f32 = @splat(.{ 0, 0 }),
@@ -235,6 +239,14 @@ pub const FramePose = struct {
     weapon_facing_right: bool,
     weapon_stowed: bool = false,
     weapon_stow_weight: f32 = 0,
+    knife: ?struct {
+        joint: Joint,
+        side: i8,
+        horizontal: bool,
+        contact: ?vec.Vec2,
+        show_tip: bool,
+        second_hand: ?Joint = null,
+    } = null,
 };
 pub const Pose = struct {
     joints: [jointCount]vec.Vec2,
@@ -1107,10 +1119,11 @@ fn updateWall(set: *const Assets, state: *PlayerState, input: LocomotionInput, p
     const before = state.wall;
     const settings = set.walls.settings;
     state.wall.hands = .{ null, null };
+    state.wall.knife_contact = null;
     state.wall.seconds += dt;
     select: {
         if (input.wall_jump_direction != 0) {
-            state.wall = .{ .action = .jump, .side = -input.wall_jump_direction, .weight = 1, .feet = if (before.side == -input.wall_jump_direction) before.feet else .{ null, null } };
+            state.wall = .{ .action = .jump, .side = -input.wall_jump_direction, .weight = 1, .surface_x = before.surface_x, .feet = if (before.side == -input.wall_jump_direction) before.feet else .{ null, null } };
             break :select;
         }
         if (before.action == .jump and state.wall.seconds < set.walls.jump.cycle_seconds and !input.supported) break :select;
@@ -1125,6 +1138,7 @@ fn updateWall(set: *const Assets, state: *PlayerState, input: LocomotionInput, p
         const distance = @min(settings.probe_distance_m, settings.contact_distance_m + speed * settings.anticipation_seconds);
         const origin: vec.Vec2 = .{ .x = input.body.x, .y = input.body.y - set.rig.root_from_body.y - set.rig.joints[@intFromEnum(Joint.chest)].rest_offset.y };
         const point = wallPoint(origin, side, distance) orelse break :select;
+        state.wall.surface_x = point.x;
         const touching = @abs(point.x - input.body.x) <= settings.contact_distance_m;
         state.wall.side = side;
         if (side != before.side or before.action == .none or before.action == .jump) {
@@ -1138,7 +1152,11 @@ fn updateWall(set: *const Assets, state: *PlayerState, input: LocomotionInput, p
         } else {
             state.wall.contact_seconds = 0;
         }
-        state.wall.action = if (input.wall_sliding) .slide else if (input.supported and touching and input.movement_direction != 0 and state.wall.contact_seconds >= settings.push_delay_seconds) .push else .brace;
+        const holding_push = holding_contact and before.action == .push;
+        const pushing = input.supported and touching and
+            (input.movement_direction != 0 or holding_push) and
+            state.wall.contact_seconds >= settings.push_delay_seconds;
+        state.wall.action = if (input.wall_sliding) .slide else if (pushing) .push else .brace;
         state.wall.weight = @min(1, state.wall.weight + dt / settings.blend_seconds);
     }
     if (state.wall.action == .none) state.wall = .{};
@@ -1168,7 +1186,50 @@ fn wallControls(set: *const Assets, state: *PlayerState) void {
         const progress = std.math.clamp(state.wall.contact_seconds / set.walls.settings.push_delay_seconds, 0, 1);
         controls[@intFromEnum(Control.pelvis_y)] -= @sin(progress * std.math.pi) * state.wall.impact * set.walls.settings.impact_compression_m;
     }
+    wallKnifeAimControls(set, state, &controls);
     if (state.facing_right != (state.wall.side > 0)) controls = mirrorControls(set.rig, controls);
+    // Fit the stance to the actual grips before ground constraints. The wider
+    // authored pose must also reach contacts near the probe's distance limit.
+    if (state.wall.action == .push and state.wall.surface_x != null) {
+        const pose = solvePose(set.rig, controls);
+        const facing: f32 = if (state.facing_right) 1 else -1;
+        const toward: f32 = @as(f32, @floatFromInt(state.wall.side)) * facing;
+        const knife = character_art.assets != null and character_art.assets.?.knife != null;
+        const contact_offset = if (knife)
+            character_art.knifeContactOffset(&character_art.assets.?, state.wall.side, true)
+        else
+            vec.zero;
+        const hand_x = state.wall.surface_x.? - contact_offset.x;
+        const target_x_local = (hand_x - state.body.x) * facing - set.rig.root_from_body.x;
+        const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint;
+        var shift: f32 = 0;
+        for (set.rig.limbs[2..], 2..) |limb, index| {
+            if (limb.end == weapon_joint and state.aim_weight > 0) continue;
+            const shoulder = pose.joints[@intFromEnum(limb.root)];
+            const upper = set.rig.lengths[@intFromEnum(limb.middle)];
+            const lower = set.rig.lengths[@intFromEnum(limb.end)];
+            const reach = reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians);
+            var target: vec.Vec2 = .{
+                .x = target_x_local,
+                .y = controls[@intFromEnum(target_y[index])],
+            };
+            if (knife and limb.end == weapon_joint) {
+                const pack = &character_art.assets.?;
+                const second_grip = pack.knife.?.definition.second_grip;
+                const offset = character_art.knifePointOffset(pack, state.wall.side, true, second_grip);
+                const support: usize = if (weapon_joint == .right_hand) 2 else 3;
+                target.x += offset.x * facing;
+                target.y = controls[@intFromEnum(target_y[support])] - offset.y;
+            }
+            const dy = target.y - shoulder.y;
+            const horizontal = @sqrt(@max(0, reach[1] * reach[1] - dy * dy));
+            const needed = (target.x - shoulder.x) * toward - horizontal;
+            shift = @max(shift, @as(f32, @floatCast(needed)));
+        }
+        controls[@intFromEnum(Control.pelvis_x)] += shift * toward;
+        controls[@intFromEnum(Control.left_foot_x)] += shift * toward;
+        controls[@intFromEnum(Control.right_foot_x)] += shift * toward;
+    }
     for (&state.controls, controls, 0..) |*value, target, index| {
         // During approach the running stride continues beneath the bracing arms.
         const binding: Control = @enumFromInt(index);
@@ -1179,6 +1240,51 @@ fn wallControls(set: *const Assets, state: *PlayerState) void {
     if (state.wall.action == .brace) return;
     // Airborne wall contacts are separate from the ground planting plane.
     state.contact_intent = if (state.wall.action == .push) .{ contactIntent(clip, .left_leg, phase), contactIntent(clip, .right_leg, phase) } else .{ false, false };
+}
+
+fn wallKnifeAimControls(set: *const Assets, state: *const PlayerState, controls: *[controlCount]f32) void {
+    if (state.wall.action != .push or state.previous_wall.side != state.wall.side or
+        state.aim_weight == 0 or character_art.assets == null or
+        character_art.assets.?.knife == null)
+    {
+        return;
+    }
+    const side: f32 = @floatFromInt(state.wall.side);
+    const away = std.math.clamp(-state.aim_direction.x * side, 0, 1);
+    if (away == 0) return;
+    const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint;
+    const support_index: usize = if (weapon_joint == .right_hand) 0 else 1;
+    const hand = state.previous_wall.hands[support_index] orelse return;
+    const limb = set.rig.limbs[support_index + 2];
+    const chest_offset = set.rig.joints[@intFromEnum(Joint.chest)].rest_offset;
+    var shoulder = vec.add(chest_offset, set.rig.joints[@intFromEnum(limb.root)].rest_offset);
+    // These authored controls face the wall. Reflect the small shoulder offset
+    // when the character turns, before wallControls mirrors the full pose.
+    if (state.facing_right != (state.wall.side > 0)) shoulder.x = -shoulder.x;
+    const pelvis: vec.Vec2 = .{
+        .x = controls[@intFromEnum(Control.pelvis_x)],
+        .y = controls[@intFromEnum(Control.pelvis_y)],
+    };
+    const target: vec.Vec2 = .{
+        .x = (hand.x - state.body.x) * side - set.rig.root_from_body.x,
+        .y = state.body.y - set.rig.root_from_body.y - hand.y,
+    };
+    const upper = set.rig.lengths[@intFromEnum(limb.middle)];
+    const lower = set.rig.lengths[@intFromEnum(limb.end)];
+    const reach = reachLimits(upper, lower, limb.min_bend_radians, limb.max_bend_radians);
+    const extension: f32 = @floatCast(std.math.clamp(set.aiming.hand_distance_m, reach[0], reach[1]));
+    const torso_length = vec.magnitude(shoulder);
+    // Solve the torso-to-shoulder link with a nearly extended support arm.
+    // Only the torso angle changes; the planted feet and knife target stay put.
+    const torso_reach = reachLimits(torso_length, extension, 0, std.math.pi);
+    const solved = solveLimb(pelvis, target, torso_length, extension, 1, torso_reach);
+    const direction = vec.subtract(solved.middle, pelvis);
+    const angle = std.math.atan2(shoulder.y, shoulder.x) -
+        std.math.atan2(direction.y, direction.x);
+    const weight = state.aim_weight * away;
+    const blend = weight * weight * (3 - 2 * weight);
+    const index = @intFromEnum(Control.torso_angle);
+    controls[index] = std.math.lerp(controls[index], angle, blend);
 }
 
 fn applyWallHandTargets(rig: Rig, controls: *[controlCount]f32, body: vec.Vec2, facing_right: bool, hands: [2]?vec.Vec2, weight: f32) void {
@@ -1201,18 +1307,40 @@ fn planWallHands(set: *const Assets, state: *PlayerState) void {
         .slide => set.walls.slide,
         .none, .jump => unreachable,
     };
+    const knife = character_art.assets != null and character_art.assets.?.knife != null;
+    const horizontal = state.wall.action != .slide;
+    const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint;
+    const support_index: usize = if (weapon_joint == .right_hand) 0 else 1;
+    // Ready the dagger using the approach curves before driving it into contact.
+    if (knife and state.wall.action == .brace and state.wall.contact_seconds == 0) return;
     for (&state.wall.hands, state.previous_wall.hands, 0..) |*hand, before, index| {
         // The named weapon hand stays free on a slide on either wall side.
-        if (state.wall.action == .slide and set.rig.limbs[index + 2].end == set.rig.attachments.get("weapon_hand").?.joint) continue;
+        if ((knife or state.wall.action == .slide) and index != support_index) continue;
         // Plan the authored contact height; interpolating toward it happens in
         // the pose. Locking a partly raised hand would trap it below the target.
         const height = evaluateTrack(clip.tracks[@intFromEnum(target_y[index + 2])], clipPhase(clip, state.wall.seconds / clip.cycle_seconds));
         const desired = toWorld(set.rig, .{ .x = 0, .y = height }, state.body, state.facing_right);
         const grounded = state.action != .jump and state.action != .fall;
-        const keep = grounded and state.previous_wall.side == state.wall.side and before != null and
+        const keep = !knife and grounded and state.wall.action != .push and
+            state.previous_wall.side == state.wall.side and before != null and
             @abs(before.?.x - state.body.x) <= settings.contact_distance_m and @abs(before.?.y - desired.y) < 0.25;
-        const origin: vec.Vec2 = .{ .x = state.body.x, .y = if (keep) before.?.y else desired.y };
-        hand.* = wallPoint(origin, state.wall.side, settings.probe_distance_m);
+        const offset = if (knife)
+            character_art.knifeContactOffset(&character_art.assets.?, state.wall.side, horizontal)
+        else
+            vec.zero;
+        const origin: vec.Vec2 = .{
+            .x = state.body.x,
+            .y = (if (keep) before.?.y else desired.y) + offset.y,
+        };
+        const contact = wallPoint(origin, state.wall.side, settings.probe_distance_m) orelse continue;
+        hand.* = vec.subtract(contact, offset);
+        if (knife) state.wall.knife_contact = contact;
+    }
+    if (knife and state.wall.action != .slide and state.wall.knife_contact != null) {
+        const pack = &character_art.assets.?;
+        const second_grip = pack.knife.?.definition.second_grip;
+        const offset = character_art.knifePointOffset(pack, state.wall.side, horizontal, second_grip);
+        state.wall.hands[1 - support_index] = vec.add(state.wall.hands[support_index].?, offset);
     }
     applyWallHandTargets(set.rig, &state.controls, state.body, state.facing_right, state.wall.hands, state.wall.weight);
 }
@@ -1578,16 +1706,15 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
     const before_rig = wallPoseRig(set.rig, before_state.wall.action, before_state.wall.side, before_state.facing_right);
     const after_rig = wallPoseRig(set.rig, state.wall.action, state.wall.side, state.facing_right);
     var releasing: [limbCount]bool = @splat(false);
-    for (before_rig.limbs, after_rig.limbs, &releasing, 0..) |before, after, *release, index| {
+    for (before_rig.limbs, after_rig.limbs, &releasing) |before, after, *release| {
         const before_sign = before.bend_sign * @as(i8, if (before_state.facing_right) 1 else -1);
         const after_sign = after.bend_sign * @as(i8, if (state.facing_right) 1 else -1);
         const wall_transition = before_state.wall.action != .none or state.wall.action != .none;
-        const sliding = before_state.wall.action == .slide or before_state.wall.action == .jump or state.wall.action == .slide or state.wall.action == .jump;
-        release.* = wall_transition and before_sign != after_sign and (index >= 2 or sliding);
+        release.* = wall_transition and before_sign != after_sign;
     }
     if (!initialize and std.mem.indexOfScalar(bool, &releasing, true) != null) {
-        // Reuse the release arc for any limb changing IK branch. Only released
-        // limbs blend; the supporting arm and planted feet retain their branch.
+        // Reuse the release arc for any limb changing IK branch, including
+        // grounded knees when turning to shoot from a push.
         const before_pose = interpolatedPose(set, before_state, 1);
         for (set.rig.limbs, &state.limb_release_angles, &state.limb_release_active, releasing) |limb, *angles, *active, release| {
             active.* = release or (active.* and before_state.limb_release_seconds < set.walls.settings.blend_seconds);
@@ -1840,6 +1967,37 @@ pub fn solveAimedPose(set: *const Assets, base: Pose, body: vec.Vec2, facing_rig
     return result;
 }
 
+fn frameWallKnife(set: *const Assets, wall: WallState, frame: *FramePose) void {
+    if (playback != .locomotion or wall.action == .none or character_art.assets == null) return;
+    const pack = &character_art.assets.?;
+    const knife = pack.knife orelse return;
+    const weapon_joint = set.rig.attachments.get("weapon_hand").?.joint;
+    const support_index: usize = if (weapon_joint == .right_hand) 0 else 1;
+    const joint = set.rig.limbs[support_index + 2].end;
+    const hand = toWorld(set.rig, frame.pose.joints[@intFromEnum(joint)], frame.body, frame.facing_right);
+    const horizontal = wall.action == .brace or wall.action == .push;
+    const tip_offset = character_art.knifePointOffset(pack, wall.side, horizontal, knife.definition.blade_tip);
+    const tip = vec.add(hand, tip_offset);
+    frame.knife = .{
+        .joint = joint,
+        .side = wall.side,
+        .horizontal = horizontal,
+        .contact = null,
+        // Keep the hidden half out of view until the tip clears the wall on withdrawal.
+        .show_tip = wall.surface_x == null or
+            (tip.x - wall.surface_x.?) * @as(f32, @floatFromInt(wall.side)) < -0.015,
+    };
+    const target = wall.hands[support_index] orelse return;
+    const contact = wall.knife_contact orelse return;
+    if (@abs(hand.x - target.x) > 0.015) return; // The hand is still approaching its grip.
+    frame.knife.?.contact = .{ .x = contact.x, .y = hand.y + contact.y - target.y };
+    if (frame.weapon_stow_weight < 0.99 or wall.action == .slide) return;
+    const second_target = wall.hands[1 - support_index] orelse return;
+    const second_hand = toWorld(set.rig, frame.pose.joints[@intFromEnum(weapon_joint)], frame.body, frame.facing_right);
+    if (vec.magnitude(vec.subtract(second_hand, second_target)) > 0.03) return;
+    frame.knife.?.second_hand = weapon_joint;
+}
+
 pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) ?FramePose {
     if (assets == null) return null; // The normal sprite fallback remains available.
     const set = &assets.?;
@@ -1877,6 +2035,7 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
     var frame = solveAimedPose(set, pose, vec.fromBox2d(body.pos), state.facing_right, direction, weight, angle);
     const stow = if (forced_aim != null or playback != .locomotion) 0 else std.math.lerp(state.previous_stow_weight, state.stow_weight, @as(f32, @floatCast(alpha))) * (1 - weight);
     frame.weapon_stow_weight = stow;
+    frameWallKnife(set, if (sampling == .previous_physics) state.previous_wall else state.wall, &frame);
     if (stow == 0) return frame;
     const holster = attachmentToWorld(set.rig, attachmentTransform(set.rig, frame.pose, "weapon_holster").?, frame.body, frame.facing_right);
     frame.weapon.position = vec.add(frame.weapon.position, vec.mul(vec.subtract(holster.position, frame.weapon.position), stow));
@@ -1902,6 +2061,42 @@ pub fn holdShotPose(player_id: usize, direction: vec.Vec2) void {
     state.shot_hold_seconds = assets.?.aiming.shot_hold_seconds;
     state.weapon_angle = std.math.atan2(-direction.y, direction.x);
     state.previous_weapon_angle = state.weapon_angle;
+}
+
+// Fixed-step visual emission budget. Actual downward travel prevents idle scraping;
+// rate limiting keeps fast slides and long steps from producing large bursts.
+pub fn wallScrapeEmission(player_id: usize, dt: f64) ?particle_effect.Emission {
+    const state = states.getPtr(player_id) orelse {
+        std.log.warn("character_animation.wallScrapeEmission: player {d} has no state", .{player_id});
+        return null;
+    };
+    const pending = state.scrape_particles;
+    state.scrape_particles = 0;
+    if (view != .artwork and view != .overlay) return null;
+    if (playback != .locomotion or state.wall.action != .slide or state.wall.knife_contact == null or
+        state.previous_wall.knife_contact == null or state.wall.side != state.previous_wall.side)
+    {
+        return null;
+    }
+    const distance = state.body.y - state.previous_body.y;
+    if (distance <= 0.00001 or distance > 0.3 or dt <= 0) return null;
+    const frame = playerFrame(player_id, .physics, null) orelse return null;
+    const grip = frame.knife orelse return null;
+    const contact = grip.contact orelse return null;
+    const step: f32 = @floatCast(@min(dt, 0.05));
+    const total = pending + @min(distance * 24, step * 40);
+    const count = @floor(total);
+    state.scrape_particles = total - count;
+    if (count == 0) return null;
+    const side: f32 = @floatFromInt(grip.side);
+    return .{
+        // Clear the surface by a small chip radius, rather than spawning bodies inside it.
+        .position = .{ .x = contact.x - side * 0.025, .y = contact.y },
+        .spawn_radius_m = 0,
+        .amount = count,
+        .direction = .{ .x = -side, .y = -0.35 },
+        .spread_radians = 0.8,
+    };
 }
 
 pub fn fixedUpdate(dt: f64) void {
@@ -1948,6 +2143,14 @@ pub fn fixedUpdate(dt: f64) void {
             .wall_sliding = movement_state.wallSliding,
             .wall_jump_direction = movement_state.wallJumpedDirection,
         }, dt);
+        const emission = wallScrapeEmission(player_id, dt) orelse continue;
+        const effect = particle_effect.idForName("wall_scrape") orelse {
+            std.log.warn("character_animation.fixedUpdate: wall_scrape particle preset is missing", .{});
+            continue;
+        };
+        particle_effect.emit(effect, emission) catch |err| {
+            std.log.warn("character_animation.fixedUpdate: wall scrape emission failed: {s}", .{@errorName(err)});
+        };
     }
 }
 
