@@ -132,12 +132,12 @@ fn renderCamera(cameraId: usize) !void {
     try character_art.drawAllConnectedHair(.back);
     try entity.drawAll();
     try character_art.drawAllConnectedHair(.front);
+    try rope.drawRopes(); // Gripping fingers cover the player's rope endpoint.
     try character_animation.drawAll();
     try hot_rim_visual.draw();
     try player.drawAllWeaponsFront();
     try player.drawAllLeftHandsFront();
     try particle.drawAll();
-    try rope.drawRopes();
     try weapon.drawTrails();
     try blast_pressure_visual.draw();
     try explosion_visual.draw();

@@ -525,12 +525,23 @@ pub fn toggleRope(p: *Player) !void {
     if (currentRope != null and currentRope.?.state != .inactive) {
         rope.releaseRope(p.id);
     } else {
-        const spawnPos = calcPlayerSpritePosition(p.*);
-        const worldPixelPos = camera.relativePositionForCreating(spawnPos);
-        const originM = conv.p2m(worldPixelPos);
-        try rope.shootHook(p.id, .{ .x = originM.x, .y = originM.y }, p.aimDirection);
+        const origin = ropeLaunchPosition(p.id) orelse return error.PlayerNotFound;
+        try rope.shootHook(p.id, origin, p.aimDirection);
     }
     delay.action(delayKey, config.ropeToggleDelayMs);
+}
+
+pub fn ropeLaunchPosition(playerId: usize) ?vec.Vec2 {
+    const p = players.get(playerId) orelse {
+        std.log.warn("player.ropeLaunchPosition: player {d} is missing", .{playerId});
+        return null;
+    };
+    const grip = character_animation.grappleAttachment(playerId, .physics) orelse {
+        const spawnPos = calcPlayerSpritePosition(p);
+        const origin = conv.p2m(camera.relativePositionForCreating(spawnPos));
+        return .{ .x = origin.x, .y = origin.y };
+    };
+    return grip.position;
 }
 
 pub fn sprayPaint(p: *Player) !void {
@@ -845,7 +856,7 @@ fn drawLeftArm(handSprite: sprite.Sprite, placement: LeftArmPlacement, angle: f3
 }
 
 pub fn drawLeftHand(p: *Player) !void {
-    const hasRope = if (rope.ropes.get(p.id)) |r| r.state != .inactive else false;
+    const hasRope = rope.hookPosition(p.id, false) != null;
     if (hasRope) {
         try drawLeftArmWithHookDeployed(p);
     } else {
@@ -874,23 +885,37 @@ fn drawLeftArmWithHook(p: *Player) !void {
 
 fn drawLeftArmWithHookDeployed(p: *Player) !void {
     const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return;
-    const r = rope.ropes.get(p.id) orelse return;
-    const placement = calcLeftArmPlacement(p.*, handSprite) orelse return;
-
-    const hookPosM = vec.fromBox2d(box2d.c.b2Body_GetPosition(r.hookBodyId));
-    const hookPosPx = camera.relativePosition(conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y }));
-    const finalAngle = calcArmAngleTowardHook(placement, hookPosPx);
-
-    try drawLeftArm(handSprite, placement, finalAngle);
+    const arm = deployedRopeArm(p.*, handSprite) orelse return;
+    try drawLeftArm(handSprite, arm.placement, arm.angle);
 }
 
-pub fn getLeftArmRopeAttachPoint(p: Player, hookScreenPos: vec.IVec2) ?vec.IVec2 {
-    const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return null;
+// Sprite fallback shares one sampled arm transform with its rope endpoint.
+fn deployedRopeArm(
+    p: Player,
+    handSprite: sprite.Sprite,
+) ?struct { placement: LeftArmPlacement, angle: f32 } {
+    const hook = rope.hookPosition(p.id, true) orelse return null;
     const placement = calcLeftArmPlacement(p, handSprite) orelse return null;
+    const hookScreen = camera.relativePosition(conv.m2Pixel(vec.toBox2d(hook)));
+    return .{ .placement = placement, .angle = calcArmAngleTowardHook(placement, hookScreen) };
+}
+
+pub fn ropeAttachPoint(playerId: usize) ?vec.IVec2 {
+    const p = players.get(playerId) orelse {
+        std.log.warn("player.ropeAttachPoint: player {d} is missing", .{playerId});
+        return null;
+    };
+    const grip = character_animation.grappleAttachment(playerId, .render);
+    if (grip != null) {
+        return camera.relativePosition(conv.m2Pixel(vec.toBox2d(grip.?.position)));
+    }
+    const handSprite = sprite.getSprite(p.leftHandNoHookSpriteUuid) orelse return null;
+    const arm = deployedRopeArm(p, handSprite) orelse return null;
+    const placement = arm.placement;
 
     const greenAnchor = handSprite.anchorPointRight orelse return placement.shoulderPos;
 
-    const finalAngle = calcArmAngleTowardHook(placement, hookScreenPos);
+    const finalAngle = arm.angle;
 
     // Green pixel position relative to pivot, rotated by arm angle
     const effectiveGreenX: i32 = if (placement.handFlip) handSprite.sizeP.x - greenAnchor.x else greenAnchor.x;

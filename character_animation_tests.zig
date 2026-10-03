@@ -42,6 +42,7 @@ const blood = @import("src/blood.zig");
 const projectile = @import("src/projectile.zig");
 const physics = @import("src/physics.zig");
 const config = @import("src/config.zig");
+const rope = @import("src/rope.zig");
 
 const rig_json = @embedFile("character_rigs/humanoid.json");
 const locomotion_json = @embedFile("character_locomotion/run.json");
@@ -2851,6 +2852,8 @@ test "character invalid assets report field paths and failed replacement preserv
         .{ "\"angle_offset_radians\": 0", "\"angle_offset_radians\": 1e999", "finite" },
         .{ "\"id\": \"weapon_hand\"", "\"id\": \"unused_hand\"", "attachments.weapon_hand" },
         .{ "\"joint\": \"right_hand\"", "\"joint\": \"head\"", "attachments.weapon_hand.joint" },
+        .{ "\"id\": \"grapple_hand\"", "\"id\": \"unused_grapple\"", "attachments.grapple_hand" },
+        .{ "\"joint\": \"left_hand\"", "\"joint\": \"right_hand\"", "attachments.grapple_hand.joint" },
         .{ "\"y\": 0.43", "\"y\": 0", "bone length" },
     };
     for (cases) |case| {
@@ -7236,4 +7239,266 @@ test "near-side hair hangs across the head and small head motion does not amplif
         for (0..240) |_| character_hair.step(&hair_state, &pack, frame, 1.0 / 60.0);
         try std.testing.expect(hair_state.sleeping);
     }
+}
+
+fn createGrappleHook(position: vec.Vec2) !box2d.c.b2BodyId {
+    const body = try box2d.createBody(box2d.createStaticBodyDef(position));
+    errdefer box2d.c.b2DestroyBody(body);
+    var ent = std.mem.zeroes(entity.Entity);
+    ent.bodyId = body;
+    ent.state = box2d.getState(body);
+    try entity.entities.putLocking(body, ent);
+    errdefer _ = entity.entities.fetchSwapRemoveLocking(body);
+    try rope.ropes.put(allocator.allocator, 7, .{
+        .state = .flying,
+        .hookBodyId = body,
+        .attachedToBodyId = std.mem.zeroes(box2d.c.b2BodyId),
+        .jointId = std.mem.zeroes(box2d.c.b2JointId),
+    });
+    return body;
+}
+
+test "grapple grips use the non weapon hand and leave every other solved bone unchanged" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    var samples: std.ArrayListUnmanaged(WallPoseSample) = .empty;
+    defer samples.deinit(std.testing.allocator);
+    for ([_]bool{ false, true }) |left_weapon| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        const set = &animation.assets.?;
+        if (left_weapon) {
+            set.rig.attachments.getPtr("weapon_hand").?.joint = .left_hand;
+            set.rig.attachments.getPtr("grapple_hand").?.joint = .right_hand;
+        }
+        character_art.install(try loadArt(set.rig));
+        const pack = &character_art.assets.?;
+        const joint = set.rig.attachments.get("grapple_hand").?.joint;
+        const limb_index = @intFromEnum(if (joint == .left_hand) animation.Limb.left_arm else animation.Limb.right_arm);
+        const limb = set.rig.limbs[limb_index];
+        for ([_]bool{ false, true }) |facing| {
+            for (0..8) |sector| {
+                animation.resetPlayer(7);
+                const angle = @as(f32, @floatFromInt(sector)) * std.math.pi / 4;
+                const target: vec.Vec2 = .{ .x = @cos(angle) * 4, .y = @sin(angle) * 4 - 1 };
+                const input: animation.LocomotionInput = .{
+                    .body = vec.zero,
+                    .supported = false,
+                    .ground_y = null,
+                    .facing_right = facing,
+                    .vertical_speed_mps = 1,
+                    .separation_speed_mps = 0,
+                    .aiming = true,
+                    .aim_direction = if (facing) vec.east else vec.west,
+                    .grapple_target = target,
+                };
+                box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+                for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+                const sample = animation.states.get(7).?;
+                const frame = animation.playerFrame(7, .physics, null).?;
+                try checkBones(set.rig, frame.pose);
+                try std.testing.expectEqual(joint, frame.grapple.?.joint);
+                try std.testing.expect(frame.knife == null);
+                try std.testing.expect(!frame.weapon_stowed);
+                const points = character_art.worldJoints(set.rig, frame);
+                const shoulder = points[@intFromEnum(limb.root)];
+                const wrist = points[@intFromEnum(limb.end)];
+                try std.testing.expect(vec.dot(vec.normalize(vec.subtract(wrist, shoulder)), vec.normalize(vec.subtract(target, shoulder))) > 0.9999);
+                try nearPoint(frame.grapple.?.position, animation.grappleAttachment(7, .physics).?.position, 0.000001);
+                try nearPoint(frame.grapple.?.position, player.ropeLaunchPosition(7).?, 0.000001);
+                const forearm = vec.normalize(vec.subtract(wrist, points[@intFromEnum(limb.middle)]));
+                try nearPoint(vec.add(wrist, vec.mul(forearm, 0.065)), frame.grapple.?.position, 0.00001);
+                var without = sample;
+                without.grapple = .{};
+                without.previous_grapple = .{};
+                const base = animation.interpolatedPose(set, without, 1);
+                const aimed = animation.solveAimedPose(set, base, frame.body, frame.facing_right, input.aim_direction, 1, sample.weapon_angle);
+                for (frame.pose.joints, aimed.pose.joints, 0..) |actual, expected, index| {
+                    if (index == @intFromEnum(limb.middle) or index == @intFromEnum(limb.end)) continue;
+                    try nearPoint(expected, actual, 0.00001);
+                }
+                for (pack.bindings, 0..) |binding, index| {
+                    if (binding.anchor != joint) continue;
+                    const placed = character_art.placePart(pack, index, points, frame, true);
+                    try std.testing.expectEqual(pack.grip_part, placed.part);
+                    try nearPoint(wrist, placed.position, 0.00001);
+                }
+                if (!left_weapon and facing and (sector == 5 or sector == 6 or sector == 7)) {
+                    try captureWallPose(&samples, "grapple", @floatFromInt(sector));
+                }
+            }
+        }
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, samples.items, .{});
+    defer std.testing.allocator.free(bytes);
+    try fs.writeFile("artifacts/character_animation/grapple_samples.json", bytes);
+}
+
+test "deployed hooks drive fixed and interpolated rope grips then release on lost support" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const old_alpha = time.alpha;
+    defer time.alpha = old_alpha;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    const hook = try createGrappleHook(.{ .x = 2, .y = -3 });
+    defer rope.releaseRope(7);
+    player.players.getPtr(7).?.isAiming = true;
+    for (0..30) |_| animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expect(animation.states.get(7).?.grapple.active);
+    const before = animation.playerFrame(7, .physics, null).?;
+    entity.entities.getPtrLocking(hook).?.state = box2d.getState(hook);
+    entity.entities.getPtrLocking(body).?.state = box2d.getState(body);
+    box2d.c.b2Body_SetTransform(hook, .{ .x = 3, .y = -2.5 }, box2d.c.b2MakeRot(0));
+    box2d.c.b2Body_SetTransform(body, .{ .x = 0.05, .y = 0 }, box2d.c.b2MakeRot(0));
+    animation.fixedUpdate(1.0 / 60.0);
+    for ([_]f64{ 0, 0.25, 0.5, 0.75, 1 }) |alpha| {
+        time.alpha = alpha;
+        const frame = animation.playerFrame(7, .render, null).?;
+        try checkBones(animation.assets.?.rig, frame.pose);
+        try nearPoint(rope.hookPosition(7, true).?, frame.grapple.?.hook, 0.00001);
+        const point = player.ropeAttachPoint(7).?;
+        try std.testing.expectEqualDeep(camera.relativePosition(conv.m2Pixel(vec.toBox2d(frame.grapple.?.position))), point);
+        if (alpha == 0) try nearPoint(before.grapple.?.position, frame.grapple.?.position, 0.00001);
+    }
+    const support = try createAnimationWall(1, 4);
+    rope.ropes.getPtr(7).?.state = .attached;
+    rope.ropes.getPtr(7).?.attachedToBodyId = support;
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expect(animation.states.get(7).?.grapple.active);
+    box2d.c.b2DestroyBody(support);
+    try std.testing.expect(rope.hookPosition(7, false) == null);
+    animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expect(!animation.states.get(7).?.grapple.active);
+    try std.testing.expect(animation.states.get(7).?.grapple.weight < 1);
+    for (0..20) |_| animation.fixedUpdate(1.0 / 60.0);
+    try std.testing.expect(animation.playerFrame(7, .physics, null).?.grapple == null);
+    animation.resetPlayer(7);
+    try std.testing.expectEqualDeep(animation.GrappleState{}, animation.states.get(7).?.grapple);
+    try std.testing.expectEqualDeep(animation.GrappleState{}, animation.states.get(7).?.previous_grapple);
+}
+
+test "grapple takes the knife hand on either wall and releases smoothly back to wall posing" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |side| {
+        const body = try beginAimingPlayer();
+        defer endAimingPlayer(body);
+        _ = try createAnimationWall(side, 1);
+        character_art.install(try loadArt(animation.assets.?.rig));
+        var input: animation.LocomotionInput = .{
+            .body = .{ .x = side * 0.7, .y = 0 },
+            .supported = true,
+            .ground_y = 0.3,
+            .facing_right = side > 0,
+            .vertical_speed_mps = 0,
+            .separation_speed_mps = 0,
+            .movement_direction = side,
+        };
+        box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+        for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.knife != null);
+        input.grapple_target = .{ .x = -side * 2, .y = -3 };
+        for (0..30) |_| {
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const frame = animation.playerFrame(7, .physics, null).?;
+            try checkBones(animation.assets.?.rig, frame.pose);
+            try std.testing.expect(frame.knife == null);
+            try std.testing.expect(animation.states.get(7).?.wall.hands[0] == null);
+        }
+        try std.testing.expect(!animation.playerFrame(7, .physics, null).?.weapon_stowed);
+        input.supported = false;
+        input.ground_y = null;
+        input.body.y = -1;
+        input.wall_sliding = true;
+        input.aiming = true;
+        input.aim_direction = .{ .x = side, .y = 0 };
+        box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+        for (0..30) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+        try std.testing.expectEqual(animation.WallAction.slide, animation.states.get(7).?.wall.action);
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.knife == null);
+        const before_turn = animation.playerFrame(7, .physics, null).?;
+        input.aim_direction.x = -side;
+        animation.updatePlayer(7, input, 1.0 / 60.0);
+        const turned = animation.playerFrame(7, .physics, null).?;
+        try nearPoint(before_turn.grapple.?.position, turned.grapple.?.position, 0.04);
+        input.grapple_target = null;
+        for (0..50) |_| {
+            const before = animation.playerFrame(7, .physics, null).?;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            const after = animation.playerFrame(7, .previous_physics, null).?;
+            try checkBones(animation.assets.?.rig, after.pose);
+            const joint = @intFromEnum(animation.Joint.left_hand);
+            try nearPoint(before.pose.joints[joint], after.pose.joints[joint], 0.00003);
+        }
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.grapple == null);
+        try std.testing.expect(animation.playerFrame(7, .physics, null).?.knife != null);
+    }
+}
+
+test "partly raised grapple stays continuous when leaving either wall" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    for ([_]f32{ -1, 1 }) |side| {
+        for ([_]usize{ 1, 2, 3, 4 }) |raise_ticks| {
+            const body = try beginAimingPlayer();
+            defer endAimingPlayer(body);
+            _ = try createAnimationWall(side, 1);
+            character_art.install(try loadArt(animation.assets.?.rig));
+            var input: animation.LocomotionInput = .{
+                .body = .{ .x = side * 0.7, .y = -1 },
+                .supported = false,
+                .ground_y = null,
+                .facing_right = side < 0,
+                .vertical_speed_mps = 1,
+                .separation_speed_mps = 0,
+                .movement_direction = side,
+                .wall_sliding = true,
+            };
+            box2d.c.b2Body_SetTransform(body, vec.toBox2d(input.body), box2d.c.b2MakeRot(0));
+            for (0..60) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            input.grapple_target = .{ .x = -side * 2, .y = -4 };
+            for (0..raise_ticks) |_| animation.updatePlayer(7, input, 1.0 / 60.0);
+            const before = animation.playerFrame(7, .physics, null).?;
+            try std.testing.expect(animation.states.get(7).?.grapple.weight < 1);
+            input.movement_direction = 0;
+            input.wall_sliding = false;
+            animation.updatePlayer(7, input, 1.0 / 60.0);
+            try std.testing.expectEqual(animation.WallAction.none, animation.states.get(7).?.wall.action);
+            const after = animation.playerFrame(7, .previous_physics, null).?;
+            try checkBones(animation.assets.?.rig, after.pose);
+            try nearPoint(before.grapple.?.position, after.grapple.?.position, 0.00003);
+            for (before.pose.joints, after.pose.joints) |expected, actual| {
+                try nearPoint(expected, actual, 0.00003);
+            }
+        }
+    }
+}
+
+test "sprite rope arm and endpoint share the interpolated hook transform" {
+    const old_view = animation.view;
+    defer animation.view = old_view;
+    const old_alpha = time.alpha;
+    defer time.alpha = old_alpha;
+    const body = try beginAimingPlayer();
+    defer endAimingPlayer(body);
+    const hook = try createGrappleHook(.{ .x = 2, .y = -3 });
+    defer rope.releaseRope(7);
+    animation.view = .sprites;
+    player.players.getPtr(7).?.leftHandNoHookSpriteUuid = aiming_sprite_id;
+    time.alpha = 0;
+    const before = player.ropeAttachPoint(7).?;
+    box2d.c.b2Body_SetTransform(hook, .{ .x = -2, .y = -1 }, box2d.c.b2MakeRot(0));
+    try std.testing.expectEqualDeep(before, player.ropeAttachPoint(7).?);
+    time.alpha = 1;
+    const after = player.ropeAttachPoint(7).?;
+    try std.testing.expect(before.x != after.x or before.y != after.y);
+    time.alpha = 0.5;
+    const middle = player.ropeAttachPoint(7).?;
+    try std.testing.expect(middle.x != before.x or middle.y != before.y);
+    try std.testing.expect(middle.x != after.x or middle.y != after.y);
+    rope.releaseRope(7);
+    try std.testing.expect(rope.hookPosition(7, true) == null);
+    try std.testing.expect(player.ropeAttachPoint(7) == null);
+    try std.testing.expect(!box2d.c.b2Body_IsValid(hook));
 }

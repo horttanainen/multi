@@ -30,6 +30,24 @@ pub var ropes: std.AutoArrayHashMapUnmanaged(usize, Rope) = .empty;
 var hookSpriteUuid: ?u64 = null;
 var segmentSpriteUuid: ?u64 = null;
 
+// A destroyed support releases the visual grip as well as stopping tension.
+pub fn hookPosition(playerId: usize, interpolated: bool) ?vec.Vec2 {
+    const deployed = ropes.get(playerId) orelse return null;
+    if (deployed.state == .inactive or !box2d.c.b2Body_IsValid(deployed.hookBodyId)) {
+        return null;
+    }
+    if (deployed.state == .attached and !box2d.c.b2Body_IsValid(deployed.attachedToBodyId)) {
+        return null;
+    }
+    const current = box2d.getState(deployed.hookBodyId);
+    if (!interpolated) return vec.fromBox2d(current.pos);
+    const ent = entity.getEntity(deployed.hookBodyId) orelse {
+        std.log.warn("rope.hookPosition: hook entity is missing for player {d}", .{playerId});
+        return null;
+    };
+    return vec.fromBox2d(box2d.getInterpolatedState(ent.state, current).pos);
+}
+
 pub fn init() !void {
     hookSpriteUuid = data.createSpriteFrom("rope_hook") orelse return error.SpriteNotFound;
     segmentSpriteUuid = data.createSpriteFrom("rope_segment") orelse return error.SpriteNotFound;
@@ -215,11 +233,12 @@ pub fn drawRopes() !void {
         if (maybePlayer == null) continue;
         const p = maybePlayer.?;
 
-        const hookPosM: vec.Vec2 = vec.fromBox2d(box2d.c.b2Body_GetPosition(ropeState.hookBodyId));
+        if (p.isDead) continue;
+        const hookPosM = hookPosition(playerId, true) orelse continue;
         const hookPosPx = conv.m2Pixel(.{ .x = hookPosM.x, .y = hookPosM.y });
         const hookScreenPos = camera.relativePosition(hookPosPx);
 
-        const playerScreenPos = player.getLeftArmRopeAttachPoint(p, hookScreenPos) orelse continue;
+        const playerScreenPos = player.ropeAttachPoint(playerId) orelse continue;
 
         try drawRopeSegments(segmentSprite, playerScreenPos, hookScreenPos);
     }

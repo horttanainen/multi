@@ -283,6 +283,11 @@ def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=N
     knife_drawn = False
     far = 'right' if facing else 'left'
     drawing = [hair_layer(manifest, sources, joints, facing, 'back', hair_appearance)]
+    grapple = frame.get('grapple') if frame else None
+    if grapple:
+        grip, hook = xy(grapple['position']), xy(grapple['hook'])
+        drawing.append(f'<path d="M{grip[0]} {grip[1]} L{hook[0]} {hook[1]}" '
+                       'stroke="#927953" stroke-width=".025" fill="none"/>')
     for name in resolved_order(manifest, facing):
         if name == 'holstered_weapon':
             if frame and frame['weapon_stowed']:
@@ -298,6 +303,8 @@ def render_pose(manifest, rig, sources, joints, facing, color='#f3f3f3', frame=N
         start, end = (joints[joint] for joint in binding['axis'])
         direction = [end[0] - start[0], end[1] - start[1]]
         part_facing = facing
+        if grapple and binding['anchor'] == grapple['joint']:
+            part_name = manifest['weapon_hand']['part']
         if knife_grip and binding['anchor'] in (knife_grip['joint'], knife_grip.get('second_hand')):
             part_name = manifest['weapon_hand']['part']
             part_facing = knife_grip['side'] < 0
@@ -469,6 +476,17 @@ def previews(manifest, rig, sources, output):
             (output / filename).write_text(page('CURB RAT / WALL DAGGER',
                 'Native solved poses: preparation, contact and grip transitions. Hair uses its static preview.',
                 ''.join(cells)))
+    grapple_samples = artifacts / 'grapple_samples.json'
+    if grapple_samples.exists():
+        cells = []
+        for index, sample in enumerate(json.loads(grapple_samples.read_text())):
+            frame = sample['frame']
+            joints = pose_joints(frame, rig, local=True)
+            drawing = render_pose(manifest, rig, sources, joints, frame['facing_right'], '#ffffff', frame)
+            cells.append(panel(drawing, joints, 24 + index * 415, 108, 398, 532,
+                               ('HOOK LEFT', 'HOOK ABOVE', 'HOOK RIGHT')[index], scale=170))
+        (output / 'grapple.svg').write_text(page('CURB RAT / ROPE GRIP',
+            'Native solved poses. Non-weapon hand holds the rope; weapon arm aims independently.', ''.join(cells)))
     cells = []
     for index, (name, source) in enumerate(part_sources.items()):
         x, y = 24 + index % 5 * 249, 110 + index // 5 * 305

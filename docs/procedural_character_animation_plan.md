@@ -363,7 +363,12 @@ Split this work into independently reviewed commits:
   curves, ordinary arm IK, SVG export and particles; retain physical movement
   and gun-arm aiming priority. See
   [the wall-slide follow-up](character_animation_wall_slide.md#knife-artwork-follow-up--accepted).
-- **3B, deferred:** Grappling and rope animation, with explicit control priorities.
+- **3B, grapple hand (accepted):** The non-weapon arm grips
+  the existing rope through its named palm attachment, shared arm IK and closed
+  hand artwork. Grappling overrides the knife hand while weapon aiming stays
+  independent. Reuse existing rope physics and entity interpolation; validate
+  launch, release, turns, wall transitions and lifecycle. See
+  [the rope-grip phase](character_animation_grappling.md).
 - **Running polish (accepted):** Reshape the sparse run curves using the existing
   exporter, preserve the original regression assets, and verify foot contact,
   heel recovery and independent width/lift tuning at slow/reference/game speeds.

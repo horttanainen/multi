@@ -208,7 +208,7 @@
       "id": "grapple_hand",
       "joint": "left_hand",
       "local_offset": {
-        "x": 0,
+        "x": 0.065,
         "y": 0
       }
     },

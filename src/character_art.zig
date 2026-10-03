@@ -563,6 +563,9 @@ pub fn placePart(pack: *const Pack, binding_index: usize, points: [joint_count]v
     var position = points[@intFromEnum(binding.anchor)];
     var direction = vec.subtract(points[@intFromEnum(binding.axis[1])], points[@intFromEnum(binding.axis[0])]);
     var facing = frame.facing_right;
+    if (frame.grapple != null and binding.anchor == frame.grapple.?.joint) {
+        part_index = pack.grip_part;
+    }
     if (pack.knife != null and frame.knife != null and
         (binding.anchor == frame.knife.?.joint or
             binding.anchor == frame.knife.?.second_hand))

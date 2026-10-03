@@ -20,6 +20,7 @@ const collision = @import("collision.zig");
 const character_art = @import("character_art.zig");
 const gibbing = @import("gibbing.zig");
 const particle_effect = @import("particle_effect.zig");
+const rope = @import("rope.zig");
 
 pub const Joint = enum(u8) {
     pelvis,
@@ -179,6 +180,13 @@ pub const LocomotionInput = struct {
     movement_direction: f32 = 0,
     wall_sliding: bool = false,
     wall_jump_direction: i8 = 0,
+    grapple_target: ?vec.Vec2 = null, // Hook position in world meters.
+};
+pub const GrappleState = struct {
+    active: bool = false,
+    target: vec.Vec2 = vec.zero,
+    weight: f32 = 0,
+    bend_sign: i8 = 1, // World-space branch, retained when aim changes facing.
 };
 pub const PlayerState = struct {
     step_seconds: f32 = 0,
@@ -221,6 +229,8 @@ pub const PlayerState = struct {
     previous_weapon_angle: ?f32 = null,
     wall: WallState = .{},
     previous_wall: WallState = .{},
+    grapple: GrappleState = .{},
+    previous_grapple: GrappleState = .{},
     scrape_particles: f32 = 0,
     stow_weight: f32 = 0,
     previous_stow_weight: f32 = 0,
@@ -239,6 +249,7 @@ pub const FramePose = struct {
     weapon_facing_right: bool,
     weapon_stowed: bool = false,
     weapon_stow_weight: f32 = 0,
+    grapple: ?struct { joint: Joint, position: vec.Vec2, hook: vec.Vec2 } = null,
     knife: ?struct {
         joint: Joint,
         side: i8,
@@ -357,6 +368,14 @@ fn validateRig(file: data.CharacterRigData, memory: std.mem.Allocator, detail: *
     }
     const weapon_attachment = rig.attachments.get("weapon_hand") orelse return invalid(detail, "attachments.weapon_hand: required hand attachment is missing", .{});
     if (weapon_attachment.joint != .left_hand and weapon_attachment.joint != .right_hand) return invalid(detail, "attachments.weapon_hand.joint: expected left_hand or right_hand", .{});
+    const grapple = rig.attachments.get("grapple_hand") orelse {
+        return invalid(detail, "attachments.grapple_hand: required hand attachment is missing", .{});
+    };
+    if ((grapple.joint != .left_hand and grapple.joint != .right_hand) or
+        grapple.joint == weapon_attachment.joint)
+    {
+        return invalid(detail, "attachments.grapple_hand.joint: expected the non-weapon hand", .{});
+    }
     return rig;
 }
 
@@ -1159,6 +1178,10 @@ fn updateWall(set: *const Assets, state: *PlayerState, input: LocomotionInput, p
         state.wall.action = if (input.wall_sliding) .slide else if (pushing) .push else .brace;
         state.wall.weight = @min(1, state.wall.weight + dt / settings.blend_seconds);
     }
+    const grappling = input.grapple_target != null or state.grapple.weight > 0;
+    if (grappling and (state.wall.action == .brace or state.wall.action == .push)) {
+        state.wall.action = .none;
+    }
     if (state.wall.action == .none) state.wall = .{};
     if (state.wall.side != before.side) state.wall.foot_surfaces = .{ null, null };
     if (state.wall.action != .slide and state.wall.action != .jump) {
@@ -1299,6 +1322,9 @@ fn applyWallHandTargets(rig: Rig, controls: *[controlCount]f32, body: vec.Vec2, 
 }
 
 fn planWallHands(set: *const Assets, state: *PlayerState) void {
+    if (state.grapple.active or state.grapple.weight > 0) {
+        return;
+    }
     if (state.wall.action == .none or state.wall.action == .jump) return;
     const settings = set.walls.settings;
     const clip = switch (state.wall.action) {
@@ -1659,6 +1685,20 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
     } else if (speed > profile.stop_speed_mps) {
         state.facing_right = state.speed_mps > 0;
     }
+    state.previous_grapple = state.grapple;
+    state.grapple.active = playback == .locomotion and input.grapple_target != null;
+    if (state.grapple.active) {
+        if (state.grapple.weight == 0) {
+            const joint = set.rig.attachments.get("grapple_hand").?.joint;
+            const limb = set.rig.limbs[@intFromEnum(if (joint == .left_hand) Limb.left_arm else Limb.right_arm)];
+            state.grapple.bend_sign = limb.bend_sign * @as(i8, if (state.facing_right) 1 else -1);
+            state.previous_grapple.target = input.grapple_target.?;
+        }
+        state.grapple.target = input.grapple_target.?;
+        state.grapple.weight = @min(1, state.grapple.weight + step / set.aiming.raise_seconds);
+    } else {
+        state.grapple.weight = @max(0, state.grapple.weight - step / set.aiming.lower_seconds);
+    }
     if (playback != .locomotion) {
         if (playback == .run) state.phase += dt / set.motion.cycle_seconds;
         updateWeaponAngle(set, state, raising);
@@ -1715,7 +1755,9 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
     if (!initialize and std.mem.indexOfScalar(bool, &releasing, true) != null) {
         // Reuse the release arc for any limb changing IK branch, including
         // grounded knees when turning to shoot from a push.
-        const before_pose = interpolatedPose(set, before_state, 1);
+        // Release history belongs to the underlying pose. The grapple overlay
+        // is applied once afterward, including at the next frame's alpha=0.
+        const before_pose = interpolatedBasePose(set, before_state, 1);
         for (set.rig.limbs, &state.limb_release_angles, &state.limb_release_active, releasing) |limb, *angles, *active, release| {
             active.* = release or (active.* and before_state.limb_release_seconds < set.walls.settings.blend_seconds);
             const upper = vec.subtract(before_pose.joints[@intFromEnum(limb.middle)], before_pose.joints[@intFromEnum(limb.root)]);
@@ -1741,6 +1783,7 @@ pub fn updatePlayer(player_id: usize, requested_input: LocomotionInput, dt: f64)
         state.previous_pelvis_reference_y = state.pelvis_reference_y;
         state.previous_wall = state.wall;
         state.previous_stow_weight = state.stow_weight;
+        state.previous_grapple = state.grapple;
     }
     updateWeaponAngle(set, state, raising);
 }
@@ -1765,6 +1808,14 @@ fn wallPoseRig(rig: Rig, action: WallAction, side: i8, facing_right: bool) Rig {
 }
 
 pub fn interpolatedPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
+    var pose = interpolatedBasePose(set, state, alpha);
+    const fraction: f32 = @floatCast(alpha);
+    const body = vec.add(state.previous_body, vec.mul(vec.subtract(state.body, state.previous_body), fraction));
+    applyGrapplePose(set, state, &pose, body, fraction);
+    return pose;
+}
+
+fn interpolatedBasePose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
     if (!state.initialized) return solvePose(set.rig, set.rig.neutral);
     const previous = if (state.previous_facing_right == state.facing_right) state.previous_controls else mirrorControls(set.rig, state.previous_controls);
     var controls: [controlCount]f32 = undefined;
@@ -1913,6 +1964,57 @@ fn basePlayerPose(set: *const Assets, state: PlayerState, alpha: f64) Pose {
     return evaluatePose(set, phase, playback);
 }
 
+fn applyGrapplePose(
+    set: *const Assets,
+    state: PlayerState,
+    pose: *Pose,
+    body: vec.Vec2,
+    fraction: f32,
+) void {
+    const weight = std.math.lerp(state.previous_grapple.weight, state.grapple.weight, fraction);
+    if (weight == 0) return;
+    const travel = vec.subtract(state.grapple.target, state.previous_grapple.target);
+    const hook = vec.add(state.previous_grapple.target, vec.mul(travel, fraction));
+    const joint = set.rig.attachments.get("grapple_hand").?.joint;
+    const index = @intFromEnum(if (joint == .left_hand) Limb.left_arm else Limb.right_arm);
+    const limb = set.rig.limbs[index];
+    const root = pose.joints[@intFromEnum(limb.root)];
+    const world_root = toWorld(set.rig, root, body, state.facing_right);
+    const delta = vec.subtract(hook, world_root);
+    const distance = vec.magnitude(delta);
+    // A newly launched hook can still be at the shoulder. Keep the current arm
+    // until it has a direction rather than inventing one from a zero vector.
+    if (distance < 0.00001) return;
+    const facing: f32 = if (state.facing_right) 1 else -1;
+    const direction: vec.Vec2 = .{ .x = delta.x * facing / distance, .y = -delta.y / distance };
+    const target = vec.add(root, vec.mul(direction, @min(distance, set.aiming.hand_distance_m)));
+    const upper_length = set.rig.lengths[@intFromEnum(limb.middle)];
+    const lower_length = set.rig.lengths[@intFromEnum(limb.end)];
+    const bend_sign = state.grapple.bend_sign * @as(i8, if (state.facing_right) 1 else -1);
+    const limits = reachLimits(upper_length, lower_length, limb.min_bend_radians, limb.max_bend_radians);
+    const solution = solveLimb(root, target, upper_length, lower_length, bend_sign, limits);
+    const middle = pose.joints[@intFromEnum(limb.middle)];
+    const end = pose.joints[@intFromEnum(limb.end)];
+    const upper = std.math.atan2(middle.y - root.y, middle.x - root.x);
+    const lower = std.math.atan2(end.y - middle.y, end.x - middle.x);
+    const next_upper = std.math.atan2(solution.middle.y - root.y, solution.middle.x - root.x);
+    const next_forearm = vec.subtract(solution.end, solution.middle);
+    const next_lower = std.math.atan2(next_forearm.y, next_forearm.x);
+    const blend = weight * weight * (3 - 2 * weight);
+    const angle = upper + std.math.atan2(@sin(next_upper - upper), @cos(next_upper - upper)) * blend;
+    const bend = std.math.atan2(@sin(lower - upper), @cos(lower - upper));
+    const next_bend = std.math.atan2(@sin(next_lower - next_upper), @cos(next_lower - next_upper));
+    const blended_bend = std.math.lerp(bend, next_bend, blend);
+    // Blend joint angles so taking/releasing the rope preserves both bone lengths.
+    pose.joints[@intFromEnum(limb.middle)] = vec.add(root, rotate(.{ .x = upper_length, .y = 0 }, angle));
+    pose.joints[@intFromEnum(limb.end)] = vec.add(
+        pose.joints[@intFromEnum(limb.middle)],
+        rotate(.{ .x = lower_length, .y = 0 }, angle + blended_bend),
+    );
+    pose.desired_targets[index] = target;
+    pose.clamped[index] = solution.clamped;
+}
+
 fn updateWeaponAngle(set: *const Assets, state: *PlayerState, raising: bool) void {
     const pose = basePlayerPose(set, state.*, 1);
     const carry = attachmentTransform(set.rig, pose, "weapon_hand").?;
@@ -1968,6 +2070,7 @@ pub fn solveAimedPose(set: *const Assets, base: Pose, body: vec.Vec2, facing_rig
 }
 
 fn frameWallKnife(set: *const Assets, wall: WallState, frame: *FramePose) void {
+    if (frame.grapple != null) return;
     if (playback != .locomotion or wall.action == .none or character_art.assets == null) return;
     const pack = &character_art.assets.?;
     const knife = pack.knife orelse return;
@@ -2035,6 +2138,18 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
     var frame = solveAimedPose(set, pose, vec.fromBox2d(body.pos), state.facing_right, direction, weight, angle);
     const stow = if (forced_aim != null or playback != .locomotion) 0 else std.math.lerp(state.previous_stow_weight, state.stow_weight, @as(f32, @floatCast(alpha))) * (1 - weight);
     frame.weapon_stow_weight = stow;
+    const fraction: f32 = @floatCast(alpha);
+    if (playback == .locomotion and
+        std.math.lerp(state.previous_grapple.weight, state.grapple.weight, fraction) > 0)
+    {
+        const grip = attachmentTransform(set.rig, frame.pose, "grapple_hand").?;
+        const hook_travel = vec.subtract(state.grapple.target, state.previous_grapple.target);
+        frame.grapple = .{
+            .joint = set.rig.attachments.get("grapple_hand").?.joint,
+            .position = toWorld(set.rig, grip.position, frame.body, frame.facing_right),
+            .hook = vec.add(state.previous_grapple.target, vec.mul(hook_travel, fraction)),
+        };
+    }
     frameWallKnife(set, if (sampling == .previous_physics) state.previous_wall else state.wall, &frame);
     if (stow == 0) return frame;
     const holster = attachmentToWorld(set.rig, attachmentTransform(set.rig, frame.pose, "weapon_holster").?, frame.body, frame.facing_right);
@@ -2046,6 +2161,15 @@ pub fn playerFrame(player_id: usize, sampling: Sampling, forced_aim: ?vec.Vec2) 
     frame.weapon_facing_right = frame.facing_right;
     frame.weapon_stowed = stow > 0.5;
     return frame;
+}
+
+// Shared by hook launch and rope drawing; also usable before the first reach blend.
+pub fn grappleAttachment(player_id: usize, sampling: Sampling) ?AttachmentTransform {
+    if (!hideSprites()) return null;
+    const frame = playerFrame(player_id, sampling, null) orelse return null;
+    const rig = assets.?.rig;
+    const grip = attachmentTransform(rig, frame.pose, "grapple_hand").?;
+    return attachmentToWorld(rig, grip, frame.body, frame.facing_right);
 }
 
 pub fn holdShotPose(player_id: usize, direction: vec.Vec2) void {
@@ -2142,6 +2266,7 @@ pub fn fixedUpdate(dt: f64) void {
             .movement_direction = direction.x,
             .wall_sliding = movement_state.wallSliding,
             .wall_jump_direction = movement_state.wallJumpedDirection,
+            .grapple_target = rope.hookPosition(player_id, false),
         }, dt);
         const emission = wallScrapeEmission(player_id, dt) orelse continue;
         const effect = particle_effect.idForName("wall_scrape") orelse {
